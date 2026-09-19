@@ -61,14 +61,18 @@ pub fn normalise(spec: &str) -> Result<String, String> {
             return refuse("a control character is not a key name".to_string());
         }
         if mods[2] {
-            let instead = with_mods(
-                [mods[0], mods[1], false],
-                &c.to_ascii_uppercase().to_string(),
-            );
-            return refuse(format!(
-                "S- does not combine with a single character, because the host reports a \
-                 shifted key as the character it produces; bind '{instead}' instead"
-            ));
+            let mut message = "S- does not combine with a single character, because the host \
+                               reports a shifted key as the character it produces"
+                .to_string();
+            // Only a letter has a shifted form we can name; S-1 produces '!' on one layout
+            // and something else on the next, so naming a replacement would be a guess.
+            if c.is_alphabetic() {
+                let instead = with_mods([mods[0], mods[1], false], &c.to_uppercase().to_string());
+                message.push_str(&format!("; bind '{instead}' instead"));
+            } else {
+                message.push_str("; bind the character your terminal actually sends");
+            }
+            return refuse(message);
         }
         c.to_string()
     } else {

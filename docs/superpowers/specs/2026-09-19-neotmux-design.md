@@ -321,11 +321,17 @@ outside prefix mode and deny those keys to every other plugin through the confli
 is a notification with a veto, and nothing more: the host has no mode, no mode stack and no
 prefix concept, and everything modal is the plugin's own state.
 
-**Callbacks of one kind run in registration order.** That is not the same thing as load order,
-and the two are not interchangeable: registration order is the order the `on_key` calls
-happened in, which for anything registered from inside a tick or a keymap is not where its
-chunk sat in the init chain. Drawing orders something else — sources, in load order (§4.5).
-There is no priority and no ordering knob for either.
+**`on_key` and `on_event` callbacks run in registration order.** That is not the same thing as
+load order, and the two are not interchangeable: registration order is the order the
+`on_key` calls happened in, which for anything registered from inside a tick or a keymap is
+not where its chunk sat in the init chain.
+
+Tick callbacks are the exception, and deliberately: they are dispatched grouped by source, in
+load order, because the frame commits per source (§4.5). Within one source its own ticks run
+in registration order. Drawing then composes sources in load order as well, so what lands on
+screen never depends on when a callback happened to be registered.
+
+There is no priority and no ordering knob for any of them.
 
 A callback that raises is logged against its own source and treated as not consuming, so one
 broken handler cannot swallow the keyboard.
@@ -590,7 +596,7 @@ Documented, not solved:
 - `io`, `os.execute`, `dofile`, `loadfile`, `package.loadlib`, `debug` are all `nil` in the
   plugin environment; `package.cpath` is empty
 - `load` rejects a binary chunk; the host's plugin loader rejects one too
-- `neotmux.plugin.resubscribe(name)` brings B back and it is dropped again after K frames
+- `neotmux.resubscribe(name)` brings B back and it is dropped again after K frames
 
 ## 6. M2 — pane tree
 

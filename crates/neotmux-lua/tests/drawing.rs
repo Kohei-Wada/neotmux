@@ -399,8 +399,8 @@ fn one_raising_callback_loses_its_whole_sources_frame_and_keeps_the_previous_one
 
 #[test]
 fn grouping_tick_dispatch_by_source_still_composes_sources_in_load_order() {
-    // `later` registers first at dispatch time, so a frame composed in dispatch order would
-    // put it before `earlier`; composition is by load order and must not follow dispatch.
+    // `later`'s tick has the lower RegistrationId and `earlier` the lower SourceId, so a frame
+    // composed in registration order would reverse them; composition is by load order.
     let (_dir, sub) = built(&[
         (
             "init.lua",
