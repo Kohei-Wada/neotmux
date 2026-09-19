@@ -1,3 +1,4 @@
+pub mod budget;
 pub mod api;
 pub mod draw;
 mod geometry;
