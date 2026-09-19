@@ -148,15 +148,23 @@ fn a_key_the_host_once_reserved_falls_through_when_nothing_binds_it() {
 }
 
 #[test]
-fn an_unparseable_spec_is_refused_at_registration() {
+fn an_unparseable_spec_raises_at_registration() {
     let (_d, sub) = built(&[
         ("init.lua", "require('plugin.bad')"),
         (
             "lua/plugin/bad.lua",
-            "local h, err = neotmux.keymap.set('Ctrl+Shift+F13', function() end) if h ~= nil then error('bad spec accepted') end return {}",
+            "neotmux.keymap.set('Ctrl+Shift+F13', function() end) return {}",
         ),
     ]);
-    assert!(sub.run_init().is_empty());
+    let failures = sub.run_init();
+    assert_eq!(failures.len(), 1, "{failures:?}");
+    assert!(
+        failures[0]
+            .message
+            .contains("cannot parse key spec 'Ctrl+Shift+F13'"),
+        "{}",
+        failures[0].message
+    );
 }
 
 #[test]

@@ -290,8 +290,14 @@ contended resource in the system. The contract, fixed in M1a:
   ordinary consumer of this API. A host that reserved the key would have decided in advance
   that the plugin cannot be written the ordinary way
 - two plugins binding the same key is an error at registration time: the second registration
-  fails, returns `nil` plus a message, and the conflict is logged with both plugin names.
+  fails, returns `nil` plus a message, and the conflict is logged with both source names.
   Last-wins is rejected because it makes load order load-bearing and silent
+- **the two failures of `keymap.set` are not the same kind of failure, and do not report the
+  same way.** A spec the host cannot parse is a programming error, like every other malformed
+  argument in the ABI, and **raises** — `pane.split`, `notify`, `ctx:text` and `opt.<key>` all
+  do. Losing a conflict is not a programming error: the caller wrote a legal spec and another
+  source happened to get there first, so it **returns `nil` plus a message** for the caller to
+  handle
 
 A key is dispatched in four steps:
 

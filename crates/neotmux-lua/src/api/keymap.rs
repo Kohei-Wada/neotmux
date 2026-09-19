@@ -88,9 +88,12 @@ pub fn install(
 ) -> mlua::Result<Table> {
     let keymap = lua.create_table()?;
     let set = lua.create_function(move |lua, (spec, callback): (String, Function)| {
+        // A spec the host cannot parse is a programming error, like every other malformed
+        // argument in the ABI, so it raises. Losing a conflict is not, so that still returns.
         let Some(normalised) = normalise(&spec) else {
-            let message = format!("cannot parse key spec '{spec}'");
-            return Ok((Value::Nil, Value::String(lua.create_string(message)?)));
+            return Err(mlua::Error::RuntimeError(format!(
+                "cannot parse key spec '{spec}'"
+            )));
         };
 
         if let Some(holder) = holder_of(&registry, &sources, &normalised) {
