@@ -10,3 +10,6 @@ repository.workspace = true
 neotmux-core.workspace = true
 anyhow.workspace = true
 mlua.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

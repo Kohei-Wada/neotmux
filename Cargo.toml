@@ -19,4 +19,5 @@ nix = { version = "0.28", features = ["term", "signal"] }
 portable-pty = "0.9"
 ratatui = "0.30"
 signal-hook = "0.3.18"
+tempfile = "3"
 vt100 = "0.16"
