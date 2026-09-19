@@ -238,3 +238,57 @@ fn prefix_swallows_its_key_and_the_next_one_while_an_unrelated_key_gets_through(
         "the unrelated key never reached the shell:\n{screen}"
     );
 }
+
+/// §5.5's first exit criterion in the running program: the offender loses its tick, the
+/// well-behaved neighbour keeps drawing, and the child is still there to talk to.
+fn spinner_is_dropped_while_the_rest_of_the_program_carries_on(module: &str, echo: &str) {
+    let (mut nt, _init) = start(
+        &format!(
+            "neotmux.opt.tick_budget_ms = 5 neotmux.opt.tick_overrun_limit = 3 \
+             require('plugin.clock') require('{module}')"
+        ),
+        "cat",
+    );
+
+    let log = nt.wait_for_log("no longer ticking", PATIENCE);
+    let dropped: Vec<&str> = log
+        .lines()
+        .filter(|line| line.contains("no longer ticking"))
+        .collect();
+    assert_eq!(dropped.len(), 1, "{dropped:?}");
+    assert!(
+        dropped[0].contains(module.replace('.', "/").as_str()),
+        "{}",
+        dropped[0]
+    );
+    assert!(
+        !log.contains("ran past its loop"),
+        "the tick was not cut off:\n{log}"
+    );
+
+    nt.wait_for_screen("CLOCK 80x23", PATIENCE);
+    nt.send(echo);
+    nt.send("\r");
+    let screen = nt.screen_after(Duration::from_secs(2));
+    assert!(
+        screen.contains(echo),
+        "the shell stopped answering after the overrun:\n{screen}"
+    );
+    assert!(
+        screen.contains("CLOCK 80x23"),
+        "the status row went with the offender:\n{screen}"
+    );
+}
+
+#[test]
+fn a_spinner_loses_its_tick_and_the_terminal_stays_usable() {
+    spinner_is_dropped_while_the_rest_of_the_program_carries_on("plugin.spinner", "STILL-HERE");
+}
+
+#[test]
+fn a_coroutine_wrapped_spinner_loses_its_tick_too() {
+    spinner_is_dropped_while_the_rest_of_the_program_carries_on(
+        "plugin.coroutine_spinner",
+        "STILL-HERE-TOO",
+    );
+}
