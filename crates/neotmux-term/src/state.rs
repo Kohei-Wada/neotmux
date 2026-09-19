@@ -12,8 +12,16 @@ fn color_from_vt100(c: vt100::Color) -> Color {
     }
 }
 
+fn clamp_to_at_least_one(size: Size) -> Size {
+    Size {
+        rows: size.rows.max(1),
+        cols: size.cols.max(1),
+    }
+}
+
 impl TermState {
     pub fn new(size: Size, scrollback: usize) -> Self {
+        let size = clamp_to_at_least_one(size);
         Self {
             parser: vt100::Parser::new(size.rows, size.cols, scrollback),
         }
@@ -24,6 +32,7 @@ impl TermState {
     }
 
     pub fn resize(&mut self, size: Size) {
+        let size = clamp_to_at_least_one(size);
         self.parser.screen_mut().set_size(size.rows, size.cols);
     }
 
@@ -111,6 +120,23 @@ mod tests {
         s.resize(Size { rows: 3, cols: 6 });
         assert_eq!(s.size(), Size { rows: 3, cols: 6 });
         assert_eq!(snap(&s).size, Size { rows: 3, cols: 6 });
+    }
+
+    #[test]
+    fn new_clamps_a_zero_size_to_at_least_one_by_one() {
+        let s = TermState::new(Size { rows: 0, cols: 0 }, 0);
+        let size = s.size();
+        assert!(size.rows >= 1);
+        assert!(size.cols >= 1);
+    }
+
+    #[test]
+    fn resize_clamps_a_zero_size_to_at_least_one_by_one() {
+        let mut s = TermState::new(Size { rows: 2, cols: 4 }, 0);
+        s.resize(Size { rows: 0, cols: 0 });
+        let size = s.size();
+        assert!(size.rows >= 1);
+        assert!(size.cols >= 1);
     }
 
     #[test]
