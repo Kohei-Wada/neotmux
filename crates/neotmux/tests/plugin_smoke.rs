@@ -1,23 +1,12 @@
 use std::fs;
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 
 // ratatui::init() requires a real tty, so this drives the binary through a PTY
 // rather than with inherited stdio (see terminal_restore.rs's harness).
-#[test]
-fn a_plugin_loads_and_its_log_line_reaches_the_log_file() {
-    let dir = tempfile::tempdir().unwrap();
-    fs::create_dir_all(dir.path().join("lua/plugin")).unwrap();
-    fs::write(dir.path().join("init.lua"), "require('plugin.hello')").unwrap();
-    fs::write(
-        dir.path().join("lua/plugin/hello.lua"),
-        "neotmux.log.info('plugin-loaded-marker') return {}",
-    )
-    .unwrap();
-
-    let log = dir.path().join("neotmux.log");
-
+fn run_neotmux(runtime_dir: &Path, log: &Path) {
     let pair = native_pty_system()
         .openpty(PtySize {
             rows: 24,
@@ -29,8 +18,8 @@ fn a_plugin_loads_and_its_log_line_reaches_the_log_file() {
 
     let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_neotmux"));
     cmd.arg("--log");
-    cmd.arg(&log);
-    cmd.env("NEOTMUX_RUNTIME", dir.path());
+    cmd.arg(log);
+    cmd.env("NEOTMUX_RUNTIME", runtime_dir);
     cmd.env("SHELL", "/bin/true");
     cmd.env("TERM", "xterm-256color");
     let mut child = pair.slave.spawn_command(cmd).expect("spawn");
@@ -57,19 +46,83 @@ fn a_plugin_loads_and_its_log_line_reaches_the_log_file() {
     drop(pair.master);
     collector.join().ok();
     assert!(status.success(), "neotmux exited with {status:?}");
+}
 
+fn read_log_containing(log: &Path, marker: &str) -> String {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
-        if let Ok(text) = fs::read_to_string(&log)
-            && text.contains("plugin-loaded-marker")
+        if let Ok(text) = fs::read_to_string(log)
+            && text.contains(marker)
         {
-            assert!(
-                text.contains("hello"),
-                "the log line is not attributed: {text}"
-            );
-            return;
+            return text;
         }
         assert!(Instant::now() < deadline, "marker never reached {log:?}");
         std::thread::sleep(Duration::from_millis(50));
     }
+}
+
+#[test]
+fn a_plugin_loads_and_its_log_line_reaches_the_log_file() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("lua/plugin")).unwrap();
+    fs::write(dir.path().join("init.lua"), "require('plugin.hello')").unwrap();
+    fs::write(
+        dir.path().join("lua/plugin/hello.lua"),
+        "neotmux.log.info('plugin-loaded-marker') return {}",
+    )
+    .unwrap();
+
+    let log = dir.path().join("neotmux.log");
+    run_neotmux(dir.path(), &log);
+
+    let text = read_log_containing(&log, "plugin-loaded-marker");
+    assert!(
+        text.contains("hello"),
+        "the log line is not attributed: {text}"
+    );
+}
+
+#[test]
+fn a_failed_plugin_is_warned_about_once_and_a_silent_one_still_gets_its_warn() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("lua/plugin")).unwrap();
+    fs::write(
+        dir.path().join("init.lua"),
+        "require('plugin.broken') require('plugin.silent') require('plugin.hello')",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("lua/plugin/broken.lua"),
+        "error('deliberate-failure')",
+    )
+    .unwrap();
+    fs::write(dir.path().join("lua/plugin/silent.lua"), "return {}").unwrap();
+    fs::write(
+        dir.path().join("lua/plugin/hello.lua"),
+        "neotmux.log.info('plugin-loaded-marker') return {}",
+    )
+    .unwrap();
+
+    let log = dir.path().join("neotmux.log");
+    run_neotmux(dir.path(), &log);
+
+    let text = read_log_containing(&log, "plugin-loaded-marker");
+
+    let broken_lines: Vec<&str> = text
+        .lines()
+        .filter(|line| line.contains("broken:"))
+        .collect();
+    assert_eq!(
+        broken_lines.len(),
+        1,
+        "expected exactly one line about 'broken', got: {broken_lines:?}\nfull log: {text}"
+    );
+    assert!(
+        broken_lines[0].contains("deliberate-failure"),
+        "the one 'broken' line should be the load failure, got: {broken_lines:?}"
+    );
+    assert!(
+        text.contains("silent: registered nothing"),
+        "a plugin that loaded but registered nothing should still be warned about: {text}"
+    );
 }

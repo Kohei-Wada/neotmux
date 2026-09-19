@@ -64,8 +64,8 @@ impl Plugins {
             .names
             .iter()
             .enumerate()
-            .skip(2)
             .map(|(idx, name)| (PluginId(idx as u32), name.clone()))
+            .filter(|(id, _)| *id != ANONYMOUS && *id != INIT)
             .collect()
     }
 
