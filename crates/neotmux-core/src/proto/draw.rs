@@ -10,6 +10,10 @@ pub struct Rect {
 }
 
 impl Rect {
+    pub fn new(x: u16, y: u16, w: u16, h: u16) -> Self {
+        Self { x, y, w, h }
+    }
+
     pub fn contains(&self, x: u16, y: u16) -> bool {
         x >= self.x && y >= self.y && x < self.x + self.w && y < self.y + self.h
     }
@@ -91,12 +95,7 @@ mod tests {
 
     #[test]
     fn a_rect_knows_what_it_contains() {
-        let r = Rect {
-            x: 2,
-            y: 3,
-            w: 4,
-            h: 2,
-        };
+        let r = Rect::new(2, 3, 4, 2);
         assert!(r.contains(2, 3));
         assert!(r.contains(5, 4));
         assert!(!r.contains(6, 4));
@@ -106,12 +105,7 @@ mod tests {
 
     #[test]
     fn a_zero_sized_rect_contains_nothing() {
-        let r = Rect {
-            x: 0,
-            y: 0,
-            w: 0,
-            h: 0,
-        };
+        let r = Rect::new(0, 0, 0, 0);
         assert!(!r.contains(0, 0));
     }
 

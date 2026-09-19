@@ -149,16 +149,11 @@ impl UserData for Ctx {
                 Option<Table>,
             )| {
                 let (fg, bg) = parse_colours(colours)?;
-                let mut rect = Rect::default();
-                rect.x = x;
-                rect.y = y;
-                rect.w = w;
-                rect.h = h;
                 this.buffers.record(
                     this.owner,
                     DrawCmd::Rect {
                         pane: pane.map(PaneId::from),
-                        rect,
+                        rect: Rect::new(x, y, w, h),
                         fg,
                         bg,
                     },

@@ -24,11 +24,7 @@ fn built(files: &[(&str, &str)]) -> (tempfile::TempDir, LuaSubsystem) {
 fn frame(sub: &LuaSubsystem, rows: u16) {
     let size = Size { rows, cols: 80 };
     let pane = PaneId::from(1);
-    let mut rect = Rect::default();
-    rect.x = 0;
-    rect.y = 0;
-    rect.w = 80;
-    rect.h = rows;
+    let rect = Rect::new(0, 0, 80, rows);
     sub.begin_frame(
         Epoch::new(size, vec![pane], Some(pane)),
         size,
