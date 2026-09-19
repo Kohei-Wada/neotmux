@@ -232,3 +232,36 @@ fn a_registration_made_during_a_dispatch_inherits_the_dispatched_plugin() {
         assert_eq!(sub.plugins().name(owner).as_deref(), Some("spawner"));
     }
 }
+
+#[test]
+fn a_plugin_cannot_overwrite_a_neotmux_field() {
+    let dir = layer(&[("init.lua", "neotmux.on_tick = function() end")]);
+    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let failures = sub.run_init();
+    assert_eq!(failures.len(), 1);
+    assert!(failures[0].message.contains("read-only"));
+}
+
+#[test]
+fn a_plugin_cannot_swap_the_neotmux_metatable() {
+    let dir = layer(&[("init.lua", "setmetatable(neotmux, {})")]);
+    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let failures = sub.run_init();
+    assert_eq!(failures.len(), 1);
+}
+
+#[test]
+fn a_plugin_cannot_swap_the_opt_metatable() {
+    let dir = layer(&[("init.lua", "setmetatable(neotmux.opt, {})")]);
+    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let failures = sub.run_init();
+    assert_eq!(failures.len(), 1);
+}
+
+#[test]
+fn neotmux_opt_assignment_still_works_once_sealed() {
+    let dir = layer(&[("init.lua", "neotmux.opt.prefix = 'C-a'")]);
+    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    assert!(sub.run_init().is_empty());
+    assert_eq!(sub.opt().prefix, "C-a");
+}

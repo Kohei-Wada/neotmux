@@ -39,6 +39,7 @@ pub fn install(lua: &Lua, opts: Rc<RefCell<Opts>>) -> mlua::Result<Table> {
             Ok(())
         })?;
     meta.set("__newindex", newindex)?;
+    meta.set("__metatable", "neotmux.opt is sealed")?;
     table.set_metatable(Some(meta))?;
     Ok(table)
 }

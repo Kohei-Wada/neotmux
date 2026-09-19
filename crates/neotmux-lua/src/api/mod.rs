@@ -173,9 +173,33 @@ pub fn install(
         neotmux.set("notify", notify)?;
     }
 
+    let neotmux = seal(lua, neotmux, "neotmux")?;
     lua.globals().set("neotmux", neotmux)?;
 
     install_require_wrapper(lua, plugins, registry, load_failures)?;
 
     Ok(())
+}
+
+/// A plugin assigning `neotmux.on_tick = ...` or replacing `neotmux.log` wholesale would make
+/// every plugin loaded afterwards register into nothing and log nowhere, silently — the
+/// cross-plugin breakage the full-trust model does not cover (§7). `__newindex` alone would
+/// not stop this: Lua only invokes it for a key that is not already present, and `on_tick`
+/// etc. are already raw fields of `real`. So `real` is wrapped in an empty proxy table whose
+/// `__index` reads through to it and whose `__newindex` rejects every write, which fires for
+/// every key because the proxy itself is always empty. `__metatable` also refuses to let
+/// `setmetatable` swap the guard back out.
+fn seal(lua: &Lua, real: Table, name: &'static str) -> mlua::Result<Table> {
+    let proxy = lua.create_table()?;
+    let meta = lua.create_table()?;
+    meta.set("__index", real)?;
+    let newindex = lua.create_function(move |_, (_table, key, _value): (Table, Value, Value)| {
+        Err::<(), _>(mlua::Error::RuntimeError(format!(
+            "{name} is read-only, cannot set {key:?}"
+        )))
+    })?;
+    meta.set("__newindex", newindex)?;
+    meta.set("__metatable", format!("{name} is sealed"))?;
+    proxy.set_metatable(Some(meta))?;
+    Ok(proxy)
 }
