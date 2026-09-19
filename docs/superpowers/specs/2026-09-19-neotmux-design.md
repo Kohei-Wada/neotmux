@@ -589,16 +589,23 @@ Documented, not solved:
 
 1. **a single long C call** — `string.rep(s, 1e9)`, a pathological `string.find` backtrack, a
    huge `table.concat`. The hook only fires on Lua instruction boundaries, so one C call can
-   overrun the budget arbitrarily, or exhaust memory before it returns
+   overrun the budget arbitrarily, or exhaust memory before it returns. Measured as built: one
+   120 MB `string.rep` blocked a frame for 189 ms against a 5 ms budget. It was not merely
+   uninterrupted — it went **unreported**, because an overrun is only noticed at the next
+   sample and the tick had under `n` instructions left to run
 2. **`__gc` finalizers** — Lua clears `allowhook` for their duration (`lgc.c`), so a loop in a
-   finalizer is uninterruptible
+   finalizer is uninterruptible. Measured as built: 162 ms in one finalizer, also unreported,
+   for the same reason
 3. **`pcall`** — `while true do pcall(f) end` swallows the budget error. This *is* closable:
    with `LuaOptions { catch_rust_panics: false }` mlua replaces global `pcall`/`xpcall` with
    variants that re-raise Rust panics, so panicking in the hook instead of returning `Err`
    cannot be caught. It is **not adopted**, because it requires wrapping ticks in
    `catch_unwind` and collides with `ratatui::init()`'s panic hook, which restores the terminal
    before the unwind we intended to catch. `coroutine.resume` is not replaced either, so the
-   hole would not fully close. Deliberate loops are malice, and malice is out of scope (§8)
+   hole would not fully close. Deliberate loops are malice, and malice is out of scope (§8).
+   What a swallowed error does not buy the plugin: the frame is discarded and the overrun
+   counted whether or not the tick returned normally, so a bounded swallowing loop is dropped
+   after K frames like any other offender. An unbounded one still hangs the host
 4. **host bindings that block** — the host's own discipline, covered by §9's test
 
 ### 5.5 Exit criteria (machine-checkable)
