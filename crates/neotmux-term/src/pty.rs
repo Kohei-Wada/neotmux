@@ -1,5 +1,5 @@
 use std::io::{self, Read, Write};
-use std::sync::mpsc::{Receiver, sync_channel};
+use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 use std::thread;
 
 use anyhow::Context as _;
@@ -9,6 +9,7 @@ use portable_pty::{Child, CommandBuilder, ExitStatus, MasterPty, PtySize, native
 pub enum PtyEvent {
     Output(Vec<u8>),
     Eof,
+    Error(io::Error),
 }
 
 const OUTPUT_CHANNEL_BOUND: usize = 64;
@@ -18,6 +19,27 @@ pub struct PtyHandle {
     writer: Box<dyn Write + Send>,
     child: Box<dyn Child + Send + Sync>,
     output: Receiver<PtyEvent>,
+}
+
+fn read_loop<R: Read>(mut reader: R, tx: SyncSender<PtyEvent>) {
+    let mut buf = [0u8; 8192];
+    loop {
+        match reader.read(&mut buf) {
+            Ok(0) => {
+                let _ = tx.send(PtyEvent::Eof);
+                return;
+            }
+            Ok(n) => {
+                if tx.send(PtyEvent::Output(buf[..n].to_vec())).is_err() {
+                    return;
+                }
+            }
+            Err(e) => {
+                let _ = tx.send(PtyEvent::Error(e));
+                return;
+            }
+        }
+    }
 }
 
 fn pty_size(size: Size) -> PtySize {
@@ -41,27 +63,12 @@ impl PtyHandle {
         let child = pair.slave.spawn_command(cmd).context("spawn command")?;
         drop(pair.slave);
 
-        let mut reader = pair.master.try_clone_reader().context("clone reader")?;
+        let reader = pair.master.try_clone_reader().context("clone reader")?;
         let writer = pair.master.take_writer().context("take writer")?;
         let (tx, output) = sync_channel(OUTPUT_CHANNEL_BOUND);
         thread::Builder::new()
             .name("neotmux-pty-reader".into())
-            .spawn(move || {
-                let mut buf = [0u8; 8192];
-                loop {
-                    match reader.read(&mut buf) {
-                        Ok(0) | Err(_) => {
-                            let _ = tx.send(PtyEvent::Eof);
-                            return;
-                        }
-                        Ok(n) => {
-                            if tx.send(PtyEvent::Output(buf[..n].to_vec())).is_err() {
-                                return;
-                            }
-                        }
-                    }
-                }
-            })
+            .spawn(move || read_loop(reader, tx))
             .context("spawn reader thread")?;
 
         Ok(Self {
@@ -130,5 +137,25 @@ mod tests {
             drained <= OUTPUT_CHANNEL_BOUND + 1,
             "reader thread buffered {drained} messages, channel bound is {OUTPUT_CHANNEL_BOUND}"
         );
+    }
+
+    struct FailingReader;
+
+    impl Read for FailingReader {
+        fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
+            Err(io::Error::other("boom"))
+        }
+    }
+
+    #[test]
+    fn a_read_error_is_reported_as_error_not_eof() {
+        let (tx, rx) = sync_channel(1);
+        read_loop(FailingReader, tx);
+
+        match rx.recv().expect("event") {
+            PtyEvent::Error(e) => assert_eq!(e.kind(), io::ErrorKind::Other),
+            PtyEvent::Eof => panic!("a read error must not be reported as Eof"),
+            PtyEvent::Output(_) => panic!("unexpected output from a failing reader"),
+        }
     }
 }

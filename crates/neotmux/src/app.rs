@@ -59,6 +59,7 @@ pub fn run(
                     eof = true;
                     break;
                 }
+                Ok(PtyEvent::Error(err)) => return Err(err).context("read from pty"),
                 Err(_) => break,
             }
         }
