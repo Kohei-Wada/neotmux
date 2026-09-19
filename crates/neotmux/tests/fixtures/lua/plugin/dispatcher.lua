@@ -6,7 +6,7 @@ neotmux.on_tick(function()
     return
   end
   armed = true
-  late.arm()
+  late.handle = neotmux.on_tick(late.boom)
 end)
 
 return {}

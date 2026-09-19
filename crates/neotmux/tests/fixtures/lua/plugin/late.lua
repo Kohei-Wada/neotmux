@@ -1,14 +1,11 @@
 local late = {}
 
--- Registered from inside another plugin's dispatch: the owner is still this chunk, because
--- attribution is lexical. Raising is how the host is made to say so out loud — a tick error
--- is logged under the registration's owner.
-function late.arm()
-  local handle
-  handle = neotmux.on_tick(function()
-    handle:remove()
-    error("late-callback-boom")
-  end)
+-- Written here but registered by plugin/dispatcher, from inside its own tick. Attribution
+-- is lexical, so the owner is this chunk; raising is how the host says so out loud, since a
+-- tick error is logged under the registration's owner.
+function late.boom()
+  late.handle:remove()
+  error("late-callback-boom")
 end
 
 return late
