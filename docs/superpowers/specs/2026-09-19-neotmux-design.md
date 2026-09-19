@@ -259,8 +259,7 @@ Lua where it is.
 
 ```lua
 local h = neotmux.on_tick(fn)                    -- per-frame draw callback
-local h = neotmux.on_event(name, fn)             -- pane_opened / pane_closed /
-                                                 -- pane_output / focus_changed / resized
+local h = neotmux.on_event(name, fn)             -- pane_output / resized
 local h = neotmux.keymap.set(key, fn)            -- key binding
 local h = neotmux.status.provider(fn)            -- status-line contributor
 h:remove()                                       -- idempotent
@@ -270,6 +269,11 @@ h:remove()                                       -- idempotent
 also keeps the set of registrations per `SourceId`. Reload is not implemented in M1a, but
 reload is impossible to add later without breaking the ABI unless this shape is fixed now
 (ttymap #241 is still open for exactly this reason). Freezing the shape is cheap today.
+
+The event list is exactly the events the host fires. An event the host defines but never
+dispatches is worse than a missing one: a plugin subscribing to it waits forever and finds
+out only by experiment. The pane-tree events belong to M2 (§6), which is where they can
+first be fired.
 
 Every API that names a pane takes a `PaneId`, even though M1a has exactly one pane. This is
 what stops M2's splits from reshaping the ABI.
@@ -562,6 +566,9 @@ There is no hardcoded prefix. The prefix is a plugin: a keymap registration that
 one key, sets a flag, and consumes the next key. That is the test of whether the keymap
 API from M1a is real — if the prefix cannot be written as a plugin, the API is missing
 something, and finding that out is the point of building it this way.
+
+M2 also introduces the pane-tree events — `pane_opened`, `pane_closed` and
+`focus_changed` — deliberately held back from M1a because nothing there could fire them.
 
 `neotmux.pane` gives Lua `list()`, `current()`, `split(dir)` and `focus(id)`, the
 signatures frozen in M1a. Every one of them is an op on the buffer (§4.6), applied after

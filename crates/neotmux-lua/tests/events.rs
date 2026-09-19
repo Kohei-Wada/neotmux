@@ -58,16 +58,16 @@ fn every_subscriber_runs_even_when_one_raises() {
         ("init.lua", "require('plugin.bad') require('plugin.good')"),
         (
             "lua/plugin/bad.lua",
-            "neotmux.on_event('pane_closed', function() error('boom') end) return {}",
+            "neotmux.on_event('resized', function() error('boom') end) return {}",
         ),
         (
             "lua/plugin/good.lua",
-            "neotmux.on_event('pane_closed', function() neotmux.log.info('still here') end) return {}",
+            "neotmux.on_event('resized', function() neotmux.log.info('still here') end) return {}",
         ),
     ]);
     assert!(sub.run_init().is_empty());
-    sub.dispatch_event(&Event::PaneClosed {
-        pane: PaneId::from(1),
+    sub.dispatch_event(&Event::Resized {
+        size: Size { rows: 1, cols: 1 },
     });
     let text = format!("{:?}", sub.drain_ops());
     assert!(text.contains("still here"), "{text}");
@@ -83,12 +83,12 @@ fn a_subscriber_to_another_event_is_not_called() {
         ("init.lua", "require('plugin.picky')"),
         (
             "lua/plugin/picky.lua",
-            "neotmux.on_event('pane_opened', function() neotmux.log.info('opened') end) return {}",
+            "neotmux.on_event('pane_output', function() neotmux.log.info('output') end) return {}",
         ),
     ]);
     assert!(sub.run_init().is_empty());
-    sub.dispatch_event(&Event::PaneClosed {
-        pane: PaneId::from(1),
+    sub.dispatch_event(&Event::Resized {
+        size: Size { rows: 1, cols: 1 },
     });
     assert!(sub.drain_ops().is_empty());
 }
@@ -127,33 +127,19 @@ fn subscribers_run_in_registration_order() {
         ),
         (
             "lua/plugin/first.lua",
-            "neotmux.on_event('pane_closed', function() neotmux.log.info('first') end) return {}",
+            "neotmux.on_event('resized', function() neotmux.log.info('first') end) return {}",
         ),
         (
             "lua/plugin/second.lua",
-            "neotmux.on_event('pane_closed', function() neotmux.log.info('second') end) return {}",
+            "neotmux.on_event('resized', function() neotmux.log.info('second') end) return {}",
         ),
     ]);
     assert!(sub.run_init().is_empty());
-    sub.dispatch_event(&Event::PaneClosed {
-        pane: PaneId::from(1),
+    sub.dispatch_event(&Event::Resized {
+        size: Size { rows: 1, cols: 1 },
     });
     let text = format!("{:?}", sub.drain_ops());
     let first_idx = text.find("first").expect("first should have run");
     let second_idx = text.find("second").expect("second should have run");
     assert!(first_idx < second_idx, "{text}");
-}
-
-#[test]
-fn focus_changed_can_carry_no_pane() {
-    let (_d, sub) = built(&[
-        ("init.lua", "require('plugin.focus')"),
-        (
-            "lua/plugin/focus.lua",
-            "neotmux.on_event('focus_changed', function(e) neotmux.log.info('focus ' .. tostring(e.pane)) end) return {}",
-        ),
-    ]);
-    assert!(sub.run_init().is_empty());
-    sub.dispatch_event(&Event::FocusChanged { pane: None });
-    assert!(format!("{:?}", sub.drain_ops()).contains("focus nil"));
 }
