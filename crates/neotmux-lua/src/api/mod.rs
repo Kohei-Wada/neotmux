@@ -85,11 +85,14 @@ fn register(
     buffers: &Rc<Buffers>,
     kind: Kind,
     callback: Function,
-) -> mlua::Result<Table> {
+) -> mlua::Result<(SourceId, Table)> {
     let owner = attribute(sources, &callback);
     let key = Rc::new(lua.create_registry_value(callback)?);
     let id = registry.add(owner, kind, key);
-    make_handle(lua, registry.clone(), buffers.clone(), id)
+    Ok((
+        owner,
+        make_handle(lua, registry.clone(), buffers.clone(), id)?,
+    ))
 }
 
 /// The load convention, not `require`, owns isolation (§4.10). `loading` is set only while
@@ -165,8 +168,12 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
         let sources = sources.clone();
         let registry = registry.clone();
         let buffers = buffers.clone();
+        let parked = overrun.clone();
         let on_tick = lua.create_function(move |lua, callback: Function| {
-            register(lua, &sources, &registry, &buffers, Kind::Tick, callback)
+            let (owner, handle) =
+                register(lua, &sources, &registry, &buffers, Kind::Tick, callback)?;
+            parked.forget_parked(owner);
+            Ok(handle)
         })?;
         neotmux.set("on_tick", on_tick)?;
     }
@@ -176,14 +183,15 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
         let registry = registry.clone();
         let buffers = buffers.clone();
         let on_event = lua.create_function(move |lua, (name, callback): (String, Function)| {
-            register(
+            Ok(register(
                 lua,
                 &sources,
                 &registry,
                 &buffers,
                 Kind::Event(name),
                 callback,
-            )
+            )?
+            .1)
         })?;
         neotmux.set("on_event", on_event)?;
     }
@@ -193,7 +201,7 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
         let registry = registry.clone();
         let buffers = buffers.clone();
         let on_key = lua.create_function(move |lua, callback: Function| {
-            register(lua, &sources, &registry, &buffers, Kind::Key, callback)
+            Ok(register(lua, &sources, &registry, &buffers, Kind::Key, callback)?.1)
         })?;
         neotmux.set("on_key", on_key)?;
     }

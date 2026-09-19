@@ -397,3 +397,45 @@ fn a_budget_of_zero_measures_nothing_and_unsubscribes_nobody() {
 
     assert_eq!(tick_owners(&sub), vec!["plugin/heavy".to_string()]);
 }
+
+/// The re-`require` of §5.3 is the recovery a plugin author reaches for instead of
+/// `resubscribe`, and it must not leave the parked callbacks to be restored later.
+#[test]
+fn registering_a_tick_again_drops_what_was_parked_for_that_source() {
+    let (_dir, sub) = built(&[
+        (
+            "init.lua",
+            "neotmux.opt.tick_budget_ms = 5 neotmux.opt.tick_overrun_limit = 1 \
+             require('plugin.spinner') require('plugin.rescuer')",
+        ),
+        ("lua/plugin/spinner.lua", SPINNER),
+        (
+            "lua/plugin/rescuer.lua",
+            "neotmux.keymap.set('C-l', function()
+               package.loaded['plugin.spinner'] = nil
+               require('plugin.spinner')
+               return true
+             end)
+             neotmux.keymap.set('C-r', function()
+               neotmux.notify('info', tostring(neotmux.resubscribe('plugin/spinner')))
+               return true
+             end)
+             return {}",
+        ),
+    ]);
+
+    frame(&sub);
+    assert!(tick_owners(&sub).is_empty());
+    sub.drain_ops();
+
+    sub.dispatch_key("C-l");
+    assert_eq!(tick_owners(&sub), vec!["plugin/spinner".to_string()]);
+
+    sub.dispatch_key("C-r");
+    assert_eq!(notifications(&sub), vec!["false".to_string()]);
+    assert_eq!(
+        tick_owners(&sub),
+        vec!["plugin/spinner".to_string()],
+        "the parked callback was restored beside the freshly required one"
+    );
+}

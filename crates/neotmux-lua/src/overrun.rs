@@ -66,6 +66,14 @@ impl Overrun {
         self.forgive(source);
     }
 
+    /// Drops what a source has parked, without restoring it. A source that registers a tick
+    /// again has replaced what was taken from it — a re-`require`d chunk is the usual way —
+    /// and keeping the old callbacks would let a later `restore` put stale duplicates back
+    /// beside the fresh registration.
+    pub fn forget_parked(&self, source: SourceId) {
+        self.parked.borrow_mut().remove(&source);
+    }
+
     /// Puts them back, with a clean counter so a restored source gets a full limit's worth of
     /// frames again. False when this source has nothing parked.
     pub fn restore(&self, registry: &Registry, source: SourceId) -> bool {
