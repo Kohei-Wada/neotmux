@@ -439,6 +439,15 @@ panic hook that restores first; the test suite includes a plugin that panics the
 asserts `termios` afterwards, because this is the only failure whose blast radius is the
 user's shell session.
 
+**Known hole, left open by design in M1a: a tick callback that never returns.** `dispatch_tick`
+calls straight into the registered Lua function with no time limit, so `while true do end` in
+one plugin's tick blocks the frame loop forever. `shutdown.raised()` is checked once per frame
+(§2), so it becomes unreachable, and SIGTERM cannot be delivered — the terminal stays in the
+alternate screen until SIGKILL, which this invariant cannot cover without one. This is not an
+oversight to patch here: it is exactly the failure mode M1b's instruction-count budget (§5.1)
+exists to close, by making the hook return `Err` before the frame loop can hang. Inventing a
+second interruption mechanism in M1a would duplicate that work and is explicitly out of scope.
+
 ## 7. Trust model
 
 Plugins are fully trusted: Lua in the host VM, able to quit the application, rebind every key,
