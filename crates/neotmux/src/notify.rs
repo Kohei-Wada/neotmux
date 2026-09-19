@@ -15,8 +15,8 @@ struct Notification {
     created: Instant,
 }
 
-/// A host-owned surface for notifications: a plugin's own draw buffer can't
-/// carry a notification about the plugin system itself failing. Expires
+/// A host-owned surface for notifications: a source's own draw buffer can't
+/// carry a notification about the Lua layer itself failing. Expires
 /// entries a few seconds after they were pushed and draws the rest over the
 /// top-right of the surface.
 #[derive(Default)]

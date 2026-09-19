@@ -140,7 +140,7 @@ fn a_tick_that_raises_keeps_its_previous_frame() {
 }
 
 #[test]
-fn a_tick_error_is_reported_with_the_plugin_name() {
+fn a_tick_error_is_reported_with_the_source_name() {
     let (_dir, sub) = built(&[
         ("init.lua", "require('plugin.flaky')"),
         (
@@ -211,7 +211,7 @@ fn a_stashed_ctx_cannot_draw_outside_its_tick() {
 }
 
 #[test]
-fn same_frame_cross_plugin_isolation_survives_dispatch_tick() {
+fn same_frame_cross_source_isolation_survives_dispatch_tick() {
     let (_dir, sub) = built(&[
         (
             "init.lua",

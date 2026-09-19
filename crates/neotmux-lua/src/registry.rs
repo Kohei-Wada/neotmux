@@ -163,7 +163,7 @@ mod tests {
     }
 
     #[test]
-    fn removing_one_plugin_leaves_the_others_alone() {
+    fn removing_one_source_leaves_the_others_alone() {
         let (lua, reg, a, b) = setup();
         let a_tick = reg.add(a, Kind::Tick, key(&lua, "return function() end"));
         let a_status = reg.add(a, Kind::Status, key(&lua, "return function() end"));

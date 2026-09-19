@@ -213,9 +213,9 @@ pub(crate) fn install(
     install_require_wrapper(lua, sources, registry, load_failures)
 }
 
-/// A plugin assigning `neotmux.on_tick = ...` or replacing `neotmux.log` wholesale would make
-/// every plugin loaded afterwards register into nothing and log nowhere, silently — the
-/// cross-plugin breakage the full-trust model does not cover (§7). `__newindex` alone would
+/// A chunk assigning `neotmux.on_tick = ...` or replacing `neotmux.log` wholesale would make
+/// everything loaded after it register into nothing and log nowhere, silently — the
+/// cross-source breakage the full-trust model does not cover (§7). `__newindex` alone would
 /// not stop this: Lua only invokes it for a key that is not already present, and `on_tick`
 /// etc. are already raw fields of `real`. So `real` is wrapped in an empty proxy table whose
 /// `__index` reads through to it and whose `__newindex` rejects every write, which fires for

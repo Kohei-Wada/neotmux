@@ -119,7 +119,7 @@ fn draw_line(
     }
 }
 
-/// Draws every plugin's overlay commands for this frame, clipping each one to
+/// Draws every source's overlay commands for this frame, clipping each one to
 /// its pane's rect (or to the surface for `pane: None`), and silently
 /// ignoring a command naming a pane that closed during this same frame.
 pub fn apply(frame: &mut Frame, area: Rect, cmds: &[DrawCmd], panes: &PaneRects) {

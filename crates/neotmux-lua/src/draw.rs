@@ -53,7 +53,7 @@ impl Buffers {
     pub fn commit(&self, owner: SourceId) {
         let mut inner = self.inner.borrow_mut();
         let epoch = inner.epoch.clone();
-        // A missing scratch entry means the plugin recorded nothing this tick, not that
+        // A missing scratch entry means the source recorded nothing this tick, not that
         // the tick failed; commit still replaces the previous frame with this empty one.
         let mut entry = inner.scratch.remove(&owner).unwrap_or_default();
         entry.epoch = epoch;
@@ -181,7 +181,7 @@ mod tests {
     }
 
     #[test]
-    fn plugins_are_applied_in_id_order() {
+    fn sources_are_applied_in_id_order() {
         let sources = Sources::new();
         let a = sources.intern("a");
         let b = sources.intern("b");
@@ -196,7 +196,7 @@ mod tests {
     }
 
     #[test]
-    fn forget_drops_a_plugins_buffer() {
+    fn forget_drops_a_sources_buffer() {
         let sources = Sources::new();
         let a = sources.intern("a");
         let buffers = Buffers::new();

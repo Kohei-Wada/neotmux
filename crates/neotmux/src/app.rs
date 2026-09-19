@@ -64,7 +64,7 @@ fn pane_rects(content: Size) -> PaneRects {
 
 /// A geometry change, whether from a real terminal resize or the status row
 /// appearing/disappearing: recompute the pane's size and rects, resize
-/// `TermState` and the PTY to match, and tell plugins about it.
+/// `TermState` and the PTY to match, and tell the Lua layer about it.
 fn apply_geometry(
     lua: &LuaSubsystem,
     state: &mut TermState,
