@@ -905,9 +905,6 @@ fn main() {
 Run: `cargo test -p neotmux`
 Expected: 3 passed.
 
-If `buf.cell_mut((x, y))` or `buf[(x, y)]` does not resolve, check the signature with
-`cargo doc -p ratatui --open` or `grep -rn "pub fn cell_mut" ~/.cargo/registry/src/*/ratatui-core-*/src/buffer/buffer.rs` and adjust the call, not the test's intent.
-
 - [ ] **Step 5: Commit**
 
 ```bash
