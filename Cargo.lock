@@ -755,11 +755,13 @@ dependencies = [
  "anyhow",
  "crossterm",
  "neotmux-core",
+ "neotmux-lua",
  "neotmux-term",
  "nix 0.28.0",
  "portable-pty",
  "ratatui",
  "signal-hook",
+ "tempfile",
 ]
 
 [[package]]

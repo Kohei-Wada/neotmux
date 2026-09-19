@@ -3,11 +3,14 @@ use std::time::{Duration, Instant};
 use anyhow::Context as _;
 use crossterm::event::{self, Event};
 use neotmux_core::proto::{GridSnapshot, Size};
+use neotmux_lua::LuaSubsystem;
+use neotmux_lua::ops::Op;
 use neotmux_term::pty::{PtyEvent, PtyHandle};
 use neotmux_term::state::TermState;
 use ratatui::DefaultTerminal;
 
 use crate::input::encode_key;
+use crate::logging;
 use crate::render::draw_grid;
 use crate::signals::ShutdownSignal;
 
@@ -33,6 +36,7 @@ fn terminal_size(terminal: &DefaultTerminal) -> anyhow::Result<Size> {
 pub fn run(
     terminal: &mut DefaultTerminal,
     shutdown: &ShutdownSignal,
+    lua: &LuaSubsystem,
 ) -> anyhow::Result<Option<i32>> {
     let mut size = terminal_size(terminal)?;
     let mut state = TermState::new(size, SCROLLBACK);
@@ -93,6 +97,17 @@ pub fn run(
                 }
                 if Instant::now() >= frame_end {
                     break;
+                }
+            }
+        }
+
+        lua.dispatch_tick();
+        for (id, op) in lua.drain_ops() {
+            match op {
+                Op::Quit => return Ok(None),
+                Op::Log { level, text } | Op::Notify { level, text } => {
+                    let tag = lua.plugins().name(id).unwrap_or_else(|| id.to_string());
+                    logging::log(level, &tag, &text);
                 }
             }
         }

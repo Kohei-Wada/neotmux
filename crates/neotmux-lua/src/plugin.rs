@@ -58,6 +58,17 @@ impl Plugins {
         self.inner.borrow().names.get(id.0 as usize).cloned()
     }
 
+    pub fn interned(&self) -> Vec<(PluginId, String)> {
+        self.inner
+            .borrow()
+            .names
+            .iter()
+            .enumerate()
+            .skip(2)
+            .map(|(idx, name)| (PluginId(idx as u32), name.clone()))
+            .collect()
+    }
+
     pub fn current(&self) -> PluginId {
         let inner = self.inner.borrow();
         inner.stack.last().copied().unwrap_or(INIT)
@@ -248,6 +259,18 @@ mod tests {
             .unwrap();
         assert!(failed);
         assert_eq!(plugins.current(), INIT);
+    }
+
+    #[test]
+    fn interned_lists_plugins_but_not_anonymous_or_init() {
+        let plugins = Plugins::new();
+        let a = plugins.intern("clock");
+        let b = plugins.intern("watcher");
+        let names: Vec<(PluginId, String)> = plugins.interned();
+        assert_eq!(
+            names,
+            vec![(a, "clock".to_string()), (b, "watcher".to_string())]
+        );
     }
 
     #[test]
