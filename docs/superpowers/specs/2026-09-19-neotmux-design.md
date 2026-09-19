@@ -634,11 +634,27 @@ pure data structure over `PaneId`s; it does not own PTYs. The binary owns the ma
 
 ### Rounding and minimum sizes
 
-`assign` works in integer cells and must be total: every cell of the window is covered by
-exactly one pane rect, with no gaps and no overlap, at every size including sizes too
-small to honour the fractions. Rounding error goes to the first child. A split whose
-children would fall below one cell clamps rather than producing an empty rect, because
-`vt100` and the PTY both reject a zero dimension (M0a).
+`assign` works in integer cells and is total: every cell of the window is covered by exactly
+one pane rect, with no gaps and no overlap, at every size including sizes too small to honour
+the fractions. Rounding error goes to the first child.
+
+An earlier draft of this section also said a split whose children fall below one cell "clamps
+rather than producing an empty rect". That cannot be true at the same time as exact tiling — on
+a one-column surface, two side-by-side panes cannot both be clamped to a column without
+overlapping — and it put a `vt100` fact inside a module that does not know a terminal emulator
+exists. The rule is instead split in two:
+
+- **`assign` tiles, and may emit a zero-dimension rect.** It has no minimum and takes no
+  opinion from the terminal.
+- **The minimum is the caller's**, passed into `Tree::split`, which refuses a split whose
+  children would not both clear it. `MIN_GRID` (2x2) stays in `neotmux-term`, where it is what
+  it is: the smallest grid `vt100` 0.16.2 survives, not a property of layout.
+
+That leaves one case the refusal cannot prevent, because the user causes it after the fact:
+**the terminal shrinks below what the existing tree can hold.** A pane whose assigned rect
+falls below the minimum is not rendered for that frame and its PTY keeps its last valid size —
+it is hidden, not resized to something its child cannot handle and not destroyed. Growing the
+terminal back brings it straight back, because the tree never changed.
 
 ### Focus
 
