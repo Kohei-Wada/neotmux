@@ -429,8 +429,16 @@ Command buffers from before step 3 fail the epoch check and are not replayed.
 ### 4.10 Failure handling at load
 
 **The guarantee: one entry in the init chain failing to load does not abort the rest of the
-config.** A failed entry is inert — its partial registrations are withdrawn, so nothing it
-half-installed can run later — it is reported once by name, and loading continues.
+config.** A failed entry is inert — the registrations *it owns* are withdrawn — it is
+reported once by name, and loading continues.
+
+**The limit, accepted rather than fixed:** ownership is lexical (§4.2), so a callback the
+failing chunk got from a library is owned by the library, not by the chunk that registered it,
+and it survives the rollback and runs afterwards. Withdrawing it too would mean tracking
+"registered during this load" alongside "owned by" — a second notion of ownership, and the
+first thing that would have to be right for every later feature that asks who owns what. The
+case is not worth that, so the rollback covers the failing source's own registrations and no
+more. A test pins the behaviour so it stays a decision.
 
 | failure | handling |
 |---|---|

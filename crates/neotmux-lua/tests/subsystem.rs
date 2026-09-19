@@ -650,3 +650,47 @@ fn a_chunk_built_with_load_can_reach_the_host_api() {
     let text = format!("{ops:?}");
     assert!(text.contains("from a loaded chunk"), "{text}");
 }
+
+#[test]
+fn a_failed_loads_rollback_does_not_reach_a_callback_it_got_from_a_library() {
+    // The accepted limit of §4.10: attribution is lexical, so a callback the failing chunk
+    // took from a library is owned by the library and survives the rollback. Tracking
+    // "registered during this load" as well as "owned by" would be a second notion of
+    // ownership, which costs more than this case is worth.
+    let dir = layer(&[
+        ("init.lua", "require('plugin.half')"),
+        (
+            "lua/plugin/lib.lua",
+            "local M = {} function M.tick() neotmux.log.info('library callback ran') end return M",
+        ),
+        (
+            "lua/plugin/half.lua",
+            r#"
+            local lib = require('plugin.lib')
+            neotmux.on_tick(lib.tick)
+            neotmux.on_tick(function() neotmux.log.info('own callback ran') end)
+            error('boom')
+            "#,
+        ),
+    ]);
+    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let failures = sub.run_init();
+    assert_eq!(failures.len(), 1, "{failures:?}");
+    assert_eq!(failures[0].source, "plugin/half");
+
+    let ticks = sub.registry().snapshot(KindTag::Tick);
+    assert_eq!(
+        ticks.len(),
+        1,
+        "the failing chunk's own registration should have been withdrawn"
+    );
+    assert_eq!(
+        sub.sources().name(sub.registry().owner(ticks[0]).unwrap()),
+        Some("plugin/lib".to_string())
+    );
+
+    sub.dispatch_tick();
+    let text = format!("{:?}", sub.drain_ops());
+    assert!(text.contains("library callback ran"), "{text}");
+    assert!(!text.contains("own callback ran"), "{text}");
+}
