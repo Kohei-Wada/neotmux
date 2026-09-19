@@ -714,10 +714,16 @@ the tick, never a synchronous mutation from inside a callback.
 
 ### Exit criteria
 
-1. Splitting, focusing, closing and resizing work, driven from Lua, with no pane-related
-   key handling in core.
+1. Splitting and focusing work driven from Lua, with no pane-related key handling in core.
+   That is the whole of `neotmux.pane` — `list`, `current`, `split`, `focus` — and this
+   criterion said "closing and resizing" too, which the frozen list never offered. A pane
+   closes when its own shell exits and resizes when the terminal does; neither is a call a
+   plugin can make. `pane.close` and `pane.resize` are additive and belong after the v0.1
+   freeze, not rushed in before it.
 2. `assign` is covered by a property test: for a tree of any shape and a rect of any size
-   down to 1x1, the output rects tile the input exactly.
+   down to 1x1, the output rects tile the input exactly. Both halves of the quantifier are
+   discharged: a fixed table of shapes and sizes as the reproducible core, and a few hundred
+   shapes and sizes generated from a fixed seed so that "any" is not six of them.
 3. The prefix key ships as a plugin file, and deleting its `require` line leaves a working
    multiplexer with no prefix.
 4. Closing the last pane exits, and the terminal is restored (the M0a guarantee still

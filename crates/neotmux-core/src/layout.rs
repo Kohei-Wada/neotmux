@@ -415,8 +415,9 @@ mod tests {
 
     fn shape(steps: &[(usize, SplitDir)]) -> Tree {
         // Built on a surface no split can be refused on, so the shapes stay independent of
-        // the sizes the property then checks.
-        let roomy = Rect::new(0, 0, 200, 60);
+        // the sizes the property then checks. It has to survive the deepest shape either the
+        // table or the generator produces, which is seven splits down one side.
+        let roomy = Rect::new(0, 0, 256, 256);
         let one_cell = Size { rows: 1, cols: 1 };
         let mut tree = Tree::new(pane(1));
         for (n, (at, dir)) in steps.iter().enumerate() {
@@ -428,43 +429,126 @@ mod tests {
         tree
     }
 
+    /// The property itself, in one place: the rects `assign` produces tile `surface` — one per
+    /// pane, none outside it, none overlapping, and the areas adding up to all of it.
+    fn assert_tiles(tree: &Tree, surface: Rect, case: &str) {
+        let (w, h) = (surface.w, surface.h);
+        let rects = assign(tree, surface);
+        assert_eq!(
+            rects.len(),
+            tree.panes().len(),
+            "{case}: every pane gets a rect at {w}x{h}"
+        );
+
+        let mut area = 0usize;
+        for (id, r) in &rects {
+            assert!(
+                r.x + r.w <= surface.x + surface.w && r.y + r.h <= surface.y + surface.h,
+                "{case}: {id} at {r:?} leaves the {w}x{h} surface"
+            );
+            area += usize::from(r.w) * usize::from(r.h);
+        }
+        assert_eq!(
+            area,
+            usize::from(w) * usize::from(h),
+            "{case}: the rects cover the {w}x{h} surface"
+        );
+
+        for (i, (a_id, a)) in rects.iter().enumerate() {
+            for (b_id, b) in &rects[i + 1..] {
+                let overlaps =
+                    a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+                assert!(
+                    !overlaps,
+                    "{case}: {a_id} at {a:?} overlaps {b_id} at {b:?}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn assigned_rects_tile_the_surface_exactly() {
         for steps in SHAPES {
             let tree = shape(steps);
             for (w, h) in SIZES {
-                let surface = Rect::new(0, 0, w, h);
-                let rects = assign(&tree, surface);
-                assert_eq!(
-                    rects.len(),
-                    tree.panes().len(),
-                    "every pane gets a rect at {w}x{h}"
-                );
-
-                let mut area = 0usize;
-                for (id, r) in &rects {
-                    assert!(
-                        r.x + r.w <= surface.w && r.y + r.h <= surface.h,
-                        "{id} at {r:?} leaves the {w}x{h} surface"
-                    );
-                    area += usize::from(r.w) * usize::from(r.h);
-                }
-                assert_eq!(
-                    area,
-                    usize::from(w) * usize::from(h),
-                    "the rects cover the {w}x{h} surface"
-                );
-
-                for (i, (a_id, a)) in rects.iter().enumerate() {
-                    for (b_id, b) in &rects[i + 1..] {
-                        let overlaps = a.x < b.x + b.w
-                            && b.x < a.x + a.w
-                            && a.y < b.y + b.h
-                            && b.y < a.y + a.h;
-                        assert!(!overlaps, "{a_id} at {a:?} overlaps {b_id} at {b:?}");
-                    }
-                }
+                assert_tiles(&tree, Rect::new(0, 0, w, h), &format!("table {steps:?}"));
             }
         }
+    }
+
+    /// A small linear congruential generator, so "a tree of any shape and a rect of any size"
+    /// can be a few hundred actual shapes and sizes without a dependency. Deterministic from
+    /// a fixed seed: a failure reproduces exactly, and the table above stays the reproducible
+    /// core either way. Constants from Knuth's MMIX; the low bits of an LCG are the weak ones,
+    /// so only the top half is used.
+    struct Lcg(u64);
+
+    impl Lcg {
+        fn below(&mut self, n: u64) -> u64 {
+            self.0 = self
+                .0
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (self.0 >> 33) % n
+        }
+    }
+
+    const SEED: u64 = 0x5eed_0000_0000_0001;
+    const CASES: usize = 400;
+    const MAX_SPLITS: u64 = 8;
+
+    #[test]
+    fn assigned_rects_tile_a_generated_shape_at_a_generated_size() {
+        let mut rng = Lcg(SEED);
+        for case in 0..CASES {
+            let mut steps = Vec::new();
+            for n in 0..rng.below(MAX_SPLITS) {
+                let at = rng.below(n + 1) as usize;
+                let dir = if rng.below(2) == 0 {
+                    SplitDir::Vertical
+                } else {
+                    SplitDir::Horizontal
+                };
+                steps.push((at, dir));
+            }
+            let tree = shape(&steps);
+            let surface = Rect::new(0, 0, rng.below(300) as u16 + 1, rng.below(300) as u16 + 1);
+            assert_tiles(
+                &tree,
+                surface,
+                &format!("seed {SEED:#x} case {case} shape {steps:?}"),
+            );
+        }
+    }
+
+    /// The generator is the point of the property, so it has to actually generate: a seed that
+    /// only ever produced one pane on one surface would pass everything above and prove
+    /// nothing.
+    #[test]
+    fn the_generator_reaches_a_range_of_shapes_and_sizes() {
+        let mut rng = Lcg(SEED);
+        let mut leaves = std::collections::BTreeSet::new();
+        let mut widths = std::collections::BTreeSet::new();
+        for _ in 0..CASES {
+            let mut count = 1u64;
+            for n in 0..rng.below(MAX_SPLITS) {
+                rng.below(n + 1);
+                rng.below(2);
+                count += 1;
+            }
+            leaves.insert(count);
+            widths.insert(rng.below(300) as u16 + 1);
+            rng.below(300);
+        }
+        assert_eq!(
+            leaves,
+            (1..=MAX_SPLITS).collect(),
+            "the generated shapes do not cover every pane count up to the limit"
+        );
+        assert!(
+            widths.len() > CASES / 2,
+            "the generated widths barely vary: {} distinct out of {CASES}",
+            widths.len()
+        );
     }
 }
