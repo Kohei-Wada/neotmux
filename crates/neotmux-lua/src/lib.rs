@@ -160,13 +160,14 @@ impl LuaSubsystem {
         self.report_text(owner, format!("{err}"));
     }
 
+    /// The op carries the source, and every sink prefixes the source's name when it renders
+    /// one, so the text must not name it again or the line reads "plugin/x: plugin/x: ...".
     fn report_text(&self, owner: SourceId, text: String) {
-        let name = self.sources.name(owner).unwrap_or_default();
         self.ops.push(
             owner,
             Op::Log {
                 level: Level::Error,
-                text: format!("{name}: {text}"),
+                text,
             },
         );
     }
@@ -288,7 +289,7 @@ impl LuaSubsystem {
             Op::Notify {
                 level: Level::Warn,
                 text: format!(
-                    "{name} overran its tick budget {limit} times and is no longer ticking; \
+                    "overran its tick budget {limit} times and is no longer ticking; \
                      neotmux.resubscribe('{name}') restores it"
                 ),
             },

@@ -42,10 +42,16 @@ fn texts(sub: &LuaSubsystem) -> Vec<String> {
 }
 
 fn logs(sub: &LuaSubsystem) -> Vec<String> {
+    logged(sub).into_iter().map(|(_, text)| text).collect()
+}
+
+/// The source a log op is attributed to, beside its text. Attribution lives in the op, not in
+/// the text, so a test that cares which source was blamed has to read it here.
+fn logged(sub: &LuaSubsystem) -> Vec<(String, String)> {
     sub.drain_ops()
         .into_iter()
-        .filter_map(|(_, op)| match op {
-            Op::Log { text, .. } => Some(text),
+        .filter_map(|(owner, op)| match op {
+            Op::Log { text, .. } => Some((sub.sources().name(owner).unwrap_or_default(), text)),
             _ => None,
         })
         .collect()
@@ -86,12 +92,12 @@ fn an_overrunning_tick_is_named_and_loses_its_frame() {
         texts(&sub).is_empty(),
         "the overrunning tick's frame was kept"
     );
-    let overruns: Vec<String> = logs(&sub)
+    let overruns: Vec<(String, String)> = logged(&sub)
         .into_iter()
-        .filter(|text| text.contains("budget"))
+        .filter(|(_, text)| text.contains("budget"))
         .collect();
     assert_eq!(overruns.len(), 1, "{overruns:?}");
-    assert!(overruns[0].starts_with("plugin/spinner: "), "{overruns:?}");
+    assert_eq!(overruns[0].0, "plugin/spinner", "{overruns:?}");
 
     // Without this the only symptom of a tick that was not cut off is a suite that hangs.
     sub.dispatch_key("C-p");
@@ -586,14 +592,14 @@ fn a_long_c_call_is_reported_by_name_though_it_ran_to_completion() {
 
     frame(&sub);
 
-    let overruns: Vec<String> = logs(&sub)
+    let overruns: Vec<(String, String)> = logged(&sub)
         .into_iter()
-        .filter(|text| text.contains("budget"))
+        .filter(|(_, text)| text.contains("budget"))
         .collect();
     assert_eq!(overruns.len(), 1, "{overruns:?}");
-    assert!(overruns[0].starts_with("plugin/hog: "), "{overruns:?}");
+    assert_eq!(overruns[0].0, "plugin/hog", "{overruns:?}");
     assert!(
-        overruns[0].contains("could not be cut off"),
+        overruns[0].1.contains("could not be cut off"),
         "an uninterrupted overrun read as an interrupted one: {overruns:?}"
     );
 
@@ -653,7 +659,10 @@ fn a_fast_tick_with_no_hook_sample_is_not_reported() {
 
     for _ in 0..3 {
         frame(&sub);
-        assert!(logs(&sub).is_empty(), "a tick inside its budget was reported");
+        assert!(
+            logs(&sub).is_empty(),
+            "a tick inside its budget was reported"
+        );
         assert_eq!(texts(&sub), vec!["quick".to_string()]);
     }
 
