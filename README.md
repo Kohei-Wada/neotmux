@@ -20,7 +20,14 @@ failure stays partial and attributable instead of freezing the whole UI.
 
 ## Status
 
-Early design. Nothing runs yet. See `docs/superpowers/specs/` for the design documents.
+M0a (walking skeleton) works: `neotmux` runs a shell full-screen and exits cleanly.
+There is no plugin system yet — that is M1a. See `docs/superpowers/specs/` for the design
+and `docs/superpowers/plans/` for the implementation plans.
+
+```sh
+make run     # run it
+make check   # fmt + clippy + tests
+```
 
 ## License
 
