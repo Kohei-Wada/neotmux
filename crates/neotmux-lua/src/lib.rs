@@ -77,7 +77,6 @@ impl LuaSubsystem {
 
         let overrun = Rc::new(Overrun::new());
         let budget = Budget::new(opts.clone());
-        Budget::install(&lua, budget.clone()).map_err(|err| anyhow::anyhow!("{err:#}"))?;
 
         let loading = api::install(
             &lua,
@@ -193,6 +192,11 @@ impl LuaSubsystem {
     /// each callback would make the second one's commit replace the first one's entry, so the
     /// first's drawing would never render.
     pub fn dispatch_tick(&self) {
+        // The hook is armed for this frame only: with `LUA_MASKCOUNT` set Lua 5.4 traps on
+        // every instruction, so an always-armed hook would halve key and event dispatch too.
+        if let Err(err) = Budget::arm(&self.lua, &self.budget) {
+            self.report_text(source::ANONYMOUS, format!("the tick budget is off: {err}"));
+        }
         let mut by_source: BTreeMap<SourceId, Vec<RegistrationId>> = BTreeMap::new();
         for id in self.registry.snapshot(KindTag::Tick) {
             let Some(owner) = self.registry.owner(id) else {
@@ -259,6 +263,7 @@ impl LuaSubsystem {
                 self.buffers.commit(owner);
             }
         }
+        Budget::disarm(&self.lua);
     }
 
     /// The offender keeps its keymaps and event handlers: only what it was measured doing is

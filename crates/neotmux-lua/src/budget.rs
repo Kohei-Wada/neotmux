@@ -53,10 +53,17 @@ impl Budget {
         self.overran.get()
     }
 
+    /// Arms the hook for one frame of tick dispatch, and `disarm` takes it away again. It is
+    /// scoped rather than left on for the VM's lifetime because `LUA_MASKCOUNT` makes Lua 5.4
+    /// set `trap` and route *every* instruction through `luaG_traceexec` whatever n is: an
+    /// armed hook costs roughly half the interpreter's throughput, and key handling, event
+    /// dispatch and config load are not measured against any budget.
+    ///
     /// `set_global_hook`, never `set_hook`: mlua's per-thread hook looks the running thread up
     /// in a weak registry table and silently removes itself when it is missing, so
     /// `coroutine.wrap(function() while true do end end)()` would switch the budget off.
-    pub fn install(lua: &Lua, budget: Rc<Budget>) -> mlua::Result<()> {
+    pub fn arm(lua: &Lua, budget: &Rc<Budget>) -> mlua::Result<()> {
+        let budget = budget.clone();
         lua.set_global_hook(
             HookTriggers::new().every_nth_instruction(SAMPLE_EVERY_N_INSTRUCTIONS),
             // No Lua calls in here: `luaD_hook` clears `allowhook` for its duration, so
@@ -75,6 +82,10 @@ impl Budget {
             },
         )
     }
+
+    pub fn disarm(lua: &Lua) {
+        lua.remove_global_hook();
+    }
 }
 
 #[cfg(test)]
@@ -90,7 +101,7 @@ mod tests {
             ..Opts::default()
         }));
         let budget = Budget::new(opts);
-        Budget::install(&lua, budget.clone()).unwrap();
+        Budget::arm(&lua, &budget).unwrap();
         (lua, budget)
     }
 
@@ -140,6 +151,23 @@ mod tests {
 
         assert_eq!(result.unwrap(), 10_000_000);
         assert!(!budget.overran());
+    }
+
+    #[test]
+    fn disarming_leaves_a_tick_unmeasured() {
+        let (lua, budget) = armed(1);
+        Budget::disarm(&lua);
+        let long: Function = lua
+            .load("return function() local n = 0 for _ = 1, 5000000 do n = n + 1 end return n end")
+            .eval()
+            .unwrap();
+
+        budget.enter();
+        let result = long.call::<i64>(());
+        budget.leave();
+
+        assert_eq!(result.unwrap(), 5_000_000);
+        assert!(!budget.overran(), "a removed hook still fired");
     }
 
     #[test]
