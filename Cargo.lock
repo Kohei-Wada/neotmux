@@ -679,6 +679,7 @@ dependencies = [
  "nix 0.28.0",
  "portable-pty",
  "ratatui",
+ "signal-hook",
 ]
 
 [[package]]

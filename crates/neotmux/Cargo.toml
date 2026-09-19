@@ -12,6 +12,7 @@ neotmux-term.workspace = true
 anyhow.workspace = true
 crossterm.workspace = true
 ratatui.workspace = true
+signal-hook.workspace = true
 
 [dev-dependencies]
 portable-pty.workspace = true

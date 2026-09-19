@@ -9,6 +9,7 @@ use ratatui::DefaultTerminal;
 
 use crate::input::encode_key;
 use crate::render::draw_grid;
+use crate::signals::ShutdownSignal;
 
 const FRAME: Duration = Duration::from_millis(16);
 const SCROLLBACK: usize = 10_000;
@@ -29,7 +30,10 @@ fn terminal_size(terminal: &DefaultTerminal) -> anyhow::Result<Size> {
     }))
 }
 
-pub fn run(terminal: &mut DefaultTerminal) -> anyhow::Result<()> {
+pub fn run(
+    terminal: &mut DefaultTerminal,
+    shutdown: &ShutdownSignal,
+) -> anyhow::Result<Option<i32>> {
     let mut size = terminal_size(terminal)?;
     let mut state = TermState::new(size, SCROLLBACK);
     let mut pty = PtyHandle::spawn(PtyHandle::default_shell_command(), size)?;
@@ -41,6 +45,10 @@ pub fn run(terminal: &mut DefaultTerminal) -> anyhow::Result<()> {
     }
 
     loop {
+        if let Some(signal) = shutdown.raised() {
+            return Ok(Some(signal));
+        }
+
         let frame_end = Instant::now() + FRAME;
 
         let mut eof = false;
@@ -57,6 +65,9 @@ pub fn run(terminal: &mut DefaultTerminal) -> anyhow::Result<()> {
 
         if !eof {
             loop {
+                if let Some(signal) = shutdown.raised() {
+                    return Ok(Some(signal));
+                }
                 let remaining = frame_end.saturating_duration_since(Instant::now());
                 if !event::poll(remaining).context("poll input")? {
                     break;
@@ -91,7 +102,7 @@ pub fn run(terminal: &mut DefaultTerminal) -> anyhow::Result<()> {
     }
 
     pty.wait().context("wait for child")?;
-    Ok(())
+    Ok(None)
 }
 
 #[cfg(test)]

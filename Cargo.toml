@@ -13,7 +13,8 @@ neotmux-core = { path = "crates/neotmux-core" }
 neotmux-term = { path = "crates/neotmux-term" }
 anyhow = "1"
 crossterm = "0.29"
-nix = { version = "0.28", features = ["term"] }
+nix = { version = "0.28", features = ["term", "signal"] }
 portable-pty = "0.9"
 ratatui = "0.30"
+signal-hook = "0.3.18"
 vt100 = "0.16"
