@@ -1,9 +1,8 @@
-use std::cell::RefCell;
 use std::rc::Rc;
 
 use mlua::{Function, Lua, Table, Value};
 
-use crate::api::{Opts, attribute, make_handle};
+use crate::api::{attribute, make_handle};
 use crate::ops::{Level, Op, OpBuffer};
 use crate::registry::{Kind, KindTag, RegistrationId, Registry};
 use crate::source::Sources;
@@ -84,7 +83,6 @@ pub fn install(
     sources: Rc<Sources>,
     registry: Rc<Registry>,
     ops: Rc<OpBuffer>,
-    opts: Rc<RefCell<Opts>>,
 ) -> mlua::Result<Table> {
     let keymap = lua.create_table()?;
     let set = lua.create_function(move |lua, (spec, callback): (String, Function)| {
@@ -92,12 +90,6 @@ pub fn install(
             let message = format!("cannot parse key spec '{spec}'");
             return Ok((Value::Nil, Value::String(lua.create_string(message)?)));
         };
-
-        let prefix = normalise(&opts.borrow().prefix);
-        if prefix.as_deref() == Some(normalised.as_str()) {
-            let message = format!("'{normalised}' is the prefix key, reserved by the host");
-            return Ok((Value::Nil, Value::String(lua.create_string(message)?)));
-        }
 
         if let Some(holder) = holder_of(&registry, &sources, &normalised) {
             let attempter = attribute(&sources, &callback);

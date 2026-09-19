@@ -203,11 +203,6 @@ impl LuaSubsystem {
             return KeyOutcome::Fallthrough;
         };
 
-        let prefix = self.opts.borrow().prefix.clone();
-        if keymap::normalise(&prefix).as_deref() == Some(normalised.as_str()) {
-            return KeyOutcome::Consumed;
-        }
-
         let Some(id) = keymap::find(&self.registry, &normalised) else {
             return KeyOutcome::Fallthrough;
         };

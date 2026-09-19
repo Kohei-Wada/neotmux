@@ -123,6 +123,31 @@ fn the_loser_of_a_conflict_does_not_shadow_the_winner() {
 }
 
 #[test]
+fn no_key_is_reserved_by_the_host() {
+    let (_d, sub) = built(&[
+        ("init.lua", "require('plugin.prefixer')"),
+        (
+            "lua/plugin/prefixer.lua",
+            r#"
+            local h, err = neotmux.keymap.set('C-b', function() return true end)
+            if h == nil then error('C-b refused: ' .. tostring(err)) end
+            return {}
+            "#,
+        ),
+    ]);
+    let failures = sub.run_init();
+    assert!(failures.is_empty(), "{failures:?}");
+    assert_eq!(sub.dispatch_key("C-b"), KeyOutcome::Consumed);
+}
+
+#[test]
+fn a_key_the_host_once_reserved_falls_through_when_nothing_binds_it() {
+    let (_d, sub) = built(&[("init.lua", "")]);
+    assert!(sub.run_init().is_empty());
+    assert_eq!(sub.dispatch_key("C-b"), KeyOutcome::Fallthrough);
+}
+
+#[test]
 fn an_unparseable_spec_is_refused_at_registration() {
     let (_d, sub) = built(&[
         ("init.lua", "require('plugin.bad')"),

@@ -286,7 +286,10 @@ contended resource in the system. The contract, fixed in M1a:
 - a keymap callback returns `true` to consume the key, and `false` or `nil` to let it fall
   through to the PTY. **The return value is ABI** — introducing it in M2 would break every
   plugin written against M1a
-- the prefix key is owned by the host and is never delivered to plugins or the PTY
+- **no key is reserved by the host.** There is no prefix key in the host: §6's prefix is an
+  ordinary consumer of this API, binding its key with `keymap.set` like anything else. A host
+  that reserved the key would have decided in advance that the plugin cannot be written the
+  ordinary way
 - two plugins binding the same key is an error at registration time: the second registration
   fails, returns `nil` plus a message, and the conflict is logged with both plugin names.
   Last-wins is rejected because it makes load order load-bearing and silent
@@ -341,8 +344,8 @@ One idiom, stated so that three are not invented:
 - `init.lua` `require`s it and mutates fields before the plugin is `require`d
 - the plugin reads the holder at load time
 
-Host settings (budget, thresholds, prefix key) use `neotmux.opt.<name> = value`, applied at
-`init.lua` time.
+Host settings (budget, thresholds) use `neotmux.opt.<name> = value`, applied at `init.lua`
+time. The prefix is not among them — it belongs to the plugin that implements it (§6).
 
 ### 4.8 Resize ordering
 

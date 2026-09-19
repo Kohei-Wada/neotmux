@@ -141,13 +141,7 @@ pub(crate) fn install(
     }
 
     {
-        let keymap = keymap::install(
-            lua,
-            sources.clone(),
-            registry.clone(),
-            ops.clone(),
-            opts.clone(),
-        )?;
+        let keymap = keymap::install(lua, sources.clone(), registry.clone(), ops.clone())?;
         let keymap = seal(lua, keymap, "neotmux.keymap")?;
         neotmux.set("keymap", keymap)?;
     }
