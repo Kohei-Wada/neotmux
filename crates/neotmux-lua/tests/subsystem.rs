@@ -114,6 +114,15 @@ fn ops_reach_the_host_with_their_owner() {
 }
 
 #[test]
+fn opt_defaults_match_the_spec_before_any_init_lua_runs() {
+    let sub = LuaSubsystem::build(Layers::from_paths(vec![])).unwrap();
+    let opt = sub.opt();
+    assert_eq!(opt.tick_budget_ms, 8);
+    assert_eq!(opt.tick_overrun_limit, 5);
+    assert_eq!(opt.prefix, "C-b");
+}
+
+#[test]
 fn opt_sets_host_settings_and_rejects_unknown_keys() {
     let dir = layer(&[("init.lua", "neotmux.opt.tick_budget_ms = 12")]);
     let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();

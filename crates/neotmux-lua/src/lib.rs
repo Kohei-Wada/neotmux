@@ -37,12 +37,11 @@ pub struct LuaSubsystem {
 
 impl LuaSubsystem {
     pub fn build(layers: Layers) -> anyhow::Result<Self> {
-        let lua = vm::new_vm().map_err(|err| anyhow::anyhow!(err.to_string()))?;
-        runtime::install(&lua, &layers).map_err(|err| anyhow::anyhow!(err.to_string()))?;
+        let lua = vm::new_vm().map_err(|err| anyhow::anyhow!("{err:#}"))?;
+        runtime::install(&lua, &layers).map_err(|err| anyhow::anyhow!("{err:#}"))?;
 
         let plugins = Rc::new(Plugins::new());
-        plugin::install_loader(&lua, plugins.clone())
-            .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+        plugin::install_loader(&lua, plugins.clone()).map_err(|err| anyhow::anyhow!("{err:#}"))?;
 
         let registry = Rc::new(Registry::new());
         let ops = Rc::new(OpBuffer::new());
@@ -57,7 +56,7 @@ impl LuaSubsystem {
             opts.clone(),
             load_failures.clone(),
         )
-        .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+        .map_err(|err| anyhow::anyhow!("{err:#}"))?;
 
         Ok(Self {
             lua,
@@ -90,7 +89,7 @@ impl LuaSubsystem {
                 Err(err) => {
                     self.load_failures.borrow_mut().push(LoadFailure {
                         plugin: "init".to_string(),
-                        message: err.to_string(),
+                        message: format!("{err:#}"),
                     });
                     continue;
                 }
@@ -99,7 +98,7 @@ impl LuaSubsystem {
             if let Err(err) = func.call::<()>(()) {
                 self.load_failures.borrow_mut().push(LoadFailure {
                     plugin: "init".to_string(),
-                    message: err.to_string(),
+                    message: format!("{err:#}"),
                 });
             }
         }

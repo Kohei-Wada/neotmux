@@ -53,7 +53,7 @@ fn install_require_wrapper(
                     registry.remove_all_of(id);
                     load_failures.borrow_mut().push(LoadFailure {
                         plugin: name.to_string(),
-                        message: err.to_string(),
+                        message: format!("{err:#}"),
                     });
                     Ok(Value::Nil)
                 }

@@ -13,8 +13,8 @@ pub struct Opts {
 impl Default for Opts {
     fn default() -> Self {
         Self {
-            tick_budget_ms: 16,
-            tick_overrun_limit: 3,
+            tick_budget_ms: 8,
+            tick_overrun_limit: 5,
             prefix: "C-b".to_string(),
         }
     }
