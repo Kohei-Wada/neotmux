@@ -41,27 +41,26 @@ pub fn run(terminal: &mut DefaultTerminal) -> anyhow::Result<()> {
                 PtyEvent::Eof => eof = true,
             }
         }
-        if eof {
-            break;
-        }
 
-        while Instant::now() < frame_end {
-            let remaining = frame_end.saturating_duration_since(Instant::now());
-            if !event::poll(remaining).context("poll input")? {
-                break;
-            }
-            match event::read().context("read input")? {
-                Event::Key(key) => {
-                    if let Some(bytes) = encode_key(key) {
-                        pty.write(&bytes).context("write to pty")?;
+        if !eof {
+            while Instant::now() < frame_end {
+                let remaining = frame_end.saturating_duration_since(Instant::now());
+                if !event::poll(remaining).context("poll input")? {
+                    break;
+                }
+                match event::read().context("read input")? {
+                    Event::Key(key) => {
+                        if let Some(bytes) = encode_key(key) {
+                            pty.write(&bytes).context("write to pty")?;
+                        }
                     }
+                    Event::Resize(cols, rows) => {
+                        size = Size { rows, cols };
+                        state.resize(size);
+                        pty.resize(size)?;
+                    }
+                    _ => {}
                 }
-                Event::Resize(cols, rows) => {
-                    size = Size { rows, cols };
-                    state.resize(size);
-                    pty.resize(size)?;
-                }
-                _ => {}
             }
         }
 
@@ -69,6 +68,10 @@ pub fn run(terminal: &mut DefaultTerminal) -> anyhow::Result<()> {
         terminal
             .draw(|frame| draw_grid(frame, frame.area(), &grid))
             .context("draw")?;
+
+        if eof {
+            break;
+        }
     }
 
     pty.wait().context("wait for child")?;

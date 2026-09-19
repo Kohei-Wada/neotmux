@@ -74,3 +74,27 @@ fn leaves_the_alternate_screen_on_panic() {
         "alternate screen was never left"
     );
 }
+
+fn write_marker_shell(marker: &str) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let path = std::env::temp_dir().join(format!("neotmux-marker-shell-{}", std::process::id()));
+    std::fs::write(&path, format!("#!/bin/sh\nprintf '{marker}\\n'\nexit 0\n"))
+        .expect("write script");
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    path
+}
+
+#[test]
+fn renders_output_written_in_the_same_batch_as_exit() {
+    let marker = "NEOTMUX_EOF_MARKER_4f2c";
+    let shell = write_marker_shell(marker);
+    let shell = shell.to_str().expect("utf8 path").to_owned();
+    let (out, ok) = run_in_pty(&[("SHELL", &shell)], b"");
+    std::fs::remove_file(&shell).ok();
+    assert!(ok, "expected a clean exit");
+    assert!(
+        out.contains(marker),
+        "final PTY output written just before exit was never rendered: {out:?}"
+    );
+}
