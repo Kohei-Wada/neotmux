@@ -1,4 +1,5 @@
 pub mod ctx;
+pub mod event;
 pub mod keymap;
 pub mod log;
 pub mod opt;

@@ -16,6 +16,7 @@ use mlua::{Function, Lua, Value};
 use neotmux_core::proto::{DrawCmd, Epoch, PaneId, Rect, Size, StatusFragment};
 
 pub use api::Opts;
+pub use api::event::Event;
 pub use api::keymap;
 
 use api::ctx::Ctx;
@@ -233,6 +234,47 @@ impl LuaSubsystem {
                     },
                 );
                 KeyOutcome::Fallthrough
+            }
+        }
+    }
+
+    pub fn dispatch_event(&self, event: &Event) {
+        let Ok(payload) = event.payload(&self.lua) else {
+            return;
+        };
+
+        let ids = self.registry.snapshot(KindTag::Event);
+        for id in ids {
+            let matches = matches!(
+                self.registry.kind(id),
+                Some(Kind::Event(name)) if name == event.name()
+            );
+            if !matches {
+                continue;
+            }
+            let Some(callback) = self.registry.callback(id) else {
+                continue;
+            };
+            let Some(owner) = self.registry.owner(id) else {
+                continue;
+            };
+            let Ok(func) = self.lua.registry_value::<Function>(&callback) else {
+                continue;
+            };
+
+            self.plugins.push(owner);
+            let result = func.call::<()>(payload.clone());
+            self.plugins.pop();
+
+            if let Err(err) = result {
+                let name = self.plugins.name(owner).unwrap_or_default();
+                self.ops.push(
+                    owner,
+                    Op::Log {
+                        level: Level::Error,
+                        text: format!("{name}: {err}"),
+                    },
+                );
             }
         }
     }
