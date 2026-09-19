@@ -1,15 +1,10 @@
-use std::collections::HashMap;
-
 use neotmux_core::proto::{Color as PColor, DrawCmd, PaneId, Rect as PRect, StatusFragment};
 use ratatui::Frame;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 
+use crate::panes::PaneRects;
 use crate::render::color;
-
-/// Where each pane currently sits, in surface-local coordinates (the same
-/// space `LuaSubsystem::begin_frame` was given).
-pub type PaneRects = HashMap<PaneId, PRect>;
 
 #[derive(Clone, Copy)]
 struct Colors {
@@ -157,22 +152,6 @@ pub fn apply(frame: &mut Frame, area: Rect, cmds: &[DrawCmd], panes: &PaneRects)
                     continue;
                 };
                 draw_line(buf, area, bound, *from, *to, *fg);
-            }
-            DrawCmd::Marker {
-                pane,
-                x,
-                y,
-                text,
-                fg,
-            } => {
-                let Some(bound) = bounds(panes, area, *pane) else {
-                    continue;
-                };
-                let colors = Colors {
-                    fg: *fg,
-                    bg: PColor::Default,
-                };
-                draw_text(buf, area, bound, (*x, *y), text, colors);
             }
             // Non-exhaustive enum: an unknown future variant is silently skipped.
             _ => {}

@@ -142,12 +142,15 @@ fn the_pane_stub_answers_today_and_its_ops_travel_on_the_op_buffer() {
     assert!(bad.contains("ok=false"), "{bad}");
     assert!(bad.contains("unknown split direction"), "{bad}");
 
-    let split = line_with(&log, "pane.split('vertical') arrived");
+    // What is pinned is that the op arrived attributed to the chunk that made the call.
+    // What the placeholder note says about it is M2's to delete.
+    let split = line_with(&log, "pane.split(");
     assert!(split.contains("plugin/panes"), "{split}");
-    assert!(split.contains("nothing changed"), "{split}");
+    assert!(split.contains("vertical"), "{split}");
 
-    let focus = line_with(&log, "pane.focus(%1) arrived");
+    let focus = line_with(&log, "pane.focus(");
     assert!(focus.contains("plugin/panes"), "{focus}");
+    assert!(focus.contains("%1"), "{focus}");
 
     assert!(
         line_with(&log, "panes list after split=").contains("after split=1"),
@@ -156,9 +159,9 @@ fn the_pane_stub_answers_today_and_its_ops_travel_on_the_op_buffer() {
     // split and focus travel on the same single op buffer as the fixture's own log calls,
     // so they land in the order they were pushed (§4.6), not wherever the binding ran.
     assert!(
-        index_of(&log, "panes list=1") < index_of(&log, "pane.split('vertical')")
-            && index_of(&log, "pane.split('vertical')") < index_of(&log, "pane.focus(%1)")
-            && index_of(&log, "pane.focus(%1)") < index_of(&log, "panes list after split="),
+        index_of(&log, "panes list=1") < index_of(&log, "pane.split(")
+            && index_of(&log, "pane.split(") < index_of(&log, "pane.focus(")
+            && index_of(&log, "pane.focus(") < index_of(&log, "panes list after split="),
         "the pane ops did not drain in the order they were pushed:\n{log}"
     );
 }

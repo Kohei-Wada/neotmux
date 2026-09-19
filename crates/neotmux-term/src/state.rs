@@ -12,16 +12,22 @@ fn color_from_vt100(c: vt100::Color) -> Color {
     }
 }
 
-fn clamp_to_at_least_one(size: Size) -> Size {
+/// The smallest grid `vt100` survives arbitrary output on. Measured against vt100 0.16.2:
+/// one row underflows in `grid::col_wrap` the first time a line wraps, and one column
+/// underflows in `screen::write_grapheme` the first time a wide character is written.
+pub const MIN_GRID: Size = Size { rows: 2, cols: 2 };
+
+/// The one place a size is clamped before it reaches `vt100` or the PTY.
+pub fn clamp_to_min_grid(size: Size) -> Size {
     Size {
-        rows: size.rows.max(1),
-        cols: size.cols.max(1),
+        rows: size.rows.max(MIN_GRID.rows),
+        cols: size.cols.max(MIN_GRID.cols),
     }
 }
 
 impl TermState {
     pub fn new(size: Size, scrollback: usize) -> Self {
-        let size = clamp_to_at_least_one(size);
+        let size = clamp_to_min_grid(size);
         Self {
             parser: vt100::Parser::new(size.rows, size.cols, scrollback),
         }
@@ -32,7 +38,7 @@ impl TermState {
     }
 
     pub fn resize(&mut self, size: Size) {
-        let size = clamp_to_at_least_one(size);
+        let size = clamp_to_min_grid(size);
         self.parser.screen_mut().set_size(size.rows, size.cols);
     }
 
@@ -123,20 +129,46 @@ mod tests {
     }
 
     #[test]
-    fn new_clamps_a_zero_size_to_at_least_one_by_one() {
+    fn new_clamps_a_zero_size_up_to_the_minimum_grid() {
         let s = TermState::new(Size { rows: 0, cols: 0 }, 0);
-        let size = s.size();
-        assert!(size.rows >= 1);
-        assert!(size.cols >= 1);
+        assert_eq!(s.size(), MIN_GRID);
     }
 
     #[test]
-    fn resize_clamps_a_zero_size_to_at_least_one_by_one() {
+    fn resize_clamps_a_zero_size_up_to_the_minimum_grid() {
         let mut s = TermState::new(Size { rows: 2, cols: 4 }, 0);
         s.resize(Size { rows: 0, cols: 0 });
-        let size = s.size();
-        assert!(size.rows >= 1);
-        assert!(size.cols >= 1);
+        assert_eq!(s.size(), MIN_GRID);
+    }
+
+    /// Scrolling shell output, a wrapped line and a wide character are what a real
+    /// shell produces immediately; below `MIN_GRID` each of them overflows inside vt100.
+    fn feed_scrolling_output(mut s: TermState) {
+        s.feed(b"one\r\ntwo\r\nthree\r\nfour\r\n");
+        s.feed(b"a long unbroken line that has to wrap several times over");
+        s.feed("\u{3042}\u{3042}".as_bytes());
+    }
+
+    #[test]
+    fn scrolling_output_survives_at_the_minimum_grid() {
+        feed_scrolling_output(TermState::new(MIN_GRID, 100));
+    }
+
+    #[test]
+    fn a_zero_by_zero_terminal_survives_scrolling_output() {
+        feed_scrolling_output(TermState::new(Size { rows: 0, cols: 0 }, 100));
+    }
+
+    #[test]
+    fn a_one_by_one_terminal_survives_scrolling_output() {
+        feed_scrolling_output(TermState::new(Size { rows: 1, cols: 1 }, 100));
+    }
+
+    #[test]
+    fn resizing_below_the_minimum_grid_survives_scrolling_output() {
+        let mut s = TermState::new(Size { rows: 24, cols: 80 }, 100);
+        s.resize(Size { rows: 1, cols: 1 });
+        feed_scrolling_output(s);
     }
 
     #[test]

@@ -73,6 +73,20 @@ fn colour_field(table: &Table, field: &'static str) -> mlua::Result<Color> {
     }
 }
 
+/// `line` has no background to paint, so a `bg` the caller supplied would be discarded.
+/// Say so instead.
+fn parse_fg_only(colours: Option<Table>) -> mlua::Result<Color> {
+    let Some(table) = colours else {
+        return Ok(Color::Default);
+    };
+    if table.get::<Value>("bg")? != Value::Nil {
+        return Err(mlua::Error::RuntimeError(
+            "line takes no bg: it draws single cells, with nothing behind them".to_string(),
+        ));
+    }
+    colour_field(&table, "fg")
+}
+
 fn parse_colours(colours: Option<Table>) -> mlua::Result<(Color, Color)> {
     let Some(table) = colours else {
         return Ok((Color::Default, Color::Default));
@@ -84,7 +98,12 @@ fn parse_colours(colours: Option<Table>) -> mlua::Result<(Color, Color)> {
 
 impl UserData for Ctx {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
-        methods.add_method("size", |_, this, ()| Ok((this.size.cols, this.size.rows)));
+        methods.add_method("size", |lua, this, ()| {
+            let table = lua.create_table()?;
+            table.set("rows", this.size.rows)?;
+            table.set("cols", this.size.cols)?;
+            Ok(table)
+        });
 
         methods.add_method("pane_rect", |lua, this, pane: u32| {
             match this.pane_rect(PaneId::from(pane)) {
@@ -165,39 +184,13 @@ impl UserData for Ctx {
                 u16,
                 Option<Table>,
             )| {
-                let (fg, _bg) = parse_colours(colours)?;
+                let fg = parse_fg_only(colours)?;
                 this.buffers.record(
                     this.owner,
                     DrawCmd::Line {
                         pane: pane.map(PaneId::from),
                         from: (x1, y1),
                         to: (x2, y2),
-                        fg,
-                    },
-                );
-                Ok(())
-            },
-        );
-
-        methods.add_method(
-            "marker",
-            |_,
-             this,
-             (pane, x, y, text, colours): (
-                Option<u32>,
-                u16,
-                u16,
-                String,
-                Option<Table>,
-            )| {
-                let (fg, _bg) = parse_colours(colours)?;
-                this.buffers.record(
-                    this.owner,
-                    DrawCmd::Marker {
-                        pane: pane.map(PaneId::from),
-                        x,
-                        y,
-                        text,
                         fg,
                     },
                 );

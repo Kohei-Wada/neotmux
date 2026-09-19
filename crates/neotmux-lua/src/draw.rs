@@ -55,6 +55,8 @@ impl Buffers {
         let epoch = inner.epoch.clone();
         // A missing scratch entry means the source recorded nothing this tick, not that
         // the tick failed; commit still replaces the previous frame with this empty one.
+        // That also covers a source forgotten mid-tick: re-inserting an empty entry and
+        // skipping it are indistinguishable to `applicable`, so the cheaper one wins.
         let mut entry = inner.scratch.remove(&owner).unwrap_or_default();
         entry.epoch = epoch;
         inner.committed.insert(owner, entry);
@@ -206,6 +208,22 @@ mod tests {
         buffers.forget(a);
         let (cmds, _) = buffers.applicable(&epoch(24));
         assert!(cmds.is_empty());
+    }
+
+    #[test]
+    fn a_commit_after_a_forget_contributes_nothing() {
+        let sources = Sources::new();
+        let a = sources.intern("a");
+        let buffers = Buffers::new();
+
+        buffers.begin(epoch(24));
+        buffers.record(a, text("last words"));
+        buffers.forget(a);
+        buffers.commit(a);
+
+        let (cmds, status) = buffers.applicable(&epoch(24));
+        assert!(cmds.is_empty());
+        assert!(status.is_empty());
     }
 
     #[test]

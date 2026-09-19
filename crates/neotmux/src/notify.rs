@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::io::Write;
 use std::time::{Duration, Instant};
 
@@ -6,8 +7,13 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::Color;
 
+use crate::logging;
+
 const TTL: Duration = Duration::from_secs(4);
 const MAX_VISIBLE: usize = 5;
+/// The exit transcript is held for the life of the session, so a plugin notifying every
+/// frame would otherwise grow it without bound. Oldest lines go first.
+const MAX_TRANSCRIPT: usize = 1000;
 
 struct Notification {
     level: Level,
@@ -23,7 +29,8 @@ struct Notification {
 #[derive(Default)]
 pub struct Notifications {
     items: Vec<Notification>,
-    transcript: Vec<String>,
+    transcript: VecDeque<String>,
+    dropped: usize,
 }
 
 impl Notifications {
@@ -32,7 +39,21 @@ impl Notifications {
     }
 
     pub fn push(&mut self, level: Level, tag: &str, text: &str) {
-        self.transcript.push(format!("{tag}: {text}"));
+        self.transcript.push_back(format!("{tag}: {text}"));
+        if self.transcript.len() > MAX_TRANSCRIPT {
+            self.transcript.pop_front();
+            self.dropped += 1;
+            if self.dropped == 1 {
+                logging::log(
+                    Level::Warn,
+                    "neotmux",
+                    &format!(
+                        "the exit transcript is full at {MAX_TRANSCRIPT} lines; \
+                         older notifications are being dropped from it"
+                    ),
+                );
+            }
+        }
         self.items.push(Notification {
             level,
             tag: tag.to_string(),
@@ -45,6 +66,14 @@ impl Notifications {
     /// A full-screen TUI cannot use stderr while it is running, so without this a notification
     /// that expired, scrolled past or was never drawn at all is only ever in the log file.
     pub fn flush(&self, out: &mut impl Write) {
+        if self.dropped > 0 {
+            let _ = writeln!(
+                out,
+                "neotmux: {} earlier notifications were dropped from this transcript \
+                 (capped at {MAX_TRANSCRIPT})",
+                self.dropped
+            );
+        }
         for line in &self.transcript {
             let _ = writeln!(out, "neotmux: {line}");
         }
@@ -148,6 +177,30 @@ mod tests {
         let mut out = Vec::new();
         Notifications::new().flush(&mut out);
         assert!(out.is_empty());
+    }
+
+    #[test]
+    fn the_transcript_is_capped_and_says_so_when_it_drops_lines() {
+        let mut n = Notifications::new();
+        for i in 0..MAX_TRANSCRIPT + 3 {
+            n.push(Level::Info, "loud", &format!("line {i}"));
+        }
+        let mut out = Vec::new();
+        n.flush(&mut out);
+        let text = String::from_utf8(out).unwrap();
+        assert_eq!(text.lines().count(), MAX_TRANSCRIPT + 1, "{text}");
+        assert!(
+            text.lines()
+                .next()
+                .unwrap()
+                .contains("3 earlier notifications were dropped"),
+            "{text}"
+        );
+        assert!(
+            !text.contains("line 2\n"),
+            "the oldest line survived the cap"
+        );
+        assert!(text.contains("line 1002"), "the newest line was dropped");
     }
 
     #[test]

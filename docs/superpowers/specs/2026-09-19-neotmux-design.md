@@ -342,10 +342,10 @@ A plugin draws through a context object:
 
 ```lua
 neotmux.on_tick(function(ctx)
-  local w, h = ctx:size()                 -- the surface it is drawing into
+  local size = ctx:size()                 -- { rows = , cols = }: the surface it draws into
   local rect = ctx:pane_rect(pane_id)
   ctx:text(pane_id, x, y, "hello")
-  ctx:rect(...) ctx:line(...) ctx:marker(...)
+  ctx:rect(...) ctx:line(...)
   ctx:status("12:34", { fg = "#ffffff" })  -- a fragment of the status line
 end)
 ```
@@ -356,7 +356,9 @@ separate status registration — a source that stops calling it stops contributi
 host shows the status row only while some fragment exists.
 
 `ctx:size()` and `ctx:pane_rect()` exist because without them a status plugin cannot know its
-own width — the clock in the exit criteria only worked because a clock ignores width.
+own width — the clock in the exit criteria only worked because a clock ignores width. Both
+answer with a named table, as the `resized` event does, so there is one spelling of the
+question and no positional order to remember.
 
 Calls **append to a command buffer; they do not mutate the frame.** The host applies the
 buffer after the tick. Direct mutation (what ttymap's `MapApi` does today) cannot be rolled

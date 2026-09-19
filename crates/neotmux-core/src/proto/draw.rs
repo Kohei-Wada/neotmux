@@ -42,13 +42,6 @@ pub enum DrawCmd {
         to: (u16, u16),
         fg: Color,
     },
-    Marker {
-        pane: Option<PaneId>,
-        x: u16,
-        y: u16,
-        text: String,
-        fg: Color,
-    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
