@@ -1,7 +1,9 @@
 pub mod api;
+pub mod budget;
 pub mod draw;
 mod geometry;
 pub mod ops;
+pub mod overrun;
 pub mod registry;
 pub mod runtime;
 pub mod source;
@@ -11,6 +13,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::fs;
 use std::rc::Rc;
+use std::time::Duration;
 
 use mlua::chunk::ChunkMode;
 use mlua::{Function, Lua, Value};
@@ -22,9 +25,11 @@ pub use api::event::Event;
 pub use api::keymap;
 
 use api::ctx::Ctx;
+use budget::{Budget, Outcome};
 use draw::Buffers;
 use geometry::Geometry;
 use ops::{Level, Op, OpBuffer};
+use overrun::Overrun;
 use registry::{Kind, KindTag, RegistrationId, Registry};
 use runtime::Layers;
 use source::{SourceId, Sources};
@@ -52,6 +57,8 @@ pub struct LuaSubsystem {
     loading: Rc<Cell<bool>>,
     buffers: Rc<Buffers>,
     geometry: Rc<RefCell<Geometry>>,
+    budget: Rc<Budget>,
+    overrun: Rc<Overrun>,
 }
 
 impl LuaSubsystem {
@@ -69,6 +76,9 @@ impl LuaSubsystem {
         let geometry = Rc::new(RefCell::new(Geometry::default()));
         let buffers = Rc::new(Buffers::new());
 
+        let overrun = Rc::new(Overrun::new());
+        let budget = Budget::new(opts.clone());
+
         let loading = api::install(
             &lua,
             api::Shared {
@@ -79,6 +89,7 @@ impl LuaSubsystem {
                 opts: opts.clone(),
                 load_failures: load_failures.clone(),
                 geometry: geometry.clone(),
+                overrun: overrun.clone(),
             },
         )
         .map_err(|err| anyhow::anyhow!("{err:#}"))?;
@@ -94,6 +105,8 @@ impl LuaSubsystem {
             loading,
             buffers,
             geometry,
+            budget,
+            overrun,
         })
     }
 
@@ -148,13 +161,17 @@ impl LuaSubsystem {
         self.report_text(owner, format!("{err}"));
     }
 
+    /// The op carries the source, and every sink prefixes the source's name when it renders
+    /// one, so the text must not name it again or the line reads "plugin/x: plugin/x: ...".
+    ///
+    /// Error, not warn: a frame the plugin author meant to draw was thrown away, and the log
+    /// is the only place that says so.
     fn report_text(&self, owner: SourceId, text: String) {
-        let name = self.sources.name(owner).unwrap_or_default();
         self.ops.push(
             owner,
             Op::Log {
                 level: Level::Error,
-                text: format!("{name}: {text}"),
+                text,
             },
         );
     }
@@ -180,6 +197,11 @@ impl LuaSubsystem {
     /// each callback would make the second one's commit replace the first one's entry, so the
     /// first's drawing would never render.
     pub fn dispatch_tick(&self) {
+        // The hook is armed for this frame only: with `LUA_MASKCOUNT` set Lua 5.4 traps on
+        // every instruction, so an always-armed hook would halve key and event dispatch too.
+        if let Err(err) = Budget::arm(&self.lua, &self.budget) {
+            self.report_text(source::ANONYMOUS, format!("the tick budget is off: {err}"));
+        }
         let mut by_source: BTreeMap<SourceId, Vec<RegistrationId>> = BTreeMap::new();
         for id in self.registry.snapshot(KindTag::Tick) {
             let Some(owner) = self.registry.owner(id) else {
@@ -190,6 +212,13 @@ impl LuaSubsystem {
 
         for (owner, ids) in by_source {
             let mut raised = false;
+            let mut errors: Vec<String> = Vec::new();
+            // Taken before the group runs: a discarded frame takes its ops back out too, so a
+            // frame nobody sees does not leave its splits and notifications behind (§5.1).
+            let mark = self.ops.mark();
+            // The budget is per source per frame, so it spans the whole group: a source that
+            // has already spent its slice must not get a fresh one from its next callback.
+            self.budget.enter();
             for id in ids {
                 let Some(callback) = self.registry.callback(id) else {
                     continue;
@@ -215,16 +244,79 @@ impl LuaSubsystem {
 
                 if let Err(err) = result {
                     raised = true;
-                    self.report(owner, &err);
+                    if self.budget.overran() {
+                        break;
+                    }
+                    errors.push(format!("{err}"));
                 }
             }
+            let outcome = self.budget.leave();
+            let (budget_ms, limit) = {
+                let opts = self.opts.borrow();
+                (opts.tick_budget_ms, opts.tick_overrun_limit)
+            };
+            let report = match outcome {
+                Outcome::WithinBudget => None,
+                Outcome::Interrupted => Some(format!("tick exceeded its {budget_ms} ms budget")),
+                // What was observed is that no sample landed past the deadline, not where the
+                // time went: a long C call and a pure-Lua tick that overshoots inside its last
+                // sample window look the same from here.
+                Outcome::RanLong { elapsed } => Some(format!(
+                    "tick exceeded its {budget_ms} ms budget: {:.1} ms, not cut off — no sample \
+                     landed past the deadline",
+                    elapsed.as_secs_f64() * 1000.0
+                )),
+            };
+            let overran = report.is_some();
 
-            if raised {
+            // An overrun loses the frame even when the tick returned normally: a plugin that
+            // `pcall`s around its own loop swallows the budget error (§5.4) and would
+            // otherwise keep output the budget says it has lost (§5.1).
+            if raised || overran {
                 self.buffers.discard(owner);
+                self.ops.discard_from(owner, mark);
             } else {
                 self.buffers.commit(owner);
             }
+
+            // The host's account of the frame is pushed after the discard, never into it: it
+            // is what the plugin author is left with once their own output is gone.
+            for text in errors {
+                self.report_text(owner, text);
+            }
+            if let Some(text) = report {
+                self.report_text(owner, text);
+                let budget = Duration::from_millis(budget_ms);
+                if overrun::counts_toward_park(outcome, budget) && self.overrun.count(owner, limit)
+                {
+                    self.unsubscribe_overrunning(owner, limit);
+                }
+            } else {
+                self.overrun.forgive(owner);
+            }
         }
+        self.budget.disarm(&self.lua);
+    }
+
+    /// The offender keeps its keymaps and event handlers: only what it was measured doing is
+    /// taken away, and `neotmux.resubscribe` gives it back (§5.3).
+    ///
+    /// Notified at warn, where the per-frame overrun is logged at error: this is the one event
+    /// the user has to see on screen, and it is recoverable — nothing is broken beyond repair.
+    fn unsubscribe_overrunning(&self, owner: SourceId, limit: u32) {
+        self.overrun.park(&self.registry, owner);
+        api::forget_if_no_longer_drawing(&self.registry, &self.buffers, owner);
+        let name = self.sources.name(owner).unwrap_or_default();
+        self.ops.push(
+            owner,
+            Op::Notify {
+                level: Level::Warn,
+                text: format!(
+                    "overran its tick budget {limit} times and is no longer ticking; \
+                     neotmux.resubscribe('{name}') restores it"
+                ),
+            },
+        );
     }
 
     /// Observers first, then the binding (§4.4): an `on_key` callback is the only way to see a

@@ -523,6 +523,16 @@ path.
   **sampling point**, not the accounting unit: it reads `Instant` and compares the current
   plugin's elapsed tick time against the budget
 - default budget 8 ms per plugin per frame, `neotmux.opt.tick_budget_ms`
+- **`tick_budget_ms = 0` switches the budget off**: no hook is armed, nothing is measured and
+  nothing is counted. The trust model is "you installed it" (§8), so an opt-out is consistent,
+  and someone stepping through a plugin under a breakpoint needs one. The alternative — every
+  tick overrunning at its first sample — unsubscribes every source after K frames
+- the hook is armed for the duration of tick dispatch and removed after it, not for the VM's
+  lifetime: with `LUA_MASKCOUNT` set Lua 5.4 sets `trap` and routes every instruction through
+  `luaG_traceexec` whatever n is, so an always-armed hook taxes key handling, event dispatch
+  and config load — none of which the budget applies to. Measured on one key callback running
+  20M Lua iterations: 108 ms always armed, 72 ms armed per frame; arming and removing costs
+  ~62 ns per frame
 - on overrun the hook returns `Err`, which mlua converts to a real Lua error
   (`callback_error_ext` → `lua_error`), unwinding to the host's protected call — so the tick,
   and only that tick, is rolled back. `luaD_pcall` restores `allowhook`, so the hook survives
@@ -575,23 +585,47 @@ which is what makes §9's "every host function returns promptly" test possible t
   `package.loaded[m] = nil; require(m)`, written in Lua, because the host has nothing to add
   to it. Without a recovery path the only cure is restarting neotmux, which kills every shell
   the user is running — paying for a plugin bug with the entire reason the program exists
+- restoring also clears the counter, so a source that comes back gets a full K frames again
+  rather than being dropped by its next single overrun
 
-### 5.4 What the budget does not catch
+### 5.4 What the budget cannot cut off
 
-Documented, not solved:
+Documented, not solved. The first two are attributed but not interruptible: when a source's
+tick group returns, its elapsed time is compared against the budget even if the hook never
+fired, so the overrun is named and the frame is discarded. Only the *interruption* is missing,
+and the report says so — and it says only what was observed, that no hook sample landed past
+the deadline, never where the time went, because a pure-Lua tick that overshoots inside its
+last sample window looks exactly the same from here.
+
+Such an overrun is **only counted towards the park limit past twice the budget**. The elapsed
+figure is wall clock across the whole group and includes host work, a GC step another source
+triggered and the process being descheduled, so one budget's worth of it is jitter and an
+innocent plugin on a loaded machine should not be parked for it. Reporting is not softened,
+only parking: every overrun is still named in the log. An interrupted overrun counts at the
+first offence — the hook watched the deadline pass, so there is nothing inferred about it. A
+source that is genuinely over by a wide margin every frame is still parked after K frames like
+any other repeat offender.
 
 1. **a single long C call** — `string.rep(s, 1e9)`, a pathological `string.find` backtrack, a
    huge `table.concat`. The hook only fires on Lua instruction boundaries, so one C call can
-   overrun the budget arbitrarily, or exhaust memory before it returns
+   overrun the budget arbitrarily, or exhaust memory before it returns: an overrun is only
+   noticed at the next sample, and a tick with under `n` instructions left after the call
+   never reaches one. Measured as built: one 120 MB `string.rep` blocked a frame for 189 ms
+   against a 5 ms budget, and ran to completion. There is no mechanism for interrupting a C
+   call, so the frame is lost after the fact rather than in the middle
 2. **`__gc` finalizers** — Lua clears `allowhook` for their duration (`lgc.c`), so a loop in a
-   finalizer is uninterruptible
+   finalizer is uninterruptible. Measured as built: 162 ms in one finalizer, for the same
+   reason, and likewise attributed on the way out
 3. **`pcall`** — `while true do pcall(f) end` swallows the budget error. This *is* closable:
    with `LuaOptions { catch_rust_panics: false }` mlua replaces global `pcall`/`xpcall` with
    variants that re-raise Rust panics, so panicking in the hook instead of returning `Err`
    cannot be caught. It is **not adopted**, because it requires wrapping ticks in
    `catch_unwind` and collides with `ratatui::init()`'s panic hook, which restores the terminal
    before the unwind we intended to catch. `coroutine.resume` is not replaced either, so the
-   hole would not fully close. Deliberate loops are malice, and malice is out of scope (§8)
+   hole would not fully close. Deliberate loops are malice, and malice is out of scope (§8).
+   What a swallowed error does not buy the plugin: the frame is discarded and the overrun
+   counted whether or not the tick returned normally, so a bounded swallowing loop is dropped
+   after K frames like any other offender. An unbounded one still hangs the host
 4. **host bindings that block** — the host's own discipline, covered by §9's test
 
 ### 5.5 Exit criteria (machine-checkable)
@@ -795,6 +829,6 @@ Revision 2 changed, relative to the first draft:
   `ChunkMode::Text`; `loadstring` does not exist in 5.4
 - **ttymap's precedent scoped** (§4.1) — it covers the plugin model and draw API only; it
   contains no hook, sandbox or budget code
-- **single long C calls** added to what the budget cannot catch (§5.4)
+- **single long C calls** added to what the budget cannot cut off (§5.4)
 - **PTY threading decided** (§3) — blocking reader thread plus channel, because crossterm
   cannot poll an external fd

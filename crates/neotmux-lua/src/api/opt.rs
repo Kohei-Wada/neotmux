@@ -32,6 +32,16 @@ pub fn install(lua: &Lua, opts: Rc<RefCell<Opts>>) -> mlua::Result<Table> {
                 }
                 "tick_overrun_limit" => {
                     let value = lua.unpack::<u32>(value)?;
+                    // A limit of zero parks on the first overrun and announces "overran its
+                    // tick budget 0 times". Rejected like an unparseable key spec: it is a
+                    // programming error, not a configuration. Switching the budget off is
+                    // `tick_budget_ms = 0`.
+                    if value == 0 {
+                        return Err(mlua::Error::RuntimeError(
+                            "neotmux.opt.tick_overrun_limit must be at least 1;                              neotmux.opt.tick_budget_ms = 0 turns the budget off"
+                                .to_string(),
+                        ));
+                    }
                     opts.borrow_mut().tick_overrun_limit = value;
                 }
                 other => {

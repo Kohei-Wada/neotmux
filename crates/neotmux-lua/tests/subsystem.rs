@@ -413,7 +413,7 @@ fn pairs_over_the_sealed_top_level_table_sees_the_real_fields() {
         unreachable!()
     };
     assert_eq!(
-        text, "keymap log notify on_event on_key on_tick opt pane quit",
+        text, "keymap log notify on_event on_key on_tick opt pane quit resubscribe",
         "the top-level ABI surface changed"
     );
 }
@@ -713,4 +713,16 @@ fn a_failed_loads_rollback_does_not_reach_a_callback_it_got_from_a_library() {
     let text = format!("{:?}", sub.drain_ops());
     assert!(text.contains("library callback ran"), "{text}");
     assert!(!text.contains("own callback ran"), "{text}");
+}
+
+/// A limit of zero parks on the first overrun and reports "overran its tick budget 0 times".
+/// Nobody means that, so it is refused where it is written rather than honoured.
+#[test]
+fn a_tick_overrun_limit_of_zero_is_rejected_at_assignment() {
+    let dir = layer(&[("init.lua", "neotmux.opt.tick_overrun_limit = 0")]);
+    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let failures = sub.run_init();
+    assert_eq!(failures.len(), 1, "{failures:?}");
+    assert!(failures[0].message.contains("at least 1"), "{failures:?}");
+    assert_eq!(sub.opt().tick_overrun_limit, 5, "the zero was kept anyway");
 }
