@@ -47,8 +47,11 @@ whether the boundaries are real.
 ### 2.1 Boundary types live in `neotmux-core::proto`, not a separate crate yet
 
 All types that cross a boundary — `SessionId` / `WindowId` / `PaneId`, geometry, grid
-snapshot, draw commands — live in one module with one rule: **types only, no logic beyond
-`From` / `Display` conversions.**
+snapshot, draw commands — live in one module with one rule: **no behaviour beyond
+what the container itself is.** Constructors, accessors, bounds checks, index arithmetic and
+resizing are part of being a grid; `From` / `Display` conversions are part of being a type.
+Diffing, applying, I/O, state transitions and anything that reads or decides about the rest of
+the system are not, and belong in the crate that owns them.
 
 They are *not* a separate crate in M0a–M1b. The two arguments for a crate (the TUI client
 should not link the engine; external tools should be able to depend on the protocol alone)

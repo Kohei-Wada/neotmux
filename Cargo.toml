@@ -1,0 +1,19 @@
+[workspace]
+members = ["crates/neotmux-core", "crates/neotmux-term", "crates/neotmux"]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Kohei-Wada/neotmux"
+
+[workspace.dependencies]
+neotmux-core = { path = "crates/neotmux-core" }
+neotmux-term = { path = "crates/neotmux-term" }
+anyhow = "1"
+crossterm = "0.29"
+nix = { version = "0.28", features = ["term"] }
+portable-pty = "0.9"
+ratatui = "0.30"
+vt100 = "0.16"
