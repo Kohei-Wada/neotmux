@@ -234,6 +234,37 @@ fn a_registration_made_during_a_dispatch_inherits_the_dispatched_plugin() {
 }
 
 #[test]
+fn requiring_plugin_foo_init_and_plugin_foo_share_one_id() {
+    let dir = layer(&[
+        (
+            "init.lua",
+            "local m = require('plugin.foo') m.setup() require('plugin.foo.init')",
+        ),
+        (
+            "lua/plugin/foo/init.lua",
+            "neotmux.on_event('chunk', function() end) return { setup = function() neotmux.on_event('setup', function() end) end }",
+        ),
+    ]);
+    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    assert!(sub.run_init().is_empty());
+
+    let events = sub.registry().snapshot(KindTag::Event);
+    assert_eq!(events.len(), 3, "chunk body ran twice plus one setup() call");
+    let owners: Vec<_> = events
+        .iter()
+        .map(|id| sub.registry().owner(*id).unwrap())
+        .collect();
+    assert!(owners.windows(2).all(|w| w[0] == w[1]), "{owners:?}");
+    assert_eq!(sub.plugins().name(owners[0]).as_deref(), Some("foo"));
+
+    let interned = sub.plugins().interned();
+    assert!(
+        interned.iter().all(|(_, name)| name != "foo.init"),
+        "a phantom 'foo.init' plugin was interned: {interned:?}"
+    );
+}
+
+#[test]
 fn a_plugin_cannot_overwrite_a_neotmux_field() {
     let dir = layer(&[("init.lua", "neotmux.on_tick = function() end")]);
     let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();

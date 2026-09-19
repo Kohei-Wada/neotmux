@@ -128,6 +128,11 @@ pub fn install_loader(lua: &Lua, plugins: Rc<Plugins>) -> mlua::Result<()> {
 
         let source = fs::read(&path).map_err(mlua::Error::external)?;
         let chunk_name = format!("@{}", path.display());
+        // `plugin.foo` and `plugin.foo.init` can both resolve to the same file (`?.lua` and
+        // `?/init.lua` are both on package.path), so the id must come from the resolved
+        // path, not from whichever spelling the caller typed — otherwise the same plugin
+        // ends up interned under two ids depending on how it was required.
+        let canonical_name = plugin_name_from_source(&chunk_name);
         let inner: Function = lua
             .load(source)
             .set_name(chunk_name)
@@ -135,6 +140,7 @@ pub fn install_loader(lua: &Lua, plugins: Rc<Plugins>) -> mlua::Result<()> {
             .into_function()?;
 
         if let Some(plugin_name) = modname.strip_prefix("plugin.") {
+            let plugin_name = canonical_name.as_deref().unwrap_or(plugin_name);
             let id = plugins.intern(plugin_name);
             let plugins = plugins.clone();
             let wrapper = lua.create_function(move |_, args: Variadic<Value>| {

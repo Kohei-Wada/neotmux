@@ -166,6 +166,10 @@ So attribution is designed in, not assumed:
   `"init"`; one from a library `require`d outside a plugin chunk is attributed to the plugin
   that triggered the `require`, or `"anonymous"` if there is none
 - identity is a host-side `PluginId` with a display name
+- `require('plugin.foo')` and `require('plugin.foo.init')` can resolve to the same file
+  (`?.lua` and `?/init.lua` are both on `package.path`); the searcher interns the name from
+  the resolved file path, not from the string passed to `require`, so either spelling gives
+  the same `PluginId` instead of splitting one plugin's registrations across two
 
 **The loader-push stack alone misses the idiom every plugin author reaches for coming from
 nvim**: `local m = require('plugin.clock'); m.setup{}`. The chunk runs and the searcher pops
