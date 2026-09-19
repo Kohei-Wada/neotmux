@@ -122,6 +122,7 @@ impl Session {
         let before = self.layout.focus();
         let after = self.layout.close(pane);
         self.fit()?;
+        self.republish_geometry(lua);
         lua.dispatch_event(&LuaEvent::PaneClosed { pane });
         if after != before
             && let Some(focus) = after
@@ -233,6 +234,7 @@ impl Session {
 
         self.next_pane += 1;
         self.fit()?;
+        self.republish_geometry(lua);
         lua.dispatch_event(&LuaEvent::PaneOpened { pane: new });
         lua.dispatch_event(&LuaEvent::FocusChanged { pane: new });
         self.dirty = true;
@@ -248,6 +250,7 @@ impl Session {
             );
             return;
         }
+        self.republish_geometry(lua);
         lua.dispatch_event(&LuaEvent::FocusChanged { pane });
         self.dirty = true;
     }
@@ -257,6 +260,18 @@ impl Session {
     /// see an empty session on the very first key.
     fn publish_geometry(&self, lua: &LuaSubsystem) {
         lua.begin_frame(
+            self.layout.epoch(),
+            self.layout.content,
+            self.layout.panes(),
+            self.layout.focus(),
+        );
+    }
+
+    /// The tree changed mid-frame. A `pane_opened` handler calling `pane.list()` must see the
+    /// pane it is being told about, and a `pane_closed` handler must not see the dead one —
+    /// so the geometry catches up before any of those events is dispatched.
+    fn republish_geometry(&self, lua: &LuaSubsystem) {
+        lua.republish_geometry(
             self.layout.epoch(),
             self.layout.content,
             self.layout.panes(),

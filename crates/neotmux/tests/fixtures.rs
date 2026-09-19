@@ -616,3 +616,25 @@ fn an_installed_neotmux_starts_on_its_shipped_layer() {
         "the installed layer reported a failure:\n{log}"
     );
 }
+
+/// An event must describe the session as it is. Before this, `pane_closed` and
+/// `focus_changed` were dispatched at the top of the frame against the geometry published
+/// for the *previous* one, so a handler still saw the dead pane — `pane.current()` included.
+#[test]
+fn a_pane_event_handler_sees_the_tree_the_event_describes() {
+    let (mut nt, _init) = start("require('plugin.splitter')", "cat");
+
+    nt.send("\x02"); // C-b: split
+    let log = nt.wait_for_log("splitter pane_opened 2", PATIENCE);
+    assert!(
+        line_with(&log, "splitter pane_opened 2").contains("panes=2 current=2"),
+        "a pane_opened handler could not see the pane it was told about:\n{log}"
+    );
+
+    nt.send("\x04"); // C-d: EOF for the focused pane's cat
+    let log = nt.wait_for_log("splitter pane_closed 2", PATIENCE);
+    assert!(
+        line_with(&log, "splitter pane_closed 2").contains("panes=1 current=1"),
+        "a pane_closed handler still saw the dead pane:\n{log}"
+    );
+}

@@ -184,6 +184,19 @@ impl LuaSubsystem {
         focus: Option<PaneId>,
     ) {
         self.buffers.begin(epoch.clone());
+        self.republish_geometry(epoch, size, panes, focus);
+    }
+
+    /// The layout changed part-way through a frame. What Lua sees catches up at once, so an
+    /// event dispatched after it describes the tree as it is; the draw buffers are left
+    /// alone, and what was committed against the old epoch stops applying as usual.
+    pub fn republish_geometry(
+        &self,
+        epoch: Epoch,
+        size: Size,
+        panes: Vec<(PaneId, Rect)>,
+        focus: Option<PaneId>,
+    ) {
         *self.geometry.borrow_mut() = Geometry {
             epoch,
             size,
