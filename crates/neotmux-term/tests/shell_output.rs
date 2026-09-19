@@ -18,6 +18,7 @@ fn a_command_running_on_the_pty_reaches_the_grid() {
         match pty.output().recv_timeout(Duration::from_millis(250)) {
             Ok(PtyEvent::Output(bytes)) => state.feed(&bytes),
             Ok(PtyEvent::Eof) => break,
+            Ok(PtyEvent::Error(e)) => panic!("pty read failed: {e}"),
             Err(_) if Instant::now() < deadline => continue,
             Err(e) => panic!("timed out waiting for pty output: {e}"),
         }

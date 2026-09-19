@@ -12,19 +12,27 @@ impl Drop for ChildGuard {
     }
 }
 
-fn write_flooding_shell() -> std::path::PathBuf {
+struct TempScript(std::path::PathBuf);
+
+impl Drop for TempScript {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+fn write_flooding_shell() -> TempScript {
     use std::os::unix::fs::PermissionsExt as _;
 
     let path = std::env::temp_dir().join(format!("neotmux-flood-shell-{}", std::process::id()));
     std::fs::write(&path, "#!/bin/sh\nexec yes\n").expect("write script");
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
-    path
+    TempScript(path)
 }
 
 #[test]
 fn a_flooding_child_does_not_starve_ctrl_c() {
     let shell = write_flooding_shell();
-    let shell_path = shell.to_str().expect("utf8 path").to_owned();
+    let shell_path = shell.0.to_str().expect("utf8 path").to_owned();
 
     let pair = native_pty_system()
         .openpty(PtySize {
@@ -38,13 +46,7 @@ fn a_flooding_child_does_not_starve_ctrl_c() {
     let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_neotmux"));
     cmd.env("TERM", "xterm-256color");
     cmd.env("SHELL", &shell_path);
-    let child = match pair.slave.spawn_command(cmd) {
-        Ok(child) => child,
-        Err(e) => {
-            std::fs::remove_file(&shell_path).ok();
-            panic!("spawn neotmux: {e}");
-        }
-    };
+    let child = pair.slave.spawn_command(cmd).expect("spawn neotmux");
     drop(pair.slave);
     let mut guard = ChildGuard(child);
 
@@ -81,7 +83,6 @@ fn a_flooding_child_does_not_starve_ctrl_c() {
     drop(guard);
     drop(pair.master);
     drainer.join().ok();
-    std::fs::remove_file(&shell_path).ok();
 
     match result {
         Ok(status) => assert!(status.success(), "expected neotmux to exit cleanly"),

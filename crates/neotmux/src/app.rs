@@ -38,6 +38,7 @@ pub fn run(
     let mut state = TermState::new(size, SCROLLBACK);
     let mut pty = PtyHandle::spawn(PtyHandle::default_shell_command(), size)?;
     let mut grid = GridSnapshot::default();
+    let mut dirty = true;
 
     #[cfg(debug_assertions)]
     if std::env::var_os("NEOTMUX_PANIC_TEST").is_some() {
@@ -54,11 +55,15 @@ pub fn run(
         let mut eof = false;
         for _ in 0..MAX_CHUNKS_PER_FRAME {
             match pty.output().try_recv() {
-                Ok(PtyEvent::Output(bytes)) => state.feed(&bytes),
+                Ok(PtyEvent::Output(bytes)) => {
+                    state.feed(&bytes);
+                    dirty = true;
+                }
                 Ok(PtyEvent::Eof) => {
                     eof = true;
                     break;
                 }
+                Ok(PtyEvent::Error(err)) => return Err(err).context("read from pty"),
                 Err(_) => break,
             }
         }
@@ -82,6 +87,7 @@ pub fn run(
                         size = clamp_to_at_least_one(Size { rows, cols });
                         state.resize(size);
                         pty.resize(size)?;
+                        dirty = true;
                     }
                     _ => {}
                 }
@@ -91,10 +97,13 @@ pub fn run(
             }
         }
 
-        state.snapshot_into(&mut grid);
-        terminal
-            .draw(|frame| draw_grid(frame, frame.area(), &grid))
-            .context("draw")?;
+        if dirty || eof {
+            state.snapshot_into(&mut grid);
+            terminal
+                .draw(|frame| draw_grid(frame, frame.area(), &grid))
+                .context("draw")?;
+            dirty = false;
+        }
 
         if eof {
             break;

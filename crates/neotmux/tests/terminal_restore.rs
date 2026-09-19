@@ -176,23 +176,38 @@ fn restores_terminal_and_dies_of_sighup() {
     assert_termios_restored(&termios);
 }
 
-fn write_marker_shell(marker: &str) -> std::path::PathBuf {
+struct TempScript(std::path::PathBuf);
+
+impl Drop for TempScript {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+#[test]
+fn temp_script_guard_removes_its_file_on_drop() {
+    let path = std::env::temp_dir().join(format!("neotmux-guard-test-{}", std::process::id()));
+    std::fs::write(&path, "x").expect("write");
+    drop(TempScript(path.clone()));
+    assert!(!path.exists(), "guard did not remove its file");
+}
+
+fn write_marker_shell(marker: &str) -> TempScript {
     use std::os::unix::fs::PermissionsExt as _;
 
     let path = std::env::temp_dir().join(format!("neotmux-marker-shell-{}", std::process::id()));
     std::fs::write(&path, format!("#!/bin/sh\nprintf '{marker}\\n'\nexit 0\n"))
         .expect("write script");
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
-    path
+    TempScript(path)
 }
 
 #[test]
 fn renders_output_written_in_the_same_batch_as_exit() {
     let marker = "NEOTMUX_EOF_MARKER_4f2c";
     let shell = write_marker_shell(marker);
-    let shell = shell.to_str().expect("utf8 path").to_owned();
-    let (out, ok, _termios) = run_in_pty(&[("SHELL", &shell)], b"");
-    std::fs::remove_file(&shell).ok();
+    let shell_path = shell.0.to_str().expect("utf8 path").to_owned();
+    let (out, ok, _termios) = run_in_pty(&[("SHELL", &shell_path)], b"");
     assert!(ok, "expected a clean exit");
     assert!(
         out.contains(marker),

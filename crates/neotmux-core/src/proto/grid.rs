@@ -1,6 +1,7 @@
 use crate::proto::geom::Size;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum Color {
     #[default]
     Default,
@@ -9,6 +10,7 @@ pub enum Color {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct SnapCell {
     pub text: String,
     pub fg: Color,
@@ -36,6 +38,7 @@ impl SnapCell {
 }
 
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct GridSnapshot {
     pub size: Size,
     pub cursor: (u16, u16),
