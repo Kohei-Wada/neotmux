@@ -37,6 +37,7 @@ pub fn new_vm() -> mlua::Result<Lua> {
     globals.raw_set("loadfile", Value::Nil)?;
 
     let package: Table = globals.get("package")?;
+    package.raw_set("path", "")?;
     package.raw_set("cpath", "")?;
 
     lua.load(SEAL).set_mode(ChunkMode::Text).exec()?;
@@ -75,6 +76,34 @@ mod tests {
         }
         let cpath: String = lua.load("return package.cpath").eval().unwrap();
         assert_eq!(cpath, "");
+        let path: String = lua.load("return package.path").eval().unwrap();
+        assert_eq!(path, "");
+    }
+
+    #[test]
+    fn require_cannot_reach_a_lua_file_in_the_working_directory() {
+        let dir = std::env::temp_dir().join(format!(
+            "neotmux-lua-require-probe-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("probe.lua"), "return 1").unwrap();
+
+        let original = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&dir).unwrap();
+        let lua = new_vm().unwrap();
+        let ok: bool = lua
+            .load("local ok, _ = pcall(require, 'probe') return ok")
+            .eval()
+            .unwrap();
+        std::env::set_current_dir(&original).unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert!(!ok, "require found probe.lua via the working directory");
     }
 
     #[test]
