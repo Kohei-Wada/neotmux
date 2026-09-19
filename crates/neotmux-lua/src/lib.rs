@@ -29,7 +29,6 @@ struct Geometry {
     epoch: Epoch,
     size: Size,
     panes: Vec<(PaneId, Rect)>,
-    focus: Option<PaneId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -123,20 +122,17 @@ impl LuaSubsystem {
         std::mem::take(&mut *self.load_failures.borrow_mut())
     }
 
+    // `focus` is part of the frozen begin_frame ABI ahead of the task that reads it
+    // (pane-aware keymaps / a focus-reading Ctx method); nothing consumes it yet.
     pub fn begin_frame(
         &self,
         epoch: Epoch,
         size: Size,
         panes: Vec<(PaneId, Rect)>,
-        focus: Option<PaneId>,
+        _focus: Option<PaneId>,
     ) {
         self.buffers.begin(epoch.clone());
-        *self.geometry.borrow_mut() = Geometry {
-            epoch,
-            size,
-            panes,
-            focus,
-        };
+        *self.geometry.borrow_mut() = Geometry { epoch, size, panes };
     }
 
     pub fn dispatch_tick(&self) {
@@ -159,7 +155,6 @@ impl LuaSubsystem {
                     self.buffers.clone(),
                     geometry.size,
                     geometry.panes.clone(),
-                    geometry.focus,
                 )
             };
 

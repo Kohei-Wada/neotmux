@@ -208,6 +208,67 @@ fn a_stashed_ctx_cannot_draw_outside_its_tick() {
 }
 
 #[test]
+fn same_frame_cross_plugin_isolation_survives_dispatch_tick() {
+    let (_dir, sub) = built(&[
+        (
+            "init.lua",
+            "require('plugin.healthy') require('plugin.raiser')",
+        ),
+        (
+            "lua/plugin/healthy.lua",
+            r#"
+            local n = 0
+            neotmux.on_tick(function(ctx)
+              n = n + 1
+              ctx:text(nil, 0, 0, 'healthy' .. n)
+            end)
+            return {}
+            "#,
+        ),
+        (
+            "lua/plugin/raiser.lua",
+            r#"
+            local n = 0
+            neotmux.on_tick(function(ctx)
+              n = n + 1
+              ctx:text(nil, 0, 1, 'raiser' .. n)
+              if n == 2 then error('boom') end
+            end)
+            return {}
+            "#,
+        ),
+    ]);
+
+    frame(&sub, 24);
+    frame(&sub, 24);
+
+    let (cmds, _) = sub.frame_output();
+    let texts: Vec<(u16, u16, String)> = cmds
+        .iter()
+        .filter_map(|c| match c {
+            DrawCmd::Text { x, y, text, .. } => Some((*x, *y, text.clone())),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        texts.contains(&(0, 0, "healthy2".to_string())),
+        "the healthy plugin's current frame is missing: {texts:?}"
+    );
+    assert!(
+        texts.contains(&(0, 1, "raiser1".to_string())),
+        "the raising plugin should still show its last good frame: {texts:?}"
+    );
+    assert!(
+        !texts.iter().any(|(_, _, t)| t == "raiser2"),
+        "the raising tick's half-drawn frame leaked through: {texts:?}"
+    );
+
+    let ops = sub.drain_ops();
+    assert_eq!(ops.len(), 1, "expected exactly one error op, got {ops:?}");
+    assert_eq!(sub.plugins().name(ops[0].0).as_deref(), Some("raiser"));
+}
+
+#[test]
 fn a_bad_colour_raises_at_the_call() {
     let (_dir, sub) = built(&[
         ("init.lua", "require('plugin.painter')"),

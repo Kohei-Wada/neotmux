@@ -7,15 +7,12 @@ use neotmux_core::proto::{Color, DrawCmd, PaneId, Rect, Size, StatusFragment};
 use crate::draw::Buffers;
 use crate::plugin::PluginId;
 
-/// A per-tick draw surface handed to a plugin's `on_tick` callback. Built fresh for every
-/// dispatch and created inside `Lua::scope`, so a plugin that stashes it gets an error from
-/// mlua rather than recording into a frame whose epoch has since moved on.
+/// Scope-bound: created fresh inside `Lua::scope` for one dispatch and dies with it.
 pub struct Ctx {
     owner: PluginId,
     buffers: Rc<Buffers>,
     size: Size,
     panes: Vec<(PaneId, Rect)>,
-    focus: Option<PaneId>,
 }
 
 impl Ctx {
@@ -24,19 +21,13 @@ impl Ctx {
         buffers: Rc<Buffers>,
         size: Size,
         panes: Vec<(PaneId, Rect)>,
-        focus: Option<PaneId>,
     ) -> Self {
         Self {
             owner,
             buffers,
             size,
             panes,
-            focus,
         }
-    }
-
-    pub fn focus(&self) -> Option<PaneId> {
-        self.focus
     }
 
     fn pane_rect(&self, id: PaneId) -> Option<Rect> {
