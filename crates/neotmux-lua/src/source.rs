@@ -220,29 +220,33 @@ mod tests {
         let dir = layer_with(&[("probe", "who() pcall(who) return {}")]);
         let (lua, sources) = vm_with(&dir);
 
-        let seen: Rc<RefCell<Vec<(Option<String>, SourceId)>>> = Rc::new(RefCell::new(Vec::new()));
+        // Each call records "<level 0 source> -> <owner>": the binding itself, then whoever
+        // `caller` blamed for it.
+        let seen: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
         let captured = seen.clone();
         let sources_for_fn = sources.clone();
         let who = lua
             .create_function(move |lua, ()| {
                 let level_zero = lua
                     .inspect_stack(0, |debug| debug.source().source.map(|s| s.into_owned()))
-                    .flatten();
+                    .flatten()
+                    .unwrap_or_default();
+                let owner = caller(lua, &sources_for_fn);
+                let owner = sources_for_fn.name(owner).unwrap_or_default();
                 captured
                     .borrow_mut()
-                    .push((level_zero, caller(lua, &sources_for_fn)));
+                    .push(format!("{level_zero} -> {owner}"));
                 Ok(())
             })
             .unwrap();
         lua.globals().set("who", who).unwrap();
         lua.load("require('plugin.probe')").exec().unwrap();
 
-        let got = seen.borrow();
-        assert_eq!(got.len(), 2, "{got:?}");
-        for (level_zero, owner) in got.iter() {
-            assert_eq!(level_zero.as_deref(), Some("=[C]"));
-            assert_eq!(sources.name(*owner).as_deref(), Some("plugin/probe"));
-        }
+        assert_eq!(
+            *seen.borrow(),
+            vec!["=[C] -> plugin/probe".to_string(); 2],
+            "the direct call and the one through pcall must both name the chunk"
+        );
     }
 
     #[test]
