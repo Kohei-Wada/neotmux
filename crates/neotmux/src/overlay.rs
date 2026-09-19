@@ -1,15 +1,10 @@
-use std::collections::HashMap;
-
 use neotmux_core::proto::{Color as PColor, DrawCmd, PaneId, Rect as PRect, StatusFragment};
 use ratatui::Frame;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 
+use crate::panes::PaneRects;
 use crate::render::color;
-
-/// Where each pane currently sits, in surface-local coordinates (the same
-/// space `LuaSubsystem::begin_frame` was given).
-pub type PaneRects = HashMap<PaneId, PRect>;
 
 #[derive(Clone, Copy)]
 struct Colors {
