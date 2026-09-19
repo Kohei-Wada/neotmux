@@ -5,6 +5,7 @@ mod notify;
 mod overlay;
 mod panes;
 mod render;
+mod shells;
 mod signals;
 
 use std::env;
@@ -69,13 +70,24 @@ fn main() -> anyhow::Result<()> {
                 let tag = lua.sources().name(id).unwrap_or_else(|| id.to_string());
                 logging::log(level, &tag, &text);
             }
+            // Nothing is running yet at load time, so there is no pane to split or focus.
             Op::PaneSplit { dir } => {
                 let tag = lua.sources().name(id).unwrap_or_else(|| id.to_string());
-                logging::log(Level::Info, &tag, &panes::split_note(dir));
+                logging::log(
+                    Level::Error,
+                    &tag,
+                    &format!(
+                        "pane.split('{dir}') refused: no panes exist until the session starts"
+                    ),
+                );
             }
             Op::PaneFocus { pane } => {
                 let tag = lua.sources().name(id).unwrap_or_else(|| id.to_string());
-                logging::log(Level::Info, &tag, &panes::focus_note(pane));
+                logging::log(
+                    Level::Error,
+                    &tag,
+                    &format!("pane.focus({pane}) refused: no panes exist until the session starts"),
+                );
             }
         }
     }

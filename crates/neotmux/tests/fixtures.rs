@@ -24,12 +24,6 @@ fn line_with<'a>(log: &'a str, marker: &str) -> &'a str {
         .unwrap_or_else(|| panic!("no log line contains {marker:?}:\n{log}"))
 }
 
-fn index_of(log: &str, marker: &str) -> usize {
-    log.lines()
-        .position(|line| line.contains(marker))
-        .unwrap_or_else(|| panic!("no log line contains {marker:?}:\n{log}"))
-}
-
 #[test]
 fn clock_draws_a_status_line_sized_from_ctx_size_on_every_frame() {
     let (mut nt, _init) = start("require('plugin.clock')", "/bin/cat");
@@ -131,9 +125,9 @@ fn remover_removes_twice_without_raising_and_its_callback_never_runs() {
 }
 
 #[test]
-fn the_pane_stub_answers_today_and_its_ops_travel_on_the_op_buffer() {
+fn the_pane_ops_apply_after_the_tick_and_in_the_order_they_were_pushed() {
     let (nt, _init) = start("require('plugin.panes')", "/bin/cat");
-    let log = nt.wait_for_log("panes list after split=", PATIENCE);
+    let log = nt.wait_for_log("panes applied list=", PATIENCE);
 
     let listed = line_with(&log, "panes list=");
     assert!(listed.contains("list=1 first=1 current=1"), "{listed}");
@@ -142,28 +136,15 @@ fn the_pane_stub_answers_today_and_its_ops_travel_on_the_op_buffer() {
     assert!(bad.contains("ok=false"), "{bad}");
     assert!(bad.contains("unknown split direction"), "{bad}");
 
-    // What is pinned is that the op arrived attributed to the chunk that made the call.
-    // What the placeholder note says about it is M2's to delete.
-    let split = line_with(&log, "pane.split(");
-    assert!(split.contains("plugin/panes"), "{split}");
-    assert!(split.contains("vertical"), "{split}");
-
-    let focus = line_with(&log, "pane.focus(");
-    assert!(focus.contains("plugin/panes"), "{focus}");
-    assert!(focus.contains("%1"), "{focus}");
-
     assert!(
         line_with(&log, "panes list after split=").contains("after split=1"),
         "split mutated the pane list synchronously, inside the callback"
     );
-    // split and focus travel on the same single op buffer as the fixture's own log calls,
-    // so they land in the order they were pushed (§4.6), not wherever the binding ran.
-    assert!(
-        index_of(&log, "panes list=1") < index_of(&log, "pane.split(")
-            && index_of(&log, "pane.split(") < index_of(&log, "pane.focus(")
-            && index_of(&log, "pane.focus(") < index_of(&log, "panes list after split="),
-        "the pane ops did not drain in the order they were pushed:\n{log}"
-    );
+
+    // The split focuses the pane it made, so a focus back to %1 surviving means the two ops
+    // drained in the order they were pushed (§4.6) rather than in the order they ran.
+    let applied = line_with(&log, "panes applied list=");
+    assert!(applied.contains("list=2 current=1"), "{applied}");
 }
 
 #[test]

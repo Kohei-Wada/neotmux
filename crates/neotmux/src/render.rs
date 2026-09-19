@@ -43,7 +43,9 @@ pub fn layout(area: Rect, has_status: bool) -> (Rect, Rect) {
     }
 }
 
-pub fn draw_grid(frame: &mut Frame, area: Rect, grid: &GridSnapshot) {
+/// Draws one pane's grid into `area`. Only the focused pane places the terminal cursor:
+/// there is one cursor and it belongs where the keys are going.
+pub fn draw_grid(frame: &mut Frame, area: Rect, grid: &GridSnapshot, focused: bool) {
     let buf = frame.buffer_mut();
     let rows = grid.size.rows.min(area.height);
     let cols = grid.size.cols.min(area.width);
@@ -71,7 +73,7 @@ pub fn draw_grid(frame: &mut Frame, area: Rect, grid: &GridSnapshot) {
         }
     }
 
-    if !grid.hide_cursor {
+    if focused && !grid.hide_cursor {
         let (crow, ccol) = grid.cursor;
         if crow < area.height && ccol < area.width {
             frame.set_cursor_position(Position::new(area.x + ccol, area.y + crow));
@@ -92,7 +94,7 @@ mod tests {
     fn render(grid: &GridSnapshot, w: u16, h: u16) -> ratatui::buffer::Buffer {
         let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
         terminal
-            .draw(|frame| draw_grid(frame, frame.area(), grid))
+            .draw(|frame| draw_grid(frame, frame.area(), grid, true))
             .unwrap();
         terminal.backend().buffer().clone()
     }

@@ -4,7 +4,11 @@ use std::thread;
 
 use anyhow::Context as _;
 use neotmux_core::proto::Size;
-use portable_pty::{Child, CommandBuilder, ExitStatus, MasterPty, PtySize, native_pty_system};
+use portable_pty::{Child, ExitStatus, MasterPty, PtySize, native_pty_system};
+
+// `spawn` takes one, so it is part of this crate's surface either way: re-exported so a
+// caller does not need its own dependency on portable-pty to name the type.
+pub use portable_pty::CommandBuilder;
 
 pub enum PtyEvent {
     Output(Vec<u8>),

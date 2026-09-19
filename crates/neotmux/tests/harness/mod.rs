@@ -83,10 +83,16 @@ impl Neotmux {
     }
 
     pub fn start_layered(layers: &[&Path], shell: &str) -> Self {
+        Self::start_sized(layers, shell, ROWS, COLS)
+    }
+
+    /// A terminal of a chosen size, for the cases where the size is the point — a surface
+    /// too small to split, for instance.
+    pub fn start_sized(layers: &[&Path], shell: &str, rows: u16, cols: u16) -> Self {
         let pair = native_pty_system()
             .openpty(PtySize {
-                rows: ROWS,
-                cols: COLS,
+                rows,
+                cols,
                 pixel_width: 0,
                 pixel_height: 0,
             })
@@ -110,7 +116,7 @@ impl Neotmux {
 
         let mut reader = pair.master.try_clone_reader().expect("clone reader");
         let writer = pair.master.take_writer().expect("take writer");
-        let parser = Arc::new(Mutex::new(vt100::Parser::new(ROWS, COLS, 0)));
+        let parser = Arc::new(Mutex::new(vt100::Parser::new(rows, cols, 0)));
         let (tx, byte_rx) = mpsc::channel();
 
         let parser_clone = parser.clone();
