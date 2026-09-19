@@ -21,7 +21,7 @@ fn a_plugin_can_register_and_is_attributed() {
         ("init.lua", "require('plugin.clock')"),
         (
             "lua/plugin/clock.lua",
-            "neotmux.on_tick(function() end) neotmux.status.provider(function() end) return {}",
+            "neotmux.on_tick(function() end) neotmux.on_key(function() end) return {}",
         ),
     ]);
     let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
@@ -32,7 +32,7 @@ fn a_plugin_can_register_and_is_attributed() {
     assert_eq!(ticks.len(), 1);
     let owner = sub.registry().owner(ticks[0]).unwrap();
     assert_eq!(sub.sources().name(owner).as_deref(), Some("plugin/clock"));
-    assert_eq!(sub.registry().snapshot(KindTag::Status).len(), 1);
+    assert_eq!(sub.registry().snapshot(KindTag::Key).len(), 1);
 }
 
 #[test]
@@ -367,15 +367,6 @@ fn a_plugin_cannot_monkey_patch_neotmux_keymap() {
 }
 
 #[test]
-fn a_plugin_cannot_monkey_patch_neotmux_status() {
-    let dir = layer(&[("init.lua", "neotmux.status.provider = function() end")]);
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
-    let failures = sub.run_init();
-    assert_eq!(failures.len(), 1);
-    assert!(failures[0].message.contains("read-only"));
-}
-
-#[test]
 fn a_plugin_cannot_monkey_patch_neotmux_pane() {
     let dir = layer(&[("init.lua", "neotmux.pane.split = function() end")]);
     let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
@@ -388,7 +379,7 @@ fn a_plugin_cannot_monkey_patch_neotmux_pane() {
 fn sealed_subtable_functions_still_work_through_the_proxy() {
     let dir = layer(&[(
         "init.lua",
-        "neotmux.log.info('from log') neotmux.keymap.set('x', function() end) neotmux.status.provider(function() end)",
+        "neotmux.log.info('from log') neotmux.keymap.set('x', function() end)",
     )]);
     let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
     assert!(sub.run_init().is_empty());
@@ -398,7 +389,6 @@ fn sealed_subtable_functions_still_work_through_the_proxy() {
         Op::Log { text, .. } if text == "from log"
     )));
     assert_eq!(sub.registry().snapshot(KindTag::Keymap).len(), 1);
-    assert_eq!(sub.registry().snapshot(KindTag::Status).len(), 1);
 }
 
 #[test]
@@ -423,7 +413,7 @@ fn pairs_over_the_sealed_top_level_table_sees_the_real_fields() {
         unreachable!()
     };
     assert_eq!(
-        text, "keymap log notify on_event on_key on_tick opt pane quit status",
+        text, "keymap log notify on_event on_key on_tick opt pane quit",
         "the top-level ABI surface changed"
     );
 }
@@ -471,17 +461,17 @@ fn a_log_call_from_a_plugin_function_invoked_by_init_is_attributed_to_the_plugin
         ),
         (
             "lua/plugin/clock.lua",
-            "local M = {} function M.setup(o) neotmux.status.provider(function() end) neotmux.log.info('clock configured') end return M",
+            "local M = {} function M.setup(o) neotmux.on_tick(function() end) neotmux.log.info('clock configured') end return M",
         ),
     ]);
     let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
     assert!(sub.run_init().is_empty());
 
-    let status = sub.registry().snapshot(KindTag::Status);
-    assert_eq!(status.len(), 1);
+    let ticks = sub.registry().snapshot(KindTag::Tick);
+    assert_eq!(ticks.len(), 1);
     let registered_to = sub
         .sources()
-        .name(sub.registry().owner(status[0]).unwrap())
+        .name(sub.registry().owner(ticks[0]).unwrap())
         .unwrap();
     assert_eq!(registered_to, "plugin/clock");
     assert_eq!(

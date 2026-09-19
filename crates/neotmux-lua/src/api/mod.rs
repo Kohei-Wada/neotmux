@@ -156,18 +156,6 @@ pub(crate) fn install(
     }
 
     {
-        let status = lua.create_table()?;
-        let sources = sources.clone();
-        let registry = registry.clone();
-        let provider = lua.create_function(move |lua, callback: Function| {
-            register(lua, &sources, &registry, Kind::Status, callback)
-        })?;
-        status.set("provider", provider)?;
-        let status = seal(lua, status, "neotmux.status")?;
-        neotmux.set("status", status)?;
-    }
-
-    {
         let pane = pane::install(lua, sources.clone(), ops.clone(), geometry)?;
         let pane = seal(lua, pane, "neotmux.pane")?;
         neotmux.set("pane", pane)?;

@@ -12,7 +12,6 @@ pub enum Kind {
     Event(String),
     Key,
     Keymap(String),
-    Status,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,7 +20,6 @@ pub enum KindTag {
     Event,
     Key,
     Keymap,
-    Status,
 }
 
 impl Kind {
@@ -31,7 +29,6 @@ impl Kind {
             Kind::Event(_) => KindTag::Event,
             Kind::Key => KindTag::Key,
             Kind::Keymap(_) => KindTag::Keymap,
-            Kind::Status => KindTag::Status,
         }
     }
 }
@@ -153,7 +150,7 @@ mod tests {
         let id = reg.add(a, Kind::Tick, key(&lua, "return function() end"));
         assert_eq!(reg.owner(id), Some(a));
         assert_eq!(reg.snapshot(KindTag::Tick), vec![id]);
-        assert!(reg.snapshot(KindTag::Status).is_empty());
+        assert!(reg.snapshot(KindTag::Key).is_empty());
     }
 
     #[test]
@@ -169,12 +166,12 @@ mod tests {
     fn removing_one_source_leaves_the_others_alone() {
         let (lua, reg, a, b) = setup();
         let a_tick = reg.add(a, Kind::Tick, key(&lua, "return function() end"));
-        let a_status = reg.add(a, Kind::Status, key(&lua, "return function() end"));
+        let a_key = reg.add(a, Kind::Key, key(&lua, "return function() end"));
         let b_tick = reg.add(b, Kind::Tick, key(&lua, "return function() end"));
         assert_eq!(reg.remove_all_of(a), 2);
         assert_eq!(reg.snapshot(KindTag::Tick), vec![b_tick]);
         assert!(reg.owner(a_tick).is_none());
-        assert!(reg.owner(a_status).is_none());
+        assert!(reg.owner(a_key).is_none());
     }
 
     #[test]

@@ -208,7 +208,7 @@ answers "who set this" by naming a file, not by looking up an entry in a plugin 
   out of date by the time a call arrives
 - for a registration there is a callback to inspect, so the owner is wherever
   `Function::info().source` says that closure was written. `neotmux.on_tick`, `on_event`,
-  `keymap.set` and `status.provider` all read it. A source location is lexical, so it is
+  `on_key` and `keymap.set` all read it. A source location is lexical, so it is
   correct regardless of when or from where the callback is later called. This is what makes
   the idiom every plugin author reaches for coming from nvim,
   `local m = require('plugin.clock'); m.setup{}`, attribute correctly with no special case:
@@ -262,7 +262,6 @@ local h = neotmux.on_tick(fn)                    -- per-frame draw callback
 local h = neotmux.on_event(name, fn)             -- pane_output / resized
 local h = neotmux.on_key(fn)                     -- every key, before the bindings
 local h = neotmux.keymap.set(key, fn)            -- key binding
-local h = neotmux.status.provider(fn)            -- status-line contributor
 h:remove()                                       -- idempotent
 ```
 
@@ -326,8 +325,14 @@ neotmux.on_tick(function(ctx)
   local rect = ctx:pane_rect(pane_id)
   ctx:text(pane_id, x, y, "hello")
   ctx:rect(...) ctx:line(...) ctx:marker(...)
+  ctx:status("12:34", { fg = "#ffffff" })  -- a fragment of the status line
 end)
 ```
+
+The status line is contributed the same way as anything else drawn: `ctx:status(text,
+colours)` appends a fragment to the calling source's buffer for this frame. There is no
+separate status registration — a source that stops calling it stops contributing, and the
+host shows the status row only while some fragment exists.
 
 `ctx:size()` and `ctx:pane_rect()` exist because without them a status plugin cannot know its
 own width — the clock in the exit criteria only worked because a clock ignores width.
@@ -432,8 +437,8 @@ This is nvim's shape: isolation lives in the thing that iterates what to load, n
 
 A fixture plugin **set**, not one plugin — the point is to exercise the ABI:
 
-- `clock` — status provider using `ctx:size()`; asserted to produce a non-empty command buffer
-  every frame
+- `clock` — a status-line contributor: an `on_tick` that calls `ctx:status()` with a string
+  sized from `ctx:size()`; asserted to produce a non-empty command buffer every frame
 - `watcher` — consumes a payload-carrying `pane_output` event; asserted to observe bytes a
   harness wrote to the PTY
 - `binder` — `keymap.set` returning `true` for one key and `false` for another; asserted that
