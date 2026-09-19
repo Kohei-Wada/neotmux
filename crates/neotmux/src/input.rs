@@ -1,6 +1,5 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-#[allow(dead_code)]
 pub fn encode_key(key: KeyEvent) -> Option<Vec<u8>> {
     let alt = key.modifiers.contains(KeyModifiers::ALT);
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);

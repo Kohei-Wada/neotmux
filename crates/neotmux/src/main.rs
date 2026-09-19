@@ -1,6 +1,10 @@
+mod app;
 mod input;
 mod render;
 
-fn main() {
-    println!("neotmux");
+fn main() -> anyhow::Result<()> {
+    let mut terminal = ratatui::init();
+    let result = app::run(&mut terminal);
+    ratatui::restore();
+    result
 }

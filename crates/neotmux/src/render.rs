@@ -3,7 +3,6 @@ use ratatui::Frame;
 use ratatui::layout::{Position, Rect};
 use ratatui::style::{Color, Modifier};
 
-#[allow(dead_code)]
 fn color(c: PColor) -> Color {
     match c {
         PColor::Default => Color::Reset,
@@ -12,7 +11,6 @@ fn color(c: PColor) -> Color {
     }
 }
 
-#[allow(dead_code)]
 pub fn draw_grid(frame: &mut Frame, area: Rect, grid: &GridSnapshot) {
     let buf = frame.buffer_mut();
     let rows = grid.size.rows.min(area.height);
