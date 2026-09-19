@@ -62,8 +62,21 @@ Each of these returns a handle with one method, `handle:remove()`, which is idem
 | `neotmux.on_key(fn)` | for every key, before any binding; return `true` to consume it |
 | `neotmux.keymap.set(spec, fn)` | for that one key; return `true` to consume it |
 
-Events that fire today: `resized` (`rows`, `cols`) and `pane_output` (`pane`, `bytes`). There
-are no others — if you subscribe to a name nothing sends, nothing happens, silently.
+Every event that fires, and the fields it carries:
+
+| name | fields | when |
+|---|---|---|
+| `resized` | `rows`, `cols` | the area available to panes changed — including when a status row appears or goes |
+| `pane_output` | `pane`, `bytes` | that pane's child wrote something |
+| `pane_opened` | `pane` | a split created it |
+| `pane_closed` | `pane` | its child exited and the pane is gone |
+| `focus_changed` | `pane` | focus moved to that pane |
+
+There are no others. Subscribe to a name nothing sends and nothing happens, silently.
+
+The three pane events fire against the tree they describe: a `pane_opened` handler calling
+`neotmux.pane.list()` sees the new pane, and a `pane_closed` handler does not see the dead
+one.
 
 `keymap.set` returns `nil, message` when another source already holds that key. It *raises*
 when the spec itself is unparseable: losing a race is something to handle, a typo is a bug.
