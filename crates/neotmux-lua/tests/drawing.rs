@@ -483,6 +483,37 @@ fn removing_the_last_tick_registration_stops_the_last_frame_replaying() {
     );
 }
 
+/// A source that removes its own last tick registration from inside that tick loses the
+/// frame it drew in the same tick: `forget` clears its scratch along with its committed
+/// entry, and the per-source commit that follows has nothing left to commit. Decided
+/// rather than incidental (§4.5) — a source with no tick left cannot refresh a frame, so
+/// showing the one it drew on its way out would be showing something it can never update.
+#[test]
+fn removing_the_last_tick_registration_from_inside_it_loses_that_frame_too() {
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.leaver')"),
+        (
+            "lua/plugin/leaver.lua",
+            r#"
+            local h
+            h = neotmux.on_tick(function(ctx)
+              ctx:text(nil, 0, 0, 'last words')
+              h:remove()
+            end)
+            return {}
+            "#,
+        ),
+    ]);
+    frame(&sub, 24);
+    assert!(
+        lines(&sub).is_empty(),
+        "the frame drawn on the way out was kept: {:?}",
+        lines(&sub)
+    );
+    frame(&sub, 24);
+    assert!(lines(&sub).is_empty(), "and it must not come back");
+}
+
 #[test]
 fn removing_one_of_two_tick_registrations_keeps_the_source_drawing() {
     let (_dir, sub) = built(&[
