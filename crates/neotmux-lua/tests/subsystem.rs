@@ -210,7 +210,7 @@ fn a_library_helper_registering_on_a_plugins_behalf_is_attributed_to_the_callbac
 }
 
 #[test]
-fn a_registration_made_during_a_dispatch_inherits_the_dispatched_plugin() {
+fn a_registration_made_during_a_dispatch_is_owned_by_the_chunk_it_was_written_in() {
     let dir = layer(&[
         ("init.lua", "require('plugin.spawner')"),
         (
@@ -231,6 +231,36 @@ fn a_registration_made_during_a_dispatch_inherits_the_dispatched_plugin() {
         let owner = sub.registry().owner(id).unwrap();
         assert_eq!(sub.sources().name(owner).as_deref(), Some("plugin/spawner"));
     }
+}
+
+#[test]
+fn a_callback_written_in_a_library_and_registered_during_a_dispatch_is_the_librarys() {
+    let dir = layer(&[
+        ("init.lua", "require('plugin.spawner')"),
+        (
+            "lua/neotmux/factory.lua",
+            "return { make = function() return function() end end }",
+        ),
+        (
+            "lua/plugin/spawner.lua",
+            "local factory = require('neotmux.factory') neotmux.on_tick(function() neotmux.on_tick(factory.make()) end) return {}",
+        ),
+    ]);
+    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    assert!(sub.run_init().is_empty());
+    sub.dispatch_tick();
+
+    let after = sub.registry().snapshot(KindTag::Tick);
+    assert_eq!(after.len(), 2);
+    let owners: Vec<String> = after
+        .iter()
+        .map(|id| {
+            sub.sources()
+                .name(sub.registry().owner(*id).unwrap())
+                .unwrap()
+        })
+        .collect();
+    assert_eq!(owners, vec!["plugin/spawner", "neotmux/factory"]);
 }
 
 #[test]
