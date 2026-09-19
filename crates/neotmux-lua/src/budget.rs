@@ -114,11 +114,13 @@ mod tests {
         (lua, budget)
     }
 
+    /// The flag after the loop is what makes "cut off" legible: without it a regression that
+    /// let the loop run on would show up as a wedged test run rather than a failure.
     #[test]
     fn a_tick_that_exceeds_its_budget_is_cut_off() {
         let (lua, budget) = armed(5);
         let spin: Function = lua
-            .load("return function() while true do end end")
+            .load("reached = false return function() while true do end reached = true end")
             .eval()
             .unwrap();
 
@@ -128,6 +130,10 @@ mod tests {
 
         assert!(result.is_err(), "an infinite loop returned normally");
         assert!(budget.overran(), "the overrun was not recorded");
+        assert!(
+            !lua.globals().get::<bool>("reached").unwrap(),
+            "the tick ran past the loop the budget was supposed to cut off"
+        );
     }
 
     /// The global hook is the reason this holds: a per-thread hook would silently not fire on
@@ -136,7 +142,12 @@ mod tests {
     fn a_coroutine_cannot_escape_the_budget() {
         let (lua, budget) = armed(5);
         let spin: Function = lua
-            .load("return function() coroutine.wrap(function() while true do end end)() end")
+            .load(
+                "reached = false
+                 return function()
+                   coroutine.wrap(function() while true do end reached = true end)()
+                 end",
+            )
             .eval()
             .unwrap();
 
@@ -146,6 +157,10 @@ mod tests {
 
         assert!(result.is_err(), "a coroutine ran past the budget");
         assert!(budget.overran(), "the overrun was not recorded");
+        assert!(
+            !lua.globals().get::<bool>("reached").unwrap(),
+            "the coroutine ran past the loop the budget was supposed to cut off"
+        );
     }
 
     #[test]

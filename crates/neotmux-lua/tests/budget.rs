@@ -58,11 +58,25 @@ fn an_overrunning_tick_is_named_and_loses_its_frame() {
     let (_dir, sub) = built(&[
         (
             "init.lua",
-            "neotmux.opt.tick_budget_ms = 5 require('plugin.spinner')",
+            "neotmux.opt.tick_budget_ms = 5 require('plugin.probe') require('plugin.spinner')",
         ),
         (
             "lua/plugin/spinner.lua",
-            "neotmux.on_tick(function(ctx) ctx:text(nil, 0, 0, 'drawn') while true do end end) return {}",
+            "neotmux.on_tick(function(ctx)
+               ctx:text(nil, 0, 0, 'drawn')
+               while true do end
+               _G.spinner_ran_past_its_loop = true
+             end)
+             return {}",
+        ),
+        (
+            "lua/plugin/probe.lua",
+            "_G.spinner_ran_past_its_loop = false
+             neotmux.keymap.set('C-p', function()
+               neotmux.notify('info', tostring(_G.spinner_ran_past_its_loop))
+               return true
+             end)
+             return {}",
         ),
     ]);
 
@@ -78,6 +92,14 @@ fn an_overrunning_tick_is_named_and_loses_its_frame() {
         .collect();
     assert_eq!(overruns.len(), 1, "{overruns:?}");
     assert!(overruns[0].starts_with("plugin/spinner: "), "{overruns:?}");
+
+    // Without this the only symptom of a tick that was not cut off is a suite that hangs.
+    sub.dispatch_key("C-p");
+    assert_eq!(
+        notifications(&sub),
+        vec!["false".to_string()],
+        "the tick ran past the loop the budget was supposed to cut off"
+    );
 }
 
 #[test]
