@@ -282,3 +282,94 @@ fn setting_every_opt_key_in_one_statement_does_not_conflict() {
     assert_eq!(sub.opt().tick_overrun_limit, 3);
     assert_eq!(sub.opt().prefix, "C-a");
 }
+
+#[test]
+fn a_plugin_cannot_monkey_patch_neotmux_log() {
+    let dir = layer(&[("init.lua", "neotmux.log.info = function() end")]);
+    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let failures = sub.run_init();
+    assert_eq!(failures.len(), 1);
+    assert!(failures[0].message.contains("read-only"));
+}
+
+#[test]
+fn a_plugin_cannot_monkey_patch_neotmux_keymap() {
+    let dir = layer(&[("init.lua", "neotmux.keymap.set = function() end")]);
+    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let failures = sub.run_init();
+    assert_eq!(failures.len(), 1);
+    assert!(failures[0].message.contains("read-only"));
+}
+
+#[test]
+fn a_plugin_cannot_monkey_patch_neotmux_status() {
+    let dir = layer(&[("init.lua", "neotmux.status.provider = function() end")]);
+    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let failures = sub.run_init();
+    assert_eq!(failures.len(), 1);
+    assert!(failures[0].message.contains("read-only"));
+}
+
+#[test]
+fn sealed_subtable_functions_still_work_through_the_proxy() {
+    let dir = layer(&[(
+        "init.lua",
+        "neotmux.log.info('from log') neotmux.keymap.set('x', function() end) neotmux.status.provider(function() end)",
+    )]);
+    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    assert!(sub.run_init().is_empty());
+    let ops = sub.drain_ops();
+    assert!(ops.iter().any(|(_, op)| matches!(
+        op,
+        Op::Log { text, .. } if text == "from log"
+    )));
+    assert_eq!(sub.registry().snapshot(KindTag::Keymap).len(), 1);
+    assert_eq!(sub.registry().snapshot(KindTag::Status).len(), 1);
+}
+
+#[test]
+fn pairs_over_the_sealed_top_level_table_sees_the_real_fields() {
+    let dir = layer(&[(
+        "init.lua",
+        r#"
+        local count = 0
+        for _ in pairs(neotmux) do count = count + 1 end
+        neotmux.notify("info", tostring(count))
+        "#,
+    )]);
+    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    assert!(sub.run_init().is_empty());
+    let ops = sub.drain_ops();
+    let (_, op) = ops
+        .into_iter()
+        .find(|(_, op)| matches!(op, Op::Notify { .. }))
+        .expect("no notify op");
+    let Op::Notify { text, .. } = op else {
+        unreachable!()
+    };
+    let count: usize = text.parse().unwrap();
+    assert_eq!(count, 8, "expected all top-level fields, got {count}");
+}
+
+#[test]
+fn pairs_over_a_sealed_subtable_sees_its_real_fields() {
+    let dir = layer(&[(
+        "init.lua",
+        r#"
+        local count = 0
+        for _ in pairs(neotmux.log) do count = count + 1 end
+        neotmux.notify("info", tostring(count))
+        "#,
+    )]);
+    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    assert!(sub.run_init().is_empty());
+    let ops = sub.drain_ops();
+    let (_, op) = ops
+        .into_iter()
+        .find(|(_, op)| matches!(op, Op::Notify { .. }))
+        .expect("no notify op");
+    let Op::Notify { text, .. } = op else {
+        unreachable!()
+    };
+    assert_eq!(text, "3");
+}

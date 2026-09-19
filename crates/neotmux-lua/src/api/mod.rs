@@ -123,6 +123,7 @@ pub fn install(
             register(lua, &plugins, &registry, Kind::Keymap(key), callback)
         })?;
         keymap.set("set", set)?;
+        let keymap = seal(lua, keymap, "neotmux.keymap")?;
         neotmux.set("keymap", keymap)?;
     }
 
@@ -134,10 +135,12 @@ pub fn install(
             register(lua, &plugins, &registry, Kind::Status, callback)
         })?;
         status.set("provider", provider)?;
+        let status = seal(lua, status, "neotmux.status")?;
         neotmux.set("status", status)?;
     }
 
     let log = log::install(lua, plugins.clone(), ops.clone())?;
+    let log = seal(lua, log, "neotmux.log")?;
     neotmux.set("log", log)?;
 
     let opt = opt::install(lua, opts.clone())?;
@@ -192,7 +195,7 @@ pub fn install(
 fn seal(lua: &Lua, real: Table, name: &'static str) -> mlua::Result<Table> {
     let proxy = lua.create_table()?;
     let meta = lua.create_table()?;
-    meta.set("__index", real)?;
+    meta.set("__index", real.clone())?;
     let newindex =
         lua.create_function(move |_, (_table, key, _value): (Table, Value, Value)| {
             Err::<(), _>(mlua::Error::RuntimeError(format!(
@@ -201,6 +204,14 @@ fn seal(lua: &Lua, real: Table, name: &'static str) -> mlua::Result<Table> {
         })?;
     meta.set("__newindex", newindex)?;
     meta.set("__metatable", format!("{name} is sealed"))?;
+    // Without __pairs the proxy is an empty table to `pairs`, so iteration silently sees
+    // nothing where it previously saw the sealed API.
+    let pairs_target = real;
+    let pairs = lua.create_function(move |lua, _table: Table| {
+        let next: Function = lua.globals().get("next")?;
+        Ok((next, pairs_target.clone(), Value::Nil))
+    })?;
+    meta.set("__pairs", pairs)?;
     proxy.set_metatable(Some(meta))?;
     Ok(proxy)
 }

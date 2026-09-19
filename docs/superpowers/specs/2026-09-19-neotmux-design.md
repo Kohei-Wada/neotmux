@@ -462,6 +462,11 @@ The budget therefore defends against **accidents, not malice**: a development-ti
 loop, a legitimately heavy plugin that is occasionally slow, a pathological input, a
 third-party plugin with a bug. The `pcall` hole (§5.4) is the honest consequence.
 
+The same applies to the `neotmux` table seal: it catches `neotmux.on_tick = ...` by mistake,
+not a plugin determined to bypass it — `rawset(neotmux, 'on_tick', ...)` still reaches the
+real table, and closing that would cost every plugin its legitimate use of `rawset` to stop a
+deliberate act the trust model already permits.
+
 ## 8. Testing
 
 - `neotmux-term`: golden tests feeding byte sequences, asserting screen contents, cursor,
