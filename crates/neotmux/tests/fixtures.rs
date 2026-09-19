@@ -513,6 +513,31 @@ fn the_shipped_status_line_shows_with_no_user_config() {
     nt.wait_for_screen("panes 2 focus 1", PATIENCE);
 }
 
+/// §1's fourth exit criterion for the *shipped* defaults: a user who does not want one
+/// turns it off from their own config, in one line, without touching an installed file.
+/// Every layer's `init.lua` runs earliest-first and the shipped layer is last, so the user's
+/// assignment is in place by the time the shipped `init.lua` reads it.
+#[test]
+fn a_user_config_can_switch_off_a_shipped_default() {
+    let init = harness::runtime(&[("init.lua", "require('neotmux.defaults').status = false")]);
+    let shipped = shipped_layer();
+    let mut nt = Neotmux::start_layered(&[init.path(), &shipped], "cat");
+
+    nt.send("STILL-HERE\r");
+    nt.wait_for_screen("STILL-HERE", PATIENCE);
+
+    let screen = nt.screen_after(Duration::from_millis(500));
+    assert!(
+        !screen.contains("panes "),
+        "the shipped status line ignored the opt-out:\n{screen}"
+    );
+    assert!(
+        nt.log_text().is_empty(),
+        "switching a default off was reported as a failure:\n{}",
+        nt.log_text()
+    );
+}
+
 /// §1's first exit criterion, checked by deletion rather than by grep: with the shipped
 /// `lua/plugin/` gone there is no status line, no error about the missing file, and the
 /// multiplexer still runs a shell and exits cleanly.

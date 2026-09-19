@@ -266,6 +266,21 @@ a plugin that is a millisecond over on a loaded machine has not done anything wr
 None of this is a sandbox. Plugins are trusted (below); the budget is there so an *accident*
 costs one plugin one frame instead of costing you the program.
 
+## Turning a shipped default off
+
+neotmux ships a default status line as a plugin, in the runtime layer an install puts on the
+search path. Every layer's `init.lua` runs, earliest layer first, and the shipped layer is
+last — so your own `init.lua` can decide what the shipped one does:
+
+```lua
+-- ~/.config/neotmux/init.lua
+require('neotmux.defaults').status = false
+```
+
+That is a Lua module the runtime layer ships, not a host feature: neotmux has no idea the
+defaults table exists. Deleting the installed `lua/plugin/` directory works too, and leaves a
+multiplexer with no status line and no error.
+
 ## Reloading
 
 There is no reload function. There are two lines of Lua:
