@@ -319,7 +319,8 @@ fn resubscribe_restores_a_removed_tick_and_it_draws_again() {
             "lua/plugin/rescuer.lua",
             "neotmux.keymap.set('C-r', function()
                _G.flaky_rescued()
-               neotmux.notify('info', tostring(neotmux.resubscribe('plugin/flaky')))
+               local handles = neotmux.resubscribe('plugin/flaky')
+               neotmux.notify('info', handles and tostring(#handles) or 'nil')
                return true
              end)
              return {}",
@@ -333,14 +334,14 @@ fn resubscribe_restores_a_removed_tick_and_it_draws_again() {
     sub.drain_ops();
 
     sub.dispatch_key("C-r");
-    assert_eq!(notifications(&sub), vec!["true".to_string()]);
+    assert_eq!(notifications(&sub), vec!["1".to_string()]);
 
     frame(&sub);
     assert_eq!(texts(&sub), vec!["back".to_string()]);
 }
 
 #[test]
-fn resubscribe_for_a_name_that_was_never_removed_is_false() {
+fn resubscribe_for_a_name_that_was_never_removed_is_nil() {
     let (_dir, sub) = built(&[
         ("init.lua", "require('plugin.rescuer')"),
         (
@@ -349,6 +350,7 @@ fn resubscribe_for_a_name_that_was_never_removed_is_false() {
              neotmux.keymap.set('C-r', function()
                neotmux.notify('info', tostring(neotmux.resubscribe('plugin/rescuer'))
                  .. ' ' .. tostring(neotmux.resubscribe('no/such/plugin')))
+               
                return true
              end)
              return {}",
@@ -357,7 +359,7 @@ fn resubscribe_for_a_name_that_was_never_removed_is_false() {
 
     sub.dispatch_key("C-r");
 
-    assert_eq!(notifications(&sub), vec!["false false".to_string()]);
+    assert_eq!(notifications(&sub), vec!["nil nil".to_string()]);
     assert_eq!(tick_owners(&sub), vec!["plugin/rescuer".to_string()]);
 }
 
@@ -373,7 +375,8 @@ fn a_restored_tick_is_dropped_again_if_it_keeps_overrunning() {
         (
             "lua/plugin/rescuer.lua",
             "neotmux.keymap.set('C-r', function()
-               neotmux.notify('info', tostring(neotmux.resubscribe('plugin/spinner')))
+               local handles = neotmux.resubscribe('plugin/spinner')
+               neotmux.notify('info', handles and tostring(#handles) or 'nil')
                return true
              end)
              return {}",
@@ -445,7 +448,8 @@ fn registering_a_tick_again_drops_what_was_parked_for_that_source() {
                return true
              end)
              neotmux.keymap.set('C-r', function()
-               neotmux.notify('info', tostring(neotmux.resubscribe('plugin/spinner')))
+               local handles = neotmux.resubscribe('plugin/spinner')
+               neotmux.notify('info', handles and tostring(#handles) or 'nil')
                return true
              end)
              return {}",
@@ -460,7 +464,7 @@ fn registering_a_tick_again_drops_what_was_parked_for_that_source() {
     assert_eq!(tick_owners(&sub), vec!["plugin/spinner".to_string()]);
 
     sub.dispatch_key("C-r");
-    assert_eq!(notifications(&sub), vec!["false".to_string()]);
+    assert_eq!(notifications(&sub), vec!["nil".to_string()]);
     assert_eq!(
         tick_owners(&sub),
         vec!["plugin/spinner".to_string()],
@@ -505,7 +509,8 @@ fn resubscribe_restores_the_first_source_interned_under_a_shared_name() {
     let first = format!(
         "{}
          neotmux.keymap.set('C-r', function()
-           neotmux.notify('info', tostring(neotmux.resubscribe('init')))
+           local handles = neotmux.resubscribe('init')
+           neotmux.notify('info', handles and tostring(#handles) or 'nil')
            _G.spin = false
            return true
          end)",
@@ -522,7 +527,7 @@ fn resubscribe_restores_the_first_source_interned_under_a_shared_name() {
     sub.drain_ops();
 
     sub.dispatch_key("C-r");
-    assert_eq!(notifications(&sub), vec!["true".to_string()]);
+    assert_eq!(notifications(&sub), vec!["1".to_string()]);
 
     frame(&sub);
     assert_eq!(texts(&sub), vec!["first".to_string()]);
@@ -629,7 +634,8 @@ fn a_long_c_call_every_frame_parks_the_source_and_resubscribe_brings_it_back() {
         (
             "lua/plugin/rescuer.lua",
             "neotmux.keymap.set('C-r', function()
-               neotmux.notify('info', tostring(neotmux.resubscribe('plugin/hog')))
+               local handles = neotmux.resubscribe('plugin/hog')
+               neotmux.notify('info', handles and tostring(#handles) or 'nil')
                return true
              end)
              return {}",
@@ -643,7 +649,7 @@ fn a_long_c_call_every_frame_parks_the_source_and_resubscribe_brings_it_back() {
     sub.drain_ops();
 
     sub.dispatch_key("C-r");
-    assert_eq!(notifications(&sub), vec!["true".to_string()]);
+    assert_eq!(notifications(&sub), vec!["1".to_string()]);
     assert_eq!(tick_owners(&sub), vec!["plugin/hog".to_string()]);
 }
 
@@ -782,4 +788,81 @@ fn a_raising_tick_loses_its_ops_but_is_still_reported() {
         .collect();
     assert_eq!(logs.len(), 1, "{ops:?}");
     assert!(logs[0].contains("nope"), "{logs:?}");
+}
+
+/// A restored registration is a new one, with an id the caller's old handle does not name.
+/// Without handles back from `resubscribe` there is no way to remove it again at all.
+#[test]
+fn the_handles_resubscribe_returns_remove_the_registrations_it_restored() {
+    let (_dir, sub) = built(&[
+        (
+            "init.lua",
+            "neotmux.opt.tick_budget_ms = 5 neotmux.opt.tick_overrun_limit = 1 \
+             require('plugin.spinner') require('plugin.rescuer')",
+        ),
+        ("lua/plugin/spinner.lua", SPINNER),
+        (
+            "lua/plugin/rescuer.lua",
+            "local handles
+             neotmux.keymap.set('C-r', function()
+               handles = neotmux.resubscribe('plugin/spinner')
+               return true
+             end)
+             neotmux.keymap.set('C-x', function()
+               for _, handle in ipairs(handles) do handle:remove() end
+               return true
+             end)
+             return {}",
+        ),
+    ]);
+
+    frame(&sub);
+    assert!(tick_owners(&sub).is_empty());
+
+    sub.dispatch_key("C-r");
+    assert_eq!(tick_owners(&sub), vec!["plugin/spinner".to_string()]);
+
+    sub.dispatch_key("C-x");
+    assert!(
+        tick_owners(&sub).is_empty(),
+        "the handle resubscribe returned did not name the restored registration: {:?}",
+        tick_owners(&sub)
+    );
+}
+
+/// One handle per restored registration, not one per source: a file with two ticks parks both
+/// and has to be able to remove both.
+#[test]
+fn resubscribe_returns_one_handle_for_each_tick_it_restored() {
+    let (_dir, sub) = built(&[
+        (
+            "init.lua",
+            "neotmux.opt.tick_budget_ms = 5 neotmux.opt.tick_overrun_limit = 1 \
+             require('plugin.twin') require('plugin.rescuer')",
+        ),
+        (
+            "lua/plugin/twin.lua",
+            "neotmux.on_tick(function() end)
+             neotmux.on_tick(function() while true do end end)
+             return {}",
+        ),
+        (
+            "lua/plugin/rescuer.lua",
+            "neotmux.keymap.set('C-r', function()
+               local handles = neotmux.resubscribe('plugin/twin')
+               neotmux.notify('info', handles and tostring(#handles) or 'nil')
+               return true
+             end)
+             return {}",
+        ),
+    ]);
+
+    frame(&sub);
+    assert!(tick_owners(&sub).is_empty());
+    sub.drain_ops();
+
+    sub.dispatch_key("C-r");
+
+    assert_eq!(notifications(&sub), vec!["2".to_string()]);
+    assert_eq!(tick_owners(&sub).len(), 2);
 }

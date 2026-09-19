@@ -266,18 +266,38 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
         // The display name is the only handle a human has — it is what the notification
         // reported — and two layers providing the same relative path share one on purpose
         // (`source::display_name`). So a name can match more than one source, and the first
-        // interned match wins: `interned()` is in interning order, which is load order.
+        // interned match wins: `interned()` is in interning order, which is load order — the
+        // handles that come back do not say which of them it was.
         let sources = sources.clone();
         let registry = registry.clone();
-        let resubscribe = lua.create_function(move |_, name: String| {
+        let buffers = buffers.clone();
+        let resubscribe = lua.create_function(move |lua, name: String| {
             let Some((id, _)) = sources
                 .interned()
                 .into_iter()
                 .find(|(_, interned)| *interned == name)
             else {
-                return Ok(false);
+                return Ok(Value::Nil);
             };
-            Ok(overrun.restore(&registry, id))
+            // Handles, not a bool: a restored registration has a fresh id, so the handle the
+            // caller held before the park is dead and this is the only way back to it. Nil
+            // when nothing was restored — a restore always brings back at least one
+            // registration, so an empty list is never the answer and nil cannot be mistaken
+            // for one.
+            let restored = overrun.restore(&registry, id);
+            if restored.is_empty() {
+                return Ok(Value::Nil);
+            }
+            let handles = lua.create_table()?;
+            for registration in restored {
+                handles.push(make_handle(
+                    lua,
+                    registry.clone(),
+                    buffers.clone(),
+                    registration,
+                )?)?;
+            }
+            Ok(Value::Table(handles))
         })?;
         neotmux.set("resubscribe", resubscribe)?;
     }

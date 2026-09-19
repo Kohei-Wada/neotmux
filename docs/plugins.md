@@ -123,7 +123,7 @@ neotmux.notify(level, text)  -- 'info' | 'warn' | 'error'; shown on screen and l
 neotmux.quit()
 neotmux.opt.tick_budget_ms = 8     -- per source per frame; 0 turns the budget off
 neotmux.opt.tick_overrun_limit = 5 -- consecutive overruns before the tick is dropped
-neotmux.resubscribe(name)          -- give a dropped source its tick back
+neotmux.resubscribe(name)          -- give a dropped source its tick back; returns handles
 ```
 
 Logs go to `$XDG_STATE_HOME/neotmux/neotmux.log`, or wherever `--log` says. Notifications also
@@ -192,15 +192,25 @@ every single frame.
 ### Getting back
 
 ```lua
-neotmux.resubscribe('plugin/clock')   -- true if a subscription was restored, false if not
+local handles = neotmux.resubscribe('plugin/clock')   -- handles, or nil if nothing was parked
 ```
+
+You get back one handle per tick it restored — the same handle `on_tick` returns — and `nil`
+when there was nothing to restore. A restore always brings back at least one registration, so
+the list is never empty and `nil` cannot be mistaken for one. Keep the handles: a restored
+registration is a *new* one, and the handle you were holding before the park names an id that
+no longer exists, so `handle:remove()` on the old one does nothing.
 
 The name is the one the notification used. It is a display name, and two runtime layers that
 provide the same relative path share one — if that happens, the earlier layer's copy is the one
-restored. You get a full 5 frames again, so a plugin that has not been fixed is dropped again.
+restored, and the handles you get back do not tell you which of the two came back.
 
-Re-`require`ing the module instead is also fine and drops what was parked, so you do not end up
-subscribed twice.
+You get a full 5 frames again, so a plugin that has not been fixed is dropped again.
+
+Re-`require`ing the module instead drops what was parked, so you do not end up subscribed
+twice — *unless* you have already called `resubscribe`. What it drops is what is still parked,
+and a restored registration is live, so re-`require`ing after a `resubscribe` leaves you with
+both. Remove the handles first.
 
 ### Turning it off
 
@@ -243,7 +253,8 @@ require('plugin.clock')
 ```
 
 Note what this does *not* do: your old registrations are still there. (The exception is a tick
-the budget took away: registering a tick again drops what was being held for you.) Keep the handles and
+the budget is still holding for you: registering a tick again drops it. A tick you already got
+back with `resubscribe` is live, not held, so that one does not go.) Keep the handles and
 remove them first if re-running the chunk would register twice.
 
 ## What the sandbox is not

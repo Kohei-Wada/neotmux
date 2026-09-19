@@ -6,7 +6,7 @@ use mlua::RegistryKey;
 
 use crate::api::forget_if_no_longer_drawing;
 use crate::draw::Buffers;
-use crate::registry::{Kind, KindTag, Registry};
+use crate::registry::{Kind, KindTag, RegistrationId, Registry};
 use crate::source::SourceId;
 
 /// What repeated overruns cost a source, and how that is undone. Measuring a tick is
@@ -75,15 +75,19 @@ impl Overrun {
     }
 
     /// Puts them back, with a clean counter so a restored source gets a full limit's worth of
-    /// frames again. False when this source has nothing parked.
-    pub fn restore(&self, registry: &Registry, source: SourceId) -> bool {
+    /// frames again. The new registrations are returned because they carry fresh ids: a Lua
+    /// handle held from before the park names an id that no longer exists, so without these
+    /// the restored subscription could never be removed again. Empty when this source has
+    /// nothing parked.
+    pub fn restore(&self, registry: &Registry, source: SourceId) -> Vec<RegistrationId> {
         let Some(callbacks) = self.parked.borrow_mut().remove(&source) else {
-            return false;
+            return Vec::new();
         };
-        for callback in callbacks {
-            registry.add(source, Kind::Tick, callback);
-        }
+        let restored = callbacks
+            .into_iter()
+            .map(|callback| registry.add(source, Kind::Tick, callback))
+            .collect();
         self.forgive(source);
-        true
+        restored
     }
 }
