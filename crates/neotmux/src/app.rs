@@ -12,6 +12,7 @@ use crate::render::draw_grid;
 
 const FRAME: Duration = Duration::from_millis(16);
 const SCROLLBACK: usize = 10_000;
+const MAX_CHUNKS_PER_FRAME: usize = 32;
 
 fn terminal_size(terminal: &DefaultTerminal) -> anyhow::Result<Size> {
     let area = terminal.size().context("terminal size")?;
@@ -36,15 +37,19 @@ pub fn run(terminal: &mut DefaultTerminal) -> anyhow::Result<()> {
         let frame_end = Instant::now() + FRAME;
 
         let mut eof = false;
-        while let Ok(ev) = pty.output().try_recv() {
-            match ev {
-                PtyEvent::Output(bytes) => state.feed(&bytes),
-                PtyEvent::Eof => eof = true,
+        for _ in 0..MAX_CHUNKS_PER_FRAME {
+            match pty.output().try_recv() {
+                Ok(PtyEvent::Output(bytes)) => state.feed(&bytes),
+                Ok(PtyEvent::Eof) => {
+                    eof = true;
+                    break;
+                }
+                Err(_) => break,
             }
         }
 
         if !eof {
-            while Instant::now() < frame_end {
+            loop {
                 let remaining = frame_end.saturating_duration_since(Instant::now());
                 if !event::poll(remaining).context("poll input")? {
                     break;
@@ -61,6 +66,9 @@ pub fn run(terminal: &mut DefaultTerminal) -> anyhow::Result<()> {
                         pty.resize(size)?;
                     }
                     _ => {}
+                }
+                if Instant::now() >= frame_end {
+                    break;
                 }
             }
         }
