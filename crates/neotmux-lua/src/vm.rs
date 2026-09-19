@@ -39,6 +39,7 @@ pub fn new_vm() -> mlua::Result<Lua> {
     let package: Table = globals.get("package")?;
     package.raw_set("path", "")?;
     package.raw_set("cpath", "")?;
+    package.raw_set("loadlib", Value::Nil)?;
 
     lua.load(SEAL).set_mode(ChunkMode::Text).exec()?;
 
@@ -71,6 +72,7 @@ mod tests {
             "dofile",
             "loadfile",
             "debug",
+            "package.loadlib",
         ] {
             assert!(is_nil(&lua, expr), "{expr} should be nil");
         }

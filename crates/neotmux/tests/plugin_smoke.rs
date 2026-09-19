@@ -130,3 +130,82 @@ fn a_failed_plugin_is_warned_about_once_and_a_silent_one_still_gets_its_warn() {
         "a plugin that loaded but registered nothing should still be warned about: {text}"
     );
 }
+
+#[test]
+fn an_init_time_quit_exits_before_entering_the_alternate_screen_and_orders_its_log_first() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("lua/plugin")).unwrap();
+    fs::write(
+        dir.path().join("init.lua"),
+        "require('plugin.loud') require('plugin.silent') neotmux.quit()",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("lua/plugin/loud.lua"),
+        "neotmux.log.info('loud-marker') return {}",
+    )
+    .unwrap();
+    fs::write(dir.path().join("lua/plugin/silent.lua"), "return {}").unwrap();
+
+    let pair = native_pty_system()
+        .openpty(PtySize {
+            rows: 24,
+            cols: 80,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .expect("openpty");
+
+    let log = dir.path().join("neotmux.log");
+    let home = tempfile::tempdir().expect("isolated home");
+
+    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_neotmux"));
+    cmd.arg("--log");
+    cmd.arg(&log);
+    cmd.env("NEOTMUX_RUNTIME", dir.path());
+    cmd.env("SHELL", "/bin/true");
+    cmd.env("TERM", "xterm-256color");
+    cmd.env("HOME", home.path());
+    cmd.env("XDG_CONFIG_HOME", home.path());
+    let mut child = pair.slave.spawn_command(cmd).expect("spawn");
+    drop(pair.slave);
+
+    let mut reader = pair.master.try_clone_reader().expect("reader");
+    let collector = std::thread::spawn(move || {
+        let mut out = Vec::new();
+        let mut buf = [0u8; 4096];
+        while let Ok(n) = std::io::Read::read(&mut reader, &mut buf) {
+            if n == 0 {
+                break;
+            }
+            out.extend_from_slice(&buf[..n]);
+        }
+        out
+    });
+
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let status = loop {
+        if let Some(status) = child.try_wait().expect("try_wait") {
+            break status;
+        }
+        assert!(Instant::now() < deadline, "neotmux did not exit");
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    drop(pair.master);
+    let out = collector.join().expect("collector");
+    assert!(status.success(), "neotmux exited with {status:?}");
+    assert!(
+        !String::from_utf8_lossy(&out).contains("\x1b[?1049h"),
+        "an init-time quit should exit before the alternate screen is entered"
+    );
+
+    let text = fs::read_to_string(&log).unwrap();
+    let loud_at = text.find("loud-marker").expect("loud's log line is missing");
+    let silent_warn_at = text
+        .find("silent: registered nothing")
+        .expect("silent's warn line is missing");
+    assert!(
+        loud_at < silent_warn_at,
+        "loud's load-time log line should land before the warnings computed after it: {text}"
+    );
+}

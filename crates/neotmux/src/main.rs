@@ -9,7 +9,7 @@ use std::env;
 use std::path::{Path, PathBuf};
 
 use neotmux_lua::LuaSubsystem;
-use neotmux_lua::ops::Level;
+use neotmux_lua::ops::{Level, Op};
 use neotmux_lua::registry::KindTag;
 use neotmux_lua::runtime::Layers;
 
@@ -80,7 +80,26 @@ fn main() -> anyhow::Result<()> {
         logging::log(Level::Warn, &failure.plugin, &failure.message);
         failed_plugins.insert(failure.plugin);
     }
+
+    // Ops from run_init are drained here, before ratatui::init(), so an init-time
+    // neotmux.quit() exits before the alternate screen is entered or a shell is spawned,
+    // and a plugin's own load-time log lines land before the warnings computed below.
+    let mut quit_at_init = false;
+    for (id, op) in lua.drain_ops() {
+        match op {
+            Op::Quit => quit_at_init = true,
+            Op::Log { level, text } | Op::Notify { level, text } => {
+                let tag = lua.plugins().name(id).unwrap_or_else(|| id.to_string());
+                logging::log(level, &tag, &text);
+            }
+        }
+    }
+
     log_silent_plugins(&lua, &failed_plugins);
+
+    if quit_at_init {
+        return Ok(());
+    }
 
     let shutdown = signals::ShutdownSignal::install()?;
     let mut terminal = ratatui::init();
