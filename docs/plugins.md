@@ -122,7 +122,7 @@ neotmux.log.info(text)    -- also .warn, .error
 neotmux.notify(level, text)  -- 'info' | 'warn' | 'error'; shown on screen and logged
 neotmux.quit()
 neotmux.opt.tick_budget_ms = 8     -- per source per frame; 0 turns the budget off
-neotmux.opt.tick_overrun_limit = 5 -- consecutive overruns before the tick is dropped
+neotmux.opt.tick_overrun_limit = 5 -- consecutive overruns before the tick is dropped; >= 1
 neotmux.resubscribe(name)          -- give a dropped source its tick back; returns handles
 ```
 
