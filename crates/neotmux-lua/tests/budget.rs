@@ -517,3 +517,39 @@ fn resubscribe_restores_the_first_source_interned_under_a_shared_name() {
         "{ran:?}"
     );
 }
+
+/// §5.4's `pcall` hole: the budget error is catchable, so the tick returns normally. What it
+/// does not buy the plugin is the frame — or the count against its limit.
+#[test]
+fn a_tick_that_pcalls_away_the_budget_error_still_loses_its_frame() {
+    let (_dir, sub) = built(&[
+        (
+            "init.lua",
+            "neotmux.opt.tick_budget_ms = 5 neotmux.opt.tick_overrun_limit = 2 \
+             require('plugin.swallower')",
+        ),
+        (
+            "lua/plugin/swallower.lua",
+            "neotmux.on_tick(function(ctx)
+               ctx:text(nil, 0, 0, 'swallowed')
+               for _ = 1, 2000 do pcall(function() while true do end end) end
+             end)
+             return {}",
+        ),
+    ]);
+
+    frame(&sub);
+
+    assert!(texts(&sub).is_empty(), "{:?}", texts(&sub));
+    let overruns: Vec<String> = logs(&sub)
+        .into_iter()
+        .filter(|text| text.contains("budget"))
+        .collect();
+    assert_eq!(overruns.len(), 1, "{overruns:?}");
+
+    frame(&sub);
+    assert!(
+        tick_owners(&sub).is_empty(),
+        "a swallowed overrun was not counted"
+    );
+}

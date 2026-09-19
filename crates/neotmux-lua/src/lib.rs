@@ -257,7 +257,10 @@ impl LuaSubsystem {
                 self.overrun.forgive(owner);
             }
 
-            if raised {
+            // An overrun loses the frame even when the tick returned normally: a plugin that
+            // `pcall`s around its own loop swallows the budget error (§5.4) and would
+            // otherwise keep output the budget says it has lost (§5.1).
+            if raised || overran {
                 self.buffers.discard(owner);
             } else {
                 self.buffers.commit(owner);
