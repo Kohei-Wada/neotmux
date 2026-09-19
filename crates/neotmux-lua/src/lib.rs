@@ -220,7 +220,7 @@ impl LuaSubsystem {
     /// Observers first, then the binding (§4.4): an `on_key` callback is the only way to see a
     /// key nobody has bound, which is what a prefix plugin needs to be modal.
     pub fn dispatch_key(&self, spec: &str) -> KeyOutcome {
-        let Some(normalised) = keymap::normalise(spec) else {
+        let Ok(normalised) = keymap::normalise(spec) else {
             return KeyOutcome::Fallthrough;
         };
 

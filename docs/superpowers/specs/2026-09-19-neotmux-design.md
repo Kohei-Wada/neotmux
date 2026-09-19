@@ -299,6 +299,12 @@ contended resource in the system. The contract, fixed in M1a:
   source happened to get there first, so it **returns `nil` plus a message** for the caller to
   handle
 
+**Normalisation canonicalises the modifiers, not the key.** `C-b`, `c-b` and `Ctrl-b` are one
+spec; `x` and `X` are two, because the host reports a character key as the character the
+terminal produced. For the same reason `S-` does not combine with a single character — such a
+spec could never be dispatched — and is refused at registration, naming the uppercase
+character to bind instead. `S-` with a named key (`S-Tab`) is ordinary.
+
 A key is dispatched in four steps:
 
 1. every `neotmux.on_key` callback runs, each receiving the normalised key spec as a string

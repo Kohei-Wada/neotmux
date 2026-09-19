@@ -62,7 +62,7 @@ fn key_specs_are_normalised_for_conflict_purposes() {
         ),
         (
             "lua/plugin/b.lua",
-            "local h, err = neotmux.keymap.set('c-X', function() return true end) if h ~= nil then error('conflict not detected') end return {}",
+            "local h, err = neotmux.keymap.set('ctrl-x', function() return true end) if h ~= nil then error('conflict not detected') end return {}",
         ),
     ]);
     assert!(
@@ -202,14 +202,76 @@ fn removing_a_binding_frees_the_key_for_another_plugin() {
 }
 
 #[test]
-fn normalise_is_canonical_and_total() {
+fn normalise_canonicalises_the_modifiers_and_leaves_the_key_alone() {
     use neotmux_lua::keymap::normalise;
-    assert_eq!(normalise("C-x").as_deref(), Some("C-x"));
-    assert_eq!(normalise("c-X").as_deref(), Some("C-x"));
-    assert_eq!(normalise("Ctrl-x").as_deref(), Some("C-x"));
-    assert_eq!(normalise("M-C-x").as_deref(), Some("C-M-x"));
-    assert_eq!(normalise("Ctrl+Shift+F13"), None);
-    assert_eq!(normalise(""), None);
+    assert_eq!(normalise("C-x").unwrap(), "C-x");
+    assert_eq!(normalise("Ctrl-x").unwrap(), "C-x");
+    assert_eq!(normalise("M-C-x").unwrap(), "C-M-x");
+    assert_eq!(normalise("c-X").unwrap(), "C-X");
+    assert!(normalise("Ctrl+Shift+F13").is_err());
+    assert!(normalise("").is_err());
+}
+
+#[test]
+fn an_uppercase_key_and_its_lowercase_are_two_bindings_that_each_fire() {
+    let (_d, sub) = built(&[
+        ("init.lua", "require('plugin.both')"),
+        (
+            "lua/plugin/both.lua",
+            r#"
+            neotmux.keymap.set('x', function() neotmux.log.info('lower') return true end)
+            neotmux.keymap.set('X', function() neotmux.log.info('upper') return true end)
+            return {}
+            "#,
+        ),
+    ]);
+    let failures = sub.run_init();
+    assert!(failures.is_empty(), "'X' collided with 'x': {failures:?}");
+
+    assert_eq!(sub.dispatch_key("x"), KeyOutcome::Consumed);
+    let text = format!("{:?}", sub.drain_ops());
+    assert!(text.contains("lower") && !text.contains("upper"), "{text}");
+
+    assert_eq!(sub.dispatch_key("X"), KeyOutcome::Consumed);
+    let text = format!("{:?}", sub.drain_ops());
+    assert!(text.contains("upper") && !text.contains("lower"), "{text}");
+}
+
+#[test]
+fn a_modified_uppercase_key_and_its_lowercase_are_also_distinct() {
+    let (_d, sub) = built(&[
+        ("init.lua", "require('plugin.both')"),
+        (
+            "lua/plugin/both.lua",
+            r#"
+            neotmux.keymap.set('C-x', function() neotmux.log.info('lower') return true end)
+            neotmux.keymap.set('C-X', function() neotmux.log.info('upper') return true end)
+            return {}
+            "#,
+        ),
+    ]);
+    assert!(sub.run_init().is_empty());
+    assert_eq!(sub.dispatch_key("C-X"), KeyOutcome::Consumed);
+    let text = format!("{:?}", sub.drain_ops());
+    assert!(text.contains("upper") && !text.contains("lower"), "{text}");
+}
+
+#[test]
+fn shift_with_a_single_character_is_refused_because_it_could_never_fire() {
+    let (_d, sub) = built(&[
+        ("init.lua", "require('plugin.shifty')"),
+        (
+            "lua/plugin/shifty.lua",
+            "neotmux.keymap.set('S-x', function() return true end) return {}",
+        ),
+    ]);
+    let failures = sub.run_init();
+    assert_eq!(failures.len(), 1, "{failures:?}");
+    assert!(
+        failures[0].message.contains("bind 'X' instead"),
+        "the refusal should name the key to use instead: {}",
+        failures[0].message
+    );
 }
 
 #[test]
@@ -225,7 +287,7 @@ fn on_key_sees_a_key_nothing_has_bound() {
     assert_eq!(sub.dispatch_key("c-X"), KeyOutcome::Fallthrough);
     let text = format!("{:?}", sub.drain_ops());
     assert!(
-        text.contains("saw C-x"),
+        text.contains("saw C-X"),
         "on_key should receive the normalised spec: {text}"
     );
 }
