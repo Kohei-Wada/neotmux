@@ -92,7 +92,10 @@ impl Plugins {
 /// `neotmux.*` library, or an anonymous/string chunk).
 pub fn plugin_name_from_source(source: &str) -> Option<String> {
     let source = source.strip_prefix('@').unwrap_or(source);
-    let rest = source.split_once("/lua/plugin/").map(|(_, rest)| rest)?;
+    // rsplit_once is the correct inverse of the searcher's own path construction: a layer
+    // directory whose own path happens to contain "/lua/plugin/" must not be mistaken for
+    // the marker that starts the plugin's own dotted name.
+    let rest = source.rsplit_once("/lua/plugin/").map(|(_, rest)| rest)?;
     let path = rest
         .strip_suffix("/init.lua")
         .or_else(|| rest.strip_suffix(".lua"))?;
@@ -372,6 +375,14 @@ mod tests {
         assert_eq!(
             plugin_name_from_source("@/runtime/lua/plugin/nested/thing/init.lua"),
             Some("nested.thing".to_string())
+        );
+    }
+
+    #[test]
+    fn plugin_name_from_source_uses_the_last_lua_plugin_marker() {
+        assert_eq!(
+            plugin_name_from_source("@/home/kohei/lua/plugin/mylayer/lua/plugin/clock.lua"),
+            Some("clock".to_string())
         );
     }
 
