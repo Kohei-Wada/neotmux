@@ -37,37 +37,27 @@ impl Buffers {
 
     pub fn record(&self, owner: PluginId, cmd: DrawCmd) {
         let mut inner = self.inner.borrow_mut();
-        let epoch = inner.epoch.clone();
-        inner
-            .scratch
-            .entry(owner)
-            .or_insert_with(|| Committed {
-                epoch,
-                ..Committed::default()
-            })
-            .cmds
-            .push(cmd);
+        inner.scratch.entry(owner).or_default().cmds.push(cmd);
     }
 
     pub fn status(&self, owner: PluginId, fragment: StatusFragment) {
         let mut inner = self.inner.borrow_mut();
-        let epoch = inner.epoch.clone();
         inner
             .scratch
             .entry(owner)
-            .or_insert_with(|| Committed {
-                epoch,
-                ..Committed::default()
-            })
+            .or_default()
             .status
             .push(fragment);
     }
 
     pub fn commit(&self, owner: PluginId) {
         let mut inner = self.inner.borrow_mut();
-        if let Some(entry) = inner.scratch.remove(&owner) {
-            inner.committed.insert(owner, entry);
-        }
+        let epoch = inner.epoch.clone();
+        // A missing scratch entry means the plugin recorded nothing this tick, not that
+        // the tick failed; commit still replaces the previous frame with this empty one.
+        let mut entry = inner.scratch.remove(&owner).unwrap_or_default();
+        entry.epoch = epoch;
+        inner.committed.insert(owner, entry);
     }
 
     pub fn discard(&self, owner: PluginId) {
@@ -216,6 +206,40 @@ mod tests {
         buffers.forget(a);
         let (cmds, _) = buffers.applicable(&epoch(24));
         assert!(cmds.is_empty());
+    }
+
+    #[test]
+    fn a_tick_that_commits_nothing_clears_the_previous_frame() {
+        let plugins = Plugins::new();
+        let a = plugins.intern("a");
+        let buffers = Buffers::new();
+
+        buffers.begin(epoch(24));
+        buffers.record(a, text("first"));
+        buffers.commit(a);
+
+        buffers.begin(epoch(24));
+        buffers.commit(a);
+
+        let (cmds, _) = buffers.applicable(&epoch(24));
+        assert!(cmds.is_empty());
+    }
+
+    #[test]
+    fn a_tick_that_raises_leaves_the_previous_frame_in_place() {
+        let plugins = Plugins::new();
+        let a = plugins.intern("a");
+        let buffers = Buffers::new();
+
+        buffers.begin(epoch(24));
+        buffers.record(a, text("first"));
+        buffers.commit(a);
+
+        buffers.begin(epoch(24));
+        buffers.discard(a);
+
+        let (cmds, _) = buffers.applicable(&epoch(24));
+        assert_eq!(cmds, vec![text("first")]);
     }
 
     #[test]
