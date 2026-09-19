@@ -461,3 +461,59 @@ fn registering_a_tick_again_drops_what_was_parked_for_that_source() {
         "the parked callback was restored beside the freshly required one"
     );
 }
+
+fn built_layers(layers: &[&[(&str, &str)]]) -> (Vec<tempfile::TempDir>, LuaSubsystem) {
+    let mut dirs = Vec::new();
+    for files in layers {
+        let dir = tempfile::tempdir().unwrap();
+        for (rel, body) in *files {
+            let path = dir.path().join(rel);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, body).unwrap();
+        }
+        dirs.push(dir);
+    }
+    let paths = dirs.iter().map(|d| d.path().to_path_buf()).collect();
+    let sub = LuaSubsystem::build(Layers::from_paths(paths)).unwrap();
+    assert!(sub.run_init().is_empty());
+    (dirs, sub)
+}
+
+/// Two layers' `init.lua` files share the display name `init`, so `resubscribe` has an
+/// ambiguous handle. The first interned match — the earlier layer — wins, deliberately.
+#[test]
+fn resubscribe_restores_the_first_source_interned_under_a_shared_name() {
+    let spinner = |tag: &str| {
+        format!(
+            "neotmux.opt.tick_budget_ms = 5 neotmux.opt.tick_overrun_limit = 1
+             neotmux.on_tick(function() neotmux.notify('info', '{tag}') while true do end end)"
+        )
+    };
+    let first = format!(
+        "{}
+         neotmux.keymap.set('C-r', function()
+           neotmux.notify('info', tostring(neotmux.resubscribe('init')))
+           return true
+         end)",
+        spinner("first")
+    );
+    let second = spinner("second");
+    let (_dirs, sub) = built_layers(&[
+        &[("init.lua", first.as_str())],
+        &[("init.lua", second.as_str())],
+    ]);
+
+    frame(&sub);
+    assert!(tick_owners(&sub).is_empty());
+    sub.drain_ops();
+
+    sub.dispatch_key("C-r");
+    assert_eq!(notifications(&sub), vec!["true".to_string()]);
+
+    frame(&sub);
+    let ran = notifications(&sub);
+    assert!(
+        ran.contains(&"first".to_string()) && !ran.contains(&"second".to_string()),
+        "{ran:?}"
+    );
+}

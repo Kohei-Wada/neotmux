@@ -263,6 +263,10 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
 
     {
         // Top level, not a `neotmux.plugin` namespace: the host has no plugin concept (§4.1).
+        // The display name is the only handle a human has — it is what the notification
+        // reported — and two layers providing the same relative path share one on purpose
+        // (`source::display_name`). So a name can match more than one source, and the first
+        // interned match wins: `interned()` is in interning order, which is load order.
         let sources = sources.clone();
         let registry = registry.clone();
         let resubscribe = lua.create_function(move |_, name: String| {
