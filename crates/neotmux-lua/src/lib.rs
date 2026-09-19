@@ -286,7 +286,7 @@ impl LuaSubsystem {
                 self.overrun.forgive(owner);
             }
         }
-        Budget::disarm(&self.lua);
+        self.budget.disarm(&self.lua);
     }
 
     /// The offender keeps its keymaps and event handlers: only what it was measured doing is

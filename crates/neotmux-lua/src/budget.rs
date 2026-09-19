@@ -35,6 +35,7 @@ struct Active {
 /// is `crate::overrun`.
 pub struct Budget {
     opts: Rc<RefCell<Opts>>,
+    armed: Cell<bool>,
     active: Cell<Option<Active>>,
     overran: Cell<bool>,
 }
@@ -43,15 +44,21 @@ impl Budget {
     pub fn new(opts: Rc<RefCell<Opts>>) -> Rc<Self> {
         Rc::new(Self {
             opts,
+            armed: Cell::new(false),
             active: Cell::new(None),
             overran: Cell::new(false),
         })
     }
 
-    /// Arms the hook for one source's slice of one frame. Outside an `enter`/`leave` pair the
-    /// hook does nothing, so key and event dispatch are unmeasured — this is a *tick* budget.
+    /// Opens one source's slice of one frame. Outside an `enter`/`leave` pair the hook does
+    /// nothing, so key and event dispatch are unmeasured — this is a *tick* budget.
+    ///
+    /// A slice is only measured if the frame armed a hook. A tick that raises the budget from
+    /// 0 mid-frame would otherwise give the sources after it a deadline with nothing watching
+    /// it: the loop that passes it is never interrupted and neotmux hangs.
     pub fn enter(&self) {
-        self.active.set(self.enabled().then(|| Active {
+        let measured = self.armed.get() && self.enabled();
+        self.active.set(measured.then(|| Active {
             start: Instant::now(),
             budget: Duration::from_millis(self.opts.borrow().tick_budget_ms),
         }));
@@ -92,32 +99,37 @@ impl Budget {
     /// in a weak registry table and silently removes itself when it is missing, so
     /// `coroutine.wrap(function() while true do end end)()` would switch the budget off.
     pub fn arm(lua: &Lua, budget: &Rc<Budget>) -> mlua::Result<()> {
+        budget.armed.set(false);
         if !budget.enabled() {
             return Ok(());
         }
-        let budget = budget.clone();
+        let sampled = budget.clone();
         lua.set_global_hook(
             HookTriggers::new().every_nth_instruction(SAMPLE_EVERY_N_INSTRUCTIONS),
             // No Lua calls in here: `luaD_hook` clears `allowhook` for its duration, so
             // anything Lua-side would run unmeasured.
             move |_lua, _debug| {
-                let Some(active) = budget.active.get() else {
+                let Some(active) = sampled.active.get() else {
                     return Ok(VmState::Continue);
                 };
                 if active.start.elapsed() <= active.budget {
                     return Ok(VmState::Continue);
                 }
-                budget.overran.set(true);
+                sampled.overran.set(true);
                 Err(mlua::Error::RuntimeError(
                     "tick exceeded its budget".to_string(),
                 ))
             },
-        )
+        )?;
+        budget.armed.set(true);
+        Ok(())
     }
 
-    pub fn disarm(lua: &Lua) {
+    pub fn disarm(&self, lua: &Lua) {
         lua.remove_global_hook();
+        self.armed.set(false);
     }
+
     /// `tick_budget_ms = 0` switches the budget off entirely: no hook, no measurement, no
     /// counting (§5.1). Someone stepping through a plugin under a breakpoint needs that, and
     /// the alternative — every tick overrunning at its first sample — unsubscribes everything.
@@ -133,14 +145,67 @@ mod tests {
     use super::*;
 
     fn armed(tick_budget_ms: u64) -> (Lua, Rc<Budget>) {
+        let (lua, budget, _) = armed_with_opts(tick_budget_ms);
+        (lua, budget)
+    }
+
+    /// The same, keeping the options handle so a test can change the budget mid-frame.
+    fn armed_with_opts(tick_budget_ms: u64) -> (Lua, Rc<Budget>, Rc<RefCell<Opts>>) {
         let lua = crate::vm::new_vm().unwrap();
         let opts = Rc::new(RefCell::new(Opts {
             tick_budget_ms,
             ..Opts::default()
         }));
-        let budget = Budget::new(opts);
+        let budget = Budget::new(opts.clone());
         Budget::arm(&lua, &budget).unwrap();
-        (lua, budget)
+        (lua, budget, opts)
+    }
+
+    /// Long enough that any budget in this module's tests would cut it off, short enough to
+    /// finish: a test that turns the budget on mid-frame cannot spin forever to prove it.
+    fn slow(lua: &Lua) -> Function {
+        lua.load("return function() local n = 0 for _ = 1, 20000000 do n = n + 1 end return n end")
+            .eval()
+            .unwrap()
+    }
+
+    /// A tick that raises the budget from 0 gives the rest of the frame a deadline no hook is
+    /// watching. Measuring that window would leave a loop in a later source uninterruptible,
+    /// so the frame stays unmeasured until the next one arms.
+    #[test]
+    fn a_budget_raised_mid_frame_does_not_measure_the_rest_of_it() {
+        let (lua, budget, opts) = armed_with_opts(0);
+        let slow = slow(&lua);
+
+        opts.borrow_mut().tick_budget_ms = 1;
+        budget.enter();
+        let result = slow.call::<i64>(());
+        let outcome = budget.leave();
+
+        assert_eq!(result.unwrap(), 20_000_000);
+        assert!(!budget.overran(), "an unhooked frame recorded an overrun");
+        assert_eq!(
+            outcome,
+            Outcome::WithinBudget,
+            "a budget nothing was watching was billed anyway"
+        );
+    }
+
+    /// The other direction: the hook is armed and still installed, and switching the budget
+    /// off mid-frame has to stop it firing.
+    #[test]
+    fn a_budget_lowered_to_zero_mid_frame_stops_measuring() {
+        let (lua, budget, opts) = armed_with_opts(1);
+        let slow = slow(&lua);
+
+        opts.borrow_mut().tick_budget_ms = 0;
+        budget.enter();
+        let result = slow.call::<i64>(());
+        let outcome = budget.leave();
+
+        assert_eq!(result.unwrap(), 20_000_000);
+        assert!(!budget.overran(), "a disabled budget cut a tick off");
+        assert_eq!(outcome, Outcome::WithinBudget);
     }
 
     /// The flag after the loop is what makes "cut off" legible: without it a regression that
@@ -225,7 +290,7 @@ mod tests {
     #[test]
     fn disarming_leaves_a_tick_unmeasured() {
         let (lua, budget) = armed(1);
-        Budget::disarm(&lua);
+        budget.disarm(&lua);
         let long: Function = lua
             .load("return function() local n = 0 for _ = 1, 5000000 do n = n + 1 end return n end")
             .eval()
