@@ -4,8 +4,13 @@ use mlua::{Lua, LuaOptions, StdLib, Table, Value};
 const SEAL: &str = r#"
 do
   local _load = load
-  load = function(chunk, chunkname, _mode, env)
-    return _load(chunk, chunkname, "t", env)
+  -- Lua distinguishes an absent 4th argument from an explicit nil one, so forward the
+  -- environment only when the caller supplied it; otherwise the chunk gets a nil _ENV.
+  load = function(chunk, chunkname, _mode, ...)
+    if select('#', ...) == 0 then
+      return _load(chunk, chunkname, "t")
+    end
+    return _load(chunk, chunkname, "t", ...)
   end
 end
 "#;
@@ -136,12 +141,73 @@ mod tests {
     }
 
     #[test]
+    fn load_refuses_a_binary_chunk_through_the_three_argument_shape() {
+        let lua = new_vm().unwrap();
+        let ok: bool = lua
+            .load(
+                r#"
+                local chunk = string.dump(function() return 1 end)
+                local f = load(chunk, "bin")
+                return f == nil
+                "#,
+            )
+            .eval()
+            .unwrap();
+        assert!(ok, "load accepted a binary chunk");
+    }
+
+    #[test]
+    fn load_refuses_a_binary_chunk_through_the_four_argument_shape() {
+        let lua = new_vm().unwrap();
+        let ok: bool = lua
+            .load(
+                r#"
+                local chunk = string.dump(function() return 1 end)
+                local f = load(chunk, "bin", "b", _ENV)
+                return f == nil
+                "#,
+            )
+            .eval()
+            .unwrap();
+        assert!(ok, "load accepted a binary chunk");
+    }
+
+    #[test]
     fn load_still_compiles_text() {
         let lua = new_vm().unwrap();
         let n: i64 = lua
-            .load("local f = load('return 7') return f()")
+            .load("local f = load('return 7 + #tostring(7)') return f()")
+            .eval()
+            .unwrap();
+        assert_eq!(n, 8);
+    }
+
+    #[test]
+    fn a_loaded_chunk_can_reach_the_globals() {
+        let lua = new_vm().unwrap();
+        let kind: String = lua
+            .load("local f = load('return type(string)') return f()")
+            .eval()
+            .unwrap();
+        assert_eq!(kind, "table");
+    }
+
+    #[test]
+    fn an_explicitly_supplied_environment_replaces_the_globals() {
+        let lua = new_vm().unwrap();
+        let n: i64 = lua
+            .load("local f = load('return x', 'c', 't', {x = 7}) return f()")
             .eval()
             .unwrap();
         assert_eq!(n, 7);
+
+        let hidden: bool = lua
+            .load("local f = load('return string', 'c', 't', {}) return f() == nil")
+            .eval()
+            .unwrap();
+        assert!(
+            hidden,
+            "the supplied environment should not see the globals"
+        );
     }
 }

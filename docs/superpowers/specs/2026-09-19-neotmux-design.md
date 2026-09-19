@@ -473,7 +473,9 @@ On top of that, the host:
 - wraps the global `load` in Lua so the `mode` argument is forced to `"t"` (the Lua default is
   `"bt"`, and the manual warns that crafted bytecode can crash the interpreter). Wrapping in
   Lua rather than Rust keeps the reader-function form of `load` working. `loadstring` does not
-  exist in 5.4
+  exist in 5.4. The wrapper forwards the environment argument only when the caller actually
+  supplied one: Lua tells an absent 4th argument from an explicit `nil`, and passing `nil`
+  leaves the chunk with a nil `_ENV` and no reachable global
 - loads every plugin chunk with `Chunk::set_mode(ChunkMode::Text)`. mlua's automatic detection
   loads a binary chunk if it sees the signature, so the host's own load path needs this too
 

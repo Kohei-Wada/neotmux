@@ -645,3 +645,18 @@ fn a_log_call_from_inside_a_resumed_coroutine_is_attributed_to_its_chunk() {
         .expect("the coroutine's log line never arrived");
     assert_eq!(sub.sources().name(*id).as_deref(), Some("plugin/threaded"));
 }
+
+#[test]
+fn a_chunk_built_with_load_can_reach_the_host_api() {
+    let dir = layer(&[(
+        "init.lua",
+        "local f = assert(load(\"neotmux.log.info('from a loaded chunk')\")) f()",
+    )]);
+    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let failures = sub.run_init();
+    assert!(failures.is_empty(), "{failures:?}");
+
+    let ops = sub.drain_ops();
+    let text = format!("{ops:?}");
+    assert!(text.contains("from a loaded chunk"), "{text}");
+}
