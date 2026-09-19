@@ -15,7 +15,7 @@ use crate::logging;
 use crate::notify::Notifications;
 use crate::overlay;
 use crate::panes::PaneLayout;
-use crate::render::{draw_grid, layout};
+use crate::render::{cursor_position, draw_grid, layout};
 use crate::shells::Shells;
 use crate::signals::ShutdownSignal;
 
@@ -328,6 +328,7 @@ impl Session {
                 let area = frame.area();
                 let (pane_area, status_area) = layout(area, has_status);
                 let focus = pane_layout.focus();
+                let mut focused_cell = None;
                 for (pane, rect) in pane_layout.showable() {
                     let Some(grid) = shells.grid(pane) else {
                         continue;
@@ -339,7 +340,15 @@ impl Session {
                         height: rect.h,
                     }
                     .intersection(pane_area);
-                    draw_grid(frame, cell, grid, focus == Some(pane));
+                    draw_grid(frame, cell, grid);
+                    if focus == Some(pane) {
+                        focused_cell = Some((cell, grid));
+                    }
+                }
+                if let Some(position) =
+                    focused_cell.and_then(|(cell, grid)| cursor_position(cell, grid))
+                {
+                    frame.set_cursor_position(position);
                 }
                 overlay::apply(frame, pane_area, cmds, &pane_layout.rects);
                 if has_status {

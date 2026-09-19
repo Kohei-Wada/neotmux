@@ -121,6 +121,13 @@ no way to close or resize a pane from Lua in v0.1.
 after the change, so a handler's `pane.list()` and `pane.current()` describe the event it is
 being told about.
 
+A terminal too small to hold the tree hides the panes that no longer fit rather than closing
+or shrinking them, and hiding a pane does not unfocus it: keys still go to it, so you are
+typing blind until the terminal grows back. The terminal cursor is hidden for as long as that
+lasts. It has nowhere honest to sit — the panes tile the surface exactly, so any visible cell
+belongs to a pane that is not getting the keys — and no cursor is a better answer than one
+pointing at the wrong pane.
+
 ### Everything else
 
 ```lua
