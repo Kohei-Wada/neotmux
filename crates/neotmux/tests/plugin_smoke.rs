@@ -200,7 +200,9 @@ fn an_init_time_quit_exits_before_entering_the_alternate_screen_and_orders_its_l
     );
 
     let text = fs::read_to_string(&log).unwrap();
-    let loud_at = text.find("loud-marker").expect("loud's log line is missing");
+    let loud_at = text
+        .find("loud-marker")
+        .expect("loud's log line is missing");
     let silent_warn_at = text
         .find("silent: registered nothing")
         .expect("silent's warn line is missing");

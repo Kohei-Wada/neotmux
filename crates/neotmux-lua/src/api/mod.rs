@@ -193,11 +193,12 @@ fn seal(lua: &Lua, real: Table, name: &'static str) -> mlua::Result<Table> {
     let proxy = lua.create_table()?;
     let meta = lua.create_table()?;
     meta.set("__index", real)?;
-    let newindex = lua.create_function(move |_, (_table, key, _value): (Table, Value, Value)| {
-        Err::<(), _>(mlua::Error::RuntimeError(format!(
-            "{name} is read-only, cannot set {key:?}"
-        )))
-    })?;
+    let newindex =
+        lua.create_function(move |_, (_table, key, _value): (Table, Value, Value)| {
+            Err::<(), _>(mlua::Error::RuntimeError(format!(
+                "{name} is read-only, cannot set {key:?}"
+            )))
+        })?;
     meta.set("__newindex", newindex)?;
     meta.set("__metatable", format!("{name} is sealed"))?;
     proxy.set_metatable(Some(meta))?;

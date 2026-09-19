@@ -312,7 +312,11 @@ mod tests {
             let f: mlua::Function = lua.load(body).eval().unwrap();
             std::rc::Rc::new(lua.create_registry_value(f).unwrap())
         };
-        let init_reg = registry.add(INIT, crate::registry::Kind::Tick, key("return function() end"));
+        let init_reg = registry.add(
+            INIT,
+            crate::registry::Kind::Tick,
+            key("return function() end"),
+        );
 
         let failed = lua
             .load("local ok = pcall(require, 'plugin.init') return ok == false")
