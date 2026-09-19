@@ -125,13 +125,13 @@ mod tests {
 
         std::thread::sleep(Duration::from_millis(500));
 
+        pty.child.kill().ok();
+        pty.child.wait().ok();
+
         let mut drained = 0;
         while pty.output().try_recv().is_ok() {
             drained += 1;
         }
-
-        pty.child.kill().ok();
-        pty.child.wait().ok();
 
         assert!(
             drained <= OUTPUT_CHANNEL_BOUND + 1,
