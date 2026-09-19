@@ -332,19 +332,14 @@ mod tests {
 
         drop(shells);
 
+        // Anything but `StillAlive` is an exit, or a reap the drop already did.
         let deadline = Instant::now() + Duration::from_secs(5);
-        loop {
-            match waitpid(pid, Some(WaitPidFlag::WNOHANG)) {
-                Ok(WaitStatus::StillAlive) => {
-                    assert!(
-                        Instant::now() < deadline,
-                        "the child outlived the collection that owned it"
-                    );
-                    std::thread::sleep(Duration::from_millis(10));
-                }
-                // Anything else is an exit, or a reap the drop already did.
-                _ => break,
-            }
+        while let Ok(WaitStatus::StillAlive) = waitpid(pid, Some(WaitPidFlag::WNOHANG)) {
+            assert!(
+                Instant::now() < deadline,
+                "the child outlived the collection that owned it"
+            );
+            std::thread::sleep(Duration::from_millis(10));
         }
     }
 
