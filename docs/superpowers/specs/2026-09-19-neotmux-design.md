@@ -366,12 +366,36 @@ Command buffers from before step 3 fail the epoch check and are not replayed.
 
 ### 4.10 Failure handling at load
 
+**The guarantee: one entry in the init chain failing to load does not abort the rest of the
+config.** A failed entry is inert — its partial registrations are withdrawn, so nothing it
+half-installed can run later — it is reported once by name, and loading continues.
+
 | failure | handling |
 |---|---|
 | `init.lua` raises | log + notify, continue with whatever loaded before the error |
 | `init.lua` absent | normal startup, no plugins |
 | no runtime layer resolves | normal startup, no plugins |
-| a plugin raises during load | that plugin is inert; its partial registrations are removed via its handle set; others unaffected |
+| an entry in the init chain fails to load | that entry is inert; its partial registrations are removed via its handle set; others unaffected |
+
+The mechanism is the **load convention** (§4.1), not `require`, and it is keyed on nesting
+depth rather than on the module name — the host holds no opinion about which names are
+plugins:
+
+- the isolation is armed only while the `init.lua` chain is running. A `require` reached at
+  runtime, out of a tick callback or a keymap, is an ordinary `require` and its error
+  propagates to whoever called it
+- while armed, a `require` with no other `require` below it on the stack is a
+  load-convention load: on failure its source's registrations are removed, the failure is
+  recorded against that source, and it evaluates to `nil`
+- a `require` nested inside another `require` propagates its error normally. A plugin's own
+  missing dependency is that plugin's error: it aborts that plugin, is attributed to it, and
+  surfaces as the outer load's recorded failure
+- a module that does not resolve to a file at all — a typo, a plugin that is not installed —
+  never ran and owns no registrations, so nothing is removed and the failure is recorded
+  under the name that was asked for
+
+This is nvim's shape: isolation lives in the thing that iterates what to load, not in
+`require`.
 
 ### 4.11 Exit criteria (machine-checkable)
 

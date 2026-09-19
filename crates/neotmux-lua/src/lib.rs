@@ -7,7 +7,7 @@ pub mod runtime;
 pub mod source;
 pub mod vm;
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::fs;
 use std::rc::Rc;
 
@@ -48,6 +48,7 @@ pub struct LuaSubsystem {
     ops: Rc<OpBuffer>,
     opts: Rc<RefCell<Opts>>,
     load_failures: Rc<RefCell<Vec<LoadFailure>>>,
+    loading: Rc<Cell<bool>>,
     buffers: Rc<Buffers>,
     geometry: Rc<RefCell<Geometry>>,
 }
@@ -66,7 +67,7 @@ impl LuaSubsystem {
         let load_failures = Rc::new(RefCell::new(Vec::new()));
         let geometry = Rc::new(RefCell::new(Geometry::default()));
 
-        api::install(
+        let loading = api::install(
             &lua,
             sources.clone(),
             registry.clone(),
@@ -85,12 +86,14 @@ impl LuaSubsystem {
             ops,
             opts,
             load_failures,
+            loading,
             buffers: Rc::new(Buffers::new()),
             geometry,
         })
     }
 
     pub fn run_init(&self) -> Vec<LoadFailure> {
+        self.loading.set(true);
         for layer in self.layers.paths() {
             let init_path = layer.join("init.lua");
             let source = match fs::read(&init_path) {
@@ -130,6 +133,7 @@ impl LuaSubsystem {
             }
         }
 
+        self.loading.set(false);
         std::mem::take(&mut *self.load_failures.borrow_mut())
     }
 

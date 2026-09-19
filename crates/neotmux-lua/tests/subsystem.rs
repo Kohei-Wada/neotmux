@@ -507,3 +507,76 @@ fn a_notify_from_a_plugin_tick_callback_is_attributed_to_the_plugin() {
         .expect("no notify op");
     assert_eq!(sub.sources().name(*id).as_deref(), Some("plugin/ticker"));
 }
+
+#[test]
+fn an_unresolvable_require_leaves_anonymous_registrations_alone() {
+    // The callback is written inside a `load(...)` chunk, so it has no `@path` source and is
+    // owned by ANONYMOUS — the bucket an unresolvable module would otherwise be filed under.
+    let dir = layer(&[(
+        "init.lua",
+        "neotmux.on_tick(load('return function() end')()) require('plugin.does_not_exist')",
+    )]);
+    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let failures = sub.run_init();
+
+    assert_eq!(failures.len(), 1, "{failures:?}");
+    assert_eq!(failures[0].plugin, "plugin.does_not_exist", "{failures:?}");
+    assert_eq!(
+        sub.registry().snapshot(KindTag::Tick).len(),
+        1,
+        "an unresolvable require wiped registrations it never owned"
+    );
+}
+
+#[test]
+fn a_plugins_own_failing_require_is_attributed_to_the_plugin() {
+    let dir = layer(&[
+        ("init.lua", "require('plugin.ok') require('plugin.needy')"),
+        (
+            "lua/plugin/ok.lua",
+            "neotmux.on_tick(function() end) return {}",
+        ),
+        (
+            "lua/plugin/needy.lua",
+            "neotmux.on_tick(function() end) require('plugin.absent_dep') neotmux.on_tick(function() end) return {}",
+        ),
+    ]);
+    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let failures = sub.run_init();
+
+    assert_eq!(failures.len(), 1, "{failures:?}");
+    assert_eq!(
+        failures[0].plugin, "plugin/needy",
+        "the outer load is the failure, not the dependency it asked for"
+    );
+    assert!(failures[0].message.contains("absent_dep"), "{failures:?}");
+
+    let ticks = sub.registry().snapshot(KindTag::Tick);
+    assert_eq!(
+        ticks.len(),
+        1,
+        "the failing plugin's registrations survived"
+    );
+    let owner = sub.registry().owner(ticks[0]).unwrap();
+    assert_eq!(sub.sources().name(owner).as_deref(), Some("plugin/ok"));
+}
+
+#[test]
+fn a_require_outside_init_raises_instead_of_returning_nil() {
+    let dir = layer(&[
+        ("init.lua", "require('plugin.later')"),
+        (
+            "lua/plugin/later.lua",
+            "neotmux.on_tick(function() local ok = pcall(require, 'plugin.absent') neotmux.log.info('ok=' .. tostring(ok)) end) return {}",
+        ),
+    ]);
+    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    assert!(sub.run_init().is_empty());
+    sub.dispatch_tick();
+
+    let text = format!("{:?}", sub.drain_ops());
+    assert!(
+        text.contains("ok=false"),
+        "a require at runtime should raise, not be swallowed by the load convention: {text}"
+    );
+}

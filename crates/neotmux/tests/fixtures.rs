@@ -179,6 +179,20 @@ fn a_callback_registered_during_another_plugins_dispatch_is_owned_by_its_own_chu
     );
 }
 
+/// The load-convention guarantee from a plugin author's seat: one entry in the init chain
+/// that cannot be resolved does not take the rest of the config with it.
+#[test]
+fn a_missing_plugin_in_the_init_chain_does_not_stop_the_rest() {
+    let (mut nt, _init) = start(
+        "require('plugin.not_installed') require('plugin.clock')",
+        "/bin/cat",
+    );
+    nt.wait_for_screen("CLOCK 80x23", PATIENCE);
+    let log = nt.log_text();
+    let line = line_with(&log, "plugin.not_installed");
+    assert!(line.contains("not found"), "{line}");
+}
+
 #[test]
 fn painter_draws_over_the_pane() {
     let (mut nt, _init) = start("require('plugin.painter')", "/bin/cat");

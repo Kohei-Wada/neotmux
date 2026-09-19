@@ -5,7 +5,7 @@ pub mod log;
 pub mod opt;
 pub mod pane;
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use mlua::{Function, Lua, Table, Value};
@@ -57,37 +57,60 @@ fn register(
     make_handle(lua, registry.clone(), id)
 }
 
+/// The load convention, not `require`, owns isolation (§4.10). `loading` is set only while
+/// `run_init` is running and `depth` counts how deep the current `require` is nested, so the
+/// wrapper can tell a load-convention load — a `require` written in an init chain, with no
+/// other `require` below it — from a plugin's own `require` of its dependency and from a
+/// `require` reached at runtime out of a callback. Only the first is swallowed; the other two
+/// raise like any other error, which is what attributes a missing dependency to the plugin
+/// that wanted it.
 fn install_require_wrapper(
     lua: &Lua,
     sources: Rc<Sources>,
     registry: Rc<Registry>,
     load_failures: Rc<RefCell<Vec<LoadFailure>>>,
-) -> mlua::Result<()> {
+) -> mlua::Result<Rc<Cell<bool>>> {
+    let loading = Rc::new(Cell::new(false));
+    let armed = loading.clone();
     let globals = lua.globals();
     let original_require: Function = globals.get("require")?;
+    let depth = Cell::new(0u32);
     let wrapped = lua.create_function(move |lua, modname: String| {
-        match original_require.call::<Value>(modname.clone()) {
-            Ok(value) => Ok(value),
-            Err(err) => match modname.strip_prefix("plugin.") {
-                Some(name) => {
-                    let id = source::resolve_chunk_name(lua, &modname)?
-                        .map(|chunk_name| sources.intern(&chunk_name))
-                        .unwrap_or(source::ANONYMOUS);
-                    registry.remove_all_of(id);
-                    load_failures.borrow_mut().push(LoadFailure {
-                        plugin: sources.name(id).unwrap_or_else(|| name.to_string()),
-                        message: format!("{err:#}"),
-                    });
-                    Ok(Value::Nil)
-                }
-                None => Err(err),
-            },
+        let nested = depth.get() > 0;
+        depth.set(depth.get() + 1);
+        let result = original_require.call::<Value>(modname.clone());
+        depth.set(depth.get() - 1);
+
+        let err = match result {
+            Ok(value) => return Ok(value),
+            Err(err) => err,
+        };
+        if nested || !armed.get() {
+            return Err(err);
         }
+
+        // A module that does not resolve to a file never ran, so it owns no registrations.
+        // Removing "its" registrations without a resolved source would empty whichever
+        // bucket the fallback names — `ANONYMOUS`, which real callbacks share.
+        let failed = source::resolve_chunk_name(lua, &modname)?
+            .map(|chunk_name| sources.intern(&chunk_name));
+        if let Some(id) = failed {
+            registry.remove_all_of(id);
+        }
+        load_failures.borrow_mut().push(LoadFailure {
+            plugin: failed
+                .and_then(|id| sources.name(id))
+                .unwrap_or_else(|| modname.clone()),
+            message: format!("{err:#}"),
+        });
+        Ok(Value::Nil)
     })?;
     globals.set("require", wrapped)?;
-    Ok(())
+    Ok(loading)
 }
 
+/// Returns the flag that arms the load convention (§4.10): the caller sets it while the
+/// `init.lua` chain runs and clears it afterwards.
 pub(crate) fn install(
     lua: &Lua,
     sources: Rc<Sources>,
@@ -96,7 +119,7 @@ pub(crate) fn install(
     opts: Rc<RefCell<Opts>>,
     load_failures: Rc<RefCell<Vec<LoadFailure>>>,
     geometry: Rc<RefCell<Geometry>>,
-) -> mlua::Result<()> {
+) -> mlua::Result<Rc<Cell<bool>>> {
     let neotmux = lua.create_table()?;
 
     {
@@ -187,9 +210,7 @@ pub(crate) fn install(
     let neotmux = seal(lua, neotmux, "neotmux")?;
     lua.globals().set("neotmux", neotmux)?;
 
-    install_require_wrapper(lua, sources, registry, load_failures)?;
-
-    Ok(())
+    install_require_wrapper(lua, sources, registry, load_failures)
 }
 
 /// A plugin assigning `neotmux.on_tick = ...` or replacing `neotmux.log` wholesale would make
