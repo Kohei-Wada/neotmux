@@ -668,11 +668,27 @@ pure data structure over `PaneId`s; it does not own PTYs. The binary owns the ma
 
 ### Rounding and minimum sizes
 
-`assign` works in integer cells and must be total: every cell of the window is covered by
-exactly one pane rect, with no gaps and no overlap, at every size including sizes too
-small to honour the fractions. Rounding error goes to the first child. A split whose
-children would fall below one cell clamps rather than producing an empty rect, because
-`vt100` and the PTY both reject a zero dimension (M0a).
+`assign` works in integer cells and is total: every cell of the window is covered by exactly
+one pane rect, with no gaps and no overlap, at every size including sizes too small to honour
+the fractions. Rounding error goes to the first child.
+
+An earlier draft of this section also said a split whose children fall below one cell "clamps
+rather than producing an empty rect". That cannot be true at the same time as exact tiling — on
+a one-column surface, two side-by-side panes cannot both be clamped to a column without
+overlapping — and it put a `vt100` fact inside a module that does not know a terminal emulator
+exists. The rule is instead split in two:
+
+- **`assign` tiles, and may emit a zero-dimension rect.** It has no minimum and takes no
+  opinion from the terminal.
+- **The minimum is the caller's**, passed into `Tree::split`, which refuses a split whose
+  children would not both clear it. `MIN_GRID` (2x2) stays in `neotmux-term`, where it is what
+  it is: the smallest grid `vt100` 0.16.2 survives, not a property of layout.
+
+That leaves one case the refusal cannot prevent, because the user causes it after the fact:
+**the terminal shrinks below what the existing tree can hold.** A pane whose assigned rect
+falls below the minimum is not rendered for that frame and its PTY keeps its last valid size —
+it is hidden, not resized to something its child cannot handle and not destroyed. Growing the
+terminal back brings it straight back, because the tree never changed.
 
 ### Focus
 
@@ -698,12 +714,21 @@ the tick, never a synchronous mutation from inside a callback.
 
 ### Exit criteria
 
-1. Splitting, focusing, closing and resizing work, driven from Lua, with no pane-related
-   key handling in core.
+1. Splitting and focusing work driven from Lua, with no pane-related key handling in core.
+   That is the whole of `neotmux.pane` — `list`, `current`, `split`, `focus` — and this
+   criterion said "closing and resizing" too, which the frozen list never offered. A pane
+   closes when its own shell exits and resizes when the terminal does; neither is a call a
+   plugin can make. `pane.close` and `pane.resize` are additive and belong after the v0.1
+   freeze, not rushed in before it.
 2. `assign` is covered by a property test: for a tree of any shape and a rect of any size
-   down to 1x1, the output rects tile the input exactly.
-3. The prefix key ships as a plugin file, and deleting its `require` line leaves a working
-   multiplexer with no prefix.
+   down to 1x1, the output rects tile the input exactly. Both halves of the quantifier are
+   discharged: a fixed table of shapes and sizes as the reproducible core, and a few hundred
+   shapes and sizes generated from a fixed seed so that "any" is not six of them.
+3. The prefix key ships as a plugin file, and switching it off leaves a working multiplexer
+   with no prefix. There is no `require` line to delete: the shipped `init.lua` loops over
+   the names in `neotmux.defaults`, so the one-line equivalent from a user's own config is
+   `require('neotmux.defaults').prefix = false`. Deleting the shipped `lua/plugin/` does it
+   too — the loop's `package.searchpath` guard makes that an opt-out rather than an error.
 4. Closing the last pane exits, and the terminal is restored (the M0a guarantee still
    holds with a tree in place).
 

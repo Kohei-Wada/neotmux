@@ -4,7 +4,11 @@ use std::thread;
 
 use anyhow::Context as _;
 use neotmux_core::proto::Size;
-use portable_pty::{Child, CommandBuilder, ExitStatus, MasterPty, PtySize, native_pty_system};
+use portable_pty::{Child, ExitStatus, MasterPty, PtySize, native_pty_system};
+
+// `spawn` takes one, so it is part of this crate's surface either way: re-exported so a
+// caller does not need its own dependency on portable-pty to name the type.
+pub use portable_pty::CommandBuilder;
 
 pub enum PtyEvent {
     Output(Vec<u8>),
@@ -102,6 +106,15 @@ impl PtyHandle {
 
     pub fn wait(&mut self) -> io::Result<ExitStatus> {
         self.child.wait()
+    }
+
+    /// Sends the child SIGHUP and returns at once, saying nothing about when — or whether —
+    /// it dies. `Child::kill` cannot be used for this: portable-pty's implementation for a
+    /// `std::process::Child` follows the signal with up to 200 ms of polling and then a
+    /// SIGKILL. The killer `clone_killer` splits off sends the signal and does nothing else,
+    /// which is the whole of what a caller inside the frame loop can afford.
+    pub fn hangup(&mut self) -> io::Result<()> {
+        self.child.clone_killer().kill()
     }
 
     pub fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {

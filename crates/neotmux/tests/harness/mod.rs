@@ -9,8 +9,8 @@ use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system}
 /// The env/args every neotmux test invocation needs: an isolated HOME and
 /// XDG_CONFIG_HOME (so the binary never touches the developer's own config)
 /// and a log file inside that same isolation directory.
-pub fn base_command(log: &Path, isolation: &Path) -> CommandBuilder {
-    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_neotmux"));
+pub fn base_command(exe: &Path, log: &Path, isolation: &Path) -> CommandBuilder {
+    let mut cmd = CommandBuilder::new(exe);
     cmd.env("TERM", "xterm-256color");
     cmd.env("HOME", isolation);
     cmd.env("XDG_CONFIG_HOME", isolation);
@@ -83,10 +83,39 @@ impl Neotmux {
     }
 
     pub fn start_layered(layers: &[&Path], shell: &str) -> Self {
+        Self::start_sized(layers, shell, ROWS, COLS)
+    }
+
+    /// A terminal of a chosen size, for the cases where the size is the point — a surface
+    /// too small to split, for instance.
+    pub fn start_sized(layers: &[&Path], shell: &str, rows: u16, cols: u16) -> Self {
+        let runtime = layers
+            .iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join(":");
+        Self::spawn(
+            env!("CARGO_BIN_EXE_neotmux").as_ref(),
+            Some(runtime),
+            shell,
+            rows,
+            cols,
+        )
+    }
+
+    /// An installed tree: `<prefix>/bin/neotmux` run with no `NEOTMUX_RUNTIME`, so the
+    /// shipped layer has to be found the way an installed neotmux finds it — next to the
+    /// binary. Pointing the tests at the source tree instead is what let an install ship a
+    /// layer that errored on every start.
+    pub fn start_installed(prefix: &Path, shell: &str) -> Self {
+        Self::spawn(&prefix.join("bin/neotmux"), None, shell, ROWS, COLS)
+    }
+
+    fn spawn(exe: &Path, runtime: Option<String>, shell: &str, rows: u16, cols: u16) -> Self {
         let pair = native_pty_system()
             .openpty(PtySize {
-                rows: ROWS,
-                cols: COLS,
+                rows,
+                cols,
                 pixel_width: 0,
                 pixel_height: 0,
             })
@@ -95,14 +124,10 @@ impl Neotmux {
         let isolation = tempfile::tempdir().expect("isolation dir");
         let log = isolation.path().join("neotmux.log");
 
-        let runtime = layers
-            .iter()
-            .map(|p| p.to_string_lossy().into_owned())
-            .collect::<Vec<_>>()
-            .join(":");
-
-        let mut cmd = base_command(&log, isolation.path());
-        cmd.env("NEOTMUX_RUNTIME", runtime);
+        let mut cmd = base_command(exe, &log, isolation.path());
+        if let Some(runtime) = runtime {
+            cmd.env("NEOTMUX_RUNTIME", runtime);
+        }
         cmd.env("SHELL", resolve_shell(shell));
 
         let child = pair.slave.spawn_command(cmd).expect("spawn");
@@ -110,7 +135,7 @@ impl Neotmux {
 
         let mut reader = pair.master.try_clone_reader().expect("clone reader");
         let writer = pair.master.take_writer().expect("take writer");
-        let parser = Arc::new(Mutex::new(vt100::Parser::new(ROWS, COLS, 0)));
+        let parser = Arc::new(Mutex::new(vt100::Parser::new(rows, cols, 0)));
         let (tx, byte_rx) = mpsc::channel();
 
         let parser_clone = parser.clone();
@@ -193,6 +218,18 @@ impl Neotmux {
 
     pub fn log_text(&self) -> String {
         std::fs::read_to_string(&self.log).unwrap_or_default()
+    }
+
+    /// Blocks until the process is gone, and reports whether it left cleanly.
+    pub fn exited_cleanly(&mut self, timeout: Duration) -> bool {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if let Some(status) = self.child.try_wait().expect("try_wait") {
+                return status.success();
+            }
+            assert!(Instant::now() < deadline, "neotmux did not exit");
+            std::thread::sleep(Duration::from_millis(20));
+        }
     }
 
     pub fn bytes_in(&mut self, duration: Duration) -> usize {

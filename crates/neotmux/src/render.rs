@@ -43,6 +43,25 @@ pub fn layout(area: Rect, has_status: bool) -> (Rect, Rect) {
     }
 }
 
+/// The one place the terminal's single cursor is put. It belongs in the focused pane, because
+/// that is where the keys are going, at that pane's own cursor cell.
+///
+/// `None` parks it nowhere, which hides it, and that is the answer whenever the focused pane
+/// has no visible cell to offer: its grid hides its own cursor, the cursor sits outside the
+/// rect the pane was given, or — §6's case — the terminal shrank until the focused pane could
+/// not be shown at all. The panes tile the surface exactly, so every other visible cell
+/// belongs to a pane that is *not* receiving the keys; a cursor blinking in one of those would
+/// say the keys are going somewhere they are not. Typing blind is the documented cost of a
+/// terminal too small for the tree; lying about where the typing lands is not.
+pub fn cursor_position(area: Rect, grid: &GridSnapshot) -> Option<Position> {
+    if grid.hide_cursor {
+        return None;
+    }
+    let (row, col) = grid.cursor;
+    (row < area.height && col < area.width).then(|| Position::new(area.x + col, area.y + row))
+}
+
+/// Draws one pane's grid into `area`.
 pub fn draw_grid(frame: &mut Frame, area: Rect, grid: &GridSnapshot) {
     let buf = frame.buffer_mut();
     let rows = grid.size.rows.min(area.height);
@@ -70,13 +89,6 @@ pub fn draw_grid(frame: &mut Frame, area: Rect, grid: &GridSnapshot) {
             dst.modifier = modifier;
         }
     }
-
-    if !grid.hide_cursor {
-        let (crow, ccol) = grid.cursor;
-        if crow < area.height && ccol < area.width {
-            frame.set_cursor_position(Position::new(area.x + ccol, area.y + crow));
-        }
-    }
 }
 
 #[cfg(test)]
@@ -84,10 +96,16 @@ mod tests {
     use neotmux_core::proto::{Color as PColor, GridSnapshot, Size};
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
-    use ratatui::layout::Rect;
+    use ratatui::layout::{Position, Rect};
     use ratatui::style::Color;
 
-    use super::draw_grid;
+    use super::{cursor_position, draw_grid};
+
+    fn grid_at(row: u16, col: u16) -> GridSnapshot {
+        let mut grid = GridSnapshot::new(Size { rows: 4, cols: 4 });
+        grid.cursor = (row, col);
+        grid
+    }
 
     fn render(grid: &GridSnapshot, w: u16, h: u16) -> ratatui::buffer::Buffer {
         let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
@@ -157,5 +175,44 @@ mod tests {
         let buf = render(&g, 2, 2);
         assert_eq!(buf.area().width, 2);
         assert_eq!(buf.area().height, 2);
+    }
+
+    #[test]
+    fn the_cursor_lands_on_the_focused_panes_own_cell() {
+        let area = Rect::new(10, 5, 4, 4);
+        assert_eq!(
+            cursor_position(area, &grid_at(1, 2)),
+            Some(Position::new(12, 6))
+        );
+    }
+
+    #[test]
+    fn a_grid_that_hides_its_cursor_parks_it_nowhere() {
+        let mut grid = grid_at(1, 2);
+        grid.hide_cursor = true;
+        assert_eq!(cursor_position(Rect::new(0, 0, 4, 4), &grid), None);
+    }
+
+    #[test]
+    fn a_cursor_outside_the_rect_the_pane_was_given_parks_nowhere() {
+        assert_eq!(cursor_position(Rect::new(0, 0, 2, 2), &grid_at(3, 3)), None);
+    }
+
+    /// §6: the terminal shrank until the focused pane cannot be shown. No pane offers the
+    /// cursor a cell, and the terminal ends the frame with it hidden rather than blinking in
+    /// a pane the keys are not going to.
+    #[test]
+    fn a_frame_that_parks_the_cursor_nowhere_leaves_it_hidden() {
+        let mut terminal = Terminal::new(TestBackend::new(4, 4)).expect("terminal");
+        terminal
+            .draw(|frame| frame.set_cursor_position(Position::new(1, 1)))
+            .expect("draw");
+        assert!(terminal.backend().cursor_visible());
+
+        terminal.draw(|_| {}).expect("draw");
+        assert!(
+            !terminal.backend().cursor_visible(),
+            "the cursor stayed visible with no pane to own it"
+        );
     }
 }

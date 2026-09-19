@@ -6,6 +6,9 @@ use neotmux_core::proto::{PaneId, Size};
 pub enum Event {
     PaneOutput { pane: PaneId, bytes: Vec<u8> },
     Resized { size: Size },
+    PaneOpened { pane: PaneId },
+    PaneClosed { pane: PaneId },
+    FocusChanged { pane: PaneId },
 }
 
 impl Event {
@@ -13,6 +16,9 @@ impl Event {
         match self {
             Event::PaneOutput { .. } => "pane_output",
             Event::Resized { .. } => "resized",
+            Event::PaneOpened { .. } => "pane_opened",
+            Event::PaneClosed { .. } => "pane_closed",
+            Event::FocusChanged { .. } => "focus_changed",
         }
     }
 
@@ -39,6 +45,11 @@ impl Event {
             Event::Resized { size } => {
                 table.set("rows", size.rows)?;
                 table.set("cols", size.cols)?;
+            }
+            Event::PaneOpened { pane }
+            | Event::PaneClosed { pane }
+            | Event::FocusChanged { pane } => {
+                table.set("pane", pane.get())?;
             }
         }
         Ok(table)

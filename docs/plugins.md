@@ -112,8 +112,21 @@ applied after the tick, so `list()` returns the same thing immediately after a `
 immediately before. This is deliberate: a callback that could reshape the world underneath the
 callbacks running after it would make frame composition depend on dispatch order.
 
-Until M2 lands there is one pane and `split`/`focus` only log that they arrived. The signatures
-will not change.
+A frame applies at most three splits. Each one costs the host a fork, an exec and a terminal,
+none of it inside the tick your budget was measured against, so the number of them one frame
+can be asked for is bounded; the fourth and beyond are refused and logged against you. There is
+no way to close or resize a pane from Lua in v0.1.
+
+`pane_opened`, `pane_closed` and `focus_changed` are dispatched against the layout as it is
+after the change, so a handler's `pane.list()` and `pane.current()` describe the event it is
+being told about.
+
+A terminal too small to hold the tree hides the panes that no longer fit rather than closing
+or shrinking them, and hiding a pane does not unfocus it: keys still go to it, so you are
+typing blind until the terminal grows back. The terminal cursor is hidden for as long as that
+lasts. It has nowhere honest to sit — the panes tile the surface exactly, so any visible cell
+belongs to a pane that is not getting the keys — and no cursor is a better answer than one
+pointing at the wrong pane.
 
 ### Everything else
 
@@ -265,6 +278,26 @@ a plugin that is a millisecond over on a loaded machine has not done anything wr
 
 None of this is a sandbox. Plugins are trusted (below); the budget is there so an *accident*
 costs one plugin one frame instead of costing you the program.
+
+## Turning a shipped default off
+
+neotmux ships two plugins in the runtime layer an install puts on the search path: `status`,
+the default status line, and `prefix`, a `C-a` prefix over `%`, `"` and `o`. Neither is a host
+feature — both are ordinary files making ordinary API calls, and the prefix is the only reason
+a fresh install can make a second pane at all.
+
+Every layer's `init.lua` runs, earliest layer first, and the shipped layer is last — so your
+own `init.lua` can decide what the shipped ones do:
+
+```lua
+-- ~/.config/neotmux/init.lua
+require('neotmux.defaults').status = false
+require('neotmux.defaults').prefix = false
+```
+
+That is a Lua module the runtime layer ships, not a host feature: neotmux has no idea the
+defaults table exists. Deleting the installed `lua/plugin/` directory works too, and leaves a
+multiplexer with no status line, no prefix and no error.
 
 ## Reloading
 

@@ -1,6 +1,7 @@
 //! The §4.11 fixture plugin set: real `.lua` files under `tests/fixtures`, loaded through
 //! the ordinary runtime-layer resolution and the ordinary `require`, driven over a PTY.
 
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 mod harness;
@@ -18,15 +19,17 @@ fn start(init: &str, shell: &str) -> (Neotmux, tempfile::TempDir) {
     (nt, dir)
 }
 
+/// The shipped layer behind a thin user layer, which is what an installed neotmux runs:
+/// every shipped default loads unless the user's own `init.lua` turns it off.
+fn start_shipped(init: &str, shell: &str) -> (Neotmux, tempfile::TempDir) {
+    let dir = harness::runtime(&[("init.lua", init)]);
+    let nt = Neotmux::start_layered(&[dir.path(), &shipped_layer()], shell);
+    (nt, dir)
+}
+
 fn line_with<'a>(log: &'a str, marker: &str) -> &'a str {
     log.lines()
         .find(|line| line.contains(marker))
-        .unwrap_or_else(|| panic!("no log line contains {marker:?}:\n{log}"))
-}
-
-fn index_of(log: &str, marker: &str) -> usize {
-    log.lines()
-        .position(|line| line.contains(marker))
         .unwrap_or_else(|| panic!("no log line contains {marker:?}:\n{log}"))
 }
 
@@ -131,9 +134,9 @@ fn remover_removes_twice_without_raising_and_its_callback_never_runs() {
 }
 
 #[test]
-fn the_pane_stub_answers_today_and_its_ops_travel_on_the_op_buffer() {
+fn the_pane_ops_apply_after_the_tick_and_in_the_order_they_were_pushed() {
     let (nt, _init) = start("require('plugin.panes')", "/bin/cat");
-    let log = nt.wait_for_log("panes list after split=", PATIENCE);
+    let log = nt.wait_for_log("panes applied list=", PATIENCE);
 
     let listed = line_with(&log, "panes list=");
     assert!(listed.contains("list=1 first=1 current=1"), "{listed}");
@@ -142,28 +145,15 @@ fn the_pane_stub_answers_today_and_its_ops_travel_on_the_op_buffer() {
     assert!(bad.contains("ok=false"), "{bad}");
     assert!(bad.contains("unknown split direction"), "{bad}");
 
-    // What is pinned is that the op arrived attributed to the chunk that made the call.
-    // What the placeholder note says about it is M2's to delete.
-    let split = line_with(&log, "pane.split(");
-    assert!(split.contains("plugin/panes"), "{split}");
-    assert!(split.contains("vertical"), "{split}");
-
-    let focus = line_with(&log, "pane.focus(");
-    assert!(focus.contains("plugin/panes"), "{focus}");
-    assert!(focus.contains("%1"), "{focus}");
-
     assert!(
         line_with(&log, "panes list after split=").contains("after split=1"),
         "split mutated the pane list synchronously, inside the callback"
     );
-    // split and focus travel on the same single op buffer as the fixture's own log calls,
-    // so they land in the order they were pushed (§4.6), not wherever the binding ran.
-    assert!(
-        index_of(&log, "panes list=1") < index_of(&log, "pane.split(")
-            && index_of(&log, "pane.split(") < index_of(&log, "pane.focus(")
-            && index_of(&log, "pane.focus(") < index_of(&log, "panes list after split="),
-        "the pane ops did not drain in the order they were pushed:\n{log}"
-    );
+
+    // The split focuses the pane it made, so a focus back to %1 surviving means the two ops
+    // drained in the order they were pushed (§4.6) rather than in the order they ran.
+    let applied = line_with(&log, "panes applied list=");
+    assert!(applied.contains("list=2 current=1"), "{applied}");
 }
 
 #[test]
@@ -214,15 +204,11 @@ fn nothing_is_written_while_nothing_happens() {
 /// key after it reach it only through `on_key`, and both are swallowed before the PTY.
 #[test]
 fn prefix_swallows_its_key_and_the_next_one_while_an_unrelated_key_gets_through() {
-    let (mut nt, _init) = start("require('plugin.prefix')", "cat");
+    let (mut nt, _init) = start_shipped("", "cat");
     nt.send("\x01"); // C-a, the prefix
     nt.send("z"); // the command key, bound by nobody
     nt.send("Q"); // unrelated, no prefix pending
     nt.send("\r");
-
-    let log = nt.wait_for_log("prefix command z", PATIENCE);
-    assert!(line_with(&log, "prefix armed").contains("plugin/prefix"));
-    assert!(line_with(&log, "prefix command z").contains("plugin/prefix"));
 
     let screen = nt.screen_after(Duration::from_secs(2));
     assert!(
@@ -239,6 +225,120 @@ fn prefix_swallows_its_key_and_the_next_one_while_an_unrelated_key_gets_through(
     );
 }
 
+/// Task 2: one PTY per pane. Both children are alive and each one's output lands in its own
+/// half of the screen, never in the other's.
+#[test]
+fn each_pane_has_its_own_shell_and_its_own_grid() {
+    let (mut nt, _init) = start("require('plugin.splitter')", "cat");
+    nt.send("\x02"); // C-b: split vertically, focusing the new pane
+    nt.wait_for_log("splitter pane_opened 2", PATIENCE);
+
+    nt.send("RIGHT");
+    nt.settle(Duration::from_millis(500));
+    nt.send("\x0f"); // C-o: focus the other pane
+    nt.settle(Duration::from_millis(500));
+    nt.send("LEFT");
+
+    nt.wait_for_screen("LEFT", PATIENCE);
+    let screen = nt.screen_after(Duration::from_millis(500));
+    let row = screen.lines().next().unwrap_or_default().to_string();
+
+    let left = row
+        .find("LEFT")
+        .unwrap_or_else(|| panic!("the left pane never echoed its own input:\n{screen}"));
+    let right = row
+        .find("RIGHT")
+        .unwrap_or_else(|| panic!("the right pane never echoed its own input:\n{screen}"));
+    assert!(
+        left < 40,
+        "pane %1's output is not in its own half of the surface:\n{screen}"
+    );
+    assert!(
+        right >= 40,
+        "pane %2's output landed in pane %1's grid:\n{screen}"
+    );
+}
+
+/// Task 2: a key no plugin consumed reaches the focused pane's PTY and no other.
+#[test]
+fn an_unconsumed_key_reaches_only_the_focused_panes_pty() {
+    let (mut nt, _init) = start("require('plugin.splitter')", "cat");
+    nt.send("\x02");
+    nt.wait_for_log("splitter pane_opened 2", PATIENCE);
+    nt.settle(Duration::from_millis(500));
+
+    nt.send("MARK");
+    nt.wait_for_screen("MARK", PATIENCE);
+    let screen = nt.screen_after(Duration::from_millis(500));
+    assert_eq!(
+        screen.matches("MARK").count(),
+        1,
+        "the key reached more than the focused pane:\n{screen}"
+    );
+}
+
+/// Task 3 step 5: a split the surface cannot hold is reported against the plugin that asked
+/// for it, and nothing changes.
+#[test]
+fn a_refused_split_is_reported_against_the_calling_source() {
+    let dir = harness::runtime(&[("init.lua", "require('plugin.splitter')")]);
+    let fixtures = harness::fixture_layer();
+    let mut nt = Neotmux::start_sized(&[dir.path(), &fixtures], "cat", 24, 2);
+
+    nt.send("\x02");
+    let log = nt.wait_for_log("pane.split", PATIENCE);
+    let refusal = line_with(&log, "pane.split");
+    assert!(refusal.contains("plugin/splitter"), "{refusal}");
+    assert!(refusal.contains("too small"), "{refusal}");
+
+    nt.send("\x07"); // C-g: report the pane list
+    let log = nt.wait_for_log("splitter panes=", PATIENCE);
+    let listed = line_with(&log, "splitter panes=");
+    assert!(listed.contains("panes=1 current=1"), "{listed}");
+}
+
+/// Task 3 step 7: focusing a pane that does not exist is reported, and the session lives on.
+#[test]
+fn focusing_an_unknown_pane_is_reported_and_does_not_stop_the_session() {
+    let (mut nt, _init) = start("require('plugin.splitter')", "cat");
+    nt.send("\x07"); // C-g: report, so the next key is known to arrive after init
+    nt.wait_for_log("splitter panes=", PATIENCE);
+
+    nt.send("\x15"); // C-u: focus a pane id nobody owns
+    let log = nt.wait_for_log("pane.focus", PATIENCE);
+    let refusal = line_with(&log, "pane.focus");
+    assert!(refusal.contains("plugin/splitter"), "{refusal}");
+    assert!(refusal.contains("no such pane"), "{refusal}");
+
+    nt.send("\x07");
+    nt.settle(Duration::from_millis(500));
+    let log = nt.log_text();
+    assert!(
+        line_with(&log, "splitter panes=").contains("panes=1 current=1"),
+        "{log}"
+    );
+}
+
+/// Task 3 step 6: one pane's shell exiting closes that pane only — the survivor keeps
+/// running, takes the space, and takes the focus.
+#[test]
+fn a_pane_whose_shell_exits_is_closed_and_its_sibling_takes_over() {
+    let (mut nt, _init) = start("require('plugin.splitter')", "cat");
+    nt.send("\x02");
+    nt.wait_for_log("splitter pane_opened 2", PATIENCE);
+    nt.settle(Duration::from_millis(500));
+
+    nt.send("\x04"); // C-d: EOF for the focused pane's cat
+    nt.wait_for_log("splitter pane_closed 2", PATIENCE);
+
+    nt.send("\x07");
+    let log = nt.wait_for_log("splitter panes=", PATIENCE);
+    let listed = line_with(&log, "splitter panes=");
+    assert!(listed.contains("panes=1 current=1"), "{listed}");
+
+    nt.send("SURVIVOR");
+    nt.wait_for_screen("SURVIVOR", PATIENCE);
+}
 /// §5.5's first exit criterion in the running program: the offender loses its tick, the
 /// well-behaved neighbour keeps drawing, and the child is still there to talk to.
 fn spinner_is_dropped_while_the_rest_of_the_program_carries_on(module: &str, echo: &str) {
@@ -290,5 +390,364 @@ fn a_coroutine_wrapped_spinner_loses_its_tick_too() {
     spinner_is_dropped_while_the_rest_of_the_program_carries_on(
         "plugin.coroutine_spinner",
         "STILL-HERE-TOO",
+    );
+}
+
+/// Task 4: the prefix does what a prefix is for. `C-a %` splits vertically and `C-a o`
+/// walks to the next pane, both expressed with nothing but `neotmux.pane`.
+#[test]
+fn the_prefix_splits_vertically_and_walks_to_the_next_pane() {
+    let (mut nt, _init) = start_shipped("", "cat");
+    nt.send("\x01%"); // C-a %
+    nt.wait_for_screen("panes 2 focus 2", PATIENCE);
+    nt.settle(Duration::from_millis(500));
+
+    nt.send("RIGHT");
+    nt.settle(Duration::from_millis(500));
+    nt.send("\x01o"); // C-a o
+    nt.settle(Duration::from_millis(500));
+    nt.send("LEFT");
+
+    nt.wait_for_screen("LEFT", PATIENCE);
+    let screen = nt.screen_after(Duration::from_millis(500));
+    let row = screen.lines().next().unwrap_or_default().to_string();
+
+    let left = row
+        .find("LEFT")
+        .unwrap_or_else(|| panic!("the pane the prefix walked back to never echoed:\n{screen}"));
+    let right = row
+        .find("RIGHT")
+        .unwrap_or_else(|| panic!("`C-a %` never produced a second pane:\n{screen}"));
+    assert!(left < 40 && right >= 40, "{screen}");
+    assert!(
+        !screen.contains('%') && !screen.contains("^A"),
+        "a prefix keystroke reached a shell:\n{screen}"
+    );
+}
+
+/// Task 4: `C-a "` splits the other way — the two panes are stacked, not side by side.
+#[test]
+fn the_prefix_splits_horizontally() {
+    let (mut nt, _init) = start_shipped("", "cat");
+    nt.send("\x01\""); // C-a "
+    nt.wait_for_screen("panes 2 focus 2", PATIENCE);
+    nt.settle(Duration::from_millis(500));
+
+    nt.send("BELOW");
+    nt.settle(Duration::from_millis(500));
+    nt.send("\x01o");
+    nt.settle(Duration::from_millis(500));
+    nt.send("ABOVE");
+
+    nt.wait_for_screen("ABOVE", PATIENCE);
+    let screen = nt.screen_after(Duration::from_millis(500));
+    let line_of = |needle: &str| {
+        screen
+            .lines()
+            .position(|line| line.contains(needle))
+            .unwrap_or_else(|| panic!("{needle} never reached a pane:\n{screen}"))
+    };
+    assert!(
+        line_of("ABOVE") < line_of("BELOW"),
+        "the panes are not stacked, so the split was not horizontal:\n{screen}"
+    );
+    assert!(
+        !screen.contains('"'),
+        "the command key reached the shell:\n{screen}"
+    );
+}
+
+/// Task 4 step 5: the prefix is a plugin, not a feature. Switched off from a user config —
+/// the same one line that switches the status line off — `C-a` is an ordinary keystroke and
+/// the multiplexer is otherwise unchanged. That the defaults table works for a second entry
+/// is the point: it is a convention, not a special case for the status line.
+#[test]
+fn a_user_config_can_switch_off_the_shipped_prefix() {
+    let (mut nt, _init) = start_shipped("require('neotmux.defaults').prefix = false", "cat");
+    nt.send("\x01"); // C-a, now bound by nobody
+    nt.send("%");
+    nt.send("PLAIN\r");
+
+    nt.wait_for_screen("PLAIN", PATIENCE);
+    let screen = nt.screen_after(Duration::from_millis(500));
+    assert!(
+        screen.contains("^A"),
+        "C-a was swallowed with no prefix plugin loaded:\n{screen}"
+    );
+    assert!(
+        screen.contains('%'),
+        "the command key was swallowed with no prefix plugin loaded:\n{screen}"
+    );
+    assert!(
+        screen.contains("PLAIN"),
+        "the one pane stopped echoing:\n{screen}"
+    );
+}
+
+/// The runtime layer neotmux ships: the one an install puts on the default search path,
+/// read here straight out of the source tree.
+fn shipped_layer() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime")
+}
+
+fn copy_tree(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).expect("create dir");
+    for entry in std::fs::read_dir(from).expect("read dir") {
+        let entry = entry.expect("dir entry");
+        let target = to.join(entry.file_name());
+        if entry.file_type().expect("file type").is_dir() {
+            copy_tree(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), &target).expect("copy file");
+        }
+    }
+}
+
+/// Task 5: the default status line is a shipped plugin, so it is there with no user config
+/// at all — and it reports the pane tree, which means it follows a split and the focus.
+#[test]
+fn the_shipped_status_line_shows_with_no_user_config() {
+    let init = harness::runtime(&[("init.lua", "require('plugin.splitter')")]);
+    let fixtures = harness::fixture_layer();
+    let shipped = shipped_layer();
+    let mut nt = Neotmux::start_layered(&[init.path(), &fixtures, &shipped], "cat");
+
+    nt.wait_for_screen("panes 1 focus 1", PATIENCE);
+    nt.send("\x02"); // C-b: split, focusing the new pane
+    nt.wait_for_screen("panes 2 focus 2", PATIENCE);
+    nt.send("\x0f"); // C-o: focus the other one
+    nt.wait_for_screen("panes 2 focus 1", PATIENCE);
+}
+
+/// §1's fourth exit criterion for the *shipped* defaults: a user who does not want one
+/// turns it off from their own config, in one line, without touching an installed file.
+/// Every layer's `init.lua` runs earliest-first and the shipped layer is last, so the user's
+/// assignment is in place by the time the shipped `init.lua` reads it.
+#[test]
+fn a_user_config_can_switch_off_a_shipped_default() {
+    let init = harness::runtime(&[("init.lua", "require('neotmux.defaults').status = false")]);
+    let shipped = shipped_layer();
+    let mut nt = Neotmux::start_layered(&[init.path(), &shipped], "cat");
+
+    nt.send("STILL-HERE\r");
+    nt.wait_for_screen("STILL-HERE", PATIENCE);
+
+    let screen = nt.screen_after(Duration::from_millis(500));
+    assert!(
+        !screen.contains("panes "),
+        "the shipped status line ignored the opt-out:\n{screen}"
+    );
+    assert!(
+        nt.log_text().is_empty(),
+        "switching a default off was reported as a failure:\n{}",
+        nt.log_text()
+    );
+}
+
+/// §1's first exit criterion, checked by deletion rather than by grep: with the shipped
+/// `lua/plugin/` gone there is no status line, no error about the missing file, and the
+/// multiplexer still runs a shell and exits cleanly.
+#[test]
+fn deleting_the_shipped_plugins_leaves_a_working_multiplexer() {
+    let stripped = tempfile::tempdir().expect("stripped layer");
+    copy_tree(&shipped_layer(), stripped.path());
+    std::fs::remove_dir_all(stripped.path().join("lua/plugin")).expect("remove the plugin dir");
+
+    let mut nt = Neotmux::start_layered(&[stripped.path()], "cat");
+    nt.send("\x01"); // C-a: an ordinary keystroke with no prefix plugin left to swallow it
+    nt.send("STILL-HERE\r");
+    nt.wait_for_screen("STILL-HERE", PATIENCE);
+
+    let screen = nt.screen_after(Duration::from_millis(500));
+    assert!(
+        !screen.contains("panes "),
+        "a status line survived the deletion:\n{screen}"
+    );
+    assert!(
+        screen.contains("^A"),
+        "a prefix survived the deletion of the file it lives in:\n{screen}"
+    );
+    let log = nt.log_text();
+    assert!(
+        log.is_empty(),
+        "deleting the shipped plugins was reported as a failure:\n{log}"
+    );
+
+    nt.send("\x04"); // EOF: the last pane's shell exits, so neotmux does
+    assert!(nt.exited_cleanly(PATIENCE), "neotmux did not exit cleanly");
+}
+
+/// Builds the install layout in a temp prefix: the Makefile puts the shipped runtime layer
+/// in place, and the already-built test binary stands in for the copy `cargo install` makes.
+fn install_into(prefix: &Path) {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let status = std::process::Command::new("make")
+        .current_dir(&root)
+        .arg("install-runtime")
+        .arg(format!("PREFIX={}", prefix.display()))
+        .status()
+        .expect("run make install-runtime");
+    assert!(status.success(), "make install-runtime failed");
+
+    std::fs::create_dir_all(prefix.join("bin")).expect("create bin");
+    std::fs::copy(env!("CARGO_BIN_EXE_neotmux"), prefix.join("bin/neotmux")).expect("copy binary");
+}
+
+/// The layer an install actually produces, not the one in the source tree. Every other test
+/// here points `NEOTMUX_RUNTIME` at `runtime/`, so they exercise the layer's content and
+/// never its installed layout — which is how an install that copied `init.lua` but not the
+/// module it requires shipped, raising on every single start.
+#[test]
+fn an_installed_neotmux_starts_on_its_shipped_layer() {
+    let prefix = tempfile::tempdir().expect("prefix");
+    install_into(prefix.path());
+
+    let mut nt = Neotmux::start_installed(prefix.path(), "cat");
+    nt.wait_for_screen("panes 1 focus 1", PATIENCE);
+
+    // Out of the box, with no user Lua at all: the shipped prefix is the only way to reach
+    // a second pane, so this is what v0.1's line costs an installed user.
+    nt.send("\x01%"); // C-a %
+    nt.wait_for_screen("panes 2 focus 2", PATIENCE);
+
+    let log = nt.log_text();
+    assert!(
+        log.is_empty(),
+        "the installed layer reported a failure:\n{log}"
+    );
+}
+
+/// An event must describe the session as it is. Before this, `pane_closed` and
+/// `focus_changed` were dispatched at the top of the frame against the geometry published
+/// for the *previous* one, so a handler still saw the dead pane — `pane.current()` included.
+#[test]
+fn a_pane_event_handler_sees_the_tree_the_event_describes() {
+    let (mut nt, _init) = start("require('plugin.splitter')", "cat");
+
+    nt.send("\x02"); // C-b: split
+    let log = nt.wait_for_log("splitter pane_opened 2", PATIENCE);
+    assert!(
+        line_with(&log, "splitter pane_opened 2").contains("panes=2 current=2"),
+        "a pane_opened handler could not see the pane it was told about:\n{log}"
+    );
+
+    nt.send("\x04"); // C-d: EOF for the focused pane's cat
+    let log = nt.wait_for_log("splitter pane_closed 2", PATIENCE);
+    assert!(
+        line_with(&log, "splitter pane_closed 2").contains("panes=1 current=1"),
+        "a pane_closed handler still saw the dead pane:\n{log}"
+    );
+}
+
+/// M1b makes a tick attributable, but a split is applied after the tick: 200 `pane.split`
+/// ops pushed from one callback had the host fork a shell for each, entirely outside any
+/// source's measured slice. The cap is what keeps a plugin from buying unmeasured host work
+/// by queueing it, and the refusal is reported against whoever asked.
+#[test]
+fn a_frame_applies_only_as_many_splits_as_it_can_afford() {
+    let (mut nt, _init) = start(
+        "require('plugin.splitter') require('plugin.flooder')",
+        "cat",
+    );
+
+    nt.send("\x06"); // C-f: 200 splits from one callback
+    let log = nt.wait_for_log("splits per frame", PATIENCE);
+    let refusal = line_with(&log, "splits per frame");
+    assert!(
+        refusal.contains("plugin/flooder"),
+        "the refusal did not name the source that asked: {refusal}"
+    );
+
+    nt.send("\x07"); // C-g: report the pane list
+    let log = nt.wait_for_log("splitter panes=", PATIENCE);
+    let listed = line_with(&log, "splitter panes=");
+    assert!(
+        listed.contains("panes=4"),
+        "the frame forked more shells than its cap allows: {listed}"
+    );
+}
+
+/// Every `resized` the probe plugin logged, in order.
+fn resizes(log: &str) -> Vec<&str> {
+    log.lines()
+        .filter(|line| line.contains("resized "))
+        .collect()
+}
+
+/// The probe: the shipped status line, a plugin that logs every `resized`, and one that
+/// splits and walks the focus on a keystroke.
+fn resize_probe() -> (Neotmux, tempfile::TempDir) {
+    let init = harness::runtime(&[(
+        "init.lua",
+        "require('plugin.splitter') require('plugin.resizes')",
+    )]);
+    let nt = Neotmux::start_layered(
+        &[init.path(), &harness::fixture_layer(), &shipped_layer()],
+        "cat",
+    );
+    (nt, init)
+}
+
+/// A split costs one layout recompute — the one that made room for the new pane's siblings —
+/// and no resize at all. The epoch the frame's draw buffers were committed under used to be
+/// the same value the geometry published to Lua carried, so republishing it mid-frame to give
+/// `pane_opened` a true tree invalidated the status that the tick had already committed. The
+/// host read the empty status as "the status plugin stopped drawing", took its row back and
+/// gave it straight back on the next frame: two recomputes and two SIGWINCHes per split.
+#[test]
+fn a_split_does_not_resize_every_pane() {
+    let (mut nt, _init) = resize_probe();
+    nt.wait_for_screen("panes 1 focus 1", PATIENCE);
+    nt.settle(Duration::from_millis(500));
+    let before = resizes(&nt.log_text()).len();
+
+    nt.send("\x02"); // C-b: split, focusing the new pane
+    nt.wait_for_log("splitter pane_opened 2", PATIENCE);
+    nt.settle(Duration::from_millis(500));
+
+    let log = nt.log_text();
+    let after = resizes(&log);
+    assert_eq!(
+        after.len(),
+        before,
+        "the split resized every pane: the status row blanked for a frame, so the host took \
+         its row back and gave it straight back. Unexpected: {:?}",
+        &after[before.min(after.len())..]
+    );
+    let screen = nt.screen_after(Duration::from_millis(300));
+    assert!(
+        screen.contains("panes 2 focus 2"),
+        "the status row did not survive the split:\n{screen}"
+    );
+}
+
+/// The same for a focus change, which invalidated the epoch for the same reason: focus is one
+/// of the three things it is made of.
+#[test]
+fn a_focus_change_does_not_resize_every_pane() {
+    let (mut nt, _init) = resize_probe();
+    nt.wait_for_screen("panes 1 focus 1", PATIENCE);
+    nt.send("\x02"); // C-b: split
+    nt.wait_for_log("splitter pane_opened 2", PATIENCE);
+    nt.settle(Duration::from_millis(500));
+    let before = resizes(&nt.log_text()).len();
+
+    nt.send("\x0f"); // C-o: focus the other pane
+    nt.wait_for_log("splitter focus_changed 1", PATIENCE);
+    nt.settle(Duration::from_millis(500));
+
+    let log = nt.log_text();
+    let after = resizes(&log);
+    assert_eq!(
+        after.len(),
+        before,
+        "the focus change resized every pane: the status row blanked for a frame, so the host \
+         took its row back and gave it straight back. Unexpected: {:?}",
+        &after[before.min(after.len())..]
+    );
+    let screen = nt.screen_after(Duration::from_millis(300));
+    assert!(
+        screen.contains("panes 2 focus 1"),
+        "the status row did not survive the focus change:\n{screen}"
     );
 }
