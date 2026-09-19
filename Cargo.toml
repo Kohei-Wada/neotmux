@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/neotmux-core", "crates/neotmux-term", "crates/neotmux"]
+members = ["crates/neotmux-core", "crates/neotmux-term", "crates/neotmux-lua", "crates/neotmux"]
 resolver = "3"
 
 [workspace.package]
@@ -10,11 +10,14 @@ repository = "https://github.com/Kohei-Wada/neotmux"
 
 [workspace.dependencies]
 neotmux-core = { path = "crates/neotmux-core" }
+neotmux-lua = { path = "crates/neotmux-lua" }
 neotmux-term = { path = "crates/neotmux-term" }
 anyhow = "1"
 crossterm = "0.29"
+mlua = { version = "0.12", features = ["lua54", "vendored"] }
 nix = { version = "0.28", features = ["term", "signal"] }
 portable-pty = "0.9"
 ratatui = "0.30"
 signal-hook = "0.3.18"
+tempfile = "3"
 vt100 = "0.16"

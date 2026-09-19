@@ -165,8 +165,30 @@ So attribution is designed in, not assumed:
 - a registration with neither (e.g. from a bare `init.lua` line) is attributed to
   `"init"`; one from a library `require`d outside a plugin chunk is attributed to the plugin
   that triggered the `require`, or `"anonymous"` if there is none
-- identity is a host-side `PluginId` with a display name; it is never derived from Lua state
-  at call time
+- identity is a host-side `PluginId` with a display name
+- `require('plugin.foo')` and `require('plugin.foo.init')` can resolve to the same file
+  (`?.lua` and `?/init.lua` are both on `package.path`); the searcher interns the name from
+  the resolved file path, not from the string passed to `require`, so either spelling gives
+  the same `PluginId` instead of splitting one plugin's registrations across two
+
+**The loader-push stack alone misses the idiom every plugin author reaches for coming from
+nvim**: `local m = require('plugin.clock'); m.setup{}`. The chunk runs and the searcher pops
+its identity before `setup` is ever called, so a registration made from inside `setup` — or
+from any function pulled out of the module table, including on a second `require` that hits
+`package.loaded` and never re-enters the searcher — sees an empty stack. Falling back to
+`"init"` there is wrong: `setup`'s registrations are the plugin's own and must be
+unsubscribable by its `PluginId` (§5.3).
+
+So registration attribution has a second step: **when the stack is empty, ask mlua where the
+registering callback's chunk came from.** `Function::info().source` goes through
+`lua_getinfo` in Rust, not the `debug` library, so it survives stripping `debug` (§5.2). The
+loader names every plugin chunk `@<layer>/lua/plugin/<name>.lua` (or `.../<name>/init.lua`),
+so the source string maps back to the same plugin name the searcher would have interned. If
+the source doesn't look like a plugin chunk — `init.lua` itself, or a `neotmux.*` library
+loaded outside any plugin — `"init"` remains correct. A library helper that registers while
+some other plugin is genuinely current still follows the stack, not its own source, so it is
+attributed to whoever is current. Identity is still a host-side `PluginId`; only this one
+fallback derives it from Lua state, and only when the stack has nothing to say.
 
 Because `debug` is unavailable, Lua-level tracebacks for error messages are produced by the
 host: the error path attaches the captured `PluginId` and the chunk name rather than asking
@@ -276,7 +298,12 @@ Command buffers from before step 3 fail the epoch check and are not replayed.
 - log initialisation failure is reported on stderr **before raw mode is entered**, then
   startup continues. A full-screen TUI cannot use stderr afterwards (ttymap #226 is the silent
   version of this bug)
-- `neotmux.log.{info,warn,error}` for plugins, tagged with the calling `PluginId`
+- `neotmux.log.{info,warn,error}` for plugins, tagged with the plugin identity on the top of
+  the stack (§4.2). A call made from a post-`require` `setup()` — after the searcher has
+  already popped that plugin's identity — has no callback to inspect the way registration
+  does, so it falls back to `"init"` rather than the plugin's own id. Closing this needs
+  `Lua::inspect_stack` to recover the calling chunk's source directly instead of the
+  registration path's `Function::info()`; deferred to part 2
 - notifications (budget overruns, unsubscribes, key conflicts) render through a **host-owned**
   surface, not a plugin. If notification rendering itself fails, the message still reaches the
   log, and is flushed to stderr after the terminal is restored at exit
@@ -421,6 +448,15 @@ panic hook that restores first; the test suite includes a plugin that panics the
 asserts `termios` afterwards, because this is the only failure whose blast radius is the
 user's shell session.
 
+**Known hole, left open by design in M1a: a tick callback that never returns.** `dispatch_tick`
+calls straight into the registered Lua function with no time limit, so `while true do end` in
+one plugin's tick blocks the frame loop forever. `shutdown.raised()` is checked once per frame
+(§2), so it becomes unreachable, and SIGTERM cannot be delivered — the terminal stays in the
+alternate screen until SIGKILL, which this invariant cannot cover without one. This is not an
+oversight to patch here: it is exactly the failure mode M1b's instruction-count budget (§5.1)
+exists to close, by making the hook return `Err` before the frame loop can hang. Inventing a
+second interruption mechanism in M1a would duplicate that work and is explicitly out of scope.
+
 ## 7. Trust model
 
 Plugins are fully trusted: Lua in the host VM, able to quit the application, rebind every key,
@@ -434,6 +470,11 @@ conclusion in ttymap and deleted the allow-list built there (`76abece`).
 The budget therefore defends against **accidents, not malice**: a development-time infinite
 loop, a legitimately heavy plugin that is occasionally slow, a pathological input, a
 third-party plugin with a bug. The `pcall` hole (§5.4) is the honest consequence.
+
+The same applies to the `neotmux` table seal: it catches `neotmux.on_tick = ...` by mistake,
+not a plugin determined to bypass it — `rawset(neotmux, 'on_tick', ...)` still reaches the
+real table, and closing that would cost every plugin its legitimate use of `rawset` to stop a
+deliberate act the trust model already permits.
 
 ## 8. Testing
 

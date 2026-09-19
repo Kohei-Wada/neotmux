@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 neotmux-core.workspace = true
+neotmux-lua.workspace = true
 neotmux-term.workspace = true
 anyhow.workspace = true
 crossterm.workspace = true
@@ -17,3 +18,4 @@ signal-hook.workspace = true
 [dev-dependencies]
 portable-pty.workspace = true
 nix.workspace = true
+tempfile.workspace = true
