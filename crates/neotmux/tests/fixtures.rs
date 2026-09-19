@@ -387,3 +387,92 @@ fn a_coroutine_wrapped_spinner_loses_its_tick_too() {
         "STILL-HERE-TOO",
     );
 }
+
+/// Task 4: the prefix does what a prefix is for. `C-a %` splits vertically and `C-a o`
+/// walks to the next pane, both expressed with nothing but `neotmux.pane`.
+#[test]
+fn the_prefix_splits_vertically_and_walks_to_the_next_pane() {
+    let (mut nt, _init) = start("require('plugin.prefix')", "cat");
+    nt.send("\x01%"); // C-a %
+    nt.wait_for_log("prefix command %", PATIENCE);
+    nt.settle(Duration::from_millis(500));
+
+    nt.send("RIGHT");
+    nt.settle(Duration::from_millis(500));
+    nt.send("\x01o"); // C-a o
+    nt.settle(Duration::from_millis(500));
+    nt.send("LEFT");
+
+    nt.wait_for_screen("LEFT", PATIENCE);
+    let screen = nt.screen_after(Duration::from_millis(500));
+    let row = screen.lines().next().unwrap_or_default().to_string();
+
+    let left = row
+        .find("LEFT")
+        .unwrap_or_else(|| panic!("the pane the prefix walked back to never echoed:\n{screen}"));
+    let right = row
+        .find("RIGHT")
+        .unwrap_or_else(|| panic!("`C-a %` never produced a second pane:\n{screen}"));
+    assert!(left < 40 && right >= 40, "{screen}");
+    assert!(
+        !screen.contains('%') && !screen.contains("^A"),
+        "a prefix keystroke reached a shell:\n{screen}"
+    );
+}
+
+/// Task 4: `C-a "` splits the other way — the two panes are stacked, not side by side.
+#[test]
+fn the_prefix_splits_horizontally() {
+    let (mut nt, _init) = start("require('plugin.prefix')", "cat");
+    nt.send("\x01\""); // C-a "
+    nt.wait_for_log("prefix command \"", PATIENCE);
+    nt.settle(Duration::from_millis(500));
+
+    nt.send("BELOW");
+    nt.settle(Duration::from_millis(500));
+    nt.send("\x01o");
+    nt.settle(Duration::from_millis(500));
+    nt.send("ABOVE");
+
+    nt.wait_for_screen("ABOVE", PATIENCE);
+    let screen = nt.screen_after(Duration::from_millis(500));
+    let line_of = |needle: &str| {
+        screen
+            .lines()
+            .position(|line| line.contains(needle))
+            .unwrap_or_else(|| panic!("{needle} never reached a pane:\n{screen}"))
+    };
+    assert!(
+        line_of("ABOVE") < line_of("BELOW"),
+        "the panes are not stacked, so the split was not horizontal:\n{screen}"
+    );
+    assert!(
+        !screen.contains('"'),
+        "the command key reached the shell:\n{screen}"
+    );
+}
+
+/// Task 4 step 5: the prefix is a plugin, not a feature. Without its `require` line `C-a`
+/// is an ordinary keystroke and the multiplexer is otherwise unchanged.
+#[test]
+fn without_its_require_line_the_prefix_key_reaches_the_shell() {
+    let (mut nt, _init) = start("", "cat");
+    nt.send("\x01"); // C-a, now bound by nobody
+    nt.send("%");
+    nt.send("PLAIN\r");
+
+    nt.wait_for_screen("PLAIN", PATIENCE);
+    let screen = nt.screen_after(Duration::from_millis(500));
+    assert!(
+        screen.contains("^A"),
+        "C-a was swallowed with no prefix plugin loaded:\n{screen}"
+    );
+    assert!(
+        screen.contains('%'),
+        "the command key was swallowed with no prefix plugin loaded:\n{screen}"
+    );
+    assert!(
+        screen.contains("PLAIN"),
+        "the one pane stopped echoing:\n{screen}"
+    );
+}
