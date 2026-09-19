@@ -265,3 +265,20 @@ fn neotmux_opt_assignment_still_works_once_sealed() {
     assert!(sub.run_init().is_empty());
     assert_eq!(sub.opt().prefix, "C-a");
 }
+
+#[test]
+fn setting_every_opt_key_in_one_statement_does_not_conflict() {
+    // opt's __newindex used to hold opts.borrow_mut() across lua.unpack(value), safe today
+    // only because FromLua for String happens not to invoke __tostring. It now unpacks into
+    // a local before borrowing, so back-to-back writes in the same chunk never overlap a
+    // borrow with a call back into mlua.
+    let dir = layer(&[(
+        "init.lua",
+        "neotmux.opt.tick_budget_ms = 12 neotmux.opt.tick_overrun_limit = 3 neotmux.opt.prefix = 'C-a'",
+    )]);
+    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    assert!(sub.run_init().is_empty());
+    assert_eq!(sub.opt().tick_budget_ms, 12);
+    assert_eq!(sub.opt().tick_overrun_limit, 3);
+    assert_eq!(sub.opt().prefix, "C-a");
+}
