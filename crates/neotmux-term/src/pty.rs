@@ -85,6 +85,14 @@ impl PtyHandle {
         self.master.resize(pty_size(size)).context("resize pty")
     }
 
+    pub fn size(&self) -> anyhow::Result<Size> {
+        let size = self.master.get_size().context("get pty size")?;
+        Ok(Size {
+            rows: size.rows,
+            cols: size.cols,
+        })
+    }
+
     pub fn wait(&mut self) -> io::Result<ExitStatus> {
         self.child.wait()
     }
