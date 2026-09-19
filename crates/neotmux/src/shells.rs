@@ -57,13 +57,6 @@ impl Shells {
         }
     }
 
-    /// Reaps every remaining child. The session is over, so nothing is redrawn after this.
-    pub fn close_all(&mut self) {
-        for pane in self.shells.keys().copied().collect::<Vec<_>>() {
-            self.close(pane);
-        }
-    }
-
     /// How many panes are running, which is what "was that the last one?" asks.
     pub fn len(&self) -> usize {
         self.shells.len()
@@ -141,11 +134,24 @@ impl Shells {
     }
 }
 
+/// Every way out of the frame loop — the last pane's EOF, `Op::Quit`, a shutdown signal, a
+/// PTY read error — ends with this collection being dropped, so reaping the children here is
+/// the only arrangement that covers all four.
+impl Drop for Shells {
+    fn drop(&mut self) {
+        for pane in self.shells.keys().copied().collect::<Vec<_>>() {
+            self.close(pane);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::{Duration, Instant};
 
     use neotmux_core::proto::SplitDir;
+    use nix::sys::wait::{WaitPidFlag, WaitStatus, waitpid};
+    use nix::unistd::Pid;
 
     use super::*;
     use crate::panes::PaneLayout;
@@ -292,6 +298,53 @@ mod tests {
 
         for id in ids {
             shells.close(pane(id));
+        }
+    }
+
+    /// Only one path out of the frame loop ever called a reaper explicitly; `Op::Quit`, a
+    /// shutdown signal and a PTY read error all returned past it. This pins the end of that
+    /// asymmetry: whichever way the loop was left, no child outlives the collection.
+    #[test]
+    fn dropping_the_collection_ends_the_children_it_still_holds() {
+        let dir = tempfile::tempdir().expect("dir");
+        let pidfile = dir.path().join("pid");
+        let mut cmd = CommandBuilder::new("sh");
+        cmd.args(["-c", &format!("echo $$ > {}; sleep 30", pidfile.display())]);
+
+        let mut shells = Shells::default();
+        shells
+            .open(pane(1), cmd, Size { rows: 24, cols: 80 })
+            .expect("spawn");
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let pid = loop {
+            if let Ok(text) = std::fs::read_to_string(&pidfile)
+                && let Ok(pid) = text.trim().parse::<i32>()
+            {
+                break Pid::from_raw(pid);
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the child never reported its pid"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        };
+
+        drop(shells);
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match waitpid(pid, Some(WaitPidFlag::WNOHANG)) {
+                Ok(WaitStatus::StillAlive) => {
+                    assert!(
+                        Instant::now() < deadline,
+                        "the child outlived the collection that owned it"
+                    );
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                // Anything else is an exit, or a reap the drop already did.
+                _ => break,
+            }
         }
     }
 

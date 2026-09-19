@@ -105,7 +105,7 @@ impl Session {
         }
         // The last pane's final output and its EOF arrive together; leaving it open for one
         // more frame is what renders that output before the session ends (M0a's guarantee).
-        // `run` reaps the children after that frame.
+        // Dropping the session after that frame is what reaps the children.
         if !drained.closed.is_empty() && drained.closed.len() == self.shells.len() {
             return Ok(Drained::Eof);
         }
@@ -401,7 +401,6 @@ pub fn run(
         }
     }
 
-    session.shells.close_all();
     Ok(None)
 }
 
