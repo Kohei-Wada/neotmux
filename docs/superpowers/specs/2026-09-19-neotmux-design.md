@@ -343,6 +343,12 @@ back: a plugin interrupted mid-draw leaves half a line on screen and there is no
 value to fall back to. A recorded list can be discarded wholesale and the previous one
 replayed. Ergonomics are identical; cost is one reused `Vec` per plugin per frame.
 
+**The unit of commit is the source, not the callback.** A source may register more than one
+`on_tick`; its frame is the union of what all of them drew, committed once after the last one
+returns. If any of them raises, the whole union is discarded and the source's previous frame
+stands — a partial union is not a frame, and committing per callback would make each callback
+overwrite the one before it.
+
 **Replay validity.** Commands carry absolute coordinates and `PaneId`s, so replaying a stale
 buffer after a resize or a pane close would draw at wrong coordinates or into a dead pane.
 Each buffer is stamped with an **epoch** = (grid dimensions, set of live pane ids, focused

@@ -8,6 +8,7 @@ pub mod source;
 pub mod vm;
 
 use std::cell::{Cell, RefCell};
+use std::collections::BTreeMap;
 use std::fs;
 use std::rc::Rc;
 
@@ -24,7 +25,7 @@ use api::ctx::Ctx;
 use draw::Buffers;
 use geometry::Geometry;
 use ops::{Level, Op, OpBuffer};
-use registry::{Kind, KindTag, Registry};
+use registry::{Kind, KindTag, RegistrationId, Registry};
 use runtime::Layers;
 use source::{SourceId, Sources};
 
@@ -153,38 +154,46 @@ impl LuaSubsystem {
         };
     }
 
+    /// The unit of commit is the source, not the callback: a source's frame is the union of
+    /// what all its tick callbacks drew, and a partial union is not a frame. Committing after
+    /// each callback would make the second one's commit replace the first one's entry, so the
+    /// first's drawing would never render.
     pub fn dispatch_tick(&self) {
-        let ids = self.registry.snapshot(KindTag::Tick);
-        for id in ids {
-            let Some(callback) = self.registry.callback(id) else {
-                continue;
-            };
+        let mut by_source: BTreeMap<SourceId, Vec<RegistrationId>> = BTreeMap::new();
+        for id in self.registry.snapshot(KindTag::Tick) {
             let Some(owner) = self.registry.owner(id) else {
                 continue;
             };
-            let Ok(func) = self.lua.registry_value::<Function>(&callback) else {
-                continue;
-            };
+            by_source.entry(owner).or_default().push(id);
+        }
 
-            let ctx = {
-                let geometry = self.geometry.borrow();
-                Ctx::new(
-                    owner,
-                    self.buffers.clone(),
-                    geometry.size,
-                    geometry.panes.clone(),
-                )
-            };
+        for (owner, ids) in by_source {
+            let mut raised = false;
+            for id in ids {
+                let Some(callback) = self.registry.callback(id) else {
+                    continue;
+                };
+                let Ok(func) = self.lua.registry_value::<Function>(&callback) else {
+                    continue;
+                };
 
-            let result = self.lua.scope(|scope| {
-                let ctx = scope.create_userdata(ctx)?;
-                func.call::<()>(ctx)
-            });
+                let ctx = {
+                    let geometry = self.geometry.borrow();
+                    Ctx::new(
+                        owner,
+                        self.buffers.clone(),
+                        geometry.size,
+                        geometry.panes.clone(),
+                    )
+                };
 
-            match result {
-                Ok(()) => self.buffers.commit(owner),
-                Err(err) => {
-                    self.buffers.discard(owner);
+                let result = self.lua.scope(|scope| {
+                    let ctx = scope.create_userdata(ctx)?;
+                    func.call::<()>(ctx)
+                });
+
+                if let Err(err) = result {
+                    raised = true;
                     let name = self.sources.name(owner).unwrap_or_default();
                     self.ops.push(
                         owner,
@@ -194,6 +203,12 @@ impl LuaSubsystem {
                         },
                     );
                 }
+            }
+
+            if raised {
+                self.buffers.discard(owner);
+            } else {
+                self.buffers.commit(owner);
             }
         }
     }

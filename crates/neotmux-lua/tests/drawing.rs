@@ -287,3 +287,141 @@ fn a_bad_colour_raises_at_the_call() {
     let ops = sub.drain_ops();
     assert_eq!(ops.len(), 1, "a bad colour should have raised");
 }
+
+/// Helper for the per-source commit tests: every `Text` command as (y, text).
+fn lines(sub: &LuaSubsystem) -> Vec<(u16, String)> {
+    sub.frame_output()
+        .0
+        .iter()
+        .filter_map(|c| match c {
+            DrawCmd::Text { y, text, .. } => Some((*y, text.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn two_tick_callbacks_from_one_source_both_reach_the_frame() {
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.pair')"),
+        (
+            "lua/plugin/pair.lua",
+            r#"
+            neotmux.on_tick(function(ctx) ctx:text(nil, 0, 0, 'first') end)
+            neotmux.on_tick(function(ctx) ctx:text(nil, 0, 1, 'second') end)
+            return {}
+            "#,
+        ),
+    ]);
+    frame(&sub, 24);
+    assert_eq!(
+        lines(&sub),
+        vec![(0, "first".to_string()), (1, "second".to_string())],
+        "the first callback's drawing was lost when the second one committed"
+    );
+}
+
+#[test]
+fn two_status_fragments_from_one_source_both_reach_the_frame() {
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.pair')"),
+        (
+            "lua/plugin/pair.lua",
+            r#"
+            neotmux.on_tick(function(ctx) ctx:status('left') end)
+            neotmux.on_tick(function(ctx) ctx:status('right') end)
+            return {}
+            "#,
+        ),
+    ]);
+    frame(&sub, 24);
+    let (_, status) = sub.frame_output();
+    let texts: Vec<&str> = status.iter().map(|f| f.text.as_str()).collect();
+    assert_eq!(texts, vec!["left", "right"]);
+}
+
+#[test]
+fn one_raising_callback_loses_its_whole_sources_frame_and_keeps_the_previous_one() {
+    let (_dir, sub) = built(&[
+        (
+            "init.lua",
+            "require('plugin.pair') require('plugin.bystander')",
+        ),
+        (
+            "lua/plugin/pair.lua",
+            r#"
+            local n = 0
+            neotmux.on_tick(function(ctx)
+              n = n + 1
+              ctx:text(nil, 0, 0, 'first' .. n)
+            end)
+            neotmux.on_tick(function(ctx)
+              ctx:text(nil, 0, 1, 'second' .. n)
+              if n == 2 then error('boom') end
+            end)
+            return {}
+            "#,
+        ),
+        (
+            "lua/plugin/bystander.lua",
+            r#"
+            local n = 0
+            neotmux.on_tick(function(ctx)
+              n = n + 1
+              ctx:text(nil, 0, 2, 'bystander' .. n)
+            end)
+            return {}
+            "#,
+        ),
+    ]);
+
+    frame(&sub, 24);
+    assert_eq!(
+        lines(&sub),
+        vec![
+            (0, "first1".to_string()),
+            (1, "second1".to_string()),
+            (2, "bystander1".to_string()),
+        ]
+    );
+
+    frame(&sub, 24);
+    assert_eq!(
+        lines(&sub),
+        vec![
+            (0, "first1".to_string()),
+            (1, "second1".to_string()),
+            (2, "bystander2".to_string()),
+        ],
+        "a raising callback must lose its source's whole frame, and only its own source's"
+    );
+}
+
+#[test]
+fn grouping_tick_dispatch_by_source_still_composes_sources_in_load_order() {
+    // `later` registers first at dispatch time, so a frame composed in dispatch order would
+    // put it before `earlier`; composition is by load order and must not follow dispatch.
+    let (_dir, sub) = built(&[
+        (
+            "init.lua",
+            "require('plugin.earlier') require('plugin.later')",
+        ),
+        (
+            "lua/plugin/earlier.lua",
+            r#"
+            local m = require('plugin.later')
+            neotmux.on_tick(function(ctx) ctx:text(nil, 0, 0, 'earlier') end)
+            return {}
+            "#,
+        ),
+        (
+            "lua/plugin/later.lua",
+            "neotmux.on_tick(function(ctx) ctx:text(nil, 0, 1, 'later') end) return {}",
+        ),
+    ]);
+    frame(&sub, 24);
+    assert_eq!(
+        lines(&sub),
+        vec![(0, "earlier".to_string()), (1, "later".to_string())]
+    );
+}
