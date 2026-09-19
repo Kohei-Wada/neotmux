@@ -249,7 +249,11 @@ fn requiring_plugin_foo_init_and_plugin_foo_share_one_id() {
     assert!(sub.run_init().is_empty());
 
     let events = sub.registry().snapshot(KindTag::Event);
-    assert_eq!(events.len(), 3, "chunk body ran twice plus one setup() call");
+    assert_eq!(
+        events.len(),
+        3,
+        "chunk body ran twice plus one setup() call"
+    );
     let owners: Vec<_> = events
         .iter()
         .map(|id| sub.registry().owner(*id).unwrap())

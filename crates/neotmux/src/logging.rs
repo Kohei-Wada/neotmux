@@ -107,6 +107,10 @@ mod tests {
         assert_eq!(ts.as_bytes()[10], b' ');
         assert_eq!(ts.as_bytes()[13], b':');
         assert_eq!(ts.as_bytes()[16], b':');
-        assert_eq!(ts.as_bytes()[19], b'Z', "{ts} is missing its UTC zone marker");
+        assert_eq!(
+            ts.as_bytes()[19],
+            b'Z',
+            "{ts} is missing its UTC zone marker"
+        );
     }
 }
