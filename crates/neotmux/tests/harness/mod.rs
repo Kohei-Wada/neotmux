@@ -1,5 +1,5 @@
 use std::io::{Read, Write as _};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -33,6 +33,12 @@ pub fn runtime(files: &[(&str, &str)]) -> tempfile::TempDir {
     dir
 }
 
+/// The checked-in fixture plugin set (§4.11): an ordinary runtime layer of `.lua` files,
+/// stacked behind a layer that supplies the `init.lua` choosing what to require.
+pub fn fixture_layer() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
+}
+
 const ROWS: u16 = 24;
 const COLS: u16 = 80;
 
@@ -58,6 +64,7 @@ fn resolve_shell(shell: &str) -> String {
 /// into a `vt100::Parser` so tests can assert on the screen rather than on
 /// raw escape bytes.
 pub struct Neotmux {
+    log: PathBuf,
     child: Box<dyn Child + Send + Sync>,
     writer: Box<dyn std::io::Write + Send>,
     master: Box<dyn MasterPty + Send>,
@@ -72,6 +79,10 @@ impl Neotmux {
     }
 
     pub fn start_with_shell(dir: &tempfile::TempDir, shell: &str) -> Self {
+        Self::start_layered(&[dir.path()], shell)
+    }
+
+    pub fn start_layered(layers: &[&Path], shell: &str) -> Self {
         let pair = native_pty_system()
             .openpty(PtySize {
                 rows: ROWS,
@@ -84,8 +95,14 @@ impl Neotmux {
         let isolation = tempfile::tempdir().expect("isolation dir");
         let log = isolation.path().join("neotmux.log");
 
+        let runtime = layers
+            .iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join(":");
+
         let mut cmd = base_command(&log, isolation.path());
-        cmd.env("NEOTMUX_RUNTIME", dir.path());
+        cmd.env("NEOTMUX_RUNTIME", runtime);
         cmd.env("SHELL", resolve_shell(shell));
 
         let child = pair.slave.spawn_command(cmd).expect("spawn");
@@ -114,6 +131,7 @@ impl Neotmux {
         });
 
         Self {
+            log,
             child,
             writer,
             master: pair.master,
@@ -155,6 +173,26 @@ impl Neotmux {
     pub fn settle(&mut self, duration: Duration) {
         std::thread::sleep(duration);
         while self.byte_rx.try_recv().is_ok() {}
+    }
+
+    /// Blocks until `marker` appears in the isolated log file, then returns the whole log.
+    pub fn wait_for_log(&self, marker: &str, timeout: Duration) -> String {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let text = std::fs::read_to_string(&self.log).unwrap_or_default();
+            if text.contains(marker) {
+                return text;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "marker {marker:?} never reached the log:\n{text}"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    pub fn log_text(&self) -> String {
+        std::fs::read_to_string(&self.log).unwrap_or_default()
     }
 
     pub fn bytes_in(&mut self, duration: Duration) -> usize {

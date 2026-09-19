@@ -391,8 +391,10 @@ A fixture plugin **set**, not one plugin — the point is to exercise the ABI:
   afterwards
 - a plugin calling the M2 pane/split API (§6) against a stub, to freeze those signatures now
 
-Plus: every callback's attributed `PluginId` matches the plugin that registered it, including
-one registered from inside another plugin's dispatch.
+Plus: every callback's attributed source (§4.2) is the chunk the callback was written in,
+including one registered from inside another plugin's dispatch. There is no `PluginId`: the
+host tracks `SourceId`s, and a display name such as `plugin/clock` is derived from the chunk
+path.
 
 ## 5. M1b — budget and environment
 

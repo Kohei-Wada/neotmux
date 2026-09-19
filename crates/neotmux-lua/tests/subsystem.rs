@@ -349,6 +349,15 @@ fn a_plugin_cannot_monkey_patch_neotmux_status() {
 }
 
 #[test]
+fn a_plugin_cannot_monkey_patch_neotmux_pane() {
+    let dir = layer(&[("init.lua", "neotmux.pane.split = function() end")]);
+    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let failures = sub.run_init();
+    assert_eq!(failures.len(), 1);
+    assert!(failures[0].message.contains("read-only"));
+}
+
+#[test]
 fn sealed_subtable_functions_still_work_through_the_proxy() {
     let dir = layer(&[(
         "init.lua",
@@ -386,7 +395,7 @@ fn pairs_over_the_sealed_top_level_table_sees_the_real_fields() {
         unreachable!()
     };
     let count: usize = text.parse().unwrap();
-    assert_eq!(count, 8, "expected all top-level fields, got {count}");
+    assert_eq!(count, 9, "expected all top-level fields, got {count}");
 }
 
 #[test]
