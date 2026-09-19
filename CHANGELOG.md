@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.1.0 — unreleased
+## v0.1.0 — 2026-09-20
 
 The line at which a plugin author can exercise the ABI. **Not** the line at which neotmux is
 a daily driver: there is no detach/attach, and that is the intended trade — the ABI is the
