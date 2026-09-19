@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use anyhow::Context as _;
 use neotmux_core::proto::{GridSnapshot, PaneId, Rect as PRect, Size};
@@ -16,16 +16,19 @@ struct Shell {
 
 /// Every pane's child process, keyed by pane. The tree says where a pane is; this says what
 /// is running in it, and it is the only thing in the binary that touches a PTY.
+///
+/// Ordered, not hashed: a pane's output becomes a `pane_output` event, and plugins are owed
+/// the same order every frame rather than whatever order a hash map happens to be in.
 #[derive(Default)]
 pub struct Shells {
-    shells: HashMap<PaneId, Shell>,
+    shells: BTreeMap<PaneId, Shell>,
 }
 
 /// What one pass over every pane's output found.
 pub struct Drained {
     /// Some pane produced output, so the screen needs redrawing.
     pub output: bool,
-    /// The panes whose child reached EOF and are to be closed.
+    /// The panes whose child reached EOF and are to be closed, in pane order.
     pub closed: Vec<PaneId>,
 }
 
@@ -91,7 +94,8 @@ impl Shells {
     }
 
     /// At most `max_chunks` chunks per pane, so one flooding child cannot starve input or
-    /// the other panes.
+    /// the other panes. Panes are visited in pane order, so which pane's chunks a plugin
+    /// sees first under a flood is a fact rather than an accident.
     pub fn drain(
         &mut self,
         max_chunks: usize,
@@ -118,7 +122,6 @@ impl Shells {
                 }
             }
         }
-        drained.closed.sort();
         Ok(drained)
     }
 
@@ -261,6 +264,35 @@ mod tests {
             "closing waited {took:?} on a child that had only closed its descriptors"
         );
         assert_eq!(shells.len(), 0);
+    }
+
+    /// A plugin is owed the same order every frame: which pane's chunks it sees first must
+    /// not be whatever order a hash map happens to iterate in.
+    #[test]
+    fn output_is_dispatched_in_pane_order() {
+        let mut shells = Shells::default();
+        let ids = [5u32, 2, 6, 1, 4, 3];
+        for id in ids {
+            let mut cmd = CommandBuilder::new("sh");
+            cmd.args(["-c", "printf X; sleep 5"]);
+            shells
+                .open(pane(id), cmd, Size { rows: 24, cols: 80 })
+                .expect("spawn");
+        }
+        std::thread::sleep(Duration::from_millis(500));
+
+        let mut seen = Vec::new();
+        shells.drain(8, |pane, _| seen.push(pane)).expect("drain");
+        seen.dedup();
+        assert_eq!(
+            seen,
+            vec![pane(1), pane(2), pane(3), pane(4), pane(5), pane(6)],
+            "output was dispatched out of pane order"
+        );
+
+        for id in ids {
+            shells.close(pane(id));
+        }
     }
 
     #[test]
