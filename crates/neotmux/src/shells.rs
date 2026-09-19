@@ -22,6 +22,10 @@ struct Shell {
 #[derive(Default)]
 pub struct Shells {
     shells: BTreeMap<PaneId, Shell>,
+    /// Children that were hung up on but had not died yet. Nothing here is waited for; each
+    /// frame asks once whether they are done. Without it a session that opens and closes
+    /// panes accumulates one zombie per closed pane until it exits.
+    reaping: Vec<PtyHandle>,
 }
 
 /// What one pass over every pane's output found.
@@ -53,14 +57,24 @@ impl Shells {
     ///
     /// What that buys and what it costs: SIGHUP goes out and nothing is waited for, so the
     /// call is over in microseconds, but it is the only signal sent. A child that handles or
-    /// ignores SIGHUP outlives the pane, and outlives neotmux — init inherits it. The
-    /// `try_wait` reaps a child that had already died; one that dies a moment later stays a
-    /// zombie until neotmux exits and init reaps it in turn.
+    /// ignores SIGHUP outlives the pane, and outlives neotmux — init inherits it, which is
+    /// what tmux does too. One that dies a moment after the signal is reaped by a later
+    /// frame rather than left a zombie for the session.
     pub fn close(&mut self, pane: PaneId) {
         if let Some(mut shell) = self.shells.remove(&pane) {
             let _ = shell.pty.hangup();
-            let _ = shell.pty.try_wait();
+            match shell.pty.try_wait() {
+                Ok(Some(_)) => {}
+                _ => self.reaping.push(shell.pty),
+            }
         }
+    }
+
+    /// Asks once, for each child still owed a reap, whether it has died. Never blocks: a
+    /// child that is still running simply stays on the list.
+    fn reap(&mut self) {
+        self.reaping
+            .retain_mut(|pty| !matches!(pty.try_wait(), Ok(Some(_))));
     }
 
     /// How many panes are running, which is what "was that the last one?" asks.
@@ -100,6 +114,7 @@ impl Shells {
         max_chunks: usize,
         mut on_output: impl FnMut(PaneId, Vec<u8>),
     ) -> anyhow::Result<Drained> {
+        self.reap();
         let mut drained = Drained {
             output: false,
             closed: Vec::new(),
@@ -379,5 +394,28 @@ mod tests {
         assert_eq!(shells.len(), 1);
         shells.close(pane(1));
         assert_eq!(shells.len(), 0);
+    }
+
+    /// A closed pane's child must not sit in the process table for the rest of the session.
+    /// `close` hangs up without waiting, so whether the child has died by the time it returns
+    /// is a race; a later frame is what reaps it.
+    #[test]
+    fn a_closed_panes_child_is_reaped_within_a_few_frames() {
+        let mut shells = Shells::default();
+        let size = Size { rows: 4, cols: 20 };
+        shells
+            .open(pane(1), CommandBuilder::new("true"), size)
+            .expect("open");
+        shells.close(pane(1));
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !shells.reaping.is_empty() {
+            assert!(
+                Instant::now() < deadline,
+                "a closed pane's child was never reaped"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+            shells.reap();
+        }
     }
 }
