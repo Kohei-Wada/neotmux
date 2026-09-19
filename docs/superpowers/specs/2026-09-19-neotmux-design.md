@@ -2,9 +2,10 @@
 
 Date: 2026-09-19
 Status: proposed (revision 2 — incorporates a design review and a mechanism-feasibility
-review; see §11 for what changed and why)
-Scope: M0a (walking skeleton), M1a (plugin ABI surface), M1b (budget and environment).
-Later milestones are sketched in §10 for context only.
+review; see §12 for what changed and why)
+Scope: M0a (walking skeleton), M1a (ABI surface), M1b (budget and environment), M2 (pane
+tree) — the milestones that make up v0.1 (§1). Later milestones are sketched in §11 for
+context only.
 
 ## 1. Goal and non-goals
 
@@ -24,10 +25,38 @@ plugin's output for that frame is discarded, the overrun is attributed *by name*
 overruns unsubscribe it — reversibly. Failure stays partial and attributable instead of
 freezing the UI.
 
+### The v0.1 release line
+
+v0.1 is the line at which a plugin author can exercise the ABI. It is not the
+line at which neotmux is a daily driver: detach/attach (M3) is out, and a
+multiplexer without it will not attract users. That is the intended trade. The
+ABI is the part that is expensive to change after publication, so it meets other
+people before it freezes, and M3 — the largest structural change in the roadmap —
+happens against an ABI that has already been used rather than one that has not.
+
+v0.1 contains M1a, M1b and M2; `neotmux.pane` implemented rather than stubbed;
+the default status line shipped as a plugin; `docs/plugins.md` with three working
+examples; installation via `cargo install`; and a README that states detach/attach
+is v0.2.
+
+Exit criteria, each mechanically checkable:
+
+1. No feature name (`status`, `clock`, and their kind) appears in core sources.
+2. Someone given only this spec and `docs/plugins.md` can write a plugin that is
+   not one of the examples.
+3. A plugin that loops forever leaves the terminal usable and produces a
+   name-attributed overrun in the log.
+4. Every example plugin can be disabled by deleting one `require` line, with no
+   change to core.
+
+Out of v0.1, and stated as such in the README: detach/attach, scrollback and
+copy-mode, mouse, multiple sessions, a plugin manager, and tmux compatibility in
+any form.
+
 ### Non-goals (v1)
 
 - tmux compatibility of any kind: no `.tmux.conf`, no tpm, no `tmux` CLI surface
-- Sandboxing plugins. The trust model is "you installed it" (§7)
+- Sandboxing plugins. The trust model is "you installed it" (§8)
 - Mouse, multiple sessions, remote-machine aggregation, external control API
 
 ## 2. Crate layout
@@ -88,7 +117,7 @@ for.
 
 `neotmux-term` wraps `vt100` behind `GridSnapshot` and a line-access trait. If `vt100` ever
 becomes the constraint, the grid can be replaced behind that boundary — the deferred M0b in
-§10. `alacritty_terminal` is the other off-the-shelf option (fuller, less stable API).
+§11. `alacritty_terminal` is the other off-the-shelf option (fuller, less stable API).
 
 ### PTY I/O: reader thread plus channel
 
@@ -119,7 +148,7 @@ light; revisit at M3.
 - A PTY harness writes `printf 'X'`; after render, the frame buffer cell at (0,0) is `X`
 - The child exits 0 and the process exits 0
 - After exit, `termios` has `echo` and `icanon` restored
-- A test that panics mid-render still restores the terminal (§6)
+- A test that panics mid-render still restores the terminal (§7)
 
 ## 4. M1a — the ABI surface
 
@@ -360,7 +389,7 @@ A fixture plugin **set**, not one plugin — the point is to exercise the ABI:
   value
 - `remover` — registers then `:remove()`s twice; asserted idempotent and that no callback runs
   afterwards
-- a plugin calling the M2 pane/split API against a stub, to freeze those signatures now
+- a plugin calling the M2 pane/split API (§6) against a stub, to freeze those signatures now
 
 Plus: every callback's attributed `PluginId` matches the plugin that registered it, including
 one registered from inside another plugin's dispatch.
@@ -415,7 +444,7 @@ On top of that, the host:
 
 All host I/O bindings are asynchronous: the call returns a handle and completion arrives on a
 later tick. Bindings are registered through a single helper that records a sample invocation,
-which is what makes §8's "every host function returns promptly" test possible to write.
+which is what makes §9's "every host function returns promptly" test possible to write.
 
 ### 5.3 Overrun policy, and why it is reversible
 
@@ -444,8 +473,8 @@ Documented, not solved:
    cannot be caught. It is **not adopted**, because it requires wrapping ticks in
    `catch_unwind` and collides with `ratatui::init()`'s panic hook, which restores the terminal
    before the unwind we intended to catch. `coroutine.resume` is not replaced either, so the
-   hole would not fully close. Deliberate loops are malice, and malice is out of scope (§7)
-4. **host bindings that block** — the host's own discipline, covered by §8's test
+   hole would not fully close. Deliberate loops are malice, and malice is out of scope (§8)
+4. **host bindings that block** — the host's own discipline, covered by §9's test
 
 ### 5.5 Exit criteria (machine-checkable)
 
@@ -458,7 +487,70 @@ Documented, not solved:
 - `load` rejects a binary chunk; the host's plugin loader rejects one too
 - `neotmux.plugin.resubscribe(name)` brings B back and it is dropped again after K frames
 
-## 6. Error handling
+## 6. M2 — pane tree
+
+### The model
+
+A window owns a binary tree. A leaf is a pane: one PTY, one `vt100` parser, one rect.
+An internal node is a split with an orientation (horizontal or vertical), exactly two
+children, and the fraction of its own rect that goes to the first child.
+
+`split(dir)` replaces the focused leaf with an internal node whose children are the old
+pane and a new one, oriented by `dir` and starting at 0.5. Closing a pane replaces its
+parent with its sibling: the sibling inherits the parent's rect, so closing never leaves
+a hole and never needs a rebalance pass.
+
+This is tmux's model and it has tmux's weakness — three equal columns are
+`Row(A, Row(B, C))` and stay equal only by accident of the fractions. That is accepted
+(§1, v0.1 scope). What is not accepted is foreclosing the alternative: **rect assignment
+happens in exactly one function**, `layout::assign(&Tree, Rect) -> Vec<(PaneId, Rect)>`,
+with no other code in the tree module computing geometry. Making layout replaceable from
+Lua later is then "let a registered callback stand in for that function", not a
+restructuring.
+
+### Where it lives
+
+`neotmux-core`, and it must stay testable with no terminal and no Lua (§2). The tree is a
+pure data structure over `PaneId`s; it does not own PTYs. The binary owns the map from
+`PaneId` to its PTY handle and `vt100` parser, and asks core for the rects.
+
+### Rounding and minimum sizes
+
+`assign` works in integer cells and must be total: every cell of the window is covered by
+exactly one pane rect, with no gaps and no overlap, at every size including sizes too
+small to honour the fractions. Rounding error goes to the first child. A split whose
+children would fall below one cell clamps rather than producing an empty rect, because
+`vt100` and the PTY both reject a zero dimension (M0a).
+
+### Focus
+
+Focus is a `PaneId` held beside the tree, not a flag inside it, so that "the focused pane
+closed" is one assignment rather than a tree walk. When the focused pane closes, focus
+moves to the sibling subtree's first leaf in traversal order.
+
+### The prefix key is not special
+
+There is no hardcoded prefix. The prefix is a plugin: a keymap registration that swallows
+one key, sets a flag, and consumes the next key. That is the test of whether the keymap
+API from M1a is real — if the prefix cannot be written as a plugin, the API is missing
+something, and finding that out is the point of building it this way.
+
+`neotmux.pane` gives Lua `list()`, `current()`, `split(dir)` and `focus(id)`, the
+signatures frozen in M1a. Every one of them is an op on the buffer (§4.6), applied after
+the tick, never a synchronous mutation from inside a callback.
+
+### Exit criteria
+
+1. Splitting, focusing, closing and resizing work, driven from Lua, with no pane-related
+   key handling in core.
+2. `assign` is covered by a property test: for a tree of any shape and a rect of any size
+   down to 1x1, the output rects tile the input exactly.
+3. The prefix key ships as a plugin file, and deleting its `require` line leaves a working
+   multiplexer with no prefix.
+4. Closing the last pane exits, and the terminal is restored (the M0a guarantee still
+   holds with a tree in place).
+
+## 7. Error handling
 
 | failure | handling |
 |---|---|
@@ -483,7 +575,7 @@ oversight to patch here: it is exactly the failure mode M1b's instruction-count 
 exists to close, by making the hook return `Err` before the frame loop can hang. Inventing a
 second interruption mechanism in M1a would duplicate that work and is explicitly out of scope.
 
-## 7. Trust model
+## 8. Trust model
 
 Plugins are fully trusted: Lua in the host VM, able to quit the application, rebind every key,
 read every pane.
@@ -502,7 +594,7 @@ not a plugin determined to bypass it — `rawset(neotmux, 'on_tick', ...)` still
 real table, and closing that would cost every plugin its legitimate use of `rawset` to stop a
 deliberate act the trust model already permits.
 
-## 8. Testing
+## 9. Testing
 
 - `neotmux-term`: golden tests feeding byte sequences, asserting screen contents, cursor,
   attributes, alternate-screen transitions
@@ -518,7 +610,7 @@ deliberate act the trust model already permits.
 - integration: PTY harness writes known bytes, asserts rendered frame; panic test asserts
   terminal restoration
 
-## 9. Risks
+## 10. Risks
 
 - **the ABI is wrong even though M1a passes.** Mitigated by making the exit criteria a plugin
   set that exercises attribution, handles, key consumption, config and `PaneId`, and by
@@ -527,18 +619,17 @@ deliberate act the trust model already permits.
 - **budget mechanism is new work**, with no ttymap precedent to copy (§4.1). M1b is separated
   from M1a so that a hard M1b does not block the ABI
 
-## 10. Roadmap (context only)
+## 11. Roadmap (context only)
 
 - **M0b** hand-rolled grid behind `neotmux-term`'s boundary — only if `vt100` becomes the
   constraint
-- **M2** pane tree, splits, layout, focus, resize, prefix key
 - **M3** server/client split, detach/attach. **Lua stays on the client**: the server holds
   other people's long-running jobs, so a frozen client should cost one client, not every
   session. Promote `proto` to a crate here and close §2.1's open question
 - **M4** scrollback and copy-mode, exposed to Lua as line access
 - **M5** distribution: single binary, nixpkgs, `neotmux plugin` subcommand, publish `proto`
 
-## 11. Revision log
+## 12. Revision log
 
 Revision 2 changed, relative to the first draft:
 

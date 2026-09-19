@@ -14,7 +14,7 @@
 
 - Edition 2024, rustc 1.95 or newer. Dependency versions are declared once in `[workspace.dependencies]`; members reference them with `workspace = true`
 - `neotmux-core` and `neotmux-term` stay free of Lua. `neotmux-lua` never touches ratatui or a PTY. **Plugins never see ratatui types** — the command enum lives in `neotmux-core::proto`
-- Plugins are fully trusted (spec §7). The threat model is accidents, not malice
+- Plugins are fully trusted (spec §8). The threat model is accidents, not malice
 - All plugin→host intent goes through the op buffer, drained at one point per frame; no host binding re-enters Lua (§4.6)
 - No test may depend on the process's current directory
 - Indentation is spaces, never tabs. No code comments unless the *why* is non-obvious, and then one line
