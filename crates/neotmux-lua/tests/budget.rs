@@ -140,3 +140,231 @@ fn an_overrun_is_reported_at_error_level() {
         .collect();
     assert_eq!(levels, vec![Level::Error]);
 }
+
+fn notifications(sub: &LuaSubsystem) -> Vec<String> {
+    sub.drain_ops()
+        .into_iter()
+        .filter_map(|(_, op)| match op {
+            Op::Notify { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect()
+}
+
+fn tick_owners(sub: &LuaSubsystem) -> Vec<String> {
+    sub.registry()
+        .snapshot(KindTag::Tick)
+        .into_iter()
+        .filter_map(|id| sub.registry().owner(id))
+        .filter_map(|owner| sub.sources().name(owner))
+        .collect()
+}
+
+/// A spinner that also holds a keymap, so the unsubscribe can be shown to take the tick and
+/// nothing else, and a control to prove the neighbour is untouched.
+fn spinner_layer(extra_init: &str) -> Vec<(&'static str, String)> {
+    vec![
+        (
+            "init.lua",
+            format!(
+                "neotmux.opt.tick_budget_ms = 5 neotmux.opt.tick_overrun_limit = 3 \
+                 require('plugin.spinner') {extra_init}"
+            ),
+        ),
+        (
+            "lua/plugin/spinner.lua",
+            "neotmux.on_tick(function() while true do end end)
+             neotmux.keymap.set('C-x', function() return true end)
+             return {}"
+                .to_string(),
+        ),
+    ]
+}
+
+fn built_owned(files: &[(&'static str, String)]) -> (tempfile::TempDir, LuaSubsystem) {
+    let borrowed: Vec<(&str, &str)> = files
+        .iter()
+        .map(|(rel, body)| (*rel, body.as_str()))
+        .collect();
+    built(&borrowed)
+}
+
+#[test]
+fn a_repeat_offender_loses_its_tick_and_keeps_everything_else() {
+    let (_dir, sub) = built_owned(&spinner_layer(""));
+
+    for _ in 0..3 {
+        frame(&sub);
+    }
+
+    assert!(tick_owners(&sub).is_empty(), "{:?}", tick_owners(&sub));
+    let notes: Vec<String> = notifications(&sub)
+        .into_iter()
+        .filter(|text| text.contains("plugin/spinner"))
+        .collect();
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert_eq!(
+        sub.dispatch_key("C-x"),
+        neotmux_lua::KeyOutcome::Consumed,
+        "the unsubscribe took the keymap too"
+    );
+}
+
+#[test]
+fn the_last_frame_of_a_removed_offender_is_not_replayed() {
+    let (_dir, sub) = built(&[
+        (
+            "init.lua",
+            "neotmux.opt.tick_budget_ms = 5 neotmux.opt.tick_overrun_limit = 2 \
+             require('plugin.flaky')",
+        ),
+        (
+            "lua/plugin/flaky.lua",
+            "local n = 0
+             neotmux.on_tick(function(ctx)
+               n = n + 1
+               if n == 1 then ctx:text(nil, 0, 0, 'stale') return end
+               while true do end
+             end)
+             return {}",
+        ),
+    ]);
+
+    frame(&sub);
+    assert_eq!(texts(&sub), vec!["stale".to_string()]);
+    for _ in 0..2 {
+        frame(&sub);
+    }
+
+    assert!(texts(&sub).is_empty(), "{:?}", texts(&sub));
+}
+
+#[test]
+fn the_overrun_counter_resets_on_a_tick_within_budget() {
+    let (_dir, sub) = built(&[
+        (
+            "init.lua",
+            "neotmux.opt.tick_budget_ms = 5 neotmux.opt.tick_overrun_limit = 3 \
+             require('plugin.flaky')",
+        ),
+        (
+            "lua/plugin/flaky.lua",
+            "local n = 0
+             neotmux.on_tick(function()
+               n = n + 1
+               if n ~= 3 then while true do end end
+             end)
+             return {}",
+        ),
+    ]);
+
+    for _ in 0..5 {
+        frame(&sub);
+    }
+
+    assert_eq!(
+        tick_owners(&sub),
+        vec!["plugin/flaky".to_string()],
+        "two runs of two overruns crossed a limit of three"
+    );
+}
+
+#[test]
+fn resubscribe_restores_a_removed_tick_and_it_draws_again() {
+    let (_dir, sub) = built(&[
+        (
+            "init.lua",
+            "neotmux.opt.tick_budget_ms = 5 neotmux.opt.tick_overrun_limit = 2 \
+             require('plugin.flaky') require('plugin.rescuer')",
+        ),
+        (
+            "lua/plugin/flaky.lua",
+            "local rescued = false
+             neotmux.on_tick(function(ctx)
+               if rescued then ctx:text(nil, 0, 0, 'back') return end
+               while true do end
+             end)
+             _G.flaky_rescued = function() rescued = true end
+             return {}",
+        ),
+        (
+            "lua/plugin/rescuer.lua",
+            "neotmux.keymap.set('C-r', function()
+               _G.flaky_rescued()
+               neotmux.notify('info', tostring(neotmux.resubscribe('plugin/flaky')))
+               return true
+             end)
+             return {}",
+        ),
+    ]);
+
+    for _ in 0..2 {
+        frame(&sub);
+    }
+    assert!(tick_owners(&sub).is_empty());
+    sub.drain_ops();
+
+    sub.dispatch_key("C-r");
+    assert_eq!(notifications(&sub), vec!["true".to_string()]);
+
+    frame(&sub);
+    assert_eq!(texts(&sub), vec!["back".to_string()]);
+}
+
+#[test]
+fn resubscribe_for_a_name_that_was_never_removed_is_false() {
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.rescuer')"),
+        (
+            "lua/plugin/rescuer.lua",
+            "neotmux.on_tick(function() end)
+             neotmux.keymap.set('C-r', function()
+               neotmux.notify('info', tostring(neotmux.resubscribe('plugin/rescuer'))
+                 .. ' ' .. tostring(neotmux.resubscribe('no/such/plugin')))
+               return true
+             end)
+             return {}",
+        ),
+    ]);
+
+    sub.dispatch_key("C-r");
+
+    assert_eq!(notifications(&sub), vec!["false false".to_string()]);
+    assert_eq!(tick_owners(&sub), vec!["plugin/rescuer".to_string()]);
+}
+
+#[test]
+fn a_restored_tick_is_dropped_again_if_it_keeps_overrunning() {
+    let (_dir, sub) = built(&[
+        (
+            "init.lua",
+            "neotmux.opt.tick_budget_ms = 5 neotmux.opt.tick_overrun_limit = 2 \
+             require('plugin.spinner') require('plugin.rescuer')",
+        ),
+        ("lua/plugin/spinner.lua", SPINNER),
+        (
+            "lua/plugin/rescuer.lua",
+            "neotmux.keymap.set('C-r', function()
+               neotmux.notify('info', tostring(neotmux.resubscribe('plugin/spinner')))
+               return true
+             end)
+             return {}",
+        ),
+    ]);
+
+    for _ in 0..2 {
+        frame(&sub);
+    }
+    assert!(tick_owners(&sub).is_empty());
+    sub.dispatch_key("C-r");
+    assert_eq!(tick_owners(&sub), vec!["plugin/spinner".to_string()]);
+
+    frame(&sub);
+    assert_eq!(
+        tick_owners(&sub),
+        vec!["plugin/spinner".to_string()],
+        "the restored tick was dropped by a single overrun, so the counter did not reset"
+    );
+    frame(&sub);
+    assert!(tick_owners(&sub).is_empty());
+}

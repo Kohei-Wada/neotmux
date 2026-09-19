@@ -3,6 +3,7 @@ pub mod budget;
 pub mod draw;
 mod geometry;
 pub mod ops;
+pub mod overrun;
 pub mod registry;
 pub mod runtime;
 pub mod source;
@@ -27,6 +28,7 @@ use budget::Budget;
 use draw::Buffers;
 use geometry::Geometry;
 use ops::{Level, Op, OpBuffer};
+use overrun::Overrun;
 use registry::{Kind, KindTag, RegistrationId, Registry};
 use runtime::Layers;
 use source::{SourceId, Sources};
@@ -55,6 +57,7 @@ pub struct LuaSubsystem {
     buffers: Rc<Buffers>,
     geometry: Rc<RefCell<Geometry>>,
     budget: Rc<Budget>,
+    overrun: Rc<Overrun>,
 }
 
 impl LuaSubsystem {
@@ -72,6 +75,7 @@ impl LuaSubsystem {
         let geometry = Rc::new(RefCell::new(Geometry::default()));
         let buffers = Rc::new(Buffers::new());
 
+        let overrun = Rc::new(Overrun::new());
         let budget = Budget::new(opts.clone());
         Budget::install(&lua, budget.clone()).map_err(|err| anyhow::anyhow!("{err:#}"))?;
 
@@ -85,6 +89,7 @@ impl LuaSubsystem {
                 opts: opts.clone(),
                 load_failures: load_failures.clone(),
                 geometry: geometry.clone(),
+                overrun: overrun.clone(),
             },
         )
         .map_err(|err| anyhow::anyhow!("{err:#}"))?;
@@ -101,6 +106,7 @@ impl LuaSubsystem {
             buffers,
             geometry,
             budget,
+            overrun,
         })
     }
 
@@ -235,8 +241,16 @@ impl LuaSubsystem {
             self.budget.leave();
 
             if overran {
-                let budget_ms = self.opts.borrow().tick_budget_ms;
+                let (budget_ms, limit) = {
+                    let opts = self.opts.borrow();
+                    (opts.tick_budget_ms, opts.tick_overrun_limit)
+                };
                 self.report_text(owner, format!("tick exceeded its {budget_ms} ms budget"));
+                if self.overrun.count(owner, limit) {
+                    self.unsubscribe_overrunning(owner, limit);
+                }
+            } else {
+                self.overrun.forgive(owner);
             }
 
             if raised {
@@ -245,6 +259,23 @@ impl LuaSubsystem {
                 self.buffers.commit(owner);
             }
         }
+    }
+
+    /// The offender keeps its keymaps and event handlers: only what it was measured doing is
+    /// taken away, and `neotmux.resubscribe` gives it back (§5.3).
+    fn unsubscribe_overrunning(&self, owner: SourceId, limit: u32) {
+        self.overrun.park(&self.registry, &self.buffers, owner);
+        let name = self.sources.name(owner).unwrap_or_default();
+        self.ops.push(
+            owner,
+            Op::Notify {
+                level: Level::Warn,
+                text: format!(
+                    "{name} overran its tick budget {limit} times and is no longer ticking; \
+                     neotmux.resubscribe('{name}') restores it"
+                ),
+            },
+        );
     }
 
     /// Observers first, then the binding (§4.4): an `on_key` callback is the only way to see a

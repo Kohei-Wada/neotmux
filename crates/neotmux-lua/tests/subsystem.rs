@@ -413,7 +413,7 @@ fn pairs_over_the_sealed_top_level_table_sees_the_real_fields() {
         unreachable!()
     };
     assert_eq!(
-        text, "keymap log notify on_event on_key on_tick opt pane quit",
+        text, "keymap log notify on_event on_key on_tick opt pane quit resubscribe",
         "the top-level ABI surface changed"
     );
 }

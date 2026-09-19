@@ -570,6 +570,8 @@ which is what makes §9's "every host function returns promptly" test possible t
   `package.loaded[m] = nil; require(m)`, written in Lua, because the host has nothing to add
   to it. Without a recovery path the only cure is restarting neotmux, which kills every shell
   the user is running — paying for a plugin bug with the entire reason the program exists
+- restoring also clears the counter, so a source that comes back gets a full K frames again
+  rather than being dropped by its next single overrun
 
 ### 5.4 What the budget does not catch
 

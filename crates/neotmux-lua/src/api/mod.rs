@@ -14,6 +14,7 @@ use crate::LoadFailure;
 use crate::draw::Buffers;
 use crate::geometry::Geometry;
 use crate::ops::{Level, Op, OpBuffer};
+use crate::overrun::Overrun;
 use crate::registry::{Kind, KindTag, RegistrationId, Registry};
 use crate::source::{self, SourceId, Sources};
 
@@ -29,6 +30,7 @@ pub(crate) struct Shared {
     pub(crate) opts: Rc<RefCell<Opts>>,
     pub(crate) load_failures: Rc<RefCell<Vec<LoadFailure>>>,
     pub(crate) geometry: Rc<RefCell<Geometry>>,
+    pub(crate) overrun: Rc<Overrun>,
 }
 
 pub(crate) fn make_handle(
@@ -155,6 +157,7 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
         opts,
         load_failures,
         geometry,
+        overrun,
     } = shared;
     let neotmux = lua.create_table()?;
 
@@ -248,6 +251,23 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
             Ok(())
         })?;
         neotmux.set("notify", notify)?;
+    }
+
+    {
+        // Top level, not a `neotmux.plugin` namespace: the host has no plugin concept (§4.1).
+        let sources = sources.clone();
+        let registry = registry.clone();
+        let resubscribe = lua.create_function(move |_, name: String| {
+            let Some((id, _)) = sources
+                .interned()
+                .into_iter()
+                .find(|(_, interned)| *interned == name)
+            else {
+                return Ok(false);
+            };
+            Ok(overrun.restore(&registry, id))
+        })?;
+        neotmux.set("resubscribe", resubscribe)?;
     }
 
     let neotmux = seal(lua, neotmux, "neotmux")?;
