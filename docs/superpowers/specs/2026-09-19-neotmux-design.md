@@ -724,8 +724,11 @@ the tick, never a synchronous mutation from inside a callback.
    down to 1x1, the output rects tile the input exactly. Both halves of the quantifier are
    discharged: a fixed table of shapes and sizes as the reproducible core, and a few hundred
    shapes and sizes generated from a fixed seed so that "any" is not six of them.
-3. The prefix key ships as a plugin file, and deleting its `require` line leaves a working
-   multiplexer with no prefix.
+3. The prefix key ships as a plugin file, and switching it off leaves a working multiplexer
+   with no prefix. There is no `require` line to delete: the shipped `init.lua` loops over
+   the names in `neotmux.defaults`, so the one-line equivalent from a user's own config is
+   `require('neotmux.defaults').prefix = false`. Deleting the shipped `lua/plugin/` does it
+   too — the loop's `package.searchpath` guard makes that an opt-out rather than an error.
 4. Closing the last pane exits, and the terminal is restored (the M0a guarantee still
    holds with a tree in place).
 
