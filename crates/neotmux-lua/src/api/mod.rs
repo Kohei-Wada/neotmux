@@ -8,7 +8,7 @@ use mlua::{Function, Lua, Table, Value};
 
 use crate::LoadFailure;
 use crate::ops::{Level, Op, OpBuffer};
-use crate::plugin::Plugins;
+use crate::plugin::{self, PluginId, Plugins};
 use crate::registry::{Kind, RegistrationId, Registry};
 
 pub use opt::Opts;
@@ -23,6 +23,28 @@ fn make_handle(lua: &Lua, registry: Rc<Registry>, id: RegistrationId) -> mlua::R
     Ok(handle)
 }
 
+/// The idiom `local m = require('plugin.x'); m.setup{}` calls back into the plugin long
+/// after the searcher's identity push has popped, so `plugins.current()` reads INIT even
+/// though the callback plainly belongs to `x`. When that happens, fall back to asking mlua
+/// where the callback's chunk came from (`Function::info().source`, which goes through
+/// `lua_getinfo` in Rust and so still works with `debug` stripped) and recover the plugin
+/// name the searcher would have interned for that chunk. A callback whose source is not a
+/// plugin chunk (bare init.lua, a neotmux.* library) keeps owner == INIT, as does a callback
+/// invoked while some other plugin is already current.
+fn attribute(plugins: &Plugins, callback: &Function) -> PluginId {
+    let owner = plugins.current();
+    if owner != plugin::INIT {
+        return owner;
+    }
+    callback
+        .info()
+        .source
+        .as_deref()
+        .and_then(plugin::plugin_name_from_source)
+        .map(|name| plugins.intern(&name))
+        .unwrap_or(plugin::INIT)
+}
+
 fn register(
     lua: &Lua,
     plugins: &Rc<Plugins>,
@@ -30,7 +52,7 @@ fn register(
     kind: Kind,
     callback: Function,
 ) -> mlua::Result<Table> {
-    let owner = plugins.current();
+    let owner = attribute(plugins, &callback);
     let key = Rc::new(lua.create_registry_value(callback)?);
     let id = registry.add(owner, kind, key);
     make_handle(lua, registry.clone(), id)

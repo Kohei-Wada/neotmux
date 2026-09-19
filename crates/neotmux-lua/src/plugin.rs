@@ -87,6 +87,21 @@ impl Plugins {
     }
 }
 
+/// Maps a chunk's `FunctionInfo::source` back to the plugin name the searcher would have
+/// interned for it, or `None` if the source is not a plugin chunk (bare `init.lua`, a
+/// `neotmux.*` library, or an anonymous/string chunk).
+pub fn plugin_name_from_source(source: &str) -> Option<String> {
+    let source = source.strip_prefix('@').unwrap_or(source);
+    let rest = source.split_once("/lua/plugin/").map(|(_, rest)| rest)?;
+    let path = rest
+        .strip_suffix("/init.lua")
+        .or_else(|| rest.strip_suffix(".lua"))?;
+    if path.is_empty() {
+        return None;
+    }
+    Some(path.replace('/', "."))
+}
+
 fn find_module(lua: &Lua, modname: &str) -> mlua::Result<Option<PathBuf>> {
     let package: Table = lua.globals().get("package")?;
     let path: String = package.get("path")?;
@@ -342,6 +357,29 @@ mod tests {
             .eval()
             .unwrap();
         assert!(ok, "a bytecode file was executed via require");
+    }
+
+    #[test]
+    fn plugin_name_from_source_recovers_the_name_a_plugin_chunk_would_intern() {
+        assert_eq!(
+            plugin_name_from_source("@/runtime/lua/plugin/clock.lua"),
+            Some("clock".to_string())
+        );
+        assert_eq!(
+            plugin_name_from_source("@/runtime/lua/plugin/nested/thing/init.lua"),
+            Some("nested.thing".to_string())
+        );
+    }
+
+    #[test]
+    fn plugin_name_from_source_rejects_non_plugin_chunks() {
+        assert_eq!(plugin_name_from_source("@/runtime/init.lua"), None);
+        assert_eq!(
+            plugin_name_from_source("@/runtime/lua/neotmux/clock.lua"),
+            None
+        );
+        assert_eq!(plugin_name_from_source("=[C]"), None);
+        assert_eq!(plugin_name_from_source("[string \"...\"]"), None);
     }
 
     #[test]

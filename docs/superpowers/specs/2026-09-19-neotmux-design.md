@@ -165,8 +165,26 @@ So attribution is designed in, not assumed:
 - a registration with neither (e.g. from a bare `init.lua` line) is attributed to
   `"init"`; one from a library `require`d outside a plugin chunk is attributed to the plugin
   that triggered the `require`, or `"anonymous"` if there is none
-- identity is a host-side `PluginId` with a display name; it is never derived from Lua state
-  at call time
+- identity is a host-side `PluginId` with a display name
+
+**The loader-push stack alone misses the idiom every plugin author reaches for coming from
+nvim**: `local m = require('plugin.clock'); m.setup{}`. The chunk runs and the searcher pops
+its identity before `setup` is ever called, so a registration made from inside `setup` — or
+from any function pulled out of the module table, including on a second `require` that hits
+`package.loaded` and never re-enters the searcher — sees an empty stack. Falling back to
+`"init"` there is wrong: `setup`'s registrations are the plugin's own and must be
+unsubscribable by its `PluginId` (§5.3).
+
+So registration attribution has a second step: **when the stack is empty, ask mlua where the
+registering callback's chunk came from.** `Function::info().source` goes through
+`lua_getinfo` in Rust, not the `debug` library, so it survives stripping `debug` (§5.2). The
+loader names every plugin chunk `@<layer>/lua/plugin/<name>.lua` (or `.../<name>/init.lua`),
+so the source string maps back to the same plugin name the searcher would have interned. If
+the source doesn't look like a plugin chunk — `init.lua` itself, or a `neotmux.*` library
+loaded outside any plugin — `"init"` remains correct. A library helper that registers while
+some other plugin is genuinely current still follows the stack, not its own source, so it is
+attributed to whoever is current. Identity is still a host-side `PluginId`; only this one
+fallback derives it from Lua state, and only when the stack has nothing to say.
 
 Because `debug` is unavailable, Lua-level tracebacks for error messages are produced by the
 host: the error path attaches the captured `PluginId` and the chunk name rather than asking

@@ -137,6 +137,79 @@ fn opt_sets_host_settings_and_rejects_unknown_keys() {
 }
 
 #[test]
+fn a_setup_call_after_require_is_attributed_to_the_plugin_not_init() {
+    let dir = layer(&[
+        ("init.lua", "local m = require('plugin.clock') m.setup()"),
+        (
+            "lua/plugin/clock.lua",
+            "return { setup = function() neotmux.on_tick(function() end) end }",
+        ),
+    ]);
+    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    assert!(sub.run_init().is_empty());
+
+    let ticks = sub.registry().snapshot(KindTag::Tick);
+    assert_eq!(ticks.len(), 1);
+    let owner = sub.registry().owner(ticks[0]).unwrap();
+    assert_eq!(sub.plugins().name(owner).as_deref(), Some("clock"));
+}
+
+#[test]
+fn a_plugin_required_twice_still_attributes_its_cached_table_correctly() {
+    let dir = layer(&[
+        (
+            "init.lua",
+            "require('plugin.clock') local m = require('plugin.clock') m.setup()",
+        ),
+        (
+            "lua/plugin/clock.lua",
+            "return { setup = function() neotmux.on_tick(function() end) end }",
+        ),
+    ]);
+    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    assert!(sub.run_init().is_empty());
+
+    let ticks = sub.registry().snapshot(KindTag::Tick);
+    assert_eq!(ticks.len(), 1);
+    let owner = sub.registry().owner(ticks[0]).unwrap();
+    assert_eq!(sub.plugins().name(owner).as_deref(), Some("clock"));
+}
+
+#[test]
+fn a_bare_init_lua_registration_is_still_attributed_to_init() {
+    let dir = layer(&[("init.lua", "neotmux.on_tick(function() end)")]);
+    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    assert!(sub.run_init().is_empty());
+
+    let ticks = sub.registry().snapshot(KindTag::Tick);
+    assert_eq!(ticks.len(), 1);
+    let owner = sub.registry().owner(ticks[0]).unwrap();
+    assert_eq!(sub.plugins().name(owner).as_deref(), Some("init"));
+}
+
+#[test]
+fn a_library_helper_registering_on_a_plugins_behalf_is_attributed_to_whoever_is_current() {
+    let dir = layer(&[
+        ("init.lua", "require('plugin.user')"),
+        (
+            "lua/neotmux/helper.lua",
+            "return { register = function(cb) neotmux.on_tick(cb) end }",
+        ),
+        (
+            "lua/plugin/user.lua",
+            "local helper = require('neotmux.helper') helper.register(function() end) return {}",
+        ),
+    ]);
+    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    assert!(sub.run_init().is_empty());
+
+    let ticks = sub.registry().snapshot(KindTag::Tick);
+    assert_eq!(ticks.len(), 1);
+    let owner = sub.registry().owner(ticks[0]).unwrap();
+    assert_eq!(sub.plugins().name(owner).as_deref(), Some("user"));
+}
+
+#[test]
 fn a_registration_made_during_a_dispatch_inherits_the_dispatched_plugin() {
     let dir = layer(&[
         ("init.lua", "require('plugin.spawner')"),
