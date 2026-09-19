@@ -1,4 +1,5 @@
 pub mod ctx;
+pub mod keymap;
 pub mod log;
 pub mod opt;
 
@@ -14,7 +15,11 @@ use crate::registry::{Kind, RegistrationId, Registry};
 
 pub use opt::Opts;
 
-fn make_handle(lua: &Lua, registry: Rc<Registry>, id: RegistrationId) -> mlua::Result<Table> {
+pub(crate) fn make_handle(
+    lua: &Lua,
+    registry: Rc<Registry>,
+    id: RegistrationId,
+) -> mlua::Result<Table> {
     let handle = lua.create_table()?;
     let remove = lua.create_function(move |_, _self: Value| {
         registry.remove(id);
@@ -32,7 +37,7 @@ fn make_handle(lua: &Lua, registry: Rc<Registry>, id: RegistrationId) -> mlua::R
 /// name the searcher would have interned for that chunk. A callback whose source is not a
 /// plugin chunk (bare init.lua, a neotmux.* library) keeps owner == INIT, as does a callback
 /// invoked while some other plugin is already current.
-fn attribute(plugins: &Plugins, callback: &Function) -> PluginId {
+pub(crate) fn attribute(plugins: &Plugins, callback: &Function) -> PluginId {
     let owner = plugins.current();
     if owner != plugin::INIT {
         return owner;
@@ -117,13 +122,13 @@ pub fn install(
     }
 
     {
-        let keymap = lua.create_table()?;
-        let plugins = plugins.clone();
-        let registry = registry.clone();
-        let set = lua.create_function(move |lua, (key, callback): (String, Function)| {
-            register(lua, &plugins, &registry, Kind::Keymap(key), callback)
-        })?;
-        keymap.set("set", set)?;
+        let keymap = keymap::install(
+            lua,
+            plugins.clone(),
+            registry.clone(),
+            ops.clone(),
+            opts.clone(),
+        )?;
         let keymap = seal(lua, keymap, "neotmux.keymap")?;
         neotmux.set("keymap", keymap)?;
     }

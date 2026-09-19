@@ -11,18 +11,25 @@ use std::fs;
 use std::rc::Rc;
 
 use mlua::chunk::ChunkMode;
-use mlua::{Function, Lua};
+use mlua::{Function, Lua, Value};
 
 use neotmux_core::proto::{DrawCmd, Epoch, PaneId, Rect, Size, StatusFragment};
 
 pub use api::Opts;
+pub use api::keymap;
 
 use api::ctx::Ctx;
 use draw::Buffers;
 use ops::{Level, Op, OpBuffer};
 use plugin::{PluginId, Plugins};
-use registry::{KindTag, Registry};
+use registry::{Kind, KindTag, Registry};
 use runtime::Layers;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyOutcome {
+    Consumed,
+    Fallthrough,
+}
 
 #[derive(Default)]
 struct Geometry {
@@ -178,6 +185,54 @@ impl LuaSubsystem {
                         },
                     );
                 }
+            }
+        }
+    }
+
+    pub fn dispatch_key(&self, spec: &str) -> KeyOutcome {
+        let Some(normalised) = keymap::normalise(spec) else {
+            return KeyOutcome::Fallthrough;
+        };
+
+        let prefix = self.opts.borrow().prefix.clone();
+        if keymap::normalise(&prefix).as_deref() == Some(normalised.as_str()) {
+            return KeyOutcome::Consumed;
+        }
+
+        let ids = self.registry.snapshot(KindTag::Keymap);
+        let target = ids.into_iter().find(|id| {
+            matches!(self.registry.kind(*id), Some(Kind::Keymap(existing)) if existing == normalised)
+        });
+        let Some(id) = target else {
+            return KeyOutcome::Fallthrough;
+        };
+        let Some(callback) = self.registry.callback(id) else {
+            return KeyOutcome::Fallthrough;
+        };
+        let Some(owner) = self.registry.owner(id) else {
+            return KeyOutcome::Fallthrough;
+        };
+        let Ok(func) = self.lua.registry_value::<Function>(&callback) else {
+            return KeyOutcome::Fallthrough;
+        };
+
+        self.plugins.push(owner);
+        let result = func.call::<Value>(());
+        self.plugins.pop();
+
+        match result {
+            Ok(Value::Boolean(true)) => KeyOutcome::Consumed,
+            Ok(_) => KeyOutcome::Fallthrough,
+            Err(err) => {
+                let name = self.plugins.name(owner).unwrap_or_default();
+                self.ops.push(
+                    owner,
+                    Op::Log {
+                        level: Level::Error,
+                        text: format!("{name}: {err}"),
+                    },
+                );
+                KeyOutcome::Fallthrough
             }
         }
     }

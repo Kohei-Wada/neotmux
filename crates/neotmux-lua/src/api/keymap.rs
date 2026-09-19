@@ -1,0 +1,151 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use mlua::{Function, Lua, Table, Value};
+
+use crate::api::{Opts, attribute, make_handle};
+use crate::ops::{Level, Op, OpBuffer};
+use crate::plugin::Plugins;
+use crate::registry::{Kind, KindTag, Registry};
+
+/// Canonical order for modifier prefixes: Control, then Meta/Alt, then Shift.
+const ORDER: [char; 3] = ['C', 'M', 'S'];
+
+/// Parses a key spec into its modifier set and base key, then re-emits it in
+/// `C-`, `M-`, `S-` order with a lowercase single-character key or a
+/// title-cased named key. Returns `None` for anything it cannot parse,
+/// including an empty spec.
+pub fn normalise(spec: &str) -> Option<String> {
+    if spec.is_empty() {
+        return None;
+    }
+
+    let mut mods = [false; 3];
+    let mut rest = spec;
+    while let Some((token, tail)) = rest.split_once('-') {
+        let idx = match token.to_ascii_lowercase().as_str() {
+            "c" | "ctrl" | "control" => 0,
+            "m" | "meta" | "alt" => 1,
+            "s" | "shift" => 2,
+            _ => break,
+        };
+        if mods[idx] {
+            return None;
+        }
+        mods[idx] = true;
+        rest = tail;
+    }
+
+    if rest.is_empty() {
+        return None;
+    }
+
+    let key = if rest.chars().count() == 1 {
+        rest.to_ascii_lowercase()
+    } else {
+        let mut chars = rest.chars();
+        let first = chars.next()?.to_ascii_uppercase();
+        let tail: String = chars.as_str().to_ascii_lowercase();
+        format!("{first}{tail}")
+    };
+
+    if !key.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return None;
+    }
+
+    let mut out = String::new();
+    for (idx, tag) in ORDER.iter().enumerate() {
+        if mods[idx] {
+            out.push(*tag);
+            out.push('-');
+        }
+    }
+    out.push_str(&key);
+    Some(out)
+}
+
+fn holder_of(registry: &Registry, plugins: &Plugins, spec: &str) -> Option<String> {
+    for id in registry.snapshot(KindTag::Keymap) {
+        if let Some(Kind::Keymap(existing)) = registry.kind(id)
+            && existing == spec
+        {
+            let owner = registry.owner(id)?;
+            return plugins.name(owner);
+        }
+    }
+    None
+}
+
+pub fn install(
+    lua: &Lua,
+    plugins: Rc<Plugins>,
+    registry: Rc<Registry>,
+    ops: Rc<OpBuffer>,
+    opts: Rc<RefCell<Opts>>,
+) -> mlua::Result<Table> {
+    let keymap = lua.create_table()?;
+    let set = lua.create_function(move |lua, (spec, callback): (String, Function)| {
+        let Some(normalised) = normalise(&spec) else {
+            let message = format!("cannot parse key spec '{spec}'");
+            return Ok((Value::Nil, Value::String(lua.create_string(message)?)));
+        };
+
+        let prefix = normalise(&opts.borrow().prefix);
+        if prefix.as_deref() == Some(normalised.as_str()) {
+            let message = format!("'{normalised}' is the prefix key, reserved by the host");
+            return Ok((Value::Nil, Value::String(lua.create_string(message)?)));
+        }
+
+        if let Some(holder) = holder_of(&registry, &plugins, &normalised) {
+            let attempted_by = plugins.name(attribute(&plugins, &callback)).unwrap_or_default();
+            let message = format!("'{normalised}' is already bound by {holder}");
+            ops.push(
+                plugins.current(),
+                Op::Log {
+                    level: Level::Warn,
+                    text: format!(
+                        "keymap conflict on '{normalised}': held by {holder}, refused for {attempted_by}"
+                    ),
+                },
+            );
+            return Ok((Value::Nil, Value::String(lua.create_string(message)?)));
+        }
+
+        let owner = attribute(&plugins, &callback);
+        let key = Rc::new(lua.create_registry_value(callback)?);
+        let id = registry.add(owner, Kind::Keymap(normalised), key);
+        let handle = make_handle(lua, registry.clone(), id)?;
+        Ok((Value::Table(handle), Value::Nil))
+    })?;
+    keymap.set("set", set)?;
+    Ok(keymap)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_bare_key_normalises_to_itself_lowercased() {
+        assert_eq!(normalise("C-x").as_deref(), Some("C-x"));
+        assert_eq!(normalise("c-X").as_deref(), Some("C-x"));
+        assert_eq!(normalise("Ctrl-x").as_deref(), Some("C-x"));
+    }
+
+    #[test]
+    fn modifiers_are_reordered_canonically() {
+        assert_eq!(normalise("M-C-x").as_deref(), Some("C-M-x"));
+        assert_eq!(normalise("S-M-C-x").as_deref(), Some("C-M-S-x"));
+    }
+
+    #[test]
+    fn unparseable_specs_are_refused() {
+        assert_eq!(normalise("Ctrl+Shift+F13"), None);
+        assert_eq!(normalise(""), None);
+    }
+
+    #[test]
+    fn a_duplicated_modifier_is_refused() {
+        assert_eq!(normalise("C-C-x"), None);
+    }
+}
