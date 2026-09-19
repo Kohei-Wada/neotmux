@@ -1,0 +1,17 @@
+[package]
+name = "neotmux"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+neotmux-core.workspace = true
+neotmux-term.workspace = true
+anyhow.workspace = true
+crossterm.workspace = true
+ratatui.workspace = true
+
+[dev-dependencies]
+portable-pty.workspace = true
