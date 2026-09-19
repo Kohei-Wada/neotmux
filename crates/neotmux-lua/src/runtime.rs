@@ -42,6 +42,8 @@ impl Layers {
 
         paths.push(PathBuf::from("/usr/share/neotmux"));
 
+        paths.retain(|p| p.is_absolute());
+
         Self(paths)
     }
 }
@@ -136,14 +138,21 @@ mod tests {
     #[test]
     fn no_resolved_layer_is_a_relative_path() {
         let env = env_from(&[
-            ("NEOTMUX_RUNTIME", "/a:/b"),
-            ("XDG_CONFIG_HOME", "/cfg"),
-            ("HOME", "/home/someone"),
+            ("NEOTMUX_RUNTIME", "rel/one:/abs/two::   "),
+            ("XDG_CONFIG_HOME", "   "),
+            ("HOME", "also/relative"),
         ]);
-        let layers = Layers::resolve(&env, Some(Path::new("/opt/neotmux/bin")));
+        let layers = Layers::resolve(&env, None);
         for p in layers.paths() {
             assert!(p.is_absolute(), "{p:?} is not absolute");
         }
+        assert!(!layers.paths().contains(&PathBuf::from("rel/one")));
+        assert!(
+            !layers
+                .paths()
+                .contains(&PathBuf::from("also/relative/.config/neotmux"))
+        );
+        assert!(layers.paths().contains(&PathBuf::from("/abs/two")));
     }
 
     #[test]
