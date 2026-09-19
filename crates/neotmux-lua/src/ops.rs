@@ -37,14 +37,6 @@ impl OpBuffer {
     pub fn drain(&self) -> Vec<(SourceId, Op)> {
         std::mem::take(&mut *self.ops.borrow_mut())
     }
-
-    pub fn len(&self) -> usize {
-        self.ops.borrow().len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
 }
 
 #[cfg(test)]
@@ -80,7 +72,6 @@ mod tests {
         let buf = OpBuffer::new();
         buf.push(a, Op::Quit);
         assert_eq!(buf.drain().len(), 1);
-        assert!(buf.is_empty());
         assert!(buf.drain().is_empty());
     }
 
