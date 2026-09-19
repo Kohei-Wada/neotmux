@@ -72,7 +72,7 @@ impl Session {
         shells.open(
             first,
             PtyHandle::default_shell_command(),
-            pane_size(&layout, first),
+            pane_size(&layout, first)?,
         )?;
         Ok(Self {
             size,
@@ -237,11 +237,11 @@ impl Session {
             return Ok(());
         }
 
-        let size = pane_size(&self.layout, new);
-        if let Err(err) = self
-            .shells
-            .open(new, PtyHandle::default_shell_command(), size)
-        {
+        let started = pane_size(&self.layout, new).and_then(|size| {
+            self.shells
+                .open(new, PtyHandle::default_shell_command(), size)
+        });
+        if let Err(err) = started {
             // The tree already holds a pane with nothing running in it; undo it rather than
             // leave a pane that can never draw or be typed into.
             self.layout.close(new);
@@ -353,12 +353,18 @@ impl Session {
     }
 }
 
-fn pane_size(layout: &PaneLayout, pane: PaneId) -> Size {
-    let rect = layout.rects.get(&pane).copied().unwrap_or_default();
-    Size {
+/// A pane with no rect is a bug in the layout, not a 0x0 pane: spawning a PTY at the default
+/// size would turn it into a terminal nothing can draw on, which is far harder to find.
+fn pane_size(layout: &PaneLayout, pane: PaneId) -> anyhow::Result<Size> {
+    let rect = layout
+        .rects
+        .get(&pane)
+        .copied()
+        .with_context(|| format!("{pane} has no rect in the layout"))?;
+    Ok(Size {
         rows: rect.h,
         cols: rect.w,
-    }
+    })
 }
 
 pub fn run(
@@ -469,6 +475,17 @@ mod tests {
     fn the_first_pane_is_the_whole_surface() {
         let size = Size { rows: 24, cols: 80 };
         let layout = PaneLayout::new(size, false, PaneId::from(FIRST_PANE));
-        assert_eq!(pane_size(&layout, PaneId::from(FIRST_PANE)), size);
+        assert_eq!(
+            pane_size(&layout, PaneId::from(FIRST_PANE)).expect("the first pane has a rect"),
+            size
+        );
+    }
+
+    /// Unreachable today, and that is the point: if the layout ever loses a pane's rect it
+    /// has to be an error rather than a 0x0 PTY nobody can see is wrong.
+    #[test]
+    fn a_pane_with_no_rect_is_an_error_not_a_zero_sized_terminal() {
+        let layout = PaneLayout::new(Size { rows: 24, cols: 80 }, false, PaneId::from(FIRST_PANE));
+        assert!(pane_size(&layout, PaneId::from(99)).is_err());
     }
 }
