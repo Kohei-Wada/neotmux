@@ -94,6 +94,57 @@ fn a_subscriber_to_another_event_is_not_called() {
 }
 
 #[test]
+fn a_subscriber_mutating_the_payload_does_not_affect_the_next_subscriber() {
+    let (_d, sub) = built(&[
+        (
+            "init.lua",
+            "require('plugin.mutator') require('plugin.observer')",
+        ),
+        (
+            "lua/plugin/mutator.lua",
+            "neotmux.on_event('pane_output', function(e) e.bytes = 'processed' e.pane = nil end) return {}",
+        ),
+        (
+            "lua/plugin/observer.lua",
+            "neotmux.on_event('pane_output', function(e) neotmux.log.info('saw ' .. e.bytes .. ' pane=' .. tostring(e.pane)) end) return {}",
+        ),
+    ]);
+    assert!(sub.run_init().is_empty());
+    sub.dispatch_event(&Event::PaneOutput {
+        pane: PaneId::from(1),
+        bytes: b"hello".to_vec(),
+    });
+    let text = format!("{:?}", sub.drain_ops());
+    assert!(text.contains("saw hello pane=1"), "{text}");
+}
+
+#[test]
+fn subscribers_run_in_registration_order() {
+    let (_d, sub) = built(&[
+        (
+            "init.lua",
+            "require('plugin.first') require('plugin.second')",
+        ),
+        (
+            "lua/plugin/first.lua",
+            "neotmux.on_event('pane_closed', function() neotmux.log.info('first') end) return {}",
+        ),
+        (
+            "lua/plugin/second.lua",
+            "neotmux.on_event('pane_closed', function() neotmux.log.info('second') end) return {}",
+        ),
+    ]);
+    assert!(sub.run_init().is_empty());
+    sub.dispatch_event(&Event::PaneClosed {
+        pane: PaneId::from(1),
+    });
+    let text = format!("{:?}", sub.drain_ops());
+    let first_idx = text.find("first").expect("first should have run");
+    let second_idx = text.find("second").expect("second should have run");
+    assert!(first_idx < second_idx, "{text}");
+}
+
+#[test]
 fn focus_changed_can_carry_no_pane() {
     let (_d, sub) = built(&[
         ("init.lua", "require('plugin.focus')"),

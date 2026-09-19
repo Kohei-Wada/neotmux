@@ -1,4 +1,4 @@
-use mlua::{Lua, Table, Value};
+use mlua::{Lua, LuaString, Table, Value};
 
 use neotmux_core::proto::{PaneId, Size};
 
@@ -22,15 +22,28 @@ impl Event {
         }
     }
 
-    pub fn payload(&self, lua: &Lua) -> mlua::Result<Table> {
+    /// `pane_output`'s bytes are the only payload expensive enough to copy
+    /// per subscriber, so build the Lua string for it once, up front.
+    pub(crate) fn shared_bytes(&self, lua: &Lua) -> mlua::Result<Option<LuaString>> {
+        match self {
+            Event::PaneOutput { bytes, .. } => Ok(Some(lua.create_string(bytes)?)),
+            _ => Ok(None),
+        }
+    }
+
+    /// A fresh table per subscriber: sharing one table would let a
+    /// subscriber's edit (e.g. `e.bytes = processed`) leak into what the
+    /// next subscriber sees.
+    pub(crate) fn table(&self, lua: &Lua, bytes: Option<&LuaString>) -> mlua::Result<Table> {
         let table = lua.create_table()?;
         match self {
             Event::PaneOpened { pane } | Event::PaneClosed { pane } => {
                 table.set("pane", pane.get())?;
             }
-            Event::PaneOutput { pane, bytes } => {
+            Event::PaneOutput { pane, .. } => {
                 table.set("pane", pane.get())?;
-                table.set("bytes", lua.create_string(bytes)?)?;
+                let bytes = bytes.expect("pane_output always carries a shared bytes string");
+                table.set("bytes", bytes.clone())?;
             }
             Event::FocusChanged { pane } => {
                 table.set(

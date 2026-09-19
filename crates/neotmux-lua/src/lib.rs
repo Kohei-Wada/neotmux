@@ -200,11 +200,7 @@ impl LuaSubsystem {
             return KeyOutcome::Consumed;
         }
 
-        let ids = self.registry.snapshot(KindTag::Keymap);
-        let target = ids.into_iter().find(|id| {
-            matches!(self.registry.kind(*id), Some(Kind::Keymap(existing)) if existing == normalised)
-        });
-        let Some(id) = target else {
+        let Some(id) = keymap::find(&self.registry, &normalised) else {
             return KeyOutcome::Fallthrough;
         };
         let Some(callback) = self.registry.callback(id) else {
@@ -239,7 +235,7 @@ impl LuaSubsystem {
     }
 
     pub fn dispatch_event(&self, event: &Event) {
-        let Ok(payload) = event.payload(&self.lua) else {
+        let Ok(bytes) = event.shared_bytes(&self.lua) else {
             return;
         };
 
@@ -261,9 +257,12 @@ impl LuaSubsystem {
             let Ok(func) = self.lua.registry_value::<Function>(&callback) else {
                 continue;
             };
+            let Ok(table) = event.table(&self.lua, bytes.as_ref()) else {
+                continue;
+            };
 
             self.plugins.push(owner);
-            let result = func.call::<()>(payload.clone());
+            let result = func.call::<()>(table);
             self.plugins.pop();
 
             if let Err(err) = result {

@@ -6,15 +6,12 @@ use mlua::{Function, Lua, Table, Value};
 use crate::api::{Opts, attribute, make_handle};
 use crate::ops::{Level, Op, OpBuffer};
 use crate::plugin::Plugins;
-use crate::registry::{Kind, KindTag, Registry};
+use crate::registry::{Kind, KindTag, RegistrationId, Registry};
 
 /// Canonical order for modifier prefixes: Control, then Meta/Alt, then Shift.
 const ORDER: [char; 3] = ['C', 'M', 'S'];
 
-/// Parses a key spec into its modifier set and base key, then re-emits it in
-/// `C-`, `M-`, `S-` order with a lowercase single-character key or a
-/// title-cased named key. Returns `None` for anything it cannot parse,
-/// including an empty spec.
+/// Canonical form so `C-b`, `c-b` and `Ctrl-b` compare equal for conflict detection.
 pub fn normalise(spec: &str) -> Option<String> {
     if spec.is_empty() {
         return None;
@@ -41,17 +38,21 @@ pub fn normalise(spec: &str) -> Option<String> {
     }
 
     let key = if rest.chars().count() == 1 {
-        rest.to_ascii_lowercase()
+        let c = rest.chars().next()?;
+        if c.is_control() {
+            return None;
+        }
+        c.to_ascii_lowercase().to_string()
     } else {
         let mut chars = rest.chars();
         let first = chars.next()?.to_ascii_uppercase();
         let tail: String = chars.as_str().to_ascii_lowercase();
-        format!("{first}{tail}")
+        let key = format!("{first}{tail}");
+        if !key.chars().all(|c| c.is_ascii_alphanumeric()) {
+            return None;
+        }
+        key
     };
-
-    if !key.chars().all(|c| c.is_ascii_alphanumeric()) {
-        return None;
-    }
 
     let mut out = String::new();
     for (idx, tag) in ORDER.iter().enumerate() {
@@ -64,16 +65,18 @@ pub fn normalise(spec: &str) -> Option<String> {
     Some(out)
 }
 
+/// The one scan `holder_of` and `dispatch_key` both need: the registration,
+/// if any, bound to this normalised spec.
+pub(crate) fn find(registry: &Registry, spec: &str) -> Option<RegistrationId> {
+    registry
+        .snapshot(KindTag::Keymap)
+        .into_iter()
+        .find(|id| matches!(registry.kind(*id), Some(Kind::Keymap(existing)) if existing == spec))
+}
+
 fn holder_of(registry: &Registry, plugins: &Plugins, spec: &str) -> Option<String> {
-    for id in registry.snapshot(KindTag::Keymap) {
-        if let Some(Kind::Keymap(existing)) = registry.kind(id)
-            && existing == spec
-        {
-            let owner = registry.owner(id)?;
-            return plugins.name(owner);
-        }
-    }
-    None
+    let owner = registry.owner(find(registry, spec)?)?;
+    plugins.name(owner)
 }
 
 pub fn install(
@@ -97,10 +100,11 @@ pub fn install(
         }
 
         if let Some(holder) = holder_of(&registry, &plugins, &normalised) {
-            let attempted_by = plugins.name(attribute(&plugins, &callback)).unwrap_or_default();
+            let attempter = attribute(&plugins, &callback);
+            let attempted_by = plugins.name(attempter).unwrap_or_default();
             let message = format!("'{normalised}' is already bound by {holder}");
             ops.push(
-                plugins.current(),
+                attempter,
                 Op::Log {
                     level: Level::Warn,
                     text: format!(
@@ -147,5 +151,16 @@ mod tests {
     #[test]
     fn a_duplicated_modifier_is_refused() {
         assert_eq!(normalise("C-C-x"), None);
+    }
+
+    #[test]
+    fn punctuation_keys_can_be_bound() {
+        assert_eq!(normalise("C-]").as_deref(), Some("C-]"));
+        assert_eq!(normalise(".").as_deref(), Some("."));
+    }
+
+    #[test]
+    fn the_final_dash_before_the_key_is_the_separator_not_the_key() {
+        assert_eq!(normalise("C--").as_deref(), Some("C--"));
     }
 }
