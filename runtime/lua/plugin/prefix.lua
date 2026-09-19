@@ -28,7 +28,6 @@ local commands = {
 neotmux.on_key(function(key)
   if armed then
     armed = false
-    neotmux.log.info("prefix command " .. key)
     local command = commands[key]
     if command then
       command()
@@ -37,7 +36,6 @@ neotmux.on_key(function(key)
   end
   if key == "C-a" then
     armed = true
-    neotmux.log.info("prefix armed")
     return true
   end
   return false

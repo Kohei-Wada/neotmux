@@ -268,18 +268,23 @@ costs one plugin one frame instead of costing you the program.
 
 ## Turning a shipped default off
 
-neotmux ships a default status line as a plugin, in the runtime layer an install puts on the
-search path. Every layer's `init.lua` runs, earliest layer first, and the shipped layer is
-last — so your own `init.lua` can decide what the shipped one does:
+neotmux ships two plugins in the runtime layer an install puts on the search path: `status`,
+the default status line, and `prefix`, a `C-a` prefix over `%`, `"` and `o`. Neither is a host
+feature — both are ordinary files making ordinary API calls, and the prefix is the only reason
+a fresh install can make a second pane at all.
+
+Every layer's `init.lua` runs, earliest layer first, and the shipped layer is last — so your
+own `init.lua` can decide what the shipped ones do:
 
 ```lua
 -- ~/.config/neotmux/init.lua
 require('neotmux.defaults').status = false
+require('neotmux.defaults').prefix = false
 ```
 
 That is a Lua module the runtime layer ships, not a host feature: neotmux has no idea the
 defaults table exists. Deleting the installed `lua/plugin/` directory works too, and leaves a
-multiplexer with no status line and no error.
+multiplexer with no status line, no prefix and no error.
 
 ## Reloading
 

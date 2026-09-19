@@ -19,6 +19,14 @@ fn start(init: &str, shell: &str) -> (Neotmux, tempfile::TempDir) {
     (nt, dir)
 }
 
+/// The shipped layer behind a thin user layer, which is what an installed neotmux runs:
+/// every shipped default loads unless the user's own `init.lua` turns it off.
+fn start_shipped(init: &str, shell: &str) -> (Neotmux, tempfile::TempDir) {
+    let dir = harness::runtime(&[("init.lua", init)]);
+    let nt = Neotmux::start_layered(&[dir.path(), &shipped_layer()], shell);
+    (nt, dir)
+}
+
 fn line_with<'a>(log: &'a str, marker: &str) -> &'a str {
     log.lines()
         .find(|line| line.contains(marker))
@@ -196,15 +204,11 @@ fn nothing_is_written_while_nothing_happens() {
 /// key after it reach it only through `on_key`, and both are swallowed before the PTY.
 #[test]
 fn prefix_swallows_its_key_and_the_next_one_while_an_unrelated_key_gets_through() {
-    let (mut nt, _init) = start("require('plugin.prefix')", "cat");
+    let (mut nt, _init) = start_shipped("", "cat");
     nt.send("\x01"); // C-a, the prefix
     nt.send("z"); // the command key, bound by nobody
     nt.send("Q"); // unrelated, no prefix pending
     nt.send("\r");
-
-    let log = nt.wait_for_log("prefix command z", PATIENCE);
-    assert!(line_with(&log, "prefix armed").contains("plugin/prefix"));
-    assert!(line_with(&log, "prefix command z").contains("plugin/prefix"));
 
     let screen = nt.screen_after(Duration::from_secs(2));
     assert!(
@@ -393,9 +397,9 @@ fn a_coroutine_wrapped_spinner_loses_its_tick_too() {
 /// walks to the next pane, both expressed with nothing but `neotmux.pane`.
 #[test]
 fn the_prefix_splits_vertically_and_walks_to_the_next_pane() {
-    let (mut nt, _init) = start("require('plugin.prefix')", "cat");
+    let (mut nt, _init) = start_shipped("", "cat");
     nt.send("\x01%"); // C-a %
-    nt.wait_for_log("prefix command %", PATIENCE);
+    nt.wait_for_screen("panes 2 focus 2", PATIENCE);
     nt.settle(Duration::from_millis(500));
 
     nt.send("RIGHT");
@@ -424,9 +428,9 @@ fn the_prefix_splits_vertically_and_walks_to_the_next_pane() {
 /// Task 4: `C-a "` splits the other way — the two panes are stacked, not side by side.
 #[test]
 fn the_prefix_splits_horizontally() {
-    let (mut nt, _init) = start("require('plugin.prefix')", "cat");
+    let (mut nt, _init) = start_shipped("", "cat");
     nt.send("\x01\""); // C-a "
-    nt.wait_for_log("prefix command \"", PATIENCE);
+    nt.wait_for_screen("panes 2 focus 2", PATIENCE);
     nt.settle(Duration::from_millis(500));
 
     nt.send("BELOW");
@@ -453,11 +457,13 @@ fn the_prefix_splits_horizontally() {
     );
 }
 
-/// Task 4 step 5: the prefix is a plugin, not a feature. Without its `require` line `C-a`
-/// is an ordinary keystroke and the multiplexer is otherwise unchanged.
+/// Task 4 step 5: the prefix is a plugin, not a feature. Switched off from a user config —
+/// the same one line that switches the status line off — `C-a` is an ordinary keystroke and
+/// the multiplexer is otherwise unchanged. That the defaults table works for a second entry
+/// is the point: it is a convention, not a special case for the status line.
 #[test]
-fn without_its_require_line_the_prefix_key_reaches_the_shell() {
-    let (mut nt, _init) = start("", "cat");
+fn a_user_config_can_switch_off_the_shipped_prefix() {
+    let (mut nt, _init) = start_shipped("require('neotmux.defaults').prefix = false", "cat");
     nt.send("\x01"); // C-a, now bound by nobody
     nt.send("%");
     nt.send("PLAIN\r");
@@ -548,6 +554,7 @@ fn deleting_the_shipped_plugins_leaves_a_working_multiplexer() {
     std::fs::remove_dir_all(stripped.path().join("lua/plugin")).expect("remove the plugin dir");
 
     let mut nt = Neotmux::start_layered(&[stripped.path()], "cat");
+    nt.send("\x01"); // C-a: an ordinary keystroke with no prefix plugin left to swallow it
     nt.send("STILL-HERE\r");
     nt.wait_for_screen("STILL-HERE", PATIENCE);
 
@@ -555,6 +562,10 @@ fn deleting_the_shipped_plugins_leaves_a_working_multiplexer() {
     assert!(
         !screen.contains("panes "),
         "a status line survived the deletion:\n{screen}"
+    );
+    assert!(
+        screen.contains("^A"),
+        "a prefix survived the deletion of the file it lives in:\n{screen}"
     );
     let log = nt.log_text();
     assert!(
@@ -593,6 +604,11 @@ fn an_installed_neotmux_starts_on_its_shipped_layer() {
 
     let mut nt = Neotmux::start_installed(prefix.path(), "cat");
     nt.wait_for_screen("panes 1 focus 1", PATIENCE);
+
+    // Out of the box, with no user Lua at all: the shipped prefix is the only way to reach
+    // a second pane, so this is what v0.1's line costs an installed user.
+    nt.send("\x01%"); // C-a %
+    nt.wait_for_screen("panes 2 focus 2", PATIENCE);
 
     let log = nt.log_text();
     assert!(

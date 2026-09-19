@@ -7,4 +7,5 @@
 -- This is a Lua convention, not a host feature: the host has no idea these defaults exist.
 return {
   status = true,
+  prefix = true,
 }
