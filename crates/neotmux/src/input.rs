@@ -38,6 +38,48 @@ fn low_function_key(letter: u8, modifier: u8) -> Vec<u8> {
     }
 }
 
+/// Turns a key event into the spec string `LuaSubsystem::dispatch_key` expects
+/// (e.g. `C-x`, `M-Left`, `.`), matching what `keymap::normalise` produces.
+pub fn key_spec(key: &KeyEvent) -> Option<String> {
+    if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
+        return None;
+    }
+
+    let key_part = match key.code {
+        KeyCode::Char(c) => c.to_string(),
+        KeyCode::Enter => "Enter".to_string(),
+        KeyCode::Tab => "Tab".to_string(),
+        KeyCode::BackTab => "BackTab".to_string(),
+        KeyCode::Backspace => "Backspace".to_string(),
+        KeyCode::Esc => "Esc".to_string(),
+        KeyCode::Up => "Up".to_string(),
+        KeyCode::Down => "Down".to_string(),
+        KeyCode::Left => "Left".to_string(),
+        KeyCode::Right => "Right".to_string(),
+        KeyCode::Home => "Home".to_string(),
+        KeyCode::End => "End".to_string(),
+        KeyCode::PageUp => "PageUp".to_string(),
+        KeyCode::PageDown => "PageDown".to_string(),
+        KeyCode::Insert => "Insert".to_string(),
+        KeyCode::Delete => "Delete".to_string(),
+        KeyCode::F(n) => format!("F{n}"),
+        _ => return None,
+    };
+
+    let mut spec = String::new();
+    if key.modifiers.contains(KeyModifiers::CONTROL) {
+        spec.push_str("C-");
+    }
+    if key.modifiers.contains(KeyModifiers::ALT) {
+        spec.push_str("M-");
+    }
+    if key.modifiers.contains(KeyModifiers::SHIFT) && !matches!(key.code, KeyCode::Char(_)) {
+        spec.push_str("S-");
+    }
+    spec.push_str(&key_part);
+    Some(spec)
+}
+
 pub fn encode_key(key: KeyEvent) -> Option<Vec<u8>> {
     if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
         return None;
@@ -312,6 +354,33 @@ mod tests {
             encode_key(modified(KeyCode::F(12), KeyModifiers::ALT)).unwrap(),
             b"\x1b[24;3~"
         );
+    }
+
+    #[test]
+    fn key_spec_builds_control_and_meta_specs() {
+        use super::key_spec;
+
+        let ctrl_x = KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL);
+        assert_eq!(key_spec(&ctrl_x).as_deref(), Some("C-x"));
+
+        let alt_left = modified(KeyCode::Left, KeyModifiers::ALT);
+        assert_eq!(key_spec(&alt_left).as_deref(), Some("M-Left"));
+
+        let dot = key(KeyCode::Char('.'));
+        assert_eq!(key_spec(&dot).as_deref(), Some("."));
+    }
+
+    #[test]
+    fn key_spec_is_none_for_release_events() {
+        use super::key_spec;
+        use crossterm::event::KeyEventKind;
+
+        let released = KeyEvent::new_with_kind(
+            KeyCode::Char('a'),
+            KeyModifiers::NONE,
+            KeyEventKind::Release,
+        );
+        assert_eq!(key_spec(&released), None);
     }
 
     #[test]

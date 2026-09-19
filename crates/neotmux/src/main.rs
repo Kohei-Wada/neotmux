@@ -1,6 +1,8 @@
 mod app;
 mod input;
 mod logging;
+mod notify;
+mod overlay;
 mod render;
 mod signals;
 

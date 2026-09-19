@@ -2,21 +2,30 @@ use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
 use crossterm::event::{self, Event};
-use neotmux_core::proto::{GridSnapshot, Size};
-use neotmux_lua::LuaSubsystem;
+use neotmux_core::proto::{
+    DrawCmd, Epoch, GridSnapshot, PaneId, Rect as PRect, Size, StatusFragment,
+};
 use neotmux_lua::ops::Op;
+use neotmux_lua::{Event as LuaEvent, KeyOutcome, LuaSubsystem};
 use neotmux_term::pty::{PtyEvent, PtyHandle};
 use neotmux_term::state::TermState;
 use ratatui::DefaultTerminal;
 
-use crate::input::encode_key;
+use crate::input::{encode_key, key_spec};
 use crate::logging;
-use crate::render::draw_grid;
+use crate::notify::Notifications;
+use crate::overlay::{self, PaneRects};
+use crate::render::{draw_grid, layout};
 use crate::signals::ShutdownSignal;
 
 const FRAME: Duration = Duration::from_millis(16);
 const SCROLLBACK: usize = 10_000;
 const MAX_CHUNKS_PER_FRAME: usize = 32;
+
+/// The single PTY-backed pane this milestone knows about.
+fn pane_id() -> PaneId {
+    PaneId::from(1)
+}
 
 fn clamp_to_at_least_one(size: Size) -> Size {
     Size {
@@ -33,16 +42,40 @@ fn terminal_size(terminal: &DefaultTerminal) -> anyhow::Result<Size> {
     }))
 }
 
+/// The pane's own size: the full terminal, minus the status row once a
+/// status provider exists. A one-row terminal can't spare that row.
+fn content_size(full: Size, has_status: bool) -> Size {
+    if has_status && full.rows > 1 {
+        Size {
+            rows: full.rows - 1,
+            cols: full.cols,
+        }
+    } else {
+        full
+    }
+}
+
+fn pane_rects(content: Size) -> PaneRects {
+    let mut map = PaneRects::new();
+    map.insert(pane_id(), PRect::new(0, 0, content.cols, content.rows));
+    map
+}
+
 pub fn run(
     terminal: &mut DefaultTerminal,
     shutdown: &ShutdownSignal,
     lua: &LuaSubsystem,
 ) -> anyhow::Result<Option<i32>> {
     let mut size = terminal_size(terminal)?;
-    let mut state = TermState::new(size, SCROLLBACK);
-    let mut pty = PtyHandle::spawn(PtyHandle::default_shell_command(), size)?;
+    let mut has_status = false;
+    let mut content = content_size(size, has_status);
+    let mut panes = pane_rects(content);
+    let mut state = TermState::new(content, SCROLLBACK);
+    let mut pty = PtyHandle::spawn(PtyHandle::default_shell_command(), content)?;
     let mut grid = GridSnapshot::default();
     let mut dirty = true;
+    let mut notifications = Notifications::new();
+    let mut last_frame_output: (Vec<DrawCmd>, Vec<StatusFragment>) = (Vec::new(), Vec::new());
 
     #[cfg(debug_assertions)]
     if std::env::var_os("NEOTMUX_PANIC_TEST").is_some() {
@@ -83,15 +116,24 @@ pub fn run(
                 }
                 match event::read().context("read input")? {
                     Event::Key(key) => {
-                        if let Some(bytes) = encode_key(key) {
+                        let outcome = match key_spec(&key) {
+                            Some(spec) => lua.dispatch_key(&spec),
+                            None => KeyOutcome::Fallthrough,
+                        };
+                        if outcome == KeyOutcome::Fallthrough
+                            && let Some(bytes) = encode_key(key)
+                        {
                             pty.write(&bytes).context("write to pty")?;
                         }
                     }
                     Event::Resize(cols, rows) => {
                         size = clamp_to_at_least_one(Size { rows, cols });
-                        state.resize(size);
-                        pty.resize(size)?;
+                        content = content_size(size, has_status);
+                        panes = pane_rects(content);
+                        state.resize(content);
+                        pty.resize(content)?;
                         dirty = true;
+                        lua.dispatch_event(&LuaEvent::Resized { size: content });
                     }
                     _ => {}
                 }
@@ -101,24 +143,74 @@ pub fn run(
             }
         }
 
+        let epoch = Epoch::new(content, vec![pane_id()], Some(pane_id()));
+        lua.begin_frame(
+            epoch,
+            content,
+            vec![(pane_id(), *panes.get(&pane_id()).unwrap())],
+            Some(pane_id()),
+        );
         lua.dispatch_tick();
+
+        let mut quit = false;
         for (id, op) in lua.drain_ops() {
             match op {
-                Op::Quit => return Ok(None),
-                Op::Log { level, text } | Op::Notify { level, text } => {
+                Op::Quit => quit = true,
+                Op::Log { level, text } => {
                     let tag = lua.plugins().name(id).unwrap_or_else(|| id.to_string());
+                    logging::log(level, &tag, &text);
+                }
+                Op::Notify { level, text } => {
+                    let tag = lua.plugins().name(id).unwrap_or_else(|| id.to_string());
+                    notifications.push(level, &tag, &text);
                     logging::log(level, &tag, &text);
                 }
             }
         }
+        if quit {
+            return Ok(None);
+        }
+
+        let frame_output = lua.frame_output();
+        let now_has_status = !frame_output.1.is_empty();
+        if now_has_status != has_status {
+            has_status = now_has_status;
+            content = content_size(size, has_status);
+            panes = pane_rects(content);
+            state.resize(content);
+            pty.resize(content)?;
+            dirty = true;
+            lua.dispatch_event(&LuaEvent::Resized { size: content });
+        }
+
+        if frame_output != last_frame_output {
+            dirty = true;
+        }
+        // A live notification needs a later frame just to notice it expired
+        // and stop being drawn, even if nothing else changed.
+        if !notifications.is_empty() {
+            dirty = true;
+        }
+        let (cmds, status) = &frame_output;
 
         if dirty || eof {
             state.snapshot_into(&mut grid);
+            notifications.expire(Instant::now());
             terminal
-                .draw(|frame| draw_grid(frame, frame.area(), &grid))
+                .draw(|frame| {
+                    let area = frame.area();
+                    let (pane_area, status_area) = layout(area, has_status);
+                    draw_grid(frame, pane_area, &grid);
+                    overlay::apply(frame, pane_area, cmds, &panes);
+                    if has_status {
+                        overlay::draw_status(frame, status_area, status);
+                    }
+                    notifications.render(frame, area);
+                })
                 .context("draw")?;
             dirty = false;
         }
+        last_frame_output = frame_output;
 
         if eof {
             break;

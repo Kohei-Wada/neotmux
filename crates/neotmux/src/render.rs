@@ -3,12 +3,43 @@ use ratatui::Frame;
 use ratatui::layout::{Position, Rect};
 use ratatui::style::{Color, Modifier};
 
-fn color(c: PColor) -> Color {
+pub(crate) fn color(c: PColor) -> Color {
     match c {
         PColor::Default => Color::Reset,
         PColor::Idx(i) => Color::Indexed(i),
         PColor::Rgb(r, g, b) => Color::Rgb(r, g, b),
         _ => Color::Reset,
+    }
+}
+
+/// Splits the terminal area into the pane area and the status row. The
+/// status row only exists (and only costs a row) when there is a status to
+/// show; otherwise the pane gets the whole area, exactly as before.
+pub fn layout(area: Rect, has_status: bool) -> (Rect, Rect) {
+    if has_status && area.height > 1 {
+        let pane = Rect {
+            x: area.x,
+            y: area.y,
+            width: area.width,
+            height: area.height - 1,
+        };
+        let status = Rect {
+            x: area.x,
+            y: area.y + area.height - 1,
+            width: area.width,
+            height: 1,
+        };
+        (pane, status)
+    } else {
+        (
+            area,
+            Rect {
+                x: area.x,
+                y: area.y + area.height,
+                width: area.width,
+                height: 0,
+            },
+        )
     }
 }
 
@@ -53,6 +84,7 @@ mod tests {
     use neotmux_core::proto::{Color as PColor, GridSnapshot, Size};
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
+    use ratatui::layout::Rect;
     use ratatui::style::Color;
 
     use super::draw_grid;
@@ -92,6 +124,30 @@ mod tests {
                 .modifier
                 .contains(ratatui::style::Modifier::BOLD)
         );
+    }
+
+    #[test]
+    fn no_status_gives_the_pane_the_whole_area() {
+        let area = Rect::new(0, 0, 80, 24);
+        let (pane, status) = super::layout(area, false);
+        assert_eq!(pane, area);
+        assert_eq!(status.height, 0);
+    }
+
+    #[test]
+    fn a_status_reserves_the_bottom_row() {
+        let area = Rect::new(0, 0, 80, 24);
+        let (pane, status) = super::layout(area, true);
+        assert_eq!(pane, Rect::new(0, 0, 80, 23));
+        assert_eq!(status, Rect::new(0, 23, 80, 1));
+    }
+
+    #[test]
+    fn a_single_row_area_cannot_spare_a_status_row() {
+        let area = Rect::new(0, 0, 80, 1);
+        let (pane, status) = super::layout(area, true);
+        assert_eq!(pane, area);
+        assert_eq!(status.height, 0);
     }
 
     #[test]
