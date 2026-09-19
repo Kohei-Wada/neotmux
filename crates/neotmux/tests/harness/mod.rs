@@ -201,6 +201,18 @@ impl Neotmux {
         std::fs::read_to_string(&self.log).unwrap_or_default()
     }
 
+    /// Blocks until the process is gone, and reports whether it left cleanly.
+    pub fn exited_cleanly(&mut self, timeout: Duration) -> bool {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if let Some(status) = self.child.try_wait().expect("try_wait") {
+                return status.success();
+            }
+            assert!(Instant::now() < deadline, "neotmux did not exit");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
     pub fn bytes_in(&mut self, duration: Duration) -> usize {
         std::thread::sleep(duration);
         let mut total = 0usize;

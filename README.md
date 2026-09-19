@@ -47,11 +47,21 @@ implementation plans.
 ## Install
 
 ```sh
-cargo install --git https://github.com/Kohei-Wada/neotmux
+make install            # or: make install PREFIX=/usr/local
 ```
 
 `mlua` builds Lua 5.4 from vendored source, so a C compiler has to be on the machine. Nothing
 else is needed — no system Lua, no shared libraries.
+
+`cargo install` on its own is not enough. It copies the binary and nothing else, and the
+default status line is a plugin: it lives in the shipped runtime layer under `runtime/`, which
+has to be installed alongside the binary as `<prefix>/share/neotmux`. That is what `make
+install` adds, and it is the directory neotmux looks for next to its own executable. A binary
+installed with `cargo install` alone starts and runs a shell with no status line and no error;
+pointing `NEOTMUX_RUNTIME` at a checkout's `runtime/` is the other way to give it one.
+
+Deleting `<prefix>/share/neotmux/lua/plugin` turns the shipped defaults off. Nothing in the
+program knows what they said.
 
 Configuration lives in `$XDG_CONFIG_HOME/neotmux` (or `~/.config/neotmux`): `init.lua` at the
 top, and modules under `lua/`, so `require('plugin.clock')` loads `lua/plugin/clock.lua`. The

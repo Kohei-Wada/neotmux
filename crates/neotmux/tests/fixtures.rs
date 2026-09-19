@@ -1,6 +1,7 @@
 //! The §4.11 fixture plugin set: real `.lua` files under `tests/fixtures`, loaded through
 //! the ordinary runtime-layer resolution and the ordinary `require`, driven over a PTY.
 
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 mod harness;
@@ -475,4 +476,67 @@ fn without_its_require_line_the_prefix_key_reaches_the_shell() {
         screen.contains("PLAIN"),
         "the one pane stopped echoing:\n{screen}"
     );
+}
+
+/// The runtime layer neotmux ships: the one an install puts on the default search path,
+/// read here straight out of the source tree.
+fn shipped_layer() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime")
+}
+
+fn copy_tree(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).expect("create dir");
+    for entry in std::fs::read_dir(from).expect("read dir") {
+        let entry = entry.expect("dir entry");
+        let target = to.join(entry.file_name());
+        if entry.file_type().expect("file type").is_dir() {
+            copy_tree(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), &target).expect("copy file");
+        }
+    }
+}
+
+/// Task 5: the default status line is a shipped plugin, so it is there with no user config
+/// at all — and it reports the pane tree, which means it follows a split and the focus.
+#[test]
+fn the_shipped_status_line_shows_with_no_user_config() {
+    let init = harness::runtime(&[("init.lua", "require('plugin.splitter')")]);
+    let fixtures = harness::fixture_layer();
+    let shipped = shipped_layer();
+    let mut nt = Neotmux::start_layered(&[init.path(), &fixtures, &shipped], "cat");
+
+    nt.wait_for_screen("panes 1 focus 1", PATIENCE);
+    nt.send("\x02"); // C-b: split, focusing the new pane
+    nt.wait_for_screen("panes 2 focus 2", PATIENCE);
+    nt.send("\x0f"); // C-o: focus the other one
+    nt.wait_for_screen("panes 2 focus 1", PATIENCE);
+}
+
+/// §1's first exit criterion, checked by deletion rather than by grep: with the shipped
+/// `lua/plugin/` gone there is no status line, no error about the missing file, and the
+/// multiplexer still runs a shell and exits cleanly.
+#[test]
+fn deleting_the_shipped_plugins_leaves_a_working_multiplexer() {
+    let stripped = tempfile::tempdir().expect("stripped layer");
+    copy_tree(&shipped_layer(), stripped.path());
+    std::fs::remove_dir_all(stripped.path().join("lua/plugin")).expect("remove the plugin dir");
+
+    let mut nt = Neotmux::start_layered(&[stripped.path()], "cat");
+    nt.send("STILL-HERE\r");
+    nt.wait_for_screen("STILL-HERE", PATIENCE);
+
+    let screen = nt.screen_after(Duration::from_millis(500));
+    assert!(
+        !screen.contains("panes "),
+        "a status line survived the deletion:\n{screen}"
+    );
+    let log = nt.log_text();
+    assert!(
+        log.is_empty(),
+        "deleting the shipped plugins was reported as a failure:\n{log}"
+    );
+
+    nt.send("\x04"); // EOF: the last pane's shell exits, so neotmux does
+    assert!(nt.exited_cleanly(PATIENCE), "neotmux did not exit cleanly");
 }
