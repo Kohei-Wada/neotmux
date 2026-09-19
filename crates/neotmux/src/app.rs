@@ -27,7 +27,8 @@ pub fn run(terminal: &mut DefaultTerminal) -> anyhow::Result<()> {
     let mut pty = PtyHandle::spawn(PtyHandle::default_shell_command(), size)?;
     let mut grid = GridSnapshot::default();
 
-    if cfg!(debug_assertions) && std::env::var_os("NEOTMUX_PANIC_TEST").is_some() {
+    #[cfg(debug_assertions)]
+    if std::env::var_os("NEOTMUX_PANIC_TEST").is_some() {
         panic!("NEOTMUX_PANIC_TEST");
     }
 
