@@ -27,10 +27,13 @@ const FIRST_PANE: u32 = 1;
 /// outside its measured tick — an op pushed in the tick, a shell fork/exec'd after it — so
 /// M1b's promise only holds if the number of them a frame can be made to do is bounded.
 ///
-/// Derived rather than picked: the frame is 16 ms, the default tick budget claims 8 ms of
-/// it, and draining the PTYs and rendering need the rest, so applying ops gets about half
-/// of what is left, 4 ms. One split measured 1.3 ms (release, 24x40 pane: openpty, fork,
-/// exec, terminal state), and 4 / 1.3 is 3.
+/// A conservative fixed floor, not a formula to re-run, and compile-time on purpose. It is
+/// not derived from `tick_budget_ms`: that budget is per source per frame, so k sources can
+/// claim 8k ms of a 16 ms frame and there is no remainder to divide; `tick_budget_ms = 0`
+/// switches the budget off altogether; and a cap read from an option a plugin sets would let
+/// it widen its own allowance. The measurement behind 3: one split costs about 1.3 ms
+/// (release, 24x40 pane: openpty, fork, exec, terminal state), so three of them spend a few
+/// milliseconds of the frame on something a session asks for a handful of times.
 const MAX_SPLITS_PER_FRAME: usize = 3;
 
 fn terminal_size(terminal: &DefaultTerminal) -> anyhow::Result<Size> {
