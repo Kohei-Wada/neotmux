@@ -608,8 +608,18 @@ fn a_long_c_call_is_reported_by_name_though_it_ran_to_completion() {
     assert_eq!(overruns.len(), 1, "{overruns:?}");
     assert_eq!(overruns[0].0, "plugin/hog", "{overruns:?}");
     assert!(
-        overruns[0].1.contains("could not be cut off"),
+        overruns[0].1.contains("not cut off"),
         "an uninterrupted overrun read as an interrupted one: {overruns:?}"
+    );
+    // The report says what was observed — no sample past the deadline — not where the time
+    // went, and says it with enough precision that an overrun reads as one.
+    assert!(
+        overruns[0].1.contains("no sample landed past the deadline"),
+        "{overruns:?}"
+    );
+    assert!(
+        overruns[0].1.contains('.'),
+        "an overrun was rendered with no fractional milliseconds: {overruns:?}"
     );
 
     // The distinguishing fact: nothing was interrupted, the tick ran its C call to the end.

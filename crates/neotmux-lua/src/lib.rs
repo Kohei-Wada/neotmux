@@ -13,6 +13,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::fs;
 use std::rc::Rc;
+use std::time::Duration;
 
 use mlua::chunk::ChunkMode;
 use mlua::{Function, Lua, Value};
@@ -254,10 +255,13 @@ impl LuaSubsystem {
             let report = match outcome {
                 Outcome::WithinBudget => None,
                 Outcome::Interrupted => Some(format!("tick exceeded its {budget_ms} ms budget")),
+                // What was observed is that no sample landed past the deadline, not where the
+                // time went: a long C call and a pure-Lua tick that overshoots inside its last
+                // sample window look the same from here.
                 Outcome::RanLong { elapsed } => Some(format!(
-                    "tick exceeded its {budget_ms} ms budget: {} ms in a call that could not be \
-                     cut off",
-                    elapsed.as_millis()
+                    "tick exceeded its {budget_ms} ms budget: {:.1} ms, not cut off — no sample \
+                     landed past the deadline",
+                    elapsed.as_secs_f64() * 1000.0
                 )),
             };
             let overran = report.is_some();
@@ -279,7 +283,9 @@ impl LuaSubsystem {
             }
             if let Some(text) = report {
                 self.report_text(owner, text);
-                if self.overrun.count(owner, limit) {
+                let budget = Duration::from_millis(budget_ms);
+                if overrun::counts_toward_park(outcome, budget) && self.overrun.count(owner, limit)
+                {
                     self.unsubscribe_overrunning(owner, limit);
                 }
             } else {

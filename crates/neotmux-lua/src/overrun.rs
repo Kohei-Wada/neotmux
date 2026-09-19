@@ -1,10 +1,12 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
+use std::time::Duration;
 
 use mlua::RegistryKey;
 
 use crate::api::forget_if_no_longer_drawing;
+use crate::budget::Outcome;
 use crate::draw::Buffers;
 use crate::registry::{Kind, KindTag, RegistrationId, Registry};
 use crate::source::SourceId;
@@ -19,6 +21,22 @@ use crate::source::SourceId;
 /// would each have to keep answering it correctly. The price is that the Lua handle held from
 /// before the removal names an id that no longer exists; `handle:remove()` is idempotent, so
 /// that is a no-op rather than a surprise.
+/// How far past its budget an uninterrupted tick has to be before it is parked for it. The
+/// elapsed figure is wall clock across the whole group — host work, a GC step another source
+/// triggered, the process being descheduled — so one budget's worth of it is jitter.
+const RAN_LONG_PARK_FACTOR: u32 = 2;
+
+/// Whether an overrun is severe enough to be held against the source. Every overrun is still
+/// reported: what this softens is parking, not attribution.
+pub fn counts_toward_park(outcome: Outcome, budget: Duration) -> bool {
+    match outcome {
+        Outcome::WithinBudget => false,
+        // The hook watched the deadline pass, so there is nothing inferred about this one.
+        Outcome::Interrupted => true,
+        Outcome::RanLong { elapsed } => elapsed > budget * RAN_LONG_PARK_FACTOR,
+    }
+}
+
 #[derive(Default)]
 pub struct Overrun {
     consecutive: RefCell<BTreeMap<SourceId, u32>>,
@@ -89,5 +107,38 @@ impl Overrun {
             .collect();
         self.forgive(source);
         restored
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const BUDGET: Duration = Duration::from_millis(5);
+
+    #[test]
+    fn an_interrupted_overrun_counts_at_the_first_offence() {
+        assert!(counts_toward_park(Outcome::Interrupted, BUDGET));
+    }
+
+    #[test]
+    fn a_tick_inside_its_budget_counts_for_nothing() {
+        assert!(!counts_toward_park(Outcome::WithinBudget, BUDGET));
+    }
+
+    #[test]
+    fn an_uninterrupted_overrun_within_jitter_is_reported_but_not_counted() {
+        let outcome = Outcome::RanLong {
+            elapsed: Duration::from_millis(9),
+        };
+        assert!(!counts_toward_park(outcome, BUDGET));
+    }
+
+    #[test]
+    fn an_uninterrupted_overrun_past_twice_the_budget_is_counted() {
+        let outcome = Outcome::RanLong {
+            elapsed: Duration::from_millis(11),
+        };
+        assert!(counts_toward_park(outcome, BUDGET));
     }
 }

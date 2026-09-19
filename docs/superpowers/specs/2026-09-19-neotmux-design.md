@@ -587,9 +587,19 @@ which is what makes §9's "every host function returns promptly" test possible t
 
 Documented, not solved. The first two are attributed but not interruptible: when a source's
 tick group returns, its elapsed time is compared against the budget even if the hook never
-fired, so the overrun is named, the frame is discarded and the count runs as usual — a source
-that does this every frame is parked after K frames like any other repeat offender. Only the
-*interruption* is missing, and the report says so.
+fired, so the overrun is named and the frame is discarded. Only the *interruption* is missing,
+and the report says so — and it says only what was observed, that no hook sample landed past
+the deadline, never where the time went, because a pure-Lua tick that overshoots inside its
+last sample window looks exactly the same from here.
+
+Such an overrun is **only counted towards the park limit past twice the budget**. The elapsed
+figure is wall clock across the whole group and includes host work, a GC step another source
+triggered and the process being descheduled, so one budget's worth of it is jitter and an
+innocent plugin on a loaded machine should not be parked for it. Reporting is not softened,
+only parking: every overrun is still named in the log. An interrupted overrun counts at the
+first offence — the hook watched the deadline pass, so there is nothing inferred about it. A
+source that is genuinely over by a wide margin every frame is still parked after K frames like
+any other repeat offender.
 
 1. **a single long C call** — `string.rep(s, 1e9)`, a pathological `string.find` backtrack, a
    huge `table.concat`. The hook only fires on Lua instruction boundaries, so one C call can

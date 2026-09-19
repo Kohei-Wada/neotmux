@@ -226,13 +226,16 @@ neotmux with no way out but killing it.
 
 The hook that measures you fires between Lua instructions, so it cannot interrupt anything that
 is not Lua instructions. It still checks the clock when your tick returns, so these are still
-your overruns: you lose the frame, you are named in the log, and it counts towards the five:
+your overruns: you lose the frame and you are named in the log. They count towards the five
+only past **twice** the budget, because that measurement is wall clock over the whole frame —
+it includes the host's own work and a garbage collection step some other plugin triggered — and
+a plugin that is a millisecond over on a loaded machine has not done anything wrong:
 
 - **one long C call.** `string.rep(s, 1e8)`, a huge `table.concat`. Your code is not stopped —
   there is no way to stop it mid-call — so the whole call runs and the rest of neotmux waits
   for it. Measured: a tick doing one 120 MB `string.rep` blocked the frame for 189 ms against a
-  5 ms budget. The log says so: `tick exceeded its 5 ms budget: 189 ms in a call that could not
-  be cut off`
+  5 ms budget. The log says what was seen, not where the time went: `tick exceeded its 5 ms
+  budget: 189.4 ms, not cut off — no sample landed past the deadline`
 - **`__gc` finalizers.** Lua switches the hook off while a finalizer runs, so the same applies.
   Measured: 162 ms in one finalizer
 - **`pcall`.** The budget error is an ordinary Lua error, so `pcall` catches it. It buys you
