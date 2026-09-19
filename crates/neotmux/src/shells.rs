@@ -293,15 +293,34 @@ mod tests {
                 .open(pane(id), cmd, Size { rows: 24, cols: 80 })
                 .expect("spawn");
         }
-        std::thread::sleep(Duration::from_millis(500));
-
-        let mut seen = Vec::new();
-        shells.drain(8, |pane, _| seen.push(pane)).expect("drain");
-        seen.dedup();
+        // Drained until every child has been heard from rather than after a fixed wait: a
+        // loaded runner that leaves one child unscheduled would fail a wait, and says
+        // nothing about the order.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut seen: Vec<PaneId> = Vec::new();
+        while seen.len() < ids.len() {
+            assert!(
+                Instant::now() < deadline,
+                "only {seen:?} of the six panes ever produced output"
+            );
+            let mut pass = Vec::new();
+            shells.drain(8, |pane, _| pass.push(pane)).expect("drain");
+            pass.dedup();
+            assert!(
+                pass.windows(2).all(|w| w[0] < w[1]),
+                "one pass dispatched output out of pane order: {pass:?}"
+            );
+            for pane in pass {
+                if !seen.contains(&pane) {
+                    seen.push(pane);
+                }
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        seen.sort_unstable();
         assert_eq!(
             seen,
-            vec![pane(1), pane(2), pane(3), pane(4), pane(5), pane(6)],
-            "output was dispatched out of pane order"
+            vec![pane(1), pane(2), pane(3), pane(4), pane(5), pane(6)]
         );
 
         for id in ids {

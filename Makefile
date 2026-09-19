@@ -29,7 +29,9 @@ install-bin:
 # `runtime/lua` goes over wholesale rather than file by file: enumerating it once shipped a
 # layer whose `init.lua` required a module the install had never copied, and every start of
 # an installed neotmux raised on it.
+# `PREFIX=` on the command line would make the `rm -rf` below read `/share/neotmux/lua`.
 install-runtime:
+	$(if $(strip $(PREFIX)),,$(error PREFIX is empty))
 	install -d $(PREFIX)/share/neotmux
 	install -m 644 runtime/init.lua $(PREFIX)/share/neotmux/init.lua
 	rm -rf $(PREFIX)/share/neotmux/lua
