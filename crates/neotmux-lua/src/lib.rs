@@ -145,12 +145,16 @@ impl LuaSubsystem {
     /// One place a raised Lua error becomes an attributed error op. M1b needs to tell an
     /// overrun from a runtime error here.
     fn report(&self, owner: SourceId, err: &mlua::Error) {
+        self.report_text(owner, format!("{err}"));
+    }
+
+    fn report_text(&self, owner: SourceId, text: String) {
         let name = self.sources.name(owner).unwrap_or_default();
         self.ops.push(
             owner,
             Op::Log {
                 level: Level::Error,
-                text: format!("{name}: {err}"),
+                text: format!("{name}: {text}"),
             },
         );
     }
@@ -285,19 +289,37 @@ impl LuaSubsystem {
     }
 
     pub fn dispatch_event(&self, event: &Event) {
-        let Ok(bytes) = event.shared_bytes(&self.lua) else {
+        let subscribers: Vec<_> = self
+            .registry
+            .snapshot(KindTag::Event)
+            .into_iter()
+            .filter(|id| {
+                matches!(
+                    self.registry.kind(*id),
+                    Some(Kind::Event(name)) if name == event.name()
+                )
+            })
+            .collect();
+        // `pane_output` copies the whole chunk into a Lua string, so build the payload only
+        // once it is known someone will read it. No subscribers is the default.
+        if subscribers.is_empty() {
             return;
+        }
+
+        let bytes = match event.shared_bytes(&self.lua) {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                let name = event.name();
+                for id in subscribers {
+                    if let Some(owner) = self.registry.owner(id) {
+                        self.report_text(owner, format!("{name} payload was not built: {err}"));
+                    }
+                }
+                return;
+            }
         };
 
-        let ids = self.registry.snapshot(KindTag::Event);
-        for id in ids {
-            let matches = matches!(
-                self.registry.kind(id),
-                Some(Kind::Event(name)) if name == event.name()
-            );
-            if !matches {
-                continue;
-            }
+        for id in subscribers {
             let Some(callback) = self.registry.callback(id) else {
                 continue;
             };
@@ -307,8 +329,13 @@ impl LuaSubsystem {
             let Ok(func) = self.lua.registry_value::<Function>(&callback) else {
                 continue;
             };
-            let Ok(table) = event.table(&self.lua, bytes.as_ref()) else {
-                continue;
+            let table = match event.table(&self.lua, bytes.as_ref()) {
+                Ok(table) => table,
+                Err(err) => {
+                    let name = event.name();
+                    self.report_text(owner, format!("{name} payload was not built: {err}"));
+                    continue;
+                }
             };
 
             if let Err(err) = func.call::<()>(table) {
