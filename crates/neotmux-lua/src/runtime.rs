@@ -16,9 +16,11 @@ impl Layers {
     }
 
     pub fn resolve(env: &dyn Fn(&str) -> Option<OsString>, exe_dir: Option<&Path>) -> Self {
+        let non_empty = |key: &str| env(key).filter(|v| !v.is_empty());
+
         let mut paths = Vec::new();
 
-        if let Some(explicit) = env("NEOTMUX_RUNTIME") {
+        if let Some(explicit) = non_empty("NEOTMUX_RUNTIME") {
             paths.extend(
                 explicit
                     .to_string_lossy()
@@ -28,9 +30,9 @@ impl Layers {
             );
         }
 
-        if let Some(xdg) = env("XDG_CONFIG_HOME") {
+        if let Some(xdg) = non_empty("XDG_CONFIG_HOME") {
             paths.push(PathBuf::from(xdg).join("neotmux"));
-        } else if let Some(home) = env("HOME") {
+        } else if let Some(home) = non_empty("HOME") {
             paths.push(PathBuf::from(home).join(".config/neotmux"));
         }
 
@@ -111,6 +113,37 @@ mod tests {
                 .paths()
                 .contains(&PathBuf::from("/home/someone/.config/neotmux"))
         );
+    }
+
+    #[test]
+    fn an_empty_xdg_config_home_falls_back_to_home() {
+        let env = env_from(&[("XDG_CONFIG_HOME", ""), ("HOME", "/home/someone")]);
+        let layers = Layers::resolve(&env, None);
+        assert!(
+            layers
+                .paths()
+                .contains(&PathBuf::from("/home/someone/.config/neotmux"))
+        );
+    }
+
+    #[test]
+    fn an_empty_home_contributes_no_home_layer() {
+        let env = env_from(&[("HOME", "")]);
+        let layers = Layers::resolve(&env, None);
+        assert_eq!(layers.paths(), &[PathBuf::from("/usr/share/neotmux")]);
+    }
+
+    #[test]
+    fn no_resolved_layer_is_a_relative_path() {
+        let env = env_from(&[
+            ("NEOTMUX_RUNTIME", "/a:/b"),
+            ("XDG_CONFIG_HOME", "/cfg"),
+            ("HOME", "/home/someone"),
+        ]);
+        let layers = Layers::resolve(&env, Some(Path::new("/opt/neotmux/bin")));
+        for p in layers.paths() {
+            assert!(p.is_absolute(), "{p:?} is not absolute");
+        }
     }
 
     #[test]
