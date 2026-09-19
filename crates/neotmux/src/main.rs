@@ -85,9 +85,11 @@ fn main() -> anyhow::Result<()> {
     }
 
     let shutdown = signals::ShutdownSignal::install()?;
+    let mut notifications = notify::Notifications::new();
     let mut terminal = ratatui::init();
-    let result = app::run(&mut terminal, &shutdown, &lua);
+    let result = app::run(&mut terminal, &shutdown, &lua, &mut notifications);
     ratatui::restore();
+    notifications.flush(&mut std::io::stderr());
     match result? {
         Some(signal) => signals::die_of(signal),
         None => Ok(()),

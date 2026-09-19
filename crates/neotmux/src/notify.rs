@@ -1,3 +1,4 @@
+use std::io::Write;
 use std::time::{Duration, Instant};
 
 use neotmux_lua::ops::Level;
@@ -22,6 +23,7 @@ struct Notification {
 #[derive(Default)]
 pub struct Notifications {
     items: Vec<Notification>,
+    transcript: Vec<String>,
 }
 
 impl Notifications {
@@ -30,12 +32,22 @@ impl Notifications {
     }
 
     pub fn push(&mut self, level: Level, tag: &str, text: &str) {
+        self.transcript.push(format!("{tag}: {text}"));
         self.items.push(Notification {
             level,
             tag: tag.to_string(),
             text: text.to_string(),
             created: Instant::now(),
         });
+    }
+
+    /// Every notification raised this session, replayed once the terminal has been restored.
+    /// A full-screen TUI cannot use stderr while it is running, so without this a notification
+    /// that expired, scrolled past or was never drawn at all is only ever in the log file.
+    pub fn flush(&self, out: &mut impl Write) {
+        for line in &self.transcript {
+            let _ = writeln!(out, "neotmux: {line}");
+        }
     }
 
     /// Whether there's anything showing that will need a later frame purely
@@ -115,6 +127,27 @@ mod tests {
         for x in 0..10 {
             assert_eq!(buf[(x, 0)].symbol(), " ");
         }
+    }
+
+    #[test]
+    fn flush_replays_every_notification_including_expired_ones() {
+        let mut n = Notifications::new();
+        n.push(Level::Info, "clock", "hi");
+        n.push(Level::Error, "clock", "bye");
+        n.expire(Instant::now() + Duration::from_secs(10));
+        let mut out = Vec::new();
+        n.flush(&mut out);
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            "neotmux: clock: hi\nneotmux: clock: bye\n"
+        );
+    }
+
+    #[test]
+    fn flush_writes_nothing_when_nothing_was_notified() {
+        let mut out = Vec::new();
+        Notifications::new().flush(&mut out);
+        assert!(out.is_empty());
     }
 
     #[test]

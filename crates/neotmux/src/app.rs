@@ -84,6 +84,7 @@ pub fn run(
     terminal: &mut DefaultTerminal,
     shutdown: &ShutdownSignal,
     lua: &LuaSubsystem,
+    notifications: &mut Notifications,
 ) -> anyhow::Result<Option<i32>> {
     let mut size = terminal_size(terminal)?;
     let mut has_status = false;
@@ -93,7 +94,6 @@ pub fn run(
     let mut pty = PtyHandle::spawn(PtyHandle::default_shell_command(), content)?;
     let mut grid = GridSnapshot::default();
     let mut dirty = true;
-    let mut notifications = Notifications::new();
     let mut last_frame_output: (Vec<DrawCmd>, Vec<StatusFragment>) = (Vec::new(), Vec::new());
 
     #[cfg(debug_assertions)]

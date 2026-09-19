@@ -423,8 +423,9 @@ Command buffers from before step 3 fail the epoch check and are not replayed.
   was written in, recovered with `Lua::inspect_stack` (§4.2). A call made from a
   post-`require` `setup()` is tagged with that plugin, not with `init`
 - notifications (budget overruns, unsubscribes, key conflicts) render through a **host-owned**
-  surface, not a plugin. If notification rendering itself fails, the message still reaches the
-  log, and is flushed to stderr after the terminal is restored at exit
+  surface, not a plugin. Every notification raised during the session is also kept and written
+  to stderr once the terminal has been restored at exit, so one that expired, scrolled past or
+  was never drawn is not left in the log file alone
 
 ### 4.10 Failure handling at load
 
