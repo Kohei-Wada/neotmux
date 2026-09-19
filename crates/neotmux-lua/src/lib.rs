@@ -37,7 +37,7 @@ pub enum KeyOutcome {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoadFailure {
-    pub plugin: String,
+    pub source: String,
     pub message: String,
 }
 
@@ -123,7 +123,7 @@ impl LuaSubsystem {
                 Ok(func) => func,
                 Err(err) => {
                     self.load_failures.borrow_mut().push(LoadFailure {
-                        plugin: tag(),
+                        source: tag(),
                         message: format!("{err:#}"),
                     });
                     continue;
@@ -132,7 +132,7 @@ impl LuaSubsystem {
 
             if let Err(err) = func.call::<()>(()) {
                 self.load_failures.borrow_mut().push(LoadFailure {
-                    plugin: tag(),
+                    source: tag(),
                     message: format!("{err:#}"),
                 });
             }

@@ -540,7 +540,7 @@ fn an_unresolvable_require_leaves_anonymous_registrations_alone() {
     let failures = sub.run_init();
 
     assert_eq!(failures.len(), 1, "{failures:?}");
-    assert_eq!(failures[0].plugin, "plugin.does_not_exist", "{failures:?}");
+    assert_eq!(failures[0].source, "plugin.does_not_exist", "{failures:?}");
     assert_eq!(
         sub.registry().snapshot(KindTag::Tick).len(),
         1,
@@ -566,7 +566,7 @@ fn a_plugins_own_failing_require_is_attributed_to_the_plugin() {
 
     assert_eq!(failures.len(), 1, "{failures:?}");
     assert_eq!(
-        failures[0].plugin, "plugin/needy",
+        failures[0].source, "plugin/needy",
         "the outer load is the failure, not the dependency it asked for"
     );
     assert!(failures[0].message.contains("absent_dep"), "{failures:?}");

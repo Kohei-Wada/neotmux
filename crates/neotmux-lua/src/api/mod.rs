@@ -133,7 +133,7 @@ fn install_require_wrapper(
             forget_if_no_longer_drawing(&registry, &buffers, id);
         }
         load_failures.borrow_mut().push(LoadFailure {
-            plugin: failed
+            source: failed
                 .and_then(|id| sources.name(id))
                 .unwrap_or_else(|| modname.clone()),
             message: format!("{err:#}"),

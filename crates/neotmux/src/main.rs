@@ -56,7 +56,7 @@ fn main() -> anyhow::Result<()> {
     let layers = Layers::resolve(&|key| env::var_os(key), exe_dir.as_deref());
     let lua = LuaSubsystem::build(layers)?;
     for failure in lua.run_init() {
-        logging::log(Level::Warn, &failure.plugin, &failure.message);
+        logging::log(Level::Warn, &failure.source, &failure.message);
     }
 
     // Ops from run_init are drained here, before ratatui::init(), so an init-time
