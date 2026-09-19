@@ -280,6 +280,18 @@ the budget is still holding for you: registering a tick again drops it. A tick y
 back with `resubscribe` is live, not held, so that one does not go.) Keep the handles and
 remove them first if re-running the chunk would register twice.
 
+## Three that work
+
+`examples/` has three plugins written only against what is documented here, each showing
+something the others do not:
+
+- `clock.lua` — the status line, and a table a user assigns to from their own config
+- `prefix.lua` — `on_key`, modal state, and driving panes; a tmux-style prefix that binds no key
+- `pane_labels.lua` — drawing into a particular pane, so a label follows it through splits
+
+Copy one into `~/.config/neotmux/lua/plugin/` and add its `require` line. Delete the line and
+it is gone.
+
 ## What the sandbox is not
 
 Plugins are trusted. They run in-process with no isolation, and the trust model is "you
