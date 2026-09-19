@@ -580,3 +580,38 @@ fn a_require_outside_init_raises_instead_of_returning_nil() {
         "a require at runtime should raise, not be swallowed by the load convention: {text}"
     );
 }
+
+#[test]
+fn a_quit_called_through_pcall_is_attributed_to_the_calling_chunk() {
+    let dir = layer(&[("init.lua", "pcall(neotmux.quit)")]);
+    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    assert!(sub.run_init().is_empty());
+
+    let ops = sub.drain_ops();
+    let (id, _) = ops
+        .iter()
+        .find(|(_, op)| matches!(op, Op::Quit))
+        .expect("no quit op");
+    assert_eq!(sub.sources().name(*id).as_deref(), Some("init"));
+}
+
+#[test]
+fn a_log_call_from_inside_a_resumed_coroutine_is_attributed_to_its_chunk() {
+    let dir = layer(&[
+        ("init.lua", "require('plugin.threaded')"),
+        (
+            "lua/plugin/threaded.lua",
+            "local co = coroutine.create(function() neotmux.log.info('from the coroutine') end) neotmux.on_tick(function() coroutine.resume(co) end) return {}",
+        ),
+    ]);
+    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    assert!(sub.run_init().is_empty());
+    sub.dispatch_tick();
+
+    let ops = sub.drain_ops();
+    let (id, _) = ops
+        .iter()
+        .find(|(_, op)| matches!(op, Op::Log { text, .. } if text == "from the coroutine"))
+        .expect("the coroutine's log line never arrived");
+    assert_eq!(sub.sources().name(*id).as_deref(), Some("plugin/threaded"));
+}

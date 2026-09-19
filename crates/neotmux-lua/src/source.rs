@@ -116,15 +116,26 @@ impl Sources {
 }
 
 /// The owner of an API call is the chunk where the calling code was written (§4.2). Level 0
-/// of the Lua stack is the host binding currently running, so level 1 is the Lua function
-/// that called it.
+/// of the Lua stack is the host binding currently running, so the search starts at level 1.
+/// C frames are skipped: `pcall(neotmux.quit)`, `xpcall`, `coroutine.wrap` and a callback
+/// invoked by `table.sort` or `string.gsub` all put one between the binding and the chunk,
+/// and the calling code was plainly still written somewhere. Nothing else is skipped, so the
+/// library rule (§4.2) is unchanged — a library frame is a chunk and the walk stops there —
+/// and a chunk with no file behind it stays `ANONYMOUS` instead of blaming its caller.
 pub fn caller(lua: &Lua, sources: &Sources) -> SourceId {
-    let source = lua
-        .inspect_stack(1, |debug| {
+    let mut level = 1;
+    loop {
+        let Some(source) = lua.inspect_stack(level, |debug| {
             debug.source().source.map(|source| source.into_owned())
-        })
-        .flatten();
-    sources.intern_chunk(source.as_deref())
+        }) else {
+            return ANONYMOUS;
+        };
+        if source.as_deref() == Some("=[C]") {
+            level += 1;
+            continue;
+        }
+        return sources.intern_chunk(source.as_deref());
+    }
 }
 
 fn find_module(lua: &Lua, modname: &str) -> mlua::Result<Option<PathBuf>> {
@@ -201,38 +212,37 @@ mod tests {
         (lua, sources)
     }
 
-    /// Pins the level `caller` reads. Level 0 is the host binding itself — a C function,
-    /// whose source is `=[C]` and never a chunk path — so level 1 is the first Lua frame.
+    /// Pins where `caller` starts and what it walks past. Level 0 is the host binding
+    /// itself — a C function, whose source is `=[C]` and never a chunk path — and the owner
+    /// is the first Lua frame above it, whatever level that turns out to be.
     #[test]
-    fn level_zero_is_the_host_binding_and_level_one_is_the_calling_chunk() {
-        let dir = layer_with(&[("probe", "levels() return {}")]);
-        let (lua, _sources) = vm_with(&dir);
+    fn the_owner_is_the_first_lua_frame_above_the_host_binding() {
+        let dir = layer_with(&[("probe", "who() pcall(who) return {}")]);
+        let (lua, sources) = vm_with(&dir);
 
-        let seen: Rc<RefCell<Vec<Option<String>>>> = Rc::new(RefCell::new(Vec::new()));
+        let seen: Rc<RefCell<Vec<(Option<String>, SourceId)>>> = Rc::new(RefCell::new(Vec::new()));
         let captured = seen.clone();
-        let levels = lua
+        let sources_for_fn = sources.clone();
+        let who = lua
             .create_function(move |lua, ()| {
-                let mut got = Vec::new();
-                for level in 0..=1 {
-                    got.push(lua.inspect_stack(level, |debug| {
-                        debug.source().source.map(|s| s.into_owned())
-                    }));
-                }
-                *captured.borrow_mut() = got.into_iter().map(|g| g.flatten()).collect();
+                let level_zero = lua
+                    .inspect_stack(0, |debug| debug.source().source.map(|s| s.into_owned()))
+                    .flatten();
+                captured
+                    .borrow_mut()
+                    .push((level_zero, caller(lua, &sources_for_fn)));
                 Ok(())
             })
             .unwrap();
-        lua.globals().set("levels", levels).unwrap();
+        lua.globals().set("who", who).unwrap();
         lua.load("require('plugin.probe')").exec().unwrap();
 
         let got = seen.borrow();
-        assert_eq!(got[0].as_deref(), Some("=[C]"));
-        assert!(
-            got[1]
-                .as_deref()
-                .is_some_and(|s| s.ends_with("plugin/probe.lua")),
-            "{got:?}"
-        );
+        assert_eq!(got.len(), 2, "{got:?}");
+        for (level_zero, owner) in got.iter() {
+            assert_eq!(level_zero.as_deref(), Some("=[C]"));
+            assert_eq!(sources.name(*owner).as_deref(), Some("plugin/probe"));
+        }
     }
 
     #[test]

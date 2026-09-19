@@ -216,7 +216,9 @@ answers "who set this" by naming a file, not by looking up an entry in a plugin 
   that hits `package.loaded` and never re-enters the searcher
 - for a direct call with no callback — `neotmux.log.info("x")`, `neotmux.quit()`,
   `neotmux.notify(...)` — the host reads the calling Lua frame with `Lua::inspect_stack`
-  (level 0 is the host binding itself, a C function; level 1 is the chunk that called it).
+  (level 0 is the host binding itself, a C function; the owner is the first frame above it
+  that is not a C frame, because `pcall`, `coroutine.wrap` and a callback invoked by
+  `table.sort` or `string.gsub` each sit between the binding and the chunk).
   Both paths end in the same step: intern an `@<path>` source, or fall to `ANONYMOUS`
 - the two paths agreeing is the point. A `setup` function written in `clock.lua` that both
   registers a provider and logs a line produces one owner, `plugin/clock`, for both — where
