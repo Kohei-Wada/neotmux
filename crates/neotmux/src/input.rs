@@ -89,7 +89,16 @@ pub fn encode_key(key: KeyEvent) -> Option<Vec<u8>> {
         _ => return None,
     };
 
-    if alt && matches!(key.code, KeyCode::Char(_)) {
+    let has_no_parameterised_form = matches!(
+        key.code,
+        KeyCode::Char(_)
+            | KeyCode::Enter
+            | KeyCode::Tab
+            | KeyCode::BackTab
+            | KeyCode::Backspace
+            | KeyCode::Esc
+    );
+    if alt && has_no_parameterised_form {
         bytes.insert(0, 0x1b);
     }
     Some(bytes)
@@ -142,6 +151,30 @@ mod tests {
     fn alt_prefixes_with_escape() {
         let alt_a = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::ALT);
         assert_eq!(encode_key(alt_a).unwrap(), b"\x1ba");
+    }
+
+    #[test]
+    fn alt_prefixes_keys_with_no_parameterised_csi_form() {
+        assert_eq!(
+            encode_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::ALT)).unwrap(),
+            vec![0x1b, 0x7f]
+        );
+        assert_eq!(
+            encode_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::ALT)).unwrap(),
+            b"\x1b\r"
+        );
+        assert_eq!(
+            encode_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::ALT)).unwrap(),
+            vec![0x1b, 0x1b]
+        );
+    }
+
+    #[test]
+    fn alt_on_keys_with_a_parameterised_csi_form_uses_the_modifier_not_an_escape_prefix() {
+        assert_eq!(
+            encode_key(KeyEvent::new(KeyCode::Left, KeyModifiers::ALT)).unwrap(),
+            b"\x1b[1;3D"
+        );
     }
 
     #[test]
