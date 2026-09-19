@@ -43,12 +43,14 @@ impl Shells {
         Ok(())
     }
 
-    /// Drops the pane's PTY, reaping the child first so a pane closing mid-session does not
-    /// leave a zombie behind for the panes still running. EOF means nothing holds the slave
-    /// any more, so the child is already gone and the wait returns at once.
+    /// Ends the pane's child and drops its PTY. EOF on the master only means no slave fd is
+    /// open any more — a child that closed its descriptors and kept running is alive and
+    /// sending it — so the child is signalled and then reaped without blocking: one pane's
+    /// daemonised child must never be able to stall the frame loop the others share.
     pub fn close(&mut self, pane: PaneId) {
         if let Some(mut shell) = self.shells.remove(&pane) {
-            let _ = shell.pty.wait();
+            let _ = shell.pty.kill();
+            let _ = shell.pty.try_wait();
         }
     }
 
@@ -138,6 +140,8 @@ impl Shells {
 
 #[cfg(test)]
 mod tests {
+    use std::time::{Duration, Instant};
+
     use neotmux_core::proto::SplitDir;
 
     use super::*;
@@ -151,6 +155,14 @@ mod tests {
     fn sleeper() -> CommandBuilder {
         let mut cmd = CommandBuilder::new("sh");
         cmd.args(["-c", "sleep 5"]);
+        cmd
+    }
+
+    /// A child that closes its descriptors and keeps running. The master reaches EOF while
+    /// the process is still very much alive, which is the case a blocking wait stalls on.
+    fn daemoniser() -> CommandBuilder {
+        let mut cmd = CommandBuilder::new("sh");
+        cmd.args(["-c", "exec 0<&- 1>&- 2>&-; sleep 10"]);
         cmd
     }
 
@@ -216,6 +228,39 @@ mod tests {
         layout.resurface(Size { rows: 24, cols: 80 }, false);
         shells.fit(layout.showable()).expect("fit");
         assert_eq!(shells.size(pane(2)), Some(Size { rows: 24, cols: 40 }));
+    }
+
+    /// One pane's child must never be able to stop the frame loop the others share: EOF says
+    /// the descriptors are gone, not that the process is, so closing signals and reaps
+    /// without waiting.
+    #[test]
+    fn closing_a_pane_whose_child_outlived_its_descriptors_does_not_block() {
+        let mut shells = Shells::default();
+        shells
+            .open(pane(1), daemoniser(), Size { rows: 24, cols: 80 })
+            .expect("spawn");
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let drained = shells.drain(8, |_, _| {}).expect("drain");
+            if !drained.closed.is_empty() {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the child never closed its descriptors, so the test never reached the EOF"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        let started = Instant::now();
+        shells.close(pane(1));
+        let took = started.elapsed();
+        assert!(
+            took < Duration::from_secs(1),
+            "closing waited {took:?} on a child that had only closed its descriptors"
+        );
+        assert_eq!(shells.len(), 0);
     }
 
     #[test]

@@ -108,6 +108,12 @@ impl PtyHandle {
         self.child.wait()
     }
 
+    /// Signals the child to end. Says nothing about when it does, so a caller that must not
+    /// block reaps with `try_wait` rather than `wait`.
+    pub fn kill(&mut self) -> io::Result<()> {
+        self.child.kill()
+    }
+
     pub fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
         self.child.try_wait()
     }

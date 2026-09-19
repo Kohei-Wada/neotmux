@@ -263,3 +263,37 @@ fn resizing_below_the_floor_does_not_kill_the_renderer() {
     );
     assert!(ok, "neotmux died on a 1x1 terminal");
 }
+
+/// A shell that closes its descriptors and keeps running, the way `setsid`, `ssh -f` and
+/// anything else that daemonises does.
+fn write_daemonising_shell() -> TempScript {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let path = std::env::temp_dir().join(format!("neotmux-daemon-shell-{}", std::process::id()));
+    std::fs::write(&path, "#!/bin/sh\nexec 0<&- 1>&- 2>&-\nsleep 10\n").expect("write script");
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    TempScript(path)
+}
+
+/// EOF on the master says the descriptors are gone, not that the process is. Waiting on it
+/// would hold the terminal in the alternate screen for as long as the child keeps running.
+#[test]
+fn shutdown_does_not_wait_on_a_child_that_outlived_its_descriptors() {
+    let shell = write_daemonising_shell();
+    let shell_path = shell.0.to_str().expect("utf8 path").to_owned();
+
+    let started = Instant::now();
+    let (out, ok, termios) = run_in_pty(&[("SHELL", &shell_path)], b"");
+    let took = started.elapsed();
+
+    assert!(ok, "expected a clean exit");
+    assert!(
+        took < Duration::from_secs(5),
+        "shutdown waited {took:?} on a child that had only closed its descriptors"
+    );
+    assert!(
+        out.contains("\x1b[?1049l"),
+        "alternate screen was never left"
+    );
+    assert_termios_restored(&termios);
+}
