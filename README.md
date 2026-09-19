@@ -41,6 +41,8 @@ happen against an ABI other people have already used instead of one nobody has t
 Also out of v0.1: scrollback and copy-mode, mouse, multiple sessions, a plugin manager, and
 tmux compatibility in any form.
 
+Writing one: `docs/plugins.md`, with three working plugins in `examples/`.
+
 See `docs/superpowers/specs/` for the design and `docs/superpowers/plans/` for the
 implementation plans.
 
