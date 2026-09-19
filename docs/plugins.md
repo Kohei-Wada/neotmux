@@ -212,17 +212,19 @@ Nothing is measured and nothing is counted — no hook is armed at all. This is 
 while stepping through a plugin with a debugger, and it means a `while true do end` freezes
 neotmux with no way out but killing it.
 
-### What the budget does not catch
+### What the budget cannot cut off
 
 The hook that measures you fires between Lua instructions, so it cannot interrupt anything that
-is not Lua instructions:
+is not Lua instructions. It still checks the clock when your tick returns, so these are still
+your overruns: you lose the frame, you are named in the log, and it counts towards the five:
 
-- **one long C call.** `string.rep(s, 1e8)`, a huge `table.concat`. Measured: a tick doing one
-  120 MB `string.rep` blocked the frame for 189 ms against a 5 ms budget and was never even
-  reported, because an overrun is only noticed at the *next* sample and the call had almost no
-  Lua left to run after it
-- **`__gc` finalizers.** Lua switches the hook off while a finalizer runs. Measured: 162 ms in
-  one finalizer, unreported
+- **one long C call.** `string.rep(s, 1e8)`, a huge `table.concat`. Your code is not stopped —
+  there is no way to stop it mid-call — so the whole call runs and the rest of neotmux waits
+  for it. Measured: a tick doing one 120 MB `string.rep` blocked the frame for 189 ms against a
+  5 ms budget. The log says so: `tick exceeded its 5 ms budget: 189 ms in a call that could not
+  be cut off`
+- **`__gc` finalizers.** Lua switches the hook off while a finalizer runs, so the same applies.
+  Measured: 162 ms in one finalizer
 - **`pcall`.** The budget error is an ordinary Lua error, so `pcall` catches it. It buys you
   nothing: you still lose the frame and the overrun is still counted against your limit. An
   unbounded `while true do pcall(f) end` does hang neotmux

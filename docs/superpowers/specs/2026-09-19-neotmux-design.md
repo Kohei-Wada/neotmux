@@ -583,19 +583,24 @@ which is what makes §9's "every host function returns promptly" test possible t
 - restoring also clears the counter, so a source that comes back gets a full K frames again
   rather than being dropped by its next single overrun
 
-### 5.4 What the budget does not catch
+### 5.4 What the budget cannot cut off
 
-Documented, not solved:
+Documented, not solved. The first two are attributed but not interruptible: when a source's
+tick group returns, its elapsed time is compared against the budget even if the hook never
+fired, so the overrun is named, the frame is discarded and the count runs as usual — a source
+that does this every frame is parked after K frames like any other repeat offender. Only the
+*interruption* is missing, and the report says so.
 
 1. **a single long C call** — `string.rep(s, 1e9)`, a pathological `string.find` backtrack, a
    huge `table.concat`. The hook only fires on Lua instruction boundaries, so one C call can
-   overrun the budget arbitrarily, or exhaust memory before it returns. Measured as built: one
-   120 MB `string.rep` blocked a frame for 189 ms against a 5 ms budget. It was not merely
-   uninterrupted — it went **unreported**, because an overrun is only noticed at the next
-   sample and the tick had under `n` instructions left to run
+   overrun the budget arbitrarily, or exhaust memory before it returns: an overrun is only
+   noticed at the next sample, and a tick with under `n` instructions left after the call
+   never reaches one. Measured as built: one 120 MB `string.rep` blocked a frame for 189 ms
+   against a 5 ms budget, and ran to completion. There is no mechanism for interrupting a C
+   call, so the frame is lost after the fact rather than in the middle
 2. **`__gc` finalizers** — Lua clears `allowhook` for their duration (`lgc.c`), so a loop in a
-   finalizer is uninterruptible. Measured as built: 162 ms in one finalizer, also unreported,
-   for the same reason
+   finalizer is uninterruptible. Measured as built: 162 ms in one finalizer, for the same
+   reason, and likewise attributed on the way out
 3. **`pcall`** — `while true do pcall(f) end` swallows the budget error. This *is* closable:
    with `LuaOptions { catch_rust_panics: false }` mlua replaces global `pcall`/`xpcall` with
    variants that re-raise Rust panics, so panicking in the hook instead of returning `Err`
@@ -793,6 +798,6 @@ Revision 2 changed, relative to the first draft:
   `ChunkMode::Text`; `loadstring` does not exist in 5.4
 - **ttymap's precedent scoped** (§4.1) — it covers the plugin model and draw API only; it
   contains no hook, sandbox or budget code
-- **single long C calls** added to what the budget cannot catch (§5.4)
+- **single long C calls** added to what the budget cannot cut off (§5.4)
 - **PTY threading decided** (§3) — blocking reader thread plus channel, because crossterm
   cannot poll an external fd
