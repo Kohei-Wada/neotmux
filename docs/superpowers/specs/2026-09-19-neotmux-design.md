@@ -298,7 +298,12 @@ Command buffers from before step 3 fail the epoch check and are not replayed.
 - log initialisation failure is reported on stderr **before raw mode is entered**, then
   startup continues. A full-screen TUI cannot use stderr afterwards (ttymap #226 is the silent
   version of this bug)
-- `neotmux.log.{info,warn,error}` for plugins, tagged with the calling `PluginId`
+- `neotmux.log.{info,warn,error}` for plugins, tagged with the plugin identity on the top of
+  the stack (§4.2). A call made from a post-`require` `setup()` — after the searcher has
+  already popped that plugin's identity — has no callback to inspect the way registration
+  does, so it falls back to `"init"` rather than the plugin's own id. Closing this needs
+  `Lua::inspect_stack` to recover the calling chunk's source directly instead of the
+  registration path's `Function::info()`; deferred to part 2
 - notifications (budget overruns, unsubscribes, key conflicts) render through a **host-owned**
   surface, not a plugin. If notification rendering itself fails, the message still reaches the
   log, and is flushed to stderr after the terminal is restored at exit
