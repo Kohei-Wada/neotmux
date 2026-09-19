@@ -12,6 +12,19 @@ use crate::api::Opts;
 /// budget ~8µs, against ~30µs at 1e4 and ~15% more throughput cost at 1e2.
 const SAMPLE_EVERY_N_INSTRUCTIONS: u32 = 1_000;
 
+/// What one source's slice of one frame came to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Outcome {
+    WithinBudget,
+    /// The hook fired past the deadline and unwound the tick.
+    Interrupted,
+    /// Past the deadline, but no sample ever landed there to cut it off: one long C call
+    /// leaves almost no Lua behind it (§5.4). Attributable, not interruptible.
+    RanLong {
+        elapsed: Duration,
+    },
+}
+
 #[derive(Clone, Copy)]
 struct Active {
     start: Instant,
@@ -38,15 +51,31 @@ impl Budget {
     /// Arms the hook for one source's slice of one frame. Outside an `enter`/`leave` pair the
     /// hook does nothing, so key and event dispatch are unmeasured — this is a *tick* budget.
     pub fn enter(&self) {
-        self.active.set(Some(Active {
+        self.active.set(self.enabled().then(|| Active {
             start: Instant::now(),
             budget: Duration::from_millis(self.opts.borrow().tick_budget_ms),
         }));
         self.overran.set(false);
     }
 
-    pub fn leave(&self) {
-        self.active.set(None);
+    /// Closes the slice and says what it came to. The elapsed comparison is what catches a
+    /// tick the hook never got to sample past the deadline.
+    pub fn leave(&self) -> Outcome {
+        let active = self.active.take();
+        if self.overran.get() {
+            return Outcome::Interrupted;
+        }
+        match active {
+            Some(active) => {
+                let elapsed = active.start.elapsed();
+                if elapsed > active.budget {
+                    Outcome::RanLong { elapsed }
+                } else {
+                    Outcome::WithinBudget
+                }
+            }
+            None => Outcome::WithinBudget,
+        }
     }
 
     pub fn overran(&self) -> bool {

@@ -553,3 +553,129 @@ fn a_tick_that_pcalls_away_the_budget_error_still_loses_its_frame() {
         "a swallowed overrun was not counted"
     );
 }
+
+/// One `string.rep` and nothing else: 8 MiB measures ~30 ms here against a 5 ms budget, the
+/// smallest size whose margin survives a much faster machine without slowing the suite.
+const HOG: &str = "neotmux.on_tick(function(ctx)
+     ctx:text(nil, 0, 0, 'hogged')
+     local s = string.rep('x', 8 * 1024 * 1024)
+     _G.hog_finished = #s
+   end)
+   return {}";
+
+const HOG_INIT: &str =
+    "neotmux.opt.tick_budget_ms = 5 neotmux.opt.tick_overrun_limit = 2 require('plugin.hog') ";
+
+/// §5.4's first hole: the hook never gets a sample past the deadline, so the tick cannot be
+/// cut off — but the elapsed check at the end of the group still names it.
+#[test]
+fn a_long_c_call_is_reported_by_name_though_it_ran_to_completion() {
+    let (_dir, sub) = built(&[
+        ("init.lua", &format!("{HOG_INIT} require('plugin.probe')")),
+        ("lua/plugin/hog.lua", HOG),
+        (
+            "lua/plugin/probe.lua",
+            "_G.hog_finished = 0
+             neotmux.keymap.set('C-p', function()
+               neotmux.notify('info', tostring(_G.hog_finished))
+               return true
+             end)
+             return {}",
+        ),
+    ]);
+
+    frame(&sub);
+
+    let overruns: Vec<String> = logs(&sub)
+        .into_iter()
+        .filter(|text| text.contains("budget"))
+        .collect();
+    assert_eq!(overruns.len(), 1, "{overruns:?}");
+    assert!(overruns[0].starts_with("plugin/hog: "), "{overruns:?}");
+    assert!(
+        overruns[0].contains("could not be cut off"),
+        "an uninterrupted overrun read as an interrupted one: {overruns:?}"
+    );
+
+    // The distinguishing fact: nothing was interrupted, the tick ran its C call to the end.
+    sub.dispatch_key("C-p");
+    assert_eq!(notifications(&sub), vec!["8388608".to_string()]);
+}
+
+#[test]
+fn a_long_c_call_loses_its_frame() {
+    let (_dir, sub) = built(&[("init.lua", HOG_INIT), ("lua/plugin/hog.lua", HOG)]);
+
+    frame(&sub);
+
+    assert!(texts(&sub).is_empty(), "{:?}", texts(&sub));
+}
+
+#[test]
+fn a_long_c_call_every_frame_parks_the_source_and_resubscribe_brings_it_back() {
+    let (_dir, sub) = built(&[
+        ("init.lua", &format!("{HOG_INIT} require('plugin.rescuer')")),
+        ("lua/plugin/hog.lua", HOG),
+        (
+            "lua/plugin/rescuer.lua",
+            "neotmux.keymap.set('C-r', function()
+               neotmux.notify('info', tostring(neotmux.resubscribe('plugin/hog')))
+               return true
+             end)
+             return {}",
+        ),
+    ]);
+
+    for _ in 0..2 {
+        frame(&sub);
+    }
+    assert!(tick_owners(&sub).is_empty(), "{:?}", tick_owners(&sub));
+    sub.drain_ops();
+
+    sub.dispatch_key("C-r");
+    assert_eq!(notifications(&sub), vec!["true".to_string()]);
+    assert_eq!(tick_owners(&sub), vec!["plugin/hog".to_string()]);
+}
+
+#[test]
+fn a_fast_tick_with_no_hook_sample_is_not_reported() {
+    let (_dir, sub) = built(&[
+        (
+            "init.lua",
+            "neotmux.opt.tick_budget_ms = 5 neotmux.opt.tick_overrun_limit = 2 \
+             require('plugin.quick')",
+        ),
+        (
+            "lua/plugin/quick.lua",
+            "neotmux.on_tick(function(ctx) ctx:text(nil, 0, 0, 'quick') end) return {}",
+        ),
+    ]);
+
+    for _ in 0..3 {
+        frame(&sub);
+        assert!(logs(&sub).is_empty(), "a tick inside its budget was reported");
+        assert_eq!(texts(&sub), vec!["quick".to_string()]);
+    }
+
+    assert_eq!(tick_owners(&sub), vec!["plugin/quick".to_string()]);
+}
+
+#[test]
+fn a_budget_of_zero_says_nothing_about_a_long_c_call() {
+    let (_dir, sub) = built(&[
+        (
+            "init.lua",
+            "neotmux.opt.tick_budget_ms = 0 neotmux.opt.tick_overrun_limit = 2 \
+             require('plugin.hog')",
+        ),
+        ("lua/plugin/hog.lua", HOG),
+    ]);
+
+    for _ in 0..3 {
+        frame(&sub);
+        assert_eq!(texts(&sub), vec!["hogged".to_string()]);
+        assert!(logs(&sub).is_empty(), "{:?}", logs(&sub));
+    }
+
+    assert_eq!(tick_owners(&sub), vec!["plugin/hog".to_string()]);
+}

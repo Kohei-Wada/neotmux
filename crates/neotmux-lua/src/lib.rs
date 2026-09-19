@@ -24,7 +24,7 @@ pub use api::event::Event;
 pub use api::keymap;
 
 use api::ctx::Ctx;
-use budget::Budget;
+use budget::{Budget, Outcome};
 use draw::Buffers;
 use geometry::Geometry;
 use ops::{Level, Op, OpBuffer};
@@ -241,15 +241,24 @@ impl LuaSubsystem {
                     self.report(owner, &err);
                 }
             }
-            let overran = self.budget.overran();
-            self.budget.leave();
+            let outcome = self.budget.leave();
+            let (budget_ms, limit) = {
+                let opts = self.opts.borrow();
+                (opts.tick_budget_ms, opts.tick_overrun_limit)
+            };
+            let report = match outcome {
+                Outcome::WithinBudget => None,
+                Outcome::Interrupted => Some(format!("tick exceeded its {budget_ms} ms budget")),
+                Outcome::RanLong { elapsed } => Some(format!(
+                    "tick exceeded its {budget_ms} ms budget: {} ms in a call that could not be \
+                     cut off",
+                    elapsed.as_millis()
+                )),
+            };
+            let overran = report.is_some();
 
-            if overran {
-                let (budget_ms, limit) = {
-                    let opts = self.opts.borrow();
-                    (opts.tick_budget_ms, opts.tick_overrun_limit)
-                };
-                self.report_text(owner, format!("tick exceeded its {budget_ms} ms budget"));
+            if let Some(text) = report {
+                self.report_text(owner, text);
                 if self.overrun.count(owner, limit) {
                     self.unsubscribe_overrunning(owner, limit);
                 }
