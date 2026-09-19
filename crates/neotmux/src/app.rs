@@ -8,7 +8,7 @@ use neotmux_core::proto::{
 use neotmux_lua::ops::{Level, Op};
 use neotmux_lua::{Event as LuaEvent, KeyOutcome, LuaSubsystem};
 use neotmux_term::pty::{PtyEvent, PtyHandle};
-use neotmux_term::state::TermState;
+use neotmux_term::state::{MIN_GRID, TermState, clamp_to_min_grid};
 use ratatui::DefaultTerminal;
 
 use crate::input::{encode_key, key_spec};
@@ -28,25 +28,18 @@ fn pane_id() -> PaneId {
     PaneId::from(1)
 }
 
-fn clamp_to_at_least_one(size: Size) -> Size {
-    Size {
-        rows: size.rows.max(1),
-        cols: size.cols.max(1),
-    }
-}
-
 fn terminal_size(terminal: &DefaultTerminal) -> anyhow::Result<Size> {
     let area = terminal.size().context("terminal size")?;
-    Ok(clamp_to_at_least_one(Size {
+    Ok(clamp_to_min_grid(Size {
         rows: area.height,
         cols: area.width,
     }))
 }
 
 /// The pane's own size: the full terminal, minus the status row once a
-/// status provider exists. A one-row terminal can't spare that row.
+/// status provider exists. A terminal at the minimum grid can't spare that row.
 fn content_size(full: Size, has_status: bool) -> Size {
-    if has_status && full.rows > 1 {
+    if has_status && full.rows > MIN_GRID.rows {
         Size {
             rows: full.rows - 1,
             cols: full.cols,
@@ -150,7 +143,7 @@ pub fn run(
                         }
                     }
                     Event::Resize(cols, rows) => {
-                        size = clamp_to_at_least_one(Size { rows, cols });
+                        size = clamp_to_min_grid(Size { rows, cols });
                         (content, panes) =
                             apply_geometry(lua, &mut state, &mut pty, size, has_status)?;
                         dirty = true;
@@ -260,8 +253,8 @@ mod tests {
     #[test]
     fn a_zero_size_is_clamped_the_same_for_state_and_pty() {
         let raw = Size { rows: 0, cols: 0 };
-        let clamped = clamp_to_at_least_one(raw);
-        assert_eq!(clamped, Size { rows: 1, cols: 1 });
+        let clamped = clamp_to_min_grid(raw);
+        assert_eq!(clamped, MIN_GRID);
 
         let state = TermState::new(clamped, 0);
         let mut pty = PtyHandle::spawn(quick_exit_command(), clamped).expect("spawn pty");
@@ -279,7 +272,7 @@ mod tests {
         let pty = PtyHandle::spawn(quick_exit_command(), initial).expect("spawn pty");
 
         let raw = Size { rows: 0, cols: 0 };
-        let clamped = clamp_to_at_least_one(raw);
+        let clamped = clamp_to_min_grid(raw);
         state.resize(clamped);
         pty.resize(clamped).expect("resize pty");
 

@@ -7,10 +7,19 @@ use nix::unistd::Pid;
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 
 fn run_in_pty(env: &[(&str, &str)], input: &[u8]) -> (String, bool, Termios) {
+    run_in_pty_sized(24, 80, env, input)
+}
+
+fn run_in_pty_sized(
+    rows: u16,
+    cols: u16,
+    env: &[(&str, &str)],
+    input: &[u8],
+) -> (String, bool, Termios) {
     let pair = native_pty_system()
         .openpty(PtySize {
-            rows: 24,
-            cols: 80,
+            rows,
+            cols,
             pixel_width: 0,
             pixel_height: 0,
         })
@@ -227,4 +236,30 @@ fn renders_output_written_in_the_same_batch_as_exit() {
         out.contains(marker),
         "final PTY output written just before exit was never rendered: {out:?}"
     );
+}
+
+/// A PTY whose window size was never set reports 0x0, which is what `pty.fork()` and an
+/// ssh session with no TTY size produce. Shell output there has to scroll a grid that
+/// `vt100` cannot scroll unless the host clamps it up first.
+#[test]
+fn shell_output_on_a_zero_sized_terminal_does_not_kill_the_renderer() {
+    let (_out, ok, _termios) = run_in_pty_sized(
+        0,
+        0,
+        &[("SHELL", "/bin/sh")],
+        b"printf 'aaaaaaaaaaaaaaaa\\n'\rexit\r",
+    );
+    assert!(ok, "neotmux died on a 0x0 terminal");
+}
+
+/// One below the measured floor on each axis, reached as a resize rather than at startup.
+#[test]
+fn resizing_below_the_floor_does_not_kill_the_renderer() {
+    let (_out, ok, _termios) = run_in_pty_sized(
+        1,
+        1,
+        &[("SHELL", "/bin/sh")],
+        b"printf 'aaaaaaaaaaaaaaaa\\n'\rexit\r",
+    );
+    assert!(ok, "neotmux died on a 1x1 terminal");
 }
