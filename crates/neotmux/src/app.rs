@@ -14,12 +14,19 @@ const FRAME: Duration = Duration::from_millis(16);
 const SCROLLBACK: usize = 10_000;
 const MAX_CHUNKS_PER_FRAME: usize = 32;
 
+fn clamp_to_at_least_one(size: Size) -> Size {
+    Size {
+        rows: size.rows.max(1),
+        cols: size.cols.max(1),
+    }
+}
+
 fn terminal_size(terminal: &DefaultTerminal) -> anyhow::Result<Size> {
     let area = terminal.size().context("terminal size")?;
-    Ok(Size {
+    Ok(clamp_to_at_least_one(Size {
         rows: area.height,
         cols: area.width,
-    })
+    }))
 }
 
 pub fn run(terminal: &mut DefaultTerminal) -> anyhow::Result<()> {
@@ -61,7 +68,7 @@ pub fn run(terminal: &mut DefaultTerminal) -> anyhow::Result<()> {
                         }
                     }
                     Event::Resize(cols, rows) => {
-                        size = Size { rows, cols };
+                        size = clamp_to_at_least_one(Size { rows, cols });
                         state.resize(size);
                         pty.resize(size)?;
                     }
@@ -85,4 +92,47 @@ pub fn run(terminal: &mut DefaultTerminal) -> anyhow::Result<()> {
 
     pty.wait().context("wait for child")?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use portable_pty::CommandBuilder;
+
+    use super::*;
+
+    fn quick_exit_command() -> CommandBuilder {
+        let mut cmd = CommandBuilder::new("sh");
+        cmd.args(["-c", "true"]);
+        cmd
+    }
+
+    #[test]
+    fn a_zero_size_is_clamped_the_same_for_state_and_pty() {
+        let raw = Size { rows: 0, cols: 0 };
+        let clamped = clamp_to_at_least_one(raw);
+        assert_eq!(clamped, Size { rows: 1, cols: 1 });
+
+        let state = TermState::new(clamped, 0);
+        let mut pty = PtyHandle::spawn(quick_exit_command(), clamped).expect("spawn pty");
+
+        assert_eq!(state.size(), clamped);
+        assert_eq!(pty.size().expect("pty size"), clamped);
+
+        pty.wait().ok();
+    }
+
+    #[test]
+    fn resizing_to_zero_is_clamped_the_same_for_state_and_pty() {
+        let initial = Size { rows: 24, cols: 80 };
+        let mut state = TermState::new(initial, 0);
+        let pty = PtyHandle::spawn(quick_exit_command(), initial).expect("spawn pty");
+
+        let raw = Size { rows: 0, cols: 0 };
+        let clamped = clamp_to_at_least_one(raw);
+        state.resize(clamped);
+        pty.resize(clamped).expect("resize pty");
+
+        assert_eq!(state.size(), clamped);
+        assert_eq!(pty.size().expect("pty size"), clamped);
+    }
 }
