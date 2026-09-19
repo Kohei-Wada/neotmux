@@ -298,7 +298,8 @@ impl LuaSubsystem {
     /// The offender keeps its keymaps and event handlers: only what it was measured doing is
     /// taken away, and `neotmux.resubscribe` gives it back (§5.3).
     fn unsubscribe_overrunning(&self, owner: SourceId, limit: u32) {
-        self.overrun.park(&self.registry, &self.buffers, owner);
+        self.overrun.park(&self.registry, owner);
+        api::forget_if_no_longer_drawing(&self.registry, &self.buffers, owner);
         let name = self.sources.name(owner).unwrap_or_default();
         self.ops.push(
             owner,

@@ -5,9 +5,7 @@ use std::time::Duration;
 
 use mlua::RegistryKey;
 
-use crate::api::forget_if_no_longer_drawing;
 use crate::budget::Outcome;
-use crate::draw::Buffers;
 use crate::registry::{Kind, KindTag, RegistrationId, Registry};
 use crate::source::SourceId;
 
@@ -61,8 +59,10 @@ impl Overrun {
         self.consecutive.borrow_mut().remove(&source);
     }
 
-    /// Removes the source's tick subscriptions, keeping their callbacks for `restore`.
-    pub fn park(&self, registry: &Registry, buffers: &Buffers, source: SourceId) {
+    /// Removes the source's tick subscriptions, keeping their callbacks for `restore`. What a
+    /// source with no tick left owes the draw layer is the caller's to settle: this is policy
+    /// over the registry and nothing else.
+    pub fn park(&self, registry: &Registry, source: SourceId) {
         let mut callbacks = Vec::new();
         for id in registry.snapshot(KindTag::Tick) {
             if registry.owner(id) != Some(source) {
@@ -73,7 +73,6 @@ impl Overrun {
             }
             registry.remove(id);
         }
-        forget_if_no_longer_drawing(registry, buffers, source);
         if !callbacks.is_empty() {
             self.parked
                 .borrow_mut()
