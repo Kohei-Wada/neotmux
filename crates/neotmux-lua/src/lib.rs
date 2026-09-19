@@ -67,15 +67,19 @@ impl LuaSubsystem {
         let opts = Rc::new(RefCell::new(Opts::default()));
         let load_failures = Rc::new(RefCell::new(Vec::new()));
         let geometry = Rc::new(RefCell::new(Geometry::default()));
+        let buffers = Rc::new(Buffers::new());
 
         let loading = api::install(
             &lua,
-            sources.clone(),
-            registry.clone(),
-            ops.clone(),
-            opts.clone(),
-            load_failures.clone(),
-            geometry.clone(),
+            api::Shared {
+                sources: sources.clone(),
+                registry: registry.clone(),
+                buffers: buffers.clone(),
+                ops: ops.clone(),
+                opts: opts.clone(),
+                load_failures: load_failures.clone(),
+                geometry: geometry.clone(),
+            },
         )
         .map_err(|err| anyhow::anyhow!("{err:#}"))?;
 
@@ -88,7 +92,7 @@ impl LuaSubsystem {
             opts,
             load_failures,
             loading,
-            buffers: Rc::new(Buffers::new()),
+            buffers,
             geometry,
         })
     }

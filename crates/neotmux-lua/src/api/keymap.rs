@@ -3,6 +3,7 @@ use std::rc::Rc;
 use mlua::{Function, Lua, Table, Value};
 
 use crate::api::{attribute, make_handle};
+use crate::draw::Buffers;
 use crate::ops::{Level, Op, OpBuffer};
 use crate::registry::{Kind, KindTag, RegistrationId, Registry};
 use crate::source::Sources;
@@ -82,6 +83,7 @@ pub fn install(
     lua: &Lua,
     sources: Rc<Sources>,
     registry: Rc<Registry>,
+    buffers: Rc<Buffers>,
     ops: Rc<OpBuffer>,
 ) -> mlua::Result<Table> {
     let keymap = lua.create_table()?;
@@ -110,7 +112,7 @@ pub fn install(
         let owner = attribute(&sources, &callback);
         let key = Rc::new(lua.create_registry_value(callback)?);
         let id = registry.add(owner, Kind::Keymap(normalised), key);
-        let handle = make_handle(lua, registry.clone(), id)?;
+        let handle = make_handle(lua, registry.clone(), buffers.clone(), id)?;
         Ok((Value::Table(handle), Value::Nil))
     })?;
     keymap.set("set", set)?;

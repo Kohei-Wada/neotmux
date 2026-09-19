@@ -1,8 +1,8 @@
 use std::fs;
 
 use neotmux_core::proto::{DrawCmd, Epoch, PaneId, Rect, Size};
-use neotmux_lua::LuaSubsystem;
 use neotmux_lua::runtime::Layers;
+use neotmux_lua::{KeyOutcome, LuaSubsystem};
 
 fn layer(files: &[(&str, &str)]) -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
@@ -423,5 +423,56 @@ fn grouping_tick_dispatch_by_source_still_composes_sources_in_load_order() {
     assert_eq!(
         lines(&sub),
         vec![(0, "earlier".to_string()), (1, "later".to_string())]
+    );
+}
+
+#[test]
+fn removing_the_last_tick_registration_stops_the_last_frame_replaying() {
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.quitter')"),
+        (
+            "lua/plugin/quitter.lua",
+            r#"
+            local h = neotmux.on_tick(function(ctx) ctx:text(nil, 0, 0, 'transient') end)
+            neotmux.keymap.set('C-q', function() h:remove() return true end)
+            return {}
+            "#,
+        ),
+    ]);
+    frame(&sub, 24);
+    assert_eq!(lines(&sub), vec![(0, "transient".to_string())]);
+
+    assert_eq!(sub.dispatch_key("C-q"), KeyOutcome::Consumed);
+    frame(&sub, 24);
+    assert!(
+        lines(&sub).is_empty(),
+        "a removed registration's last frame is still being replayed: {:?}",
+        lines(&sub)
+    );
+}
+
+#[test]
+fn removing_one_of_two_tick_registrations_keeps_the_source_drawing() {
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.pair')"),
+        (
+            "lua/plugin/pair.lua",
+            r#"
+            local h
+            h = neotmux.on_tick(function(ctx)
+              ctx:text(nil, 0, 0, 'going')
+              h:remove()
+            end)
+            neotmux.on_tick(function(ctx) ctx:text(nil, 0, 1, 'staying') end)
+            return {}
+            "#,
+        ),
+    ]);
+    frame(&sub, 24);
+    frame(&sub, 24);
+    assert_eq!(
+        lines(&sub),
+        vec![(1, "staying".to_string())],
+        "forgetting fired although the source still has a tick registration"
     );
 }

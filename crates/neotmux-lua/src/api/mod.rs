@@ -11,25 +11,57 @@ use std::rc::Rc;
 use mlua::{Function, Lua, Table, Value};
 
 use crate::LoadFailure;
+use crate::draw::Buffers;
 use crate::geometry::Geometry;
 use crate::ops::{Level, Op, OpBuffer};
-use crate::registry::{Kind, RegistrationId, Registry};
+use crate::registry::{Kind, KindTag, RegistrationId, Registry};
 use crate::source::{self, SourceId, Sources};
 
 pub use opt::Opts;
 
+/// The state every binding is wired to, passed as one value because `install` otherwise takes
+/// eight collaborators.
+pub(crate) struct Shared {
+    pub(crate) sources: Rc<Sources>,
+    pub(crate) registry: Rc<Registry>,
+    pub(crate) buffers: Rc<Buffers>,
+    pub(crate) ops: Rc<OpBuffer>,
+    pub(crate) opts: Rc<RefCell<Opts>>,
+    pub(crate) load_failures: Rc<RefCell<Vec<LoadFailure>>>,
+    pub(crate) geometry: Rc<RefCell<Geometry>>,
+}
+
 pub(crate) fn make_handle(
     lua: &Lua,
     registry: Rc<Registry>,
+    buffers: Rc<Buffers>,
     id: RegistrationId,
 ) -> mlua::Result<Table> {
     let handle = lua.create_table()?;
     let remove = lua.create_function(move |_, _self: Value| {
+        let owner = registry.owner(id);
         registry.remove(id);
+        if let Some(owner) = owner {
+            forget_if_no_longer_drawing(&registry, &buffers, owner);
+        }
         Ok(())
     })?;
     handle.set("remove", remove)?;
     Ok(handle)
+}
+
+/// Drawing is only ever contributed from a tick, so a source with no tick registration left
+/// can never refresh its frame. Without this its last committed frame is replayed on every
+/// frame for as long as the epoch matches, which makes `handle:remove()` — and M1b's overrun
+/// unsubscribe — leave the offending source's output on screen forever.
+pub(crate) fn forget_if_no_longer_drawing(registry: &Registry, buffers: &Buffers, owner: SourceId) {
+    let still_draws = registry
+        .snapshot(KindTag::Tick)
+        .into_iter()
+        .any(|id| registry.owner(id) == Some(owner));
+    if !still_draws {
+        buffers.forget(owner);
+    }
 }
 
 /// Attribution is uniform: the owner of a registration is wherever the callback itself was
@@ -48,13 +80,14 @@ fn register(
     lua: &Lua,
     sources: &Rc<Sources>,
     registry: &Rc<Registry>,
+    buffers: &Rc<Buffers>,
     kind: Kind,
     callback: Function,
 ) -> mlua::Result<Table> {
     let owner = attribute(sources, &callback);
     let key = Rc::new(lua.create_registry_value(callback)?);
     let id = registry.add(owner, kind, key);
-    make_handle(lua, registry.clone(), id)
+    make_handle(lua, registry.clone(), buffers.clone(), id)
 }
 
 /// The load convention, not `require`, owns isolation (§4.10). `loading` is set only while
@@ -68,6 +101,7 @@ fn install_require_wrapper(
     lua: &Lua,
     sources: Rc<Sources>,
     registry: Rc<Registry>,
+    buffers: Rc<Buffers>,
     load_failures: Rc<RefCell<Vec<LoadFailure>>>,
 ) -> mlua::Result<Rc<Cell<bool>>> {
     let loading = Rc::new(Cell::new(false));
@@ -96,6 +130,7 @@ fn install_require_wrapper(
             .map(|chunk_name| sources.intern(&chunk_name));
         if let Some(id) = failed {
             registry.remove_all_of(id);
+            forget_if_no_longer_drawing(&registry, &buffers, id);
         }
         load_failures.borrow_mut().push(LoadFailure {
             plugin: failed
@@ -111,22 +146,24 @@ fn install_require_wrapper(
 
 /// Returns the flag that arms the load convention (§4.10): the caller sets it while the
 /// `init.lua` chain runs and clears it afterwards.
-pub(crate) fn install(
-    lua: &Lua,
-    sources: Rc<Sources>,
-    registry: Rc<Registry>,
-    ops: Rc<OpBuffer>,
-    opts: Rc<RefCell<Opts>>,
-    load_failures: Rc<RefCell<Vec<LoadFailure>>>,
-    geometry: Rc<RefCell<Geometry>>,
-) -> mlua::Result<Rc<Cell<bool>>> {
+pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>> {
+    let Shared {
+        sources,
+        registry,
+        buffers,
+        ops,
+        opts,
+        load_failures,
+        geometry,
+    } = shared;
     let neotmux = lua.create_table()?;
 
     {
         let sources = sources.clone();
         let registry = registry.clone();
+        let buffers = buffers.clone();
         let on_tick = lua.create_function(move |lua, callback: Function| {
-            register(lua, &sources, &registry, Kind::Tick, callback)
+            register(lua, &sources, &registry, &buffers, Kind::Tick, callback)
         })?;
         neotmux.set("on_tick", on_tick)?;
     }
@@ -134,8 +171,16 @@ pub(crate) fn install(
     {
         let sources = sources.clone();
         let registry = registry.clone();
+        let buffers = buffers.clone();
         let on_event = lua.create_function(move |lua, (name, callback): (String, Function)| {
-            register(lua, &sources, &registry, Kind::Event(name), callback)
+            register(
+                lua,
+                &sources,
+                &registry,
+                &buffers,
+                Kind::Event(name),
+                callback,
+            )
         })?;
         neotmux.set("on_event", on_event)?;
     }
@@ -143,14 +188,21 @@ pub(crate) fn install(
     {
         let sources = sources.clone();
         let registry = registry.clone();
+        let buffers = buffers.clone();
         let on_key = lua.create_function(move |lua, callback: Function| {
-            register(lua, &sources, &registry, Kind::Key, callback)
+            register(lua, &sources, &registry, &buffers, Kind::Key, callback)
         })?;
         neotmux.set("on_key", on_key)?;
     }
 
     {
-        let keymap = keymap::install(lua, sources.clone(), registry.clone(), ops.clone())?;
+        let keymap = keymap::install(
+            lua,
+            sources.clone(),
+            registry.clone(),
+            buffers.clone(),
+            ops.clone(),
+        )?;
         let keymap = seal(lua, keymap, "neotmux.keymap")?;
         neotmux.set("keymap", keymap)?;
     }
@@ -201,7 +253,7 @@ pub(crate) fn install(
     let neotmux = seal(lua, neotmux, "neotmux")?;
     lua.globals().set("neotmux", neotmux)?;
 
-    install_require_wrapper(lua, sources, registry, load_failures)
+    install_require_wrapper(lua, sources, registry, buffers, load_failures)
 }
 
 /// A chunk assigning `neotmux.on_tick = ...` or replacing `neotmux.log` wholesale would make
