@@ -666,3 +666,88 @@ fn a_frame_applies_only_as_many_splits_as_it_can_afford() {
         "the frame forked more shells than its cap allows: {listed}"
     );
 }
+
+/// Every `resized` the probe plugin logged, in order.
+fn resizes(log: &str) -> Vec<&str> {
+    log.lines()
+        .filter(|line| line.contains("resized "))
+        .collect()
+}
+
+/// The probe: the shipped status line, a plugin that logs every `resized`, and one that
+/// splits and walks the focus on a keystroke.
+fn resize_probe() -> (Neotmux, tempfile::TempDir) {
+    let init = harness::runtime(&[(
+        "init.lua",
+        "require('plugin.splitter') require('plugin.resizes')",
+    )]);
+    let nt = Neotmux::start_layered(
+        &[init.path(), &harness::fixture_layer(), &shipped_layer()],
+        "cat",
+    );
+    (nt, init)
+}
+
+/// A split costs one layout recompute — the one that made room for the new pane's siblings —
+/// and no resize at all. The epoch the frame's draw buffers were committed under used to be
+/// the same value the geometry published to Lua carried, so republishing it mid-frame to give
+/// `pane_opened` a true tree invalidated the status that the tick had already committed. The
+/// host read the empty status as "the status plugin stopped drawing", took its row back and
+/// gave it straight back on the next frame: two recomputes and two SIGWINCHes per split.
+#[test]
+fn a_split_does_not_resize_every_pane() {
+    let (mut nt, _init) = resize_probe();
+    nt.wait_for_screen("panes 1 focus 1", PATIENCE);
+    nt.settle(Duration::from_millis(500));
+    let before = resizes(&nt.log_text()).len();
+
+    nt.send("\x02"); // C-b: split, focusing the new pane
+    nt.wait_for_log("splitter pane_opened 2", PATIENCE);
+    nt.settle(Duration::from_millis(500));
+
+    let log = nt.log_text();
+    let after = resizes(&log);
+    assert_eq!(
+        after.len(),
+        before,
+        "the split resized every pane: the status row blanked for a frame, so the host took \
+         its row back and gave it straight back. Unexpected: {:?}",
+        &after[before.min(after.len())..]
+    );
+    let screen = nt.screen_after(Duration::from_millis(300));
+    assert!(
+        screen.contains("panes 2 focus 2"),
+        "the status row did not survive the split:\n{screen}"
+    );
+}
+
+/// The same for a focus change, which invalidated the epoch for the same reason: focus is one
+/// of the three things it is made of.
+#[test]
+fn a_focus_change_does_not_resize_every_pane() {
+    let (mut nt, _init) = resize_probe();
+    nt.wait_for_screen("panes 1 focus 1", PATIENCE);
+    nt.send("\x02"); // C-b: split
+    nt.wait_for_log("splitter pane_opened 2", PATIENCE);
+    nt.settle(Duration::from_millis(500));
+    let before = resizes(&nt.log_text()).len();
+
+    nt.send("\x0f"); // C-o: focus the other pane
+    nt.wait_for_log("splitter focus_changed 1", PATIENCE);
+    nt.settle(Duration::from_millis(500));
+
+    let log = nt.log_text();
+    let after = resizes(&log);
+    assert_eq!(
+        after.len(),
+        before,
+        "the focus change resized every pane: the status row blanked for a frame, so the host \
+         took its row back and gave it straight back. Unexpected: {:?}",
+        &after[before.min(after.len())..]
+    );
+    let screen = nt.screen_after(Duration::from_millis(300));
+    assert!(
+        screen.contains("panes 2 focus 1"),
+        "the status row did not survive the focus change:\n{screen}"
+    );
+}

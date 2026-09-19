@@ -293,7 +293,6 @@ impl Session {
     /// so the geometry catches up before any of those events is dispatched.
     fn republish_geometry(&self, lua: &LuaSubsystem) {
         lua.republish_geometry(
-            self.layout.epoch(),
             self.layout.content,
             self.layout.panes(),
             self.layout.focus(),

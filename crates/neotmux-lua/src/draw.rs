@@ -29,6 +29,9 @@ impl Buffers {
         Self::default()
     }
 
+    /// Opens a frame under `epoch`. That epoch is the frame's, not the session's: it is what
+    /// a commit is stamped with and what `applicable` measures against, so a geometry change
+    /// after this call cannot invalidate what this frame already committed.
     pub fn begin(&self, epoch: Epoch) {
         let mut inner = self.inner.borrow_mut();
         inner.epoch = epoch;
@@ -72,12 +75,14 @@ impl Buffers {
         inner.committed.remove(&owner);
     }
 
-    pub fn applicable(&self, now: &Epoch) -> (Vec<DrawCmd>, Vec<StatusFragment>) {
+    /// Everything committed under the frame this `begin` opened. A buffer left over from an
+    /// earlier frame is replayed only while its epoch still matches.
+    pub fn applicable(&self) -> (Vec<DrawCmd>, Vec<StatusFragment>) {
         let inner = self.inner.borrow();
         let mut cmds = Vec::new();
         let mut status = Vec::new();
         for entry in inner.committed.values() {
-            if !entry.epoch.matches(now) {
+            if !entry.epoch.matches(&inner.epoch) {
                 continue;
             }
             cmds.extend(entry.cmds.iter().cloned());
@@ -122,7 +127,7 @@ mod tests {
         buffers.record(a, text("hi"));
         buffers.status(a, fragment("st"));
         buffers.commit(a);
-        let (cmds, status) = buffers.applicable(&epoch(24));
+        let (cmds, status) = buffers.applicable();
         assert_eq!(cmds, vec![text("hi")]);
         assert_eq!(status, vec![fragment("st")]);
     }
@@ -135,7 +140,8 @@ mod tests {
         buffers.begin(epoch(24));
         buffers.record(a, text("hi"));
         buffers.commit(a);
-        let (cmds, status) = buffers.applicable(&epoch(25));
+        buffers.begin(epoch(25));
+        let (cmds, status) = buffers.applicable();
         assert!(cmds.is_empty());
         assert!(status.is_empty());
     }
@@ -154,7 +160,7 @@ mod tests {
         buffers.record(a, text("half-written"));
         buffers.discard(a);
 
-        let (cmds, _) = buffers.applicable(&epoch(24));
+        let (cmds, _) = buffers.applicable();
         assert_eq!(cmds, vec![text("good")]);
     }
 
@@ -169,7 +175,7 @@ mod tests {
         buffers.begin(epoch(24));
         buffers.record(a, text("second"));
         buffers.commit(a);
-        let (cmds, _) = buffers.applicable(&epoch(24));
+        let (cmds, _) = buffers.applicable();
         assert_eq!(cmds, vec![text("second")]);
     }
 
@@ -177,7 +183,7 @@ mod tests {
     fn nothing_recorded_means_nothing_applicable() {
         let buffers = Buffers::new();
         buffers.begin(epoch(24));
-        let (cmds, status) = buffers.applicable(&epoch(24));
+        let (cmds, status) = buffers.applicable();
         assert!(cmds.is_empty());
         assert!(status.is_empty());
     }
@@ -193,7 +199,7 @@ mod tests {
         buffers.record(a, text("first"));
         buffers.commit(b);
         buffers.commit(a);
-        let (cmds, _) = buffers.applicable(&epoch(24));
+        let (cmds, _) = buffers.applicable();
         assert_eq!(cmds, vec![text("first"), text("second")]);
     }
 
@@ -206,7 +212,7 @@ mod tests {
         buffers.record(a, text("hi"));
         buffers.commit(a);
         buffers.forget(a);
-        let (cmds, _) = buffers.applicable(&epoch(24));
+        let (cmds, _) = buffers.applicable();
         assert!(cmds.is_empty());
     }
 
@@ -221,7 +227,7 @@ mod tests {
         buffers.forget(a);
         buffers.commit(a);
 
-        let (cmds, status) = buffers.applicable(&epoch(24));
+        let (cmds, status) = buffers.applicable();
         assert!(cmds.is_empty());
         assert!(status.is_empty());
     }
@@ -239,7 +245,7 @@ mod tests {
         buffers.begin(epoch(24));
         buffers.commit(a);
 
-        let (cmds, _) = buffers.applicable(&epoch(24));
+        let (cmds, _) = buffers.applicable();
         assert!(cmds.is_empty());
     }
 
@@ -256,7 +262,7 @@ mod tests {
         buffers.begin(epoch(24));
         buffers.discard(a);
 
-        let (cmds, _) = buffers.applicable(&epoch(24));
+        let (cmds, _) = buffers.applicable();
         assert_eq!(cmds, vec![text("first")]);
     }
 
@@ -270,7 +276,7 @@ mod tests {
         buffers.begin(epoch(24));
         buffers.record(a, text("fresh"));
         buffers.commit(a);
-        let (cmds, _) = buffers.applicable(&epoch(24));
+        let (cmds, _) = buffers.applicable();
         assert_eq!(cmds, vec![text("fresh")]);
     }
 }

@@ -183,26 +183,21 @@ impl LuaSubsystem {
         panes: Vec<(PaneId, Rect)>,
         focus: Option<PaneId>,
     ) {
-        self.buffers.begin(epoch.clone());
-        self.republish_geometry(epoch, size, panes, focus);
+        self.buffers.begin(epoch);
+        self.republish_geometry(size, panes, focus);
     }
 
     /// The layout changed part-way through a frame. What Lua sees catches up at once, so an
-    /// event dispatched after it describes the tree as it is; the draw buffers are left
-    /// alone, and what was committed against the old epoch stops applying as usual.
+    /// event dispatched after it describes the tree as it is. The frame's epoch is the
+    /// buffers' own and is not touched here: the tick has already committed under it, and
+    /// moving it mid-frame would throw that commit away.
     pub fn republish_geometry(
         &self,
-        epoch: Epoch,
         size: Size,
         panes: Vec<(PaneId, Rect)>,
         focus: Option<PaneId>,
     ) {
-        *self.geometry.borrow_mut() = Geometry {
-            epoch,
-            size,
-            panes,
-            focus,
-        };
+        *self.geometry.borrow_mut() = Geometry { size, panes, focus };
     }
 
     /// The unit of commit is the source, not the callback: a source's frame is the union of
@@ -450,8 +445,7 @@ impl LuaSubsystem {
     }
 
     pub fn frame_output(&self) -> (Vec<DrawCmd>, Vec<StatusFragment>) {
-        let epoch = self.geometry.borrow().epoch.clone();
-        self.buffers.applicable(&epoch)
+        self.buffers.applicable()
     }
 
     pub fn drain_ops(&self) -> Vec<(SourceId, Op)> {
