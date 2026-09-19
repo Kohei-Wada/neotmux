@@ -206,3 +206,32 @@ fn nothing_is_written_while_nothing_happens() {
     nt.settle(Duration::from_secs(1));
     assert_eq!(nt.bytes_in(Duration::from_secs(1)), 0);
 }
+
+/// The prefix plugin §6 calls for: it binds nothing, so both the prefix key and the command
+/// key after it reach it only through `on_key`, and both are swallowed before the PTY.
+#[test]
+fn prefix_swallows_its_key_and_the_next_one_while_an_unrelated_key_gets_through() {
+    let (mut nt, _init) = start("require('plugin.prefix')", "cat");
+    nt.send("\x01"); // C-a, the prefix
+    nt.send("z"); // the command key, bound by nobody
+    nt.send("Q"); // unrelated, no prefix pending
+    nt.send("\r");
+
+    let log = nt.wait_for_log("prefix command z", PATIENCE);
+    assert!(line_with(&log, "prefix armed").contains("plugin/prefix"));
+    assert!(line_with(&log, "prefix command z").contains("plugin/prefix"));
+
+    let screen = nt.screen_after(Duration::from_secs(2));
+    assert!(
+        !screen.contains("^A"),
+        "the prefix key reached the shell:\n{screen}"
+    );
+    assert!(
+        !screen.contains('z'),
+        "the command key after the prefix reached the shell:\n{screen}"
+    );
+    assert!(
+        screen.contains('Q'),
+        "the unrelated key never reached the shell:\n{screen}"
+    );
+}

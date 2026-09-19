@@ -10,6 +10,7 @@ use crate::source::SourceId;
 pub enum Kind {
     Tick,
     Event(String),
+    Key,
     Keymap(String),
     Status,
 }
@@ -18,6 +19,7 @@ pub enum Kind {
 pub enum KindTag {
     Tick,
     Event,
+    Key,
     Keymap,
     Status,
 }
@@ -27,6 +29,7 @@ impl Kind {
         match self {
             Kind::Tick => KindTag::Tick,
             Kind::Event(_) => KindTag::Event,
+            Kind::Key => KindTag::Key,
             Kind::Keymap(_) => KindTag::Keymap,
             Kind::Status => KindTag::Status,
         }

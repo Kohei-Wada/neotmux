@@ -260,6 +260,7 @@ Lua where it is.
 ```lua
 local h = neotmux.on_tick(fn)                    -- per-frame draw callback
 local h = neotmux.on_event(name, fn)             -- pane_output / resized
+local h = neotmux.on_key(fn)                     -- every key, before the bindings
 local h = neotmux.keymap.set(key, fn)            -- key binding
 local h = neotmux.status.provider(fn)            -- status-line contributor
 h:remove()                                       -- idempotent
@@ -287,12 +288,33 @@ contended resource in the system. The contract, fixed in M1a:
   through to the PTY. **The return value is ABI** — introducing it in M2 would break every
   plugin written against M1a
 - **no key is reserved by the host.** There is no prefix key in the host: §6's prefix is an
-  ordinary consumer of this API, binding its key with `keymap.set` like anything else. A host
-  that reserved the key would have decided in advance that the plugin cannot be written the
-  ordinary way
+  ordinary consumer of this API. A host that reserved the key would have decided in advance
+  that the plugin cannot be written the ordinary way
 - two plugins binding the same key is an error at registration time: the second registration
   fails, returns `nil` plus a message, and the conflict is logged with both plugin names.
   Last-wins is rejected because it makes load order load-bearing and silent
+
+A key is dispatched in four steps:
+
+1. every `neotmux.on_key` callback runs, each receiving the normalised key spec as a string
+   — the same form `keymap.set` takes, so a plugin can compare the two;
+2. the first callback to return `true` consumes the key: later `on_key` callbacks do not run
+   and the keymap lookup does not happen;
+3. otherwise the `keymap.set` binding for that spec runs, with the semantics above;
+4. if nothing consumed the key, it goes to the PTY.
+
+`on_key` exists because `keymap.set` binds one callback per spec, so a plugin can only see
+keys it has already bound. A prefix is modal — it must see the key *after* its own, whatever
+that key is — and holding a permanent global binding on every command key would both fail
+outside prefix mode and deny those keys to every other plugin through the conflict path. It
+is a notification with a veto, and nothing more: the host has no mode, no mode stack and no
+prefix concept, and everything modal is the plugin's own state.
+
+`on_key` callbacks run in registration order, which is load order — the same ordering rule
+drawing uses (§4.5). There is no priority and no ordering knob.
+
+A callback that raises is logged against its own source and treated as not consuming, so one
+broken handler cannot swallow the keyboard.
 
 ### 4.5 Drawing: commands are recorded, not executed
 
@@ -416,6 +438,8 @@ A fixture plugin **set**, not one plugin — the point is to exercise the ABI:
   harness wrote to the PTY
 - `binder` — `keymap.set` returning `true` for one key and `false` for another; asserted that
   the consumed key never reaches the PTY and the other does
+- `prefix` — a real two-key prefix: it binds nothing, and uses `on_key` to swallow its own
+  key and then the next one; asserted that neither reaches the PTY while an unrelated key does
 - `conflicting` — binds the same key as `binder`; asserted that registration returns `nil`,
   both names appear in the log, and `binder`'s binding still works
 - `configured` — reads a config holder that `init.lua` mutated; asserted to see the mutated
@@ -567,10 +591,12 @@ moves to the sibling subtree's first leaf in traversal order.
 
 ### The prefix key is not special
 
-There is no hardcoded prefix. The prefix is a plugin: a keymap registration that swallows
-one key, sets a flag, and consumes the next key. That is the test of whether the keymap
-API from M1a is real — if the prefix cannot be written as a plugin, the API is missing
-something, and finding that out is the point of building it this way.
+There is no hardcoded prefix. The prefix is a plugin: an `on_key` callback (§4.4) that
+swallows one key, sets a flag, and consumes the next key whatever it is. That is the test of
+whether the key API from M1a is real — if the prefix cannot be written as a plugin, the API
+is missing something, and finding that out is the point of building it this way. It is what
+`on_key` was added for: `keymap.set` alone cannot express it, because the key after the
+prefix is one the plugin has not bound.
 
 M2 also introduces the pane-tree events — `pane_opened`, `pane_closed` and
 `focus_changed` — deliberately held back from M1a because nothing there could fire them.

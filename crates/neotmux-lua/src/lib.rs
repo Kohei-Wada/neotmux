@@ -198,12 +198,52 @@ impl LuaSubsystem {
         }
     }
 
+    /// Observers first, then the binding (§4.4): an `on_key` callback is the only way to see a
+    /// key nobody has bound, which is what a prefix plugin needs to be modal.
     pub fn dispatch_key(&self, spec: &str) -> KeyOutcome {
         let Some(normalised) = keymap::normalise(spec) else {
             return KeyOutcome::Fallthrough;
         };
 
-        let Some(id) = keymap::find(&self.registry, &normalised) else {
+        if self.offer_key(&normalised) == KeyOutcome::Consumed {
+            return KeyOutcome::Consumed;
+        }
+        self.dispatch_binding(&normalised)
+    }
+
+    /// Every `on_key` callback in registration order, stopping at the first that consumes.
+    fn offer_key(&self, normalised: &str) -> KeyOutcome {
+        for id in self.registry.snapshot(KindTag::Key) {
+            let Some(callback) = self.registry.callback(id) else {
+                continue;
+            };
+            let Some(owner) = self.registry.owner(id) else {
+                continue;
+            };
+            let Ok(func) = self.lua.registry_value::<Function>(&callback) else {
+                continue;
+            };
+
+            match func.call::<Value>(normalised) {
+                Ok(Value::Boolean(true)) => return KeyOutcome::Consumed,
+                Ok(_) => continue,
+                Err(err) => {
+                    let name = self.sources.name(owner).unwrap_or_default();
+                    self.ops.push(
+                        owner,
+                        Op::Log {
+                            level: Level::Error,
+                            text: format!("{name}: {err}"),
+                        },
+                    );
+                }
+            }
+        }
+        KeyOutcome::Fallthrough
+    }
+
+    fn dispatch_binding(&self, normalised: &str) -> KeyOutcome {
+        let Some(id) = keymap::find(&self.registry, normalised) else {
             return KeyOutcome::Fallthrough;
         };
         let Some(callback) = self.registry.callback(id) else {

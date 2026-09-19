@@ -203,3 +203,124 @@ fn normalise_is_canonical_and_total() {
     assert_eq!(normalise("Ctrl+Shift+F13"), None);
     assert_eq!(normalise(""), None);
 }
+
+#[test]
+fn on_key_sees_a_key_nothing_has_bound() {
+    let (_d, sub) = built(&[
+        ("init.lua", "require('plugin.watcher')"),
+        (
+            "lua/plugin/watcher.lua",
+            "neotmux.on_key(function(key) neotmux.log.info('saw ' .. key) end) return {}",
+        ),
+    ]);
+    assert!(sub.run_init().is_empty());
+    assert_eq!(sub.dispatch_key("c-X"), KeyOutcome::Fallthrough);
+    let text = format!("{:?}", sub.drain_ops());
+    assert!(
+        text.contains("saw C-x"),
+        "on_key should receive the normalised spec: {text}"
+    );
+}
+
+#[test]
+fn an_on_key_that_returns_true_consumes_the_key_before_the_binding_runs() {
+    let (_d, sub) = built(&[
+        (
+            "init.lua",
+            "require('plugin.eater') require('plugin.bound')",
+        ),
+        (
+            "lua/plugin/eater.lua",
+            "neotmux.on_key(function() return true end) return {}",
+        ),
+        (
+            "lua/plugin/bound.lua",
+            "neotmux.keymap.set('C-x', function() neotmux.log.info('binding ran') return true end) return {}",
+        ),
+    ]);
+    assert!(sub.run_init().is_empty());
+    assert_eq!(sub.dispatch_key("C-x"), KeyOutcome::Consumed);
+    let text = format!("{:?}", sub.drain_ops());
+    assert!(
+        !text.contains("binding ran"),
+        "the keymap lookup ran although on_key consumed the key: {text}"
+    );
+}
+
+#[test]
+fn an_on_key_that_returns_false_falls_through_to_the_binding() {
+    let (_d, sub) = built(&[
+        (
+            "init.lua",
+            "require('plugin.eater') require('plugin.bound')",
+        ),
+        (
+            "lua/plugin/eater.lua",
+            "neotmux.on_key(function() return false end) return {}",
+        ),
+        (
+            "lua/plugin/bound.lua",
+            "neotmux.keymap.set('C-x', function() neotmux.log.info('binding ran') return true end) return {}",
+        ),
+    ]);
+    assert!(sub.run_init().is_empty());
+    assert_eq!(sub.dispatch_key("C-x"), KeyOutcome::Consumed);
+    assert_eq!(sub.dispatch_key("C-z"), KeyOutcome::Fallthrough);
+    let text = format!("{:?}", sub.drain_ops());
+    assert!(text.contains("binding ran"), "{text}");
+}
+
+#[test]
+fn on_key_callbacks_run_in_load_order_and_the_first_to_consume_stops_the_rest() {
+    let (_d, sub) = built(&[
+        (
+            "init.lua",
+            "require('plugin.first') require('plugin.second')",
+        ),
+        (
+            "lua/plugin/first.lua",
+            "neotmux.on_key(function() neotmux.log.info('first') return true end) return {}",
+        ),
+        (
+            "lua/plugin/second.lua",
+            "neotmux.on_key(function() neotmux.log.info('second') return true end) return {}",
+        ),
+    ]);
+    assert!(sub.run_init().is_empty());
+    assert_eq!(sub.dispatch_key("C-x"), KeyOutcome::Consumed);
+    let text = format!("{:?}", sub.drain_ops());
+    assert!(text.contains("first"), "{text}");
+    assert!(
+        !text.contains("second"),
+        "a later on_key ran after an earlier one consumed the key: {text}"
+    );
+}
+
+#[test]
+fn a_raising_on_key_is_blamed_by_name_and_does_not_swallow_the_key() {
+    let (_d, sub) = built(&[
+        (
+            "init.lua",
+            "require('plugin.flaky') require('plugin.bound')",
+        ),
+        (
+            "lua/plugin/flaky.lua",
+            "neotmux.on_key(function() error('boom') end) return {}",
+        ),
+        (
+            "lua/plugin/bound.lua",
+            "neotmux.keymap.set('C-x', function() neotmux.log.info('binding ran') return true end) return {}",
+        ),
+    ]);
+    assert!(sub.run_init().is_empty());
+    assert_eq!(sub.dispatch_key("C-x"), KeyOutcome::Consumed);
+    let text = format!("{:?}", sub.drain_ops());
+    assert!(
+        text.contains("boom") && text.contains("plugin/flaky"),
+        "{text}"
+    );
+    assert!(
+        text.contains("binding ran"),
+        "a raising on_key swallowed the key: {text}"
+    );
+}
