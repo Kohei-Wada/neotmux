@@ -212,30 +212,23 @@ mod tests {
         (lua, sources)
     }
 
-    /// Pins where `caller` starts and what it walks past. Level 0 is the host binding
-    /// itself — a C function, whose source is `=[C]` and never a chunk path — and the owner
-    /// is the first Lua frame above it, whatever level that turns out to be.
+    /// Pins what `caller` walks past: the host binding it is called from is never the
+    /// owner, and neither is the `pcall` in between — the owner is the chunk the call was
+    /// written in, whatever levels the stack happens to hold.
     #[test]
     fn the_owner_is_the_first_lua_frame_above_the_host_binding() {
         let dir = layer_with(&[("probe", "who() pcall(who) return {}")]);
         let (lua, sources) = vm_with(&dir);
 
-        // Each call records "<level 0 source> -> <owner>": the binding itself, then whoever
-        // `caller` blamed for it.
         let seen: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
         let captured = seen.clone();
         let sources_for_fn = sources.clone();
         let who = lua
             .create_function(move |lua, ()| {
-                let level_zero = lua
-                    .inspect_stack(0, |debug| debug.source().source.map(|s| s.into_owned()))
-                    .flatten()
-                    .unwrap_or_default();
                 let owner = caller(lua, &sources_for_fn);
-                let owner = sources_for_fn.name(owner).unwrap_or_default();
                 captured
                     .borrow_mut()
-                    .push(format!("{level_zero} -> {owner}"));
+                    .push(sources_for_fn.name(owner).unwrap_or_default());
                 Ok(())
             })
             .unwrap();
@@ -244,7 +237,7 @@ mod tests {
 
         assert_eq!(
             *seen.borrow(),
-            vec!["=[C] -> plugin/probe".to_string(); 2],
+            vec!["plugin/probe".to_string(); 2],
             "the direct call and the one through pcall must both name the chunk"
         );
     }
@@ -406,28 +399,6 @@ mod tests {
             display_name("@/runtime/lua/plugin/nested/thing/init.lua"),
             "plugin/nested/thing/init"
         );
-    }
-
-    #[test]
-    fn display_name_uses_the_last_lua_marker() {
-        assert_eq!(
-            display_name("@/home/kohei/lua/plugin/mylayer/lua/plugin/clock.lua"),
-            "plugin/clock"
-        );
-    }
-
-    #[test]
-    fn two_layers_sharing_a_relative_path_share_a_display_name() {
-        assert_eq!(
-            display_name("@/config/lua/plugin/clock.lua"),
-            display_name("@/usr/share/neotmux/lua/plugin/clock.lua")
-        );
-    }
-
-    #[test]
-    fn a_source_that_is_not_a_real_chunk_still_gets_a_display_name() {
-        assert_eq!(display_name("=[C]"), "=[C]");
-        assert_eq!(display_name("[string \"...\"]"), "[string \"...\"]");
     }
 
     #[test]

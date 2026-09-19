@@ -423,9 +423,10 @@ fn pairs_over_a_sealed_subtable_sees_its_real_fields() {
     let dir = layer(&[(
         "init.lua",
         r#"
-        local count = 0
-        for _ in pairs(neotmux.log) do count = count + 1 end
-        neotmux.notify("info", tostring(count))
+        local names = {}
+        for name in pairs(neotmux.log) do names[#names + 1] = name end
+        table.sort(names)
+        neotmux.notify("info", table.concat(names, " "))
         "#,
     )]);
     let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
@@ -438,7 +439,7 @@ fn pairs_over_a_sealed_subtable_sees_its_real_fields() {
     let Op::Notify { text, .. } = op else {
         unreachable!()
     };
-    assert_eq!(text, "3");
+    assert_eq!(text, "error info warn", "neotmux.log's ABI surface changed");
 }
 
 /// The owner of an op is the chunk it was written in, so this and the two tests below all
@@ -479,6 +480,25 @@ fn a_log_call_from_a_plugin_function_invoked_by_init_is_attributed_to_the_plugin
         "plugin/clock",
         "the log line and the registration in the same function must have the same owner"
     );
+}
+
+/// The display name is the path below the layer's own `lua/` directory, so a layer that
+/// itself lives under a `lua/` directory is named by the last one, not the first.
+#[test]
+fn a_layer_whose_own_path_contains_lua_is_still_named_by_its_relative_path() {
+    let root = tempfile::tempdir().unwrap();
+    let layer_dir = root.path().join("lua/plugin/mylayer");
+    fs::create_dir_all(layer_dir.join("lua/plugin")).unwrap();
+    fs::write(layer_dir.join("init.lua"), "require('plugin.clock')").unwrap();
+    fs::write(
+        layer_dir.join("lua/plugin/clock.lua"),
+        "neotmux.log.info('tick') return {}",
+    )
+    .unwrap();
+
+    let sub = LuaSubsystem::build(Layers::from_paths(vec![layer_dir])).unwrap();
+    assert!(sub.run_init().is_empty());
+    assert_eq!(log_owner(&sub), "plugin/clock");
 }
 
 #[test]

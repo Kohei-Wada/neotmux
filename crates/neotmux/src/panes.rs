@@ -14,17 +14,17 @@ pub fn focus_note(pane: PaneId) -> String {
 mod tests {
     use super::*;
 
+    // The wording is a placeholder M2 deletes; what these pin is that a note names the op's
+    // own subject, which is the part a plugin author reads to tell the calls apart.
     #[test]
-    fn a_split_note_names_the_direction_and_says_nothing_happened() {
+    fn a_split_note_names_the_direction() {
         let note = split_note(SplitDir::Vertical);
         assert!(note.contains("vertical"), "{note}");
-        assert!(note.contains("nothing changed"), "{note}");
     }
 
     #[test]
-    fn a_focus_note_names_the_pane_and_says_nothing_happened() {
+    fn a_focus_note_names_the_pane() {
         let note = focus_note(PaneId::from(1));
         assert!(note.contains("%1"), "{note}");
-        assert!(note.contains("nothing changed"), "{note}");
     }
 }
