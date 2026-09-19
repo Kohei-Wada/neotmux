@@ -638,3 +638,31 @@ fn a_pane_event_handler_sees_the_tree_the_event_describes() {
         "a pane_closed handler still saw the dead pane:\n{log}"
     );
 }
+
+/// M1b makes a tick attributable, but a split is applied after the tick: 200 `pane.split`
+/// ops pushed from one callback had the host fork a shell for each, entirely outside any
+/// source's measured slice. The cap is what keeps a plugin from buying unmeasured host work
+/// by queueing it, and the refusal is reported against whoever asked.
+#[test]
+fn a_frame_applies_only_as_many_splits_as_it_can_afford() {
+    let (mut nt, _init) = start(
+        "require('plugin.splitter') require('plugin.flooder')",
+        "cat",
+    );
+
+    nt.send("\x06"); // C-f: 200 splits from one callback
+    let log = nt.wait_for_log("splits per frame", PATIENCE);
+    let refusal = line_with(&log, "splits per frame");
+    assert!(
+        refusal.contains("plugin/flooder"),
+        "the refusal did not name the source that asked: {refusal}"
+    );
+
+    nt.send("\x07"); // C-g: report the pane list
+    let log = nt.wait_for_log("splitter panes=", PATIENCE);
+    let listed = line_with(&log, "splitter panes=");
+    assert!(
+        listed.contains("panes=4"),
+        "the frame forked more shells than its cap allows: {listed}"
+    );
+}

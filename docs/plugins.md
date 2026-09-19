@@ -112,8 +112,14 @@ applied after the tick, so `list()` returns the same thing immediately after a `
 immediately before. This is deliberate: a callback that could reshape the world underneath the
 callbacks running after it would make frame composition depend on dispatch order.
 
-Until M2 lands there is one pane and `split`/`focus` only log that they arrived. The signatures
-will not change.
+A frame applies at most three splits. Each one costs the host a fork, an exec and a terminal,
+none of it inside the tick your budget was measured against, so the number of them one frame
+can be asked for is bounded; the fourth and beyond are refused and logged against you. There is
+no way to close or resize a pane from Lua in v0.1.
+
+`pane_opened`, `pane_closed` and `focus_changed` are dispatched against the layout as it is
+after the change, so a handler's `pane.list()` and `pane.current()` describe the event it is
+being told about.
 
 ### Everything else
 

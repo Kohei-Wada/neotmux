@@ -23,6 +23,16 @@ const FRAME: Duration = Duration::from_millis(16);
 const MAX_CHUNKS_PER_FRAME: usize = 32;
 const FIRST_PANE: u32 = 1;
 
+/// How many `pane.split` ops one frame will act on. A split is host work a plugin buys from
+/// outside its measured tick — an op pushed in the tick, a shell fork/exec'd after it — so
+/// M1b's promise only holds if the number of them a frame can be made to do is bounded.
+///
+/// Derived rather than picked: the frame is 16 ms, the default tick budget claims 8 ms of
+/// it, and draining the PTYs and rendering need the rest, so applying ops gets about half
+/// of what is left, 4 ms. One split measured 1.3 ms (release, 24x40 pane: openpty, fork,
+/// exec, terminal state), and 4 / 1.3 is 3.
+const MAX_SPLITS_PER_FRAME: usize = 3;
+
 fn terminal_size(terminal: &DefaultTerminal) -> anyhow::Result<Size> {
     let area = terminal.size().context("terminal size")?;
     Ok(clamp_to_min_grid(Size {
@@ -184,6 +194,7 @@ impl Session {
         notifications: &mut Notifications,
     ) -> anyhow::Result<bool> {
         let mut quit = false;
+        let mut splits = 0usize;
         for (id, op) in lua.drain_ops() {
             let tag = lua.sources().name(id).unwrap_or_else(|| id.to_string());
             match op {
@@ -193,7 +204,17 @@ impl Session {
                     notifications.push(level, &tag, &text);
                     logging::log(level, &tag, &text);
                 }
-                Op::PaneSplit { dir } => self.apply_split(lua, &tag, dir)?,
+                Op::PaneSplit { dir } if splits >= MAX_SPLITS_PER_FRAME => logging::log(
+                    Level::Error,
+                    &tag,
+                    &format!(
+                        "pane.split('{dir}') refused: at most {MAX_SPLITS_PER_FRAME} splits per frame"
+                    ),
+                ),
+                Op::PaneSplit { dir } => {
+                    splits += 1;
+                    self.apply_split(lua, &tag, dir)?;
+                }
                 Op::PaneFocus { pane } => self.apply_focus(lua, &tag, pane),
             }
         }
