@@ -110,17 +110,24 @@ impl Session {
             return Ok(Drained::Eof);
         }
         for pane in drained.closed {
-            self.close_pane(pane)?;
+            self.close_pane(pane, lua)?;
         }
         Ok(Drained::More)
     }
 
     /// A pane's child ended: reap it, give its space to its sibling, and move focus if it
     /// was the focused one. The other panes keep running.
-    fn close_pane(&mut self, pane: PaneId) -> anyhow::Result<()> {
+    fn close_pane(&mut self, pane: PaneId, lua: &LuaSubsystem) -> anyhow::Result<()> {
         self.shells.close(pane);
-        self.layout.close(pane);
+        let before = self.layout.focus();
+        let after = self.layout.close(pane);
         self.fit()?;
+        lua.dispatch_event(&LuaEvent::PaneClosed { pane });
+        if after != before
+            && let Some(focus) = after
+        {
+            lua.dispatch_event(&LuaEvent::FocusChanged { pane: focus });
+        }
         self.dirty = true;
         Ok(())
     }
@@ -185,14 +192,19 @@ impl Session {
                     notifications.push(level, &tag, &text);
                     logging::log(level, &tag, &text);
                 }
-                Op::PaneSplit { dir } => self.apply_split(&tag, dir)?,
-                Op::PaneFocus { pane } => self.apply_focus(&tag, pane),
+                Op::PaneSplit { dir } => self.apply_split(lua, &tag, dir)?,
+                Op::PaneFocus { pane } => self.apply_focus(lua, &tag, pane),
             }
         }
         Ok(quit)
     }
 
-    fn apply_split(&mut self, tag: &str, dir: neotmux_core::proto::SplitDir) -> anyhow::Result<()> {
+    fn apply_split(
+        &mut self,
+        lua: &LuaSubsystem,
+        tag: &str,
+        dir: neotmux_core::proto::SplitDir,
+    ) -> anyhow::Result<()> {
         let new = PaneId::from(self.next_pane);
         if let Err(refused) = self.layout.split(dir, new) {
             logging::log(
@@ -221,11 +233,13 @@ impl Session {
 
         self.next_pane += 1;
         self.fit()?;
+        lua.dispatch_event(&LuaEvent::PaneOpened { pane: new });
+        lua.dispatch_event(&LuaEvent::FocusChanged { pane: new });
         self.dirty = true;
         Ok(())
     }
 
-    fn apply_focus(&mut self, tag: &str, pane: PaneId) {
+    fn apply_focus(&mut self, lua: &LuaSubsystem, tag: &str, pane: PaneId) {
         if !self.layout.set_focus(pane) {
             logging::log(
                 Level::Error,
@@ -234,6 +248,7 @@ impl Session {
             );
             return;
         }
+        lua.dispatch_event(&LuaEvent::FocusChanged { pane });
         self.dirty = true;
     }
 

@@ -219,3 +219,118 @@ fn prefix_swallows_its_key_and_the_next_one_while_an_unrelated_key_gets_through(
         "the unrelated key never reached the shell:\n{screen}"
     );
 }
+
+/// Task 2: one PTY per pane. Both children are alive and each one's output lands in its own
+/// half of the screen, never in the other's.
+#[test]
+fn each_pane_has_its_own_shell_and_its_own_grid() {
+    let (mut nt, _init) = start("require('plugin.splitter')", "cat");
+    nt.send("\x02"); // C-b: split vertically, focusing the new pane
+    nt.wait_for_log("splitter pane_opened 2", PATIENCE);
+
+    nt.send("RIGHT");
+    nt.settle(Duration::from_millis(500));
+    nt.send("\x0f"); // C-o: focus the other pane
+    nt.settle(Duration::from_millis(500));
+    nt.send("LEFT");
+
+    nt.wait_for_screen("LEFT", PATIENCE);
+    let screen = nt.screen_after(Duration::from_millis(500));
+    let row = screen.lines().next().unwrap_or_default().to_string();
+
+    let left = row
+        .find("LEFT")
+        .unwrap_or_else(|| panic!("the left pane never echoed its own input:\n{screen}"));
+    let right = row
+        .find("RIGHT")
+        .unwrap_or_else(|| panic!("the right pane never echoed its own input:\n{screen}"));
+    assert!(
+        left < 40,
+        "pane %1's output is not in its own half of the surface:\n{screen}"
+    );
+    assert!(
+        right >= 40,
+        "pane %2's output landed in pane %1's grid:\n{screen}"
+    );
+}
+
+/// Task 2: a key no plugin consumed reaches the focused pane's PTY and no other.
+#[test]
+fn an_unconsumed_key_reaches_only_the_focused_panes_pty() {
+    let (mut nt, _init) = start("require('plugin.splitter')", "cat");
+    nt.send("\x02");
+    nt.wait_for_log("splitter pane_opened 2", PATIENCE);
+    nt.settle(Duration::from_millis(500));
+
+    nt.send("MARK");
+    nt.wait_for_screen("MARK", PATIENCE);
+    let screen = nt.screen_after(Duration::from_millis(500));
+    assert_eq!(
+        screen.matches("MARK").count(),
+        1,
+        "the key reached more than the focused pane:\n{screen}"
+    );
+}
+
+/// Task 3 step 5: a split the surface cannot hold is reported against the plugin that asked
+/// for it, and nothing changes.
+#[test]
+fn a_refused_split_is_reported_against_the_calling_source() {
+    let dir = harness::runtime(&[("init.lua", "require('plugin.splitter')")]);
+    let fixtures = harness::fixture_layer();
+    let mut nt = Neotmux::start_sized(&[dir.path(), &fixtures], "cat", 24, 2);
+
+    nt.send("\x02");
+    let log = nt.wait_for_log("pane.split", PATIENCE);
+    let refusal = line_with(&log, "pane.split");
+    assert!(refusal.contains("plugin/splitter"), "{refusal}");
+    assert!(refusal.contains("too small"), "{refusal}");
+
+    nt.send("\x07"); // C-g: report the pane list
+    let log = nt.wait_for_log("splitter panes=", PATIENCE);
+    let listed = line_with(&log, "splitter panes=");
+    assert!(listed.contains("panes=1 current=1"), "{listed}");
+}
+
+/// Task 3 step 7: focusing a pane that does not exist is reported, and the session lives on.
+#[test]
+fn focusing_an_unknown_pane_is_reported_and_does_not_stop_the_session() {
+    let (mut nt, _init) = start("require('plugin.splitter')", "cat");
+    nt.send("\x07"); // C-g: report, so the next key is known to arrive after init
+    nt.wait_for_log("splitter panes=", PATIENCE);
+
+    nt.send("\x15"); // C-u: focus a pane id nobody owns
+    let log = nt.wait_for_log("pane.focus", PATIENCE);
+    let refusal = line_with(&log, "pane.focus");
+    assert!(refusal.contains("plugin/splitter"), "{refusal}");
+    assert!(refusal.contains("no such pane"), "{refusal}");
+
+    nt.send("\x07");
+    nt.settle(Duration::from_millis(500));
+    let log = nt.log_text();
+    assert!(
+        line_with(&log, "splitter panes=").contains("panes=1 current=1"),
+        "{log}"
+    );
+}
+
+/// Task 3 step 6: one pane's shell exiting closes that pane only — the survivor keeps
+/// running, takes the space, and takes the focus.
+#[test]
+fn a_pane_whose_shell_exits_is_closed_and_its_sibling_takes_over() {
+    let (mut nt, _init) = start("require('plugin.splitter')", "cat");
+    nt.send("\x02");
+    nt.wait_for_log("splitter pane_opened 2", PATIENCE);
+    nt.settle(Duration::from_millis(500));
+
+    nt.send("\x04"); // C-d: EOF for the focused pane's cat
+    nt.wait_for_log("splitter pane_closed 2", PATIENCE);
+
+    nt.send("\x07");
+    let log = nt.wait_for_log("splitter panes=", PATIENCE);
+    let listed = line_with(&log, "splitter panes=");
+    assert!(listed.contains("panes=1 current=1"), "{listed}");
+
+    nt.send("SURVIVOR");
+    nt.wait_for_screen("SURVIVOR", PATIENCE);
+}
