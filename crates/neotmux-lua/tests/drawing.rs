@@ -61,7 +61,7 @@ fn ctx_size_reports_the_surface() {
         ("init.lua", "require('plugin.sizer')"),
         (
             "lua/plugin/sizer.lua",
-            "neotmux.on_tick(function(ctx) local w, h = ctx:size() ctx:text(nil, 0, 0, w .. 'x' .. h) end) return {}",
+            "neotmux.on_tick(function(ctx) local s = ctx:size() ctx:text(nil, 0, 0, s.cols .. 'x' .. s.rows) end) return {}",
         ),
     ]);
     frame(&sub, 24);

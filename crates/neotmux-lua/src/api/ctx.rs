@@ -98,7 +98,12 @@ fn parse_colours(colours: Option<Table>) -> mlua::Result<(Color, Color)> {
 
 impl UserData for Ctx {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
-        methods.add_method("size", |_, this, ()| Ok((this.size.cols, this.size.rows)));
+        methods.add_method("size", |lua, this, ()| {
+            let table = lua.create_table()?;
+            table.set("rows", this.size.rows)?;
+            table.set("cols", this.size.cols)?;
+            Ok(table)
+        });
 
         methods.add_method("pane_rect", |lua, this, pane: u32| {
             match this.pane_rect(PaneId::from(pane)) {
