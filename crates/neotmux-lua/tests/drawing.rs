@@ -151,7 +151,10 @@ fn a_tick_error_is_reported_with_the_plugin_name() {
     frame(&sub, 24);
     let ops = sub.drain_ops();
     assert_eq!(ops.len(), 1, "expected one op, got {ops:?}");
-    assert_eq!(sub.plugins().name(ops[0].0).as_deref(), Some("flaky"));
+    assert_eq!(
+        sub.sources().name(ops[0].0).as_deref(),
+        Some("plugin/flaky")
+    );
 }
 
 #[test]
@@ -265,7 +268,10 @@ fn same_frame_cross_plugin_isolation_survives_dispatch_tick() {
 
     let ops = sub.drain_ops();
     assert_eq!(ops.len(), 1, "expected exactly one error op, got {ops:?}");
-    assert_eq!(sub.plugins().name(ops[0].0).as_deref(), Some("raiser"));
+    assert_eq!(
+        sub.sources().name(ops[0].0).as_deref(),
+        Some("plugin/raiser")
+    );
 }
 
 #[test]

@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use mlua::RegistryKey;
 
-use crate::plugin::PluginId;
+use crate::source::SourceId;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Kind {
@@ -37,7 +37,7 @@ impl Kind {
 pub struct RegistrationId(u64);
 
 struct Entry {
-    owner: PluginId,
+    owner: SourceId,
     kind: Kind,
     callback: Rc<RegistryKey>,
 }
@@ -58,7 +58,7 @@ impl Registry {
         Self::default()
     }
 
-    pub fn add(&self, owner: PluginId, kind: Kind, callback: Rc<RegistryKey>) -> RegistrationId {
+    pub fn add(&self, owner: SourceId, kind: Kind, callback: Rc<RegistryKey>) -> RegistrationId {
         let mut inner = self.inner.borrow_mut();
         inner.next += 1;
         let id = RegistrationId(inner.next);
@@ -77,7 +77,7 @@ impl Registry {
         self.inner.borrow_mut().entries.remove(&id).is_some()
     }
 
-    pub fn remove_all_of(&self, owner: PluginId) -> usize {
+    pub fn remove_all_of(&self, owner: SourceId) -> usize {
         let mut inner = self.inner.borrow_mut();
         let doomed: Vec<RegistrationId> = inner
             .entries
@@ -101,7 +101,7 @@ impl Registry {
             .collect()
     }
 
-    pub fn owner(&self, id: RegistrationId) -> Option<PluginId> {
+    pub fn owner(&self, id: RegistrationId) -> Option<SourceId> {
         self.inner.borrow().entries.get(&id).map(|e| e.owner)
     }
 
@@ -129,18 +129,18 @@ impl Registry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plugin::{PluginId, Plugins};
+    use crate::source::{SourceId, Sources};
 
     fn key(lua: &mlua::Lua, body: &str) -> std::rc::Rc<mlua::RegistryKey> {
         let f: mlua::Function = lua.load(body).eval().unwrap();
         std::rc::Rc::new(lua.create_registry_value(f).unwrap())
     }
 
-    fn setup() -> (mlua::Lua, Registry, PluginId, PluginId) {
+    fn setup() -> (mlua::Lua, Registry, SourceId, SourceId) {
         let lua = crate::vm::new_vm().unwrap();
-        let plugins = Plugins::new();
-        let a = plugins.intern("alpha");
-        let b = plugins.intern("beta");
+        let sources = Sources::new();
+        let a = sources.intern("alpha");
+        let b = sources.intern("beta");
         (lua, Registry::new(), a, b)
     }
 

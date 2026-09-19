@@ -172,11 +172,11 @@ pub fn run(
             match op {
                 Op::Quit => quit = true,
                 Op::Log { level, text } => {
-                    let tag = lua.plugins().name(id).unwrap_or_else(|| id.to_string());
+                    let tag = lua.sources().name(id).unwrap_or_else(|| id.to_string());
                     logging::log(level, &tag, &text);
                 }
                 Op::Notify { level, text } => {
-                    let tag = lua.plugins().name(id).unwrap_or_else(|| id.to_string());
+                    let tag = lua.sources().name(id).unwrap_or_else(|| id.to_string());
                     notifications.push(level, &tag, &text);
                     logging::log(level, &tag, &text);
                 }

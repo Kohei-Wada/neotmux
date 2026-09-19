@@ -81,18 +81,18 @@ fn a_plugin_loads_and_its_log_line_reaches_the_log_file() {
 
     let text = read_log_containing(&log, "plugin-loaded-marker");
     assert!(
-        text.contains("hello"),
+        text.contains("plugin/hello"),
         "the log line is not attributed: {text}"
     );
 }
 
 #[test]
-fn a_failed_plugin_is_warned_about_once_and_a_silent_one_still_gets_its_warn() {
+fn a_failed_plugin_is_warned_about_once() {
     let dir = tempfile::tempdir().unwrap();
     fs::create_dir_all(dir.path().join("lua/plugin")).unwrap();
     fs::write(
         dir.path().join("init.lua"),
-        "require('plugin.broken') require('plugin.silent') require('plugin.hello')",
+        "require('plugin.broken') require('plugin.hello')",
     )
     .unwrap();
     fs::write(
@@ -100,7 +100,6 @@ fn a_failed_plugin_is_warned_about_once_and_a_silent_one_still_gets_its_warn() {
         "error('deliberate-failure')",
     )
     .unwrap();
-    fs::write(dir.path().join("lua/plugin/silent.lua"), "return {}").unwrap();
     fs::write(
         dir.path().join("lua/plugin/hello.lua"),
         "neotmux.log.info('plugin-loaded-marker') return {}",
@@ -114,7 +113,7 @@ fn a_failed_plugin_is_warned_about_once_and_a_silent_one_still_gets_its_warn() {
 
     let broken_lines: Vec<&str> = text
         .lines()
-        .filter(|line| line.contains("broken:"))
+        .filter(|line| line.contains("plugin/broken:"))
         .collect();
     assert_eq!(
         broken_lines.len(),
@@ -125,19 +124,15 @@ fn a_failed_plugin_is_warned_about_once_and_a_silent_one_still_gets_its_warn() {
         broken_lines[0].contains("deliberate-failure"),
         "the one 'broken' line should be the load failure, got: {broken_lines:?}"
     );
-    assert!(
-        text.contains("silent: registered nothing"),
-        "a plugin that loaded but registered nothing should still be warned about: {text}"
-    );
 }
 
 #[test]
-fn an_init_time_quit_exits_before_entering_the_alternate_screen_and_orders_its_log_first() {
+fn an_init_time_quit_exits_before_entering_the_alternate_screen() {
     let dir = tempfile::tempdir().unwrap();
     fs::create_dir_all(dir.path().join("lua/plugin")).unwrap();
     fs::write(
         dir.path().join("init.lua"),
-        "require('plugin.loud') require('plugin.silent') neotmux.quit()",
+        "require('plugin.loud') neotmux.quit()",
     )
     .unwrap();
     fs::write(
@@ -145,7 +140,6 @@ fn an_init_time_quit_exits_before_entering_the_alternate_screen_and_orders_its_l
         "neotmux.log.info('loud-marker') return {}",
     )
     .unwrap();
-    fs::write(dir.path().join("lua/plugin/silent.lua"), "return {}").unwrap();
 
     let pair = native_pty_system()
         .openpty(PtySize {
@@ -200,14 +194,8 @@ fn an_init_time_quit_exits_before_entering_the_alternate_screen_and_orders_its_l
     );
 
     let text = fs::read_to_string(&log).unwrap();
-    let loud_at = text
-        .find("loud-marker")
-        .expect("loud's log line is missing");
-    let silent_warn_at = text
-        .find("silent: registered nothing")
-        .expect("silent's warn line is missing");
     assert!(
-        loud_at < silent_warn_at,
-        "loud's load-time log line should land before the warnings computed after it: {text}"
+        text.contains("loud-marker"),
+        "a load-time log line from before the quit should still reach the log: {text}"
     );
 }

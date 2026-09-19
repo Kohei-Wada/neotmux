@@ -1,9 +1,9 @@
 pub mod api;
 pub mod draw;
 pub mod ops;
-pub mod plugin;
 pub mod registry;
 pub mod runtime;
+pub mod source;
 pub mod vm;
 
 use std::cell::RefCell;
@@ -22,9 +22,9 @@ pub use api::keymap;
 use api::ctx::Ctx;
 use draw::Buffers;
 use ops::{Level, Op, OpBuffer};
-use plugin::{PluginId, Plugins};
 use registry::{Kind, KindTag, Registry};
 use runtime::Layers;
+use source::{SourceId, Sources};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyOutcome {
@@ -48,7 +48,7 @@ pub struct LoadFailure {
 pub struct LuaSubsystem {
     lua: Lua,
     layers: Layers,
-    plugins: Rc<Plugins>,
+    sources: Rc<Sources>,
     registry: Rc<Registry>,
     ops: Rc<OpBuffer>,
     opts: Rc<RefCell<Opts>>,
@@ -62,8 +62,8 @@ impl LuaSubsystem {
         let lua = vm::new_vm().map_err(|err| anyhow::anyhow!("{err:#}"))?;
         runtime::install(&lua, &layers).map_err(|err| anyhow::anyhow!("{err:#}"))?;
 
-        let plugins = Rc::new(Plugins::new());
-        plugin::install_loader(&lua, plugins.clone()).map_err(|err| anyhow::anyhow!("{err:#}"))?;
+        let sources = Rc::new(Sources::new());
+        source::install_loader(&lua, sources.clone()).map_err(|err| anyhow::anyhow!("{err:#}"))?;
 
         let registry = Rc::new(Registry::new());
         let ops = Rc::new(OpBuffer::new());
@@ -72,7 +72,7 @@ impl LuaSubsystem {
 
         api::install(
             &lua,
-            plugins.clone(),
+            sources.clone(),
             registry.clone(),
             ops.clone(),
             opts.clone(),
@@ -83,7 +83,7 @@ impl LuaSubsystem {
         Ok(Self {
             lua,
             layers,
-            plugins,
+            sources,
             registry,
             ops,
             opts,
@@ -102,6 +102,12 @@ impl LuaSubsystem {
             };
 
             let chunk_name = format!("@{}", init_path.display());
+            // init.lua is a source like any other: interning it here is what gives a load
+            // failure a display name, and what makes a call from its top level attribute to
+            // the same id the searcher would have produced.
+            let id = self.sources.intern(&chunk_name);
+            let tag = || self.sources.name(id).unwrap_or_else(|| "init".to_string());
+
             let func: Function = match self
                 .lua
                 .load(source)
@@ -112,7 +118,7 @@ impl LuaSubsystem {
                 Ok(func) => func,
                 Err(err) => {
                     self.load_failures.borrow_mut().push(LoadFailure {
-                        plugin: "init".to_string(),
+                        plugin: tag(),
                         message: format!("{err:#}"),
                     });
                     continue;
@@ -121,7 +127,7 @@ impl LuaSubsystem {
 
             if let Err(err) = func.call::<()>(()) {
                 self.load_failures.borrow_mut().push(LoadFailure {
-                    plugin: "init".to_string(),
+                    plugin: tag(),
                     message: format!("{err:#}"),
                 });
             }
@@ -166,18 +172,16 @@ impl LuaSubsystem {
                 )
             };
 
-            self.plugins.push(owner);
             let result = self.lua.scope(|scope| {
                 let ctx = scope.create_userdata(ctx)?;
                 func.call::<()>(ctx)
             });
-            self.plugins.pop();
 
             match result {
                 Ok(()) => self.buffers.commit(owner),
                 Err(err) => {
                     self.buffers.discard(owner);
-                    let name = self.plugins.name(owner).unwrap_or_default();
+                    let name = self.sources.name(owner).unwrap_or_default();
                     self.ops.push(
                         owner,
                         Op::Log {
@@ -213,15 +217,11 @@ impl LuaSubsystem {
             return KeyOutcome::Fallthrough;
         };
 
-        self.plugins.push(owner);
-        let result = func.call::<Value>(());
-        self.plugins.pop();
-
-        match result {
+        match func.call::<Value>(()) {
             Ok(Value::Boolean(true)) => KeyOutcome::Consumed,
             Ok(_) => KeyOutcome::Fallthrough,
             Err(err) => {
-                let name = self.plugins.name(owner).unwrap_or_default();
+                let name = self.sources.name(owner).unwrap_or_default();
                 self.ops.push(
                     owner,
                     Op::Log {
@@ -261,12 +261,8 @@ impl LuaSubsystem {
                 continue;
             };
 
-            self.plugins.push(owner);
-            let result = func.call::<()>(table);
-            self.plugins.pop();
-
-            if let Err(err) = result {
-                let name = self.plugins.name(owner).unwrap_or_default();
+            if let Err(err) = func.call::<()>(table) {
+                let name = self.sources.name(owner).unwrap_or_default();
                 self.ops.push(
                     owner,
                     Op::Log {
@@ -283,7 +279,7 @@ impl LuaSubsystem {
         self.buffers.applicable(&epoch)
     }
 
-    pub fn drain_ops(&self) -> Vec<(PluginId, Op)> {
+    pub fn drain_ops(&self) -> Vec<(SourceId, Op)> {
         self.ops.drain()
     }
 
@@ -291,8 +287,8 @@ impl LuaSubsystem {
         &self.registry
     }
 
-    pub fn plugins(&self) -> &Plugins {
-        &self.plugins
+    pub fn sources(&self) -> &Sources {
+        &self.sources
     }
 
     pub fn opt(&self) -> Opts {

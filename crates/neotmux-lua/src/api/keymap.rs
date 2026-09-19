@@ -5,8 +5,8 @@ use mlua::{Function, Lua, Table, Value};
 
 use crate::api::{Opts, attribute, make_handle};
 use crate::ops::{Level, Op, OpBuffer};
-use crate::plugin::Plugins;
 use crate::registry::{Kind, KindTag, RegistrationId, Registry};
+use crate::source::Sources;
 
 /// Canonical order for modifier prefixes: Control, then Meta/Alt, then Shift.
 const ORDER: [char; 3] = ['C', 'M', 'S'];
@@ -74,14 +74,14 @@ pub(crate) fn find(registry: &Registry, spec: &str) -> Option<RegistrationId> {
         .find(|id| matches!(registry.kind(*id), Some(Kind::Keymap(existing)) if existing == spec))
 }
 
-fn holder_of(registry: &Registry, plugins: &Plugins, spec: &str) -> Option<String> {
+fn holder_of(registry: &Registry, sources: &Sources, spec: &str) -> Option<String> {
     let owner = registry.owner(find(registry, spec)?)?;
-    plugins.name(owner)
+    sources.name(owner)
 }
 
 pub fn install(
     lua: &Lua,
-    plugins: Rc<Plugins>,
+    sources: Rc<Sources>,
     registry: Rc<Registry>,
     ops: Rc<OpBuffer>,
     opts: Rc<RefCell<Opts>>,
@@ -99,9 +99,9 @@ pub fn install(
             return Ok((Value::Nil, Value::String(lua.create_string(message)?)));
         }
 
-        if let Some(holder) = holder_of(&registry, &plugins, &normalised) {
-            let attempter = attribute(&plugins, &callback);
-            let attempted_by = plugins.name(attempter).unwrap_or_default();
+        if let Some(holder) = holder_of(&registry, &sources, &normalised) {
+            let attempter = attribute(&sources, &callback);
+            let attempted_by = sources.name(attempter).unwrap_or_default();
             let message = format!("'{normalised}' is already bound by {holder}");
             ops.push(
                 attempter,
@@ -115,7 +115,7 @@ pub fn install(
             return Ok((Value::Nil, Value::String(lua.create_string(message)?)));
         }
 
-        let owner = attribute(&plugins, &callback);
+        let owner = attribute(&sources, &callback);
         let key = Rc::new(lua.create_registry_value(callback)?);
         let id = registry.add(owner, Kind::Keymap(normalised), key);
         let handle = make_handle(lua, registry.clone(), id)?;

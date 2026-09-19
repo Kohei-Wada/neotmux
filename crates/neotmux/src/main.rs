@@ -6,13 +6,11 @@ mod overlay;
 mod render;
 mod signals;
 
-use std::collections::HashSet;
 use std::env;
 use std::path::{Path, PathBuf};
 
 use neotmux_lua::LuaSubsystem;
 use neotmux_lua::ops::{Level, Op};
-use neotmux_lua::registry::KindTag;
 use neotmux_lua::runtime::Layers;
 
 struct LogFlag {
@@ -42,27 +40,6 @@ fn parse_log_flag(mut args: impl Iterator<Item = String>) -> LogFlag {
     LogFlag { path, warnings }
 }
 
-fn log_silent_plugins(lua: &LuaSubsystem, already_reported: &HashSet<String>) {
-    let mut registered: HashSet<_> = HashSet::new();
-    for tag in [
-        KindTag::Tick,
-        KindTag::Event,
-        KindTag::Keymap,
-        KindTag::Status,
-    ] {
-        for id in lua.registry().snapshot(tag) {
-            if let Some(owner) = lua.registry().owner(id) {
-                registered.insert(owner);
-            }
-        }
-    }
-    for (id, name) in lua.plugins().interned() {
-        if !registered.contains(&id) && !already_reported.contains(&name) {
-            logging::log(Level::Warn, &name, "registered nothing");
-        }
-    }
-}
-
 fn main() -> anyhow::Result<()> {
     let flag = parse_log_flag(env::args().skip(1));
     for warning in &flag.warnings {
@@ -77,27 +54,22 @@ fn main() -> anyhow::Result<()> {
         .and_then(|path| path.parent().map(Path::to_path_buf));
     let layers = Layers::resolve(&|key| env::var_os(key), exe_dir.as_deref());
     let lua = LuaSubsystem::build(layers)?;
-    let mut failed_plugins = HashSet::new();
     for failure in lua.run_init() {
         logging::log(Level::Warn, &failure.plugin, &failure.message);
-        failed_plugins.insert(failure.plugin);
     }
 
     // Ops from run_init are drained here, before ratatui::init(), so an init-time
-    // neotmux.quit() exits before the alternate screen is entered or a shell is spawned,
-    // and a plugin's own load-time log lines land before the warnings computed below.
+    // neotmux.quit() exits before the alternate screen is entered or a shell is spawned.
     let mut quit_at_init = false;
     for (id, op) in lua.drain_ops() {
         match op {
             Op::Quit => quit_at_init = true,
             Op::Log { level, text } | Op::Notify { level, text } => {
-                let tag = lua.plugins().name(id).unwrap_or_else(|| id.to_string());
+                let tag = lua.sources().name(id).unwrap_or_else(|| id.to_string());
                 logging::log(level, &tag, &text);
             }
         }
     }
-
-    log_silent_plugins(&lua, &failed_plugins);
 
     if quit_at_init {
         return Ok(());

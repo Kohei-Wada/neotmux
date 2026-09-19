@@ -127,11 +127,25 @@ This is the milestone the project exists for. It deliberately contains no budget
 (M1b) is worthless if the ABI underneath it is wrong, and the ABI is what is expensive to
 change after publication.
 
-### 4.1 Plugin model
+### 4.1 There is no plugin model
 
-nvim-style: a plugin is a `.lua` file or `<name>/init.lua` under `<runtime>/lua/plugin/`,
-reachable by `require`; no registration ceremony; activation is an `init.lua` chain that
-`require`s what it wants; one shared Lua VM.
+The host has no concept of "plugin". It provides an API (§4.3–§4.9) and a loading
+convention (this section); a plugin is a bundle of API calls, and it is a plugin only as a
+consequence of being loaded through that convention, not because the host recognises it as
+one. This is nvim's own design: nvim-core has no plugin type either, `runtimepath` plus
+`plugin/` is a loading convention, and attribution is by **source location** — what
+`:verbose` reports as "Last set from `<file>`" — not a host-tracked plugin registry.
+
+Giving the host a first-class plugin type would force it to have opinions that belong to
+whoever is writing plugins: what a plugin is named, how its files are laid out, whether it is
+one file or many. None of that is the host's business. The loading convention below is
+sufficient, and everything the host actually needs to do — attribute a callback, remove a
+failed unit's registrations, order a draw buffer — is answerable from **where the code that
+made the call was written**, which §4.2 calls its source.
+
+The convention itself, nvim-style: a `.lua` file or `<name>/init.lua` under
+`<runtime>/lua/plugin/`, reachable by `require`; no registration ceremony; activation is an
+`init.lua` chain that `require`s what it wants; one shared Lua VM.
 
 This much is the shape ttymap uses and is known to work. **The budget and environment work in
 M1b has no precedent in ttymap** — a grep of `ttymap-lua/` finds no use of `set_hook`,
@@ -149,49 +163,65 @@ No compile-time developer path is baked in. **Zero resolvable layers is a normal
 with no plugins, not an error — a multiplexer that refuses to start because its config is
 broken has failed at its only job.
 
-### 4.2 Attribution is a first-class mechanism
+### 4.2 Attribution is by source, not by identity
 
-Every budget notification, log line and unsubscribe decision names a plugin, so the host must
-know which plugin a callback belongs to. With a single VM and a plain `package.path` searcher
-it does not — ttymap removed its per-plugin `host_tag` in #240 and its docs now state "no
-host-side plugin attribution". Stripping `debug` (§5.2) also removes the Lua-side fallback.
-So attribution is designed in, not assumed:
+Every budget notification, log line and unsubscribe decision names where a callback came
+from, so the host must know that even though it tracks no plugin registry (§4.1). With a
+single VM and a plain `package.path` searcher it does not by default — ttymap removed its
+per-plugin `host_tag` in #240 and its docs now state "no host-side plugin attribution".
+Stripping `debug` (§5.2) also removes the Lua-side fallback. So attribution is designed in,
+not assumed, and it is designed around **source location**, exactly as nvim's `:verbose`
+answers "who set this" by naming a file, not by looking up an entry in a plugin table:
 
-- the host installs a **custom searcher/loader** for `<layer>/lua/plugin/…`. Before executing
-  a plugin chunk it pushes that plugin's identity onto a stack; after, it pops
-- every registration call (§4.3) captures the identity at the top of the stack
-- a registration made later, from inside a dispatch, inherits **the plugin currently being
-  dispatched**
-- a registration with neither (e.g. from a bare `init.lua` line) is attributed to
-  `"init"`; one from a library `require`d outside a plugin chunk is attributed to the plugin
-  that triggered the `require`, or `"anonymous"` if there is none
-- identity is a host-side `PluginId` with a display name
+- **the single rule: the owner of an API call is the chunk where the calling code was
+  written.** Never where it happens to run from, never host bookkeeping. **The host keeps no
+  current-owner stack** — there is nothing to push, nothing to pop, and nothing that can be
+  out of date by the time a call arrives
+- for a registration there is a callback to inspect, so the owner is wherever
+  `Function::info().source` says that closure was written. `neotmux.on_tick`, `on_event`,
+  `keymap.set` and `status.provider` all read it. A source location is lexical, so it is
+  correct regardless of when or from where the callback is later called. This is what makes
+  the idiom every plugin author reaches for coming from nvim,
+  `local m = require('plugin.clock'); m.setup{}`, attribute correctly with no special case:
+  `setup`'s callback still carries `clock.lua` as its source, and so does a second `require`
+  that hits `package.loaded` and never re-enters the searcher
+- for a direct call with no callback — `neotmux.log.info("x")`, `neotmux.quit()`,
+  `neotmux.notify(...)` — the host reads the calling Lua frame with `Lua::inspect_stack`
+  (level 0 is the host binding itself, a C function; level 1 is the chunk that called it).
+  Both paths end in the same step: intern an `@<path>` source, or fall to `ANONYMOUS`
+- the two paths agreeing is the point. A `setup` function written in `clock.lua` that both
+  registers a provider and logs a line produces one owner, `plugin/clock`, for both — where
+  a stack would have said `plugin/clock` for the registration and `init` for the log
+- the consequence, accepted rather than worked around: a plugin callback that calls a helper
+  living in a library chunk, which then calls `neotmux.log`, attributes the log to the
+  **library**. That is the same rule that already makes a library which registers a callback
+  own that callback. There is no "walk up until you leave the library" heuristic
+- the searcher still **interns** every chunk it loads, plugin or library alike, at load time.
+  That is what allocates `SourceId`s in load order, which the draw ordering guarantee (§4.5)
+  rests on. It does not wrap the chunk
+- a source is a host-side `SourceId` with a **display name** derived from its path: the
+  runtime layer prefix and the `.lua` suffix are stripped, so `@<layer>/lua/plugin/clock.lua`
+  displays as `plugin/clock`, `@<layer>/lua/neotmux/config.lua` as `neotmux/config`, and
+  `@<layer>/init.lua` as `init`. `init.lua` is not a reserved identity; it is a source like any
+  other, interned like every other chunk. Two
+  layers providing the same relative path collide on this display name on purpose — they are
+  the same logical file — and the full source string remains available for anything that needs
+  to disambiguate
 - `require('plugin.foo')` and `require('plugin.foo.init')` can resolve to the same file
-  (`?.lua` and `?/init.lua` are both on `package.path`); the searcher interns the name from
-  the resolved file path, not from the string passed to `require`, so either spelling gives
-  the same `PluginId` instead of splitting one plugin's registrations across two
-
-**The loader-push stack alone misses the idiom every plugin author reaches for coming from
-nvim**: `local m = require('plugin.clock'); m.setup{}`. The chunk runs and the searcher pops
-its identity before `setup` is ever called, so a registration made from inside `setup` — or
-from any function pulled out of the module table, including on a second `require` that hits
-`package.loaded` and never re-enters the searcher — sees an empty stack. Falling back to
-`"init"` there is wrong: `setup`'s registrations are the plugin's own and must be
-unsubscribable by its `PluginId` (§5.3).
-
-So registration attribution has a second step: **when the stack is empty, ask mlua where the
-registering callback's chunk came from.** `Function::info().source` goes through
-`lua_getinfo` in Rust, not the `debug` library, so it survives stripping `debug` (§5.2). The
-loader names every plugin chunk `@<layer>/lua/plugin/<name>.lua` (or `.../<name>/init.lua`),
-so the source string maps back to the same plugin name the searcher would have interned. If
-the source doesn't look like a plugin chunk — `init.lua` itself, or a `neotmux.*` library
-loaded outside any plugin — `"init"` remains correct. A library helper that registers while
-some other plugin is genuinely current still follows the stack, not its own source, so it is
-attributed to whoever is current. Identity is still a host-side `PluginId`; only this one
-fallback derives it from Lua state, and only when the stack has nothing to say.
+  (`?.lua` and `?/init.lua` are both on `package.path`); the searcher's chunk name is built
+  from the *resolved file path*, not from the string passed to `require`, so either spelling
+  interns the same `SourceId` instead of splitting one file's registrations across two. A plugin split across several files (`plugin/clock/init.lua` and
+  `plugin/clock/util.lua`) does *not* get this collapsing — those are genuinely different
+  files and so genuinely different sources, with independent registrations, draw buffers and
+  log tags. Nothing in the host groups them back into one identity; a plugin author who wants
+  that today keeps state and registration in one file
+- a callback with no real chunk behind it — a native (Rust) function, a `loadstring`d chunk —
+  has no source to intern; it is `ANONYMOUS`, the one sentinel the host keeps, reserved for
+  exactly this "genuinely no source" case rather than for `init.lua`. A call reached with no
+  Lua frame below it at all is the same case
 
 Because `debug` is unavailable, Lua-level tracebacks for error messages are produced by the
-host: the error path attaches the captured `PluginId` and the chunk name rather than asking
+host: the error path attaches the captured `SourceId` and the chunk name rather than asking
 Lua where it is.
 
 ### 4.3 Registration surface — everything returns a handle
@@ -206,7 +236,7 @@ h:remove()                                       -- idempotent
 ```
 
 **Every registration returns a disposable handle and `:remove()` is idempotent.** The host
-also keeps the set of registrations per `PluginId`. Reload is not implemented in M1a, but
+also keeps the set of registrations per `SourceId`. Reload is not implemented in M1a, but
 reload is impossible to add later without breaking the ABI unless this shape is fixed now
 (ttymap #241 is still open for exactly this reason). Freezing the shape is cheap today.
 
@@ -298,12 +328,9 @@ Command buffers from before step 3 fail the epoch check and are not replayed.
 - log initialisation failure is reported on stderr **before raw mode is entered**, then
   startup continues. A full-screen TUI cannot use stderr afterwards (ttymap #226 is the silent
   version of this bug)
-- `neotmux.log.{info,warn,error}` for plugins, tagged with the plugin identity on the top of
-  the stack (§4.2). A call made from a post-`require` `setup()` — after the searcher has
-  already popped that plugin's identity — has no callback to inspect the way registration
-  does, so it falls back to `"init"` rather than the plugin's own id. Closing this needs
-  `Lua::inspect_stack` to recover the calling chunk's source directly instead of the
-  registration path's `Function::info()`; deferred to part 2
+- `neotmux.log.{info,warn,error}` for plugins, tagged with the source of the chunk the call
+  was written in, recovered with `Lua::inspect_stack` (§4.2). A call made from a
+  post-`require` `setup()` is tagged with that plugin, not with `init`
 - notifications (budget overruns, unsubscribes, key conflicts) render through a **host-owned**
   surface, not a plugin. If notification rendering itself fails, the message still reaches the
   log, and is flushed to stderr after the terminal is restored at exit
@@ -316,7 +343,6 @@ Command buffers from before step 3 fail the epoch check and are not replayed.
 | `init.lua` absent | normal startup, no plugins |
 | no runtime layer resolves | normal startup, no plugins |
 | a plugin raises during load | that plugin is inert; its partial registrations are removed via its handle set; others unaffected |
-| a plugin registers nothing | logged at warn, named |
 
 ### 4.11 Exit criteria (machine-checkable)
 

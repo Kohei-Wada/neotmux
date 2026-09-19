@@ -31,7 +31,7 @@ fn a_plugin_can_register_and_is_attributed() {
     let ticks = sub.registry().snapshot(KindTag::Tick);
     assert_eq!(ticks.len(), 1);
     let owner = sub.registry().owner(ticks[0]).unwrap();
-    assert_eq!(sub.plugins().name(owner).as_deref(), Some("clock"));
+    assert_eq!(sub.sources().name(owner).as_deref(), Some("plugin/clock"));
     assert_eq!(sub.registry().snapshot(KindTag::Status).len(), 1);
 }
 
@@ -70,7 +70,7 @@ fn a_plugin_that_raises_is_inert_and_withdraws_its_registrations() {
     let ticks = sub.registry().snapshot(KindTag::Tick);
     assert_eq!(ticks.len(), 1, "the failing plugin's registration survived");
     let owner = sub.registry().owner(ticks[0]).unwrap();
-    assert_eq!(sub.plugins().name(owner).as_deref(), Some("ok"));
+    assert_eq!(sub.sources().name(owner).as_deref(), Some("plugin/ok"));
 }
 
 #[test]
@@ -102,7 +102,7 @@ fn ops_reach_the_host_with_their_owner() {
     assert!(sub.run_init().is_empty());
     let ops = sub.drain_ops();
     assert_eq!(ops.len(), 2);
-    assert_eq!(sub.plugins().name(ops[0].0).as_deref(), Some("loud"));
+    assert_eq!(sub.sources().name(ops[0].0).as_deref(), Some("plugin/loud"));
     assert_eq!(
         ops[0].1,
         Op::Log {
@@ -151,7 +151,7 @@ fn a_setup_call_after_require_is_attributed_to_the_plugin_not_init() {
     let ticks = sub.registry().snapshot(KindTag::Tick);
     assert_eq!(ticks.len(), 1);
     let owner = sub.registry().owner(ticks[0]).unwrap();
-    assert_eq!(sub.plugins().name(owner).as_deref(), Some("clock"));
+    assert_eq!(sub.sources().name(owner).as_deref(), Some("plugin/clock"));
 }
 
 #[test]
@@ -172,7 +172,7 @@ fn a_plugin_required_twice_still_attributes_its_cached_table_correctly() {
     let ticks = sub.registry().snapshot(KindTag::Tick);
     assert_eq!(ticks.len(), 1);
     let owner = sub.registry().owner(ticks[0]).unwrap();
-    assert_eq!(sub.plugins().name(owner).as_deref(), Some("clock"));
+    assert_eq!(sub.sources().name(owner).as_deref(), Some("plugin/clock"));
 }
 
 #[test]
@@ -184,11 +184,11 @@ fn a_bare_init_lua_registration_is_still_attributed_to_init() {
     let ticks = sub.registry().snapshot(KindTag::Tick);
     assert_eq!(ticks.len(), 1);
     let owner = sub.registry().owner(ticks[0]).unwrap();
-    assert_eq!(sub.plugins().name(owner).as_deref(), Some("init"));
+    assert_eq!(sub.sources().name(owner).as_deref(), Some("init"));
 }
 
 #[test]
-fn a_library_helper_registering_on_a_plugins_behalf_is_attributed_to_whoever_is_current() {
+fn a_library_helper_registering_on_a_plugins_behalf_is_attributed_to_the_callbacks_chunk() {
     let dir = layer(&[
         ("init.lua", "require('plugin.user')"),
         (
@@ -206,7 +206,7 @@ fn a_library_helper_registering_on_a_plugins_behalf_is_attributed_to_whoever_is_
     let ticks = sub.registry().snapshot(KindTag::Tick);
     assert_eq!(ticks.len(), 1);
     let owner = sub.registry().owner(ticks[0]).unwrap();
-    assert_eq!(sub.plugins().name(owner).as_deref(), Some("user"));
+    assert_eq!(sub.sources().name(owner).as_deref(), Some("plugin/user"));
 }
 
 #[test]
@@ -229,7 +229,7 @@ fn a_registration_made_during_a_dispatch_inherits_the_dispatched_plugin() {
     assert_eq!(after.len(), 2);
     for id in after {
         let owner = sub.registry().owner(id).unwrap();
-        assert_eq!(sub.plugins().name(owner).as_deref(), Some("spawner"));
+        assert_eq!(sub.sources().name(owner).as_deref(), Some("plugin/spawner"));
     }
 }
 
@@ -259,12 +259,15 @@ fn requiring_plugin_foo_init_and_plugin_foo_share_one_id() {
         .map(|id| sub.registry().owner(*id).unwrap())
         .collect();
     assert!(owners.windows(2).all(|w| w[0] == w[1]), "{owners:?}");
-    assert_eq!(sub.plugins().name(owners[0]).as_deref(), Some("foo"));
+    assert_eq!(
+        sub.sources().name(owners[0]).as_deref(),
+        Some("plugin/foo/init")
+    );
 
-    let interned = sub.plugins().interned();
+    let interned = sub.sources().interned();
     assert!(
-        interned.iter().all(|(_, name)| name != "foo.init"),
-        "a phantom 'foo.init' plugin was interned: {interned:?}"
+        interned.iter().all(|(_, name)| name != "plugin/foo"),
+        "a phantom 'plugin/foo' source was interned distinct from plugin/foo/init: {interned:?}"
     );
 }
 
@@ -407,4 +410,91 @@ fn pairs_over_a_sealed_subtable_sees_its_real_fields() {
         unreachable!()
     };
     assert_eq!(text, "3");
+}
+
+/// The owner of an op is the chunk it was written in, so this and the two tests below all
+/// read the tag the host would put on the log line.
+fn log_owner(sub: &LuaSubsystem) -> String {
+    let ops = sub.drain_ops();
+    let (id, _) = ops
+        .iter()
+        .find(|(_, op)| matches!(op, Op::Log { .. }))
+        .expect("no log op");
+    sub.sources().name(*id).expect("the owner has no name")
+}
+
+#[test]
+fn a_log_call_from_a_plugin_function_invoked_by_init_is_attributed_to_the_plugin() {
+    let dir = layer(&[
+        (
+            "init.lua",
+            "require('plugin.clock').setup { format = 'HH:MM' }",
+        ),
+        (
+            "lua/plugin/clock.lua",
+            "local M = {} function M.setup(o) neotmux.status.provider(function() end) neotmux.log.info('clock configured') end return M",
+        ),
+    ]);
+    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    assert!(sub.run_init().is_empty());
+
+    let status = sub.registry().snapshot(KindTag::Status);
+    assert_eq!(status.len(), 1);
+    let registered_to = sub
+        .sources()
+        .name(sub.registry().owner(status[0]).unwrap())
+        .unwrap();
+    assert_eq!(registered_to, "plugin/clock");
+    assert_eq!(
+        log_owner(&sub),
+        "plugin/clock",
+        "the log line and the registration in the same function must have the same owner"
+    );
+}
+
+#[test]
+fn a_log_call_from_init_lua_top_level_is_attributed_to_init() {
+    let dir = layer(&[("init.lua", "neotmux.log.info('straight from init')")]);
+    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    assert!(sub.run_init().is_empty());
+    assert_eq!(log_owner(&sub), "init");
+}
+
+#[test]
+fn a_log_call_reached_through_a_library_is_attributed_to_the_library() {
+    let dir = layer(&[
+        ("init.lua", "require('plugin.user')"),
+        (
+            "lua/neotmux/helper.lua",
+            "return { say = function(text) neotmux.log.info(text) end }",
+        ),
+        (
+            "lua/plugin/user.lua",
+            "require('neotmux.helper').say('via the library') return {}",
+        ),
+    ]);
+    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    assert!(sub.run_init().is_empty());
+    assert_eq!(log_owner(&sub), "neotmux/helper");
+}
+
+#[test]
+fn a_notify_from_a_plugin_tick_callback_is_attributed_to_the_plugin() {
+    let dir = layer(&[
+        ("init.lua", "require('plugin.ticker')"),
+        (
+            "lua/plugin/ticker.lua",
+            "neotmux.on_tick(function() neotmux.notify('warn', 'tick') end) return {}",
+        ),
+    ]);
+    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    assert!(sub.run_init().is_empty());
+    sub.dispatch_tick();
+
+    let ops = sub.drain_ops();
+    let (id, _) = ops
+        .iter()
+        .find(|(_, op)| matches!(op, Op::Notify { .. }))
+        .expect("no notify op");
+    assert_eq!(sub.sources().name(*id).as_deref(), Some("plugin/ticker"));
 }

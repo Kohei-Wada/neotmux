@@ -3,19 +3,19 @@ use std::rc::Rc;
 use mlua::{Lua, Table};
 
 use crate::ops::{Level, Op, OpBuffer};
-use crate::plugin::Plugins;
+use crate::source::{self, Sources};
 
-pub fn install(lua: &Lua, plugins: Rc<Plugins>, ops: Rc<OpBuffer>) -> mlua::Result<Table> {
+pub fn install(lua: &Lua, sources: Rc<Sources>, ops: Rc<OpBuffer>) -> mlua::Result<Table> {
     let table = lua.create_table()?;
     for (name, level) in [
         ("info", Level::Info),
         ("warn", Level::Warn),
         ("error", Level::Error),
     ] {
-        let plugins = plugins.clone();
+        let sources = sources.clone();
         let ops = ops.clone();
-        let f = lua.create_function(move |_, text: String| {
-            ops.push(plugins.current(), Op::Log { level, text });
+        let f = lua.create_function(move |lua, text: String| {
+            ops.push(source::caller(lua, &sources), Op::Log { level, text });
             Ok(())
         })?;
         table.set(name, f)?;

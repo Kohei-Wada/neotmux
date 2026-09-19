@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 
-use crate::plugin::PluginId;
+use crate::source::SourceId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Level {
@@ -18,7 +18,7 @@ pub enum Op {
 
 #[derive(Default)]
 pub struct OpBuffer {
-    ops: RefCell<Vec<(PluginId, Op)>>,
+    ops: RefCell<Vec<(SourceId, Op)>>,
 }
 
 impl OpBuffer {
@@ -26,11 +26,11 @@ impl OpBuffer {
         Self::default()
     }
 
-    pub fn push(&self, from: PluginId, op: Op) {
+    pub fn push(&self, from: SourceId, op: Op) {
         self.ops.borrow_mut().push((from, op));
     }
 
-    pub fn drain(&self) -> Vec<(PluginId, Op)> {
+    pub fn drain(&self) -> Vec<(SourceId, Op)> {
         std::mem::take(&mut *self.ops.borrow_mut())
     }
 
@@ -46,13 +46,13 @@ impl OpBuffer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plugin::Plugins;
+    use crate::source::Sources;
 
     #[test]
     fn ops_come_back_in_order_with_their_owner() {
-        let plugins = Plugins::new();
-        let a = plugins.intern("alpha");
-        let b = plugins.intern("beta");
+        let sources = Sources::new();
+        let a = sources.intern("alpha");
+        let b = sources.intern("beta");
         let buf = OpBuffer::new();
         buf.push(a, Op::Quit);
         buf.push(
@@ -71,8 +71,8 @@ mod tests {
 
     #[test]
     fn draining_empties_the_buffer() {
-        let plugins = Plugins::new();
-        let a = plugins.intern("alpha");
+        let sources = Sources::new();
+        let a = sources.intern("alpha");
         let buf = OpBuffer::new();
         buf.push(a, Op::Quit);
         assert_eq!(buf.drain().len(), 1);
@@ -82,8 +82,8 @@ mod tests {
 
     #[test]
     fn pushing_during_a_drain_lands_in_the_next_drain() {
-        let plugins = Plugins::new();
-        let a = plugins.intern("alpha");
+        let sources = Sources::new();
+        let a = sources.intern("alpha");
         let buf = OpBuffer::new();
         buf.push(a, Op::Quit);
         let first = buf.drain();

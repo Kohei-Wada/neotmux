@@ -5,11 +5,11 @@ use mlua::{Table, UserData, UserDataMethods, Value};
 use neotmux_core::proto::{Color, DrawCmd, PaneId, Rect, Size, StatusFragment};
 
 use crate::draw::Buffers;
-use crate::plugin::PluginId;
+use crate::source::SourceId;
 
 /// Scope-bound: created fresh inside `Lua::scope` for one dispatch and dies with it.
 pub struct Ctx {
-    owner: PluginId,
+    owner: SourceId,
     buffers: Rc<Buffers>,
     size: Size,
     panes: Vec<(PaneId, Rect)>,
@@ -17,7 +17,7 @@ pub struct Ctx {
 
 impl Ctx {
     pub fn new(
-        owner: PluginId,
+        owner: SourceId,
         buffers: Rc<Buffers>,
         size: Size,
         panes: Vec<(PaneId, Rect)>,

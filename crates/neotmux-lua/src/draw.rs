@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 
 use neotmux_core::proto::{DrawCmd, Epoch, StatusFragment};
 
-use crate::plugin::PluginId;
+use crate::source::SourceId;
 
 #[derive(Debug, Clone, Default)]
 pub struct Committed {
@@ -15,8 +15,8 @@ pub struct Committed {
 #[derive(Default)]
 struct Inner {
     epoch: Epoch,
-    scratch: BTreeMap<PluginId, Committed>,
-    committed: BTreeMap<PluginId, Committed>,
+    scratch: BTreeMap<SourceId, Committed>,
+    committed: BTreeMap<SourceId, Committed>,
 }
 
 #[derive(Default)]
@@ -35,12 +35,12 @@ impl Buffers {
         inner.scratch.clear();
     }
 
-    pub fn record(&self, owner: PluginId, cmd: DrawCmd) {
+    pub fn record(&self, owner: SourceId, cmd: DrawCmd) {
         let mut inner = self.inner.borrow_mut();
         inner.scratch.entry(owner).or_default().cmds.push(cmd);
     }
 
-    pub fn status(&self, owner: PluginId, fragment: StatusFragment) {
+    pub fn status(&self, owner: SourceId, fragment: StatusFragment) {
         let mut inner = self.inner.borrow_mut();
         inner
             .scratch
@@ -50,7 +50,7 @@ impl Buffers {
             .push(fragment);
     }
 
-    pub fn commit(&self, owner: PluginId) {
+    pub fn commit(&self, owner: SourceId) {
         let mut inner = self.inner.borrow_mut();
         let epoch = inner.epoch.clone();
         // A missing scratch entry means the plugin recorded nothing this tick, not that
@@ -60,11 +60,11 @@ impl Buffers {
         inner.committed.insert(owner, entry);
     }
 
-    pub fn discard(&self, owner: PluginId) {
+    pub fn discard(&self, owner: SourceId) {
         self.inner.borrow_mut().scratch.remove(&owner);
     }
 
-    pub fn forget(&self, owner: PluginId) {
+    pub fn forget(&self, owner: SourceId) {
         let mut inner = self.inner.borrow_mut();
         inner.scratch.remove(&owner);
         inner.committed.remove(&owner);
@@ -90,7 +90,7 @@ mod tests {
     use neotmux_core::proto::{Color, DrawCmd, Epoch, Size, StatusFragment};
 
     use super::*;
-    use crate::plugin::Plugins;
+    use crate::source::Sources;
 
     fn epoch(rows: u16) -> Epoch {
         Epoch::new(Size { rows, cols: 80 }, vec![], None)
@@ -113,8 +113,8 @@ mod tests {
 
     #[test]
     fn a_committed_buffer_is_applicable_under_the_same_epoch() {
-        let plugins = Plugins::new();
-        let a = plugins.intern("a");
+        let sources = Sources::new();
+        let a = sources.intern("a");
         let buffers = Buffers::new();
         buffers.begin(epoch(24));
         buffers.record(a, text("hi"));
@@ -127,8 +127,8 @@ mod tests {
 
     #[test]
     fn a_stale_buffer_is_not_applicable() {
-        let plugins = Plugins::new();
-        let a = plugins.intern("a");
+        let sources = Sources::new();
+        let a = sources.intern("a");
         let buffers = Buffers::new();
         buffers.begin(epoch(24));
         buffers.record(a, text("hi"));
@@ -140,8 +140,8 @@ mod tests {
 
     #[test]
     fn discard_leaves_the_previous_buffer_intact() {
-        let plugins = Plugins::new();
-        let a = plugins.intern("a");
+        let sources = Sources::new();
+        let a = sources.intern("a");
         let buffers = Buffers::new();
 
         buffers.begin(epoch(24));
@@ -158,8 +158,8 @@ mod tests {
 
     #[test]
     fn a_commit_replaces_rather_than_appends() {
-        let plugins = Plugins::new();
-        let a = plugins.intern("a");
+        let sources = Sources::new();
+        let a = sources.intern("a");
         let buffers = Buffers::new();
         buffers.begin(epoch(24));
         buffers.record(a, text("first"));
@@ -182,9 +182,9 @@ mod tests {
 
     #[test]
     fn plugins_are_applied_in_id_order() {
-        let plugins = Plugins::new();
-        let a = plugins.intern("a");
-        let b = plugins.intern("b");
+        let sources = Sources::new();
+        let a = sources.intern("a");
+        let b = sources.intern("b");
         let buffers = Buffers::new();
         buffers.begin(epoch(24));
         buffers.record(b, text("second"));
@@ -197,8 +197,8 @@ mod tests {
 
     #[test]
     fn forget_drops_a_plugins_buffer() {
-        let plugins = Plugins::new();
-        let a = plugins.intern("a");
+        let sources = Sources::new();
+        let a = sources.intern("a");
         let buffers = Buffers::new();
         buffers.begin(epoch(24));
         buffers.record(a, text("hi"));
@@ -210,8 +210,8 @@ mod tests {
 
     #[test]
     fn a_tick_that_commits_nothing_clears_the_previous_frame() {
-        let plugins = Plugins::new();
-        let a = plugins.intern("a");
+        let sources = Sources::new();
+        let a = sources.intern("a");
         let buffers = Buffers::new();
 
         buffers.begin(epoch(24));
@@ -227,8 +227,8 @@ mod tests {
 
     #[test]
     fn a_tick_that_raises_leaves_the_previous_frame_in_place() {
-        let plugins = Plugins::new();
-        let a = plugins.intern("a");
+        let sources = Sources::new();
+        let a = sources.intern("a");
         let buffers = Buffers::new();
 
         buffers.begin(epoch(24));
@@ -244,8 +244,8 @@ mod tests {
 
     #[test]
     fn a_scratch_left_uncommitted_does_not_leak_into_the_next_tick() {
-        let plugins = Plugins::new();
-        let a = plugins.intern("a");
+        let sources = Sources::new();
+        let a = sources.intern("a");
         let buffers = Buffers::new();
         buffers.begin(epoch(24));
         buffers.record(a, text("orphan"));
