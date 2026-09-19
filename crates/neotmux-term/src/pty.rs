@@ -1,5 +1,5 @@
 use std::io::{self, Read, Write};
-use std::sync::mpsc::{Receiver, channel};
+use std::sync::mpsc::{Receiver, sync_channel};
 use std::thread;
 
 use anyhow::Context as _;
@@ -10,6 +10,8 @@ pub enum PtyEvent {
     Output(Vec<u8>),
     Eof,
 }
+
+const OUTPUT_CHANNEL_BOUND: usize = 64;
 
 pub struct PtyHandle {
     master: Box<dyn MasterPty + Send>,
@@ -41,7 +43,7 @@ impl PtyHandle {
 
         let mut reader = pair.master.try_clone_reader().context("clone reader")?;
         let writer = pair.master.take_writer().context("take writer")?;
-        let (tx, output) = channel();
+        let (tx, output) = sync_channel(OUTPUT_CHANNEL_BOUND);
         thread::Builder::new()
             .name("neotmux-pty-reader".into())
             .spawn(move || {
@@ -89,5 +91,36 @@ impl PtyHandle {
 
     pub fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
         self.child.try_wait()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use portable_pty::CommandBuilder;
+
+    use super::*;
+
+    #[test]
+    fn output_channel_stays_bounded_under_a_flooding_child() {
+        let mut cmd = CommandBuilder::new("sh");
+        cmd.args(["-c", "yes"]);
+        let mut pty = PtyHandle::spawn(cmd, Size { rows: 24, cols: 80 }).expect("spawn pty");
+
+        std::thread::sleep(Duration::from_millis(500));
+
+        let mut drained = 0;
+        while pty.output().try_recv().is_ok() {
+            drained += 1;
+        }
+
+        pty.child.kill().ok();
+        pty.child.wait().ok();
+
+        assert!(
+            drained <= OUTPUT_CHANNEL_BOUND + 1,
+            "reader thread buffered {drained} messages, channel bound is {OUTPUT_CHANNEL_BOUND}"
+        );
     }
 }
