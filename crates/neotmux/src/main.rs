@@ -13,26 +13,31 @@ use neotmux_lua::ops::Level;
 use neotmux_lua::registry::KindTag;
 use neotmux_lua::runtime::Layers;
 
-fn parse_log_flag(args: impl Iterator<Item = String>) -> Option<PathBuf> {
-    let mut args = args.peekable();
-    let mut log_path = None;
+struct LogFlag {
+    path: Option<PathBuf>,
+    warnings: Vec<String>,
+}
+
+fn parse_log_flag(mut args: impl Iterator<Item = String>) -> LogFlag {
+    let mut path = None;
+    let mut warnings = Vec::new();
     while let Some(arg) = args.next() {
         if arg == "--log" {
-            match args.peek() {
+            match args.next() {
                 Some(value) if !value.starts_with('-') => {
-                    log_path = Some(PathBuf::from(args.next().expect("peeked")));
+                    path = Some(PathBuf::from(value));
                 }
-                _ => {
-                    eprintln!(
-                        "neotmux: --log requires a path argument; using the default log path"
-                    );
-                }
+                Some(value) => warnings.push(format!(
+                    "--log requires a path argument, got '{value}'; using the default log path"
+                )),
+                None => warnings
+                    .push("--log requires a path argument; using the default log path".to_string()),
             }
         } else {
-            eprintln!("neotmux: unrecognised argument '{arg}'; ignoring it");
+            warnings.push(format!("unrecognised argument '{arg}'; ignoring it"));
         }
     }
-    log_path
+    LogFlag { path, warnings }
 }
 
 fn log_silent_plugins(lua: &LuaSubsystem, already_reported: &HashSet<String>) {
@@ -57,8 +62,11 @@ fn log_silent_plugins(lua: &LuaSubsystem, already_reported: &HashSet<String>) {
 }
 
 fn main() -> anyhow::Result<()> {
-    let log_override = parse_log_flag(env::args().skip(1));
-    if let Err(err) = logging::init(log_override.as_deref()) {
+    let flag = parse_log_flag(env::args().skip(1));
+    for warning in &flag.warnings {
+        eprintln!("neotmux: {warning}");
+    }
+    if let Err(err) = logging::init(flag.path.as_deref()) {
         eprintln!("neotmux: failed to initialise logging: {err:#}");
     }
 
@@ -97,30 +105,47 @@ mod tests {
     }
 
     #[test]
-    fn a_valid_log_flag_is_used() {
+    fn a_valid_log_flag_is_used_with_no_warnings() {
+        let flag = parse_log_flag(args(&["--log", "/tmp/x.log"]));
+        assert_eq!(flag.path, Some(PathBuf::from("/tmp/x.log")));
+        assert!(flag.warnings.is_empty());
+    }
+
+    #[test]
+    fn a_trailing_log_flag_with_no_value_falls_back_to_the_default_and_warns() {
+        let flag = parse_log_flag(args(&["--log"]));
+        assert_eq!(flag.path, None);
         assert_eq!(
-            parse_log_flag(args(&["--log", "/tmp/x.log"])),
-            Some(PathBuf::from("/tmp/x.log"))
+            flag.warnings,
+            vec!["--log requires a path argument; using the default log path"]
         );
     }
 
     #[test]
-    fn a_trailing_log_flag_with_no_value_falls_back_to_the_default() {
-        assert_eq!(parse_log_flag(args(&["--log"])), None);
+    fn a_log_flag_followed_by_another_flag_is_treated_as_one_typo_not_two_mistakes() {
+        let flag = parse_log_flag(args(&["--log", "--foo"]));
+        assert_eq!(flag.path, None);
+        assert_eq!(
+            flag.warnings,
+            vec!["--log requires a path argument, got '--foo'; using the default log path"],
+            "the flag-shaped token should be consumed as the rejected value, not also reported as its own unrecognised argument"
+        );
     }
 
     #[test]
-    fn a_log_flag_followed_by_another_flag_falls_back_to_the_default() {
-        assert_eq!(parse_log_flag(args(&["--log", "--foo"])), None);
+    fn an_unrecognised_argument_falls_back_to_the_default_and_warns() {
+        let flag = parse_log_flag(args(&["--bogus"]));
+        assert_eq!(flag.path, None);
+        assert_eq!(
+            flag.warnings,
+            vec!["unrecognised argument '--bogus'; ignoring it"]
+        );
     }
 
     #[test]
-    fn an_unrecognised_argument_is_ignored() {
-        assert_eq!(parse_log_flag(args(&["--bogus"])), None);
-    }
-
-    #[test]
-    fn no_arguments_at_all_falls_back_to_the_default() {
-        assert_eq!(parse_log_flag(args(&[])), None);
+    fn no_arguments_at_all_falls_back_to_the_default_with_no_warnings() {
+        let flag = parse_log_flag(args(&[]));
+        assert_eq!(flag.path, None);
+        assert!(flag.warnings.is_empty());
     }
 }
