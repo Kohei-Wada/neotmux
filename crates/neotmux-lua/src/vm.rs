@@ -1,0 +1,116 @@
+use mlua::chunk::ChunkMode;
+use mlua::{Lua, LuaOptions, StdLib, Table, Value};
+
+const SEAL: &str = r#"
+do
+  local _load = load
+  load = function(chunk, chunkname, _mode, env)
+    return _load(chunk, chunkname, "t", env)
+  end
+end
+"#;
+
+pub fn new_vm() -> mlua::Result<Lua> {
+    let libs = StdLib::COROUTINE
+        | StdLib::TABLE
+        | StdLib::STRING
+        | StdLib::UTF8
+        | StdLib::MATH
+        | StdLib::OS
+        | StdLib::PACKAGE;
+    let lua = Lua::new_with(libs, LuaOptions::default())?;
+
+    let globals = lua.globals();
+    let os: Table = globals.get("os")?;
+    for field in [
+        "execute",
+        "exit",
+        "tmpname",
+        "remove",
+        "rename",
+        "setlocale",
+        "getenv",
+    ] {
+        os.raw_set(field, Value::Nil)?;
+    }
+    globals.raw_set("dofile", Value::Nil)?;
+    globals.raw_set("loadfile", Value::Nil)?;
+
+    let package: Table = globals.get("package")?;
+    package.raw_set("cpath", "")?;
+
+    lua.load(SEAL).set_mode(ChunkMode::Text).exec()?;
+
+    Ok(lua)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn is_nil(lua: &mlua::Lua, expr: &str) -> bool {
+        lua.load(format!("return ({expr}) == nil"))
+            .set_mode(mlua::chunk::ChunkMode::Text)
+            .eval::<bool>()
+            .unwrap()
+    }
+
+    #[test]
+    fn the_blocking_and_bytecode_doors_are_shut() {
+        let lua = new_vm().unwrap();
+        for expr in [
+            "io",
+            "os.execute",
+            "os.exit",
+            "os.tmpname",
+            "os.remove",
+            "os.rename",
+            "os.setlocale",
+            "os.getenv",
+            "dofile",
+            "loadfile",
+            "debug",
+        ] {
+            assert!(is_nil(&lua, expr), "{expr} should be nil");
+        }
+        let cpath: String = lua.load("return package.cpath").eval().unwrap();
+        assert_eq!(cpath, "");
+    }
+
+    #[test]
+    fn the_clock_still_works() {
+        let lua = new_vm().unwrap();
+        let t: i64 = lua.load("return os.time()").eval().unwrap();
+        assert!(t > 0);
+        lua.load("return os.date('%H:%M')")
+            .eval::<String>()
+            .unwrap();
+        lua.load("return os.clock()").eval::<f64>().unwrap();
+    }
+
+    #[test]
+    fn load_refuses_a_binary_chunk() {
+        let lua = new_vm().unwrap();
+        let ok: bool = lua
+            .load(
+                r#"
+                local chunk = string.dump(function() return 1 end)
+                local f, err = load(chunk, "bin", "b")
+                return f == nil
+                "#,
+            )
+            .eval()
+            .unwrap();
+        assert!(ok, "load accepted a binary chunk");
+    }
+
+    #[test]
+    fn load_still_compiles_text() {
+        let lua = new_vm().unwrap();
+        let n: i64 = lua
+            .load("local f = load('return 7') return f()")
+            .eval()
+            .unwrap();
+        assert_eq!(n, 7);
+    }
+}
