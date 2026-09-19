@@ -1,5 +1,5 @@
-pub mod budget;
 pub mod api;
+pub mod budget;
 pub mod draw;
 mod geometry;
 pub mod ops;
@@ -23,6 +23,7 @@ pub use api::event::Event;
 pub use api::keymap;
 
 use api::ctx::Ctx;
+use budget::Budget;
 use draw::Buffers;
 use geometry::Geometry;
 use ops::{Level, Op, OpBuffer};
@@ -53,6 +54,7 @@ pub struct LuaSubsystem {
     loading: Rc<Cell<bool>>,
     buffers: Rc<Buffers>,
     geometry: Rc<RefCell<Geometry>>,
+    budget: Rc<Budget>,
 }
 
 impl LuaSubsystem {
@@ -69,6 +71,9 @@ impl LuaSubsystem {
         let load_failures = Rc::new(RefCell::new(Vec::new()));
         let geometry = Rc::new(RefCell::new(Geometry::default()));
         let buffers = Rc::new(Buffers::new());
+
+        let budget = Budget::new(opts.clone());
+        Budget::install(&lua, budget.clone()).map_err(|err| anyhow::anyhow!("{err:#}"))?;
 
         let loading = api::install(
             &lua,
@@ -95,6 +100,7 @@ impl LuaSubsystem {
             loading,
             buffers,
             geometry,
+            budget,
         })
     }
 
@@ -191,6 +197,9 @@ impl LuaSubsystem {
 
         for (owner, ids) in by_source {
             let mut raised = false;
+            // The budget is per source per frame, so it spans the whole group: a source that
+            // has already spent its slice must not get a fresh one from its next callback.
+            self.budget.enter();
             for id in ids {
                 let Some(callback) = self.registry.callback(id) else {
                     continue;
@@ -216,8 +225,18 @@ impl LuaSubsystem {
 
                 if let Err(err) = result {
                     raised = true;
+                    if self.budget.overran() {
+                        break;
+                    }
                     self.report(owner, &err);
                 }
+            }
+            let overran = self.budget.overran();
+            self.budget.leave();
+
+            if overran {
+                let budget_ms = self.opts.borrow().tick_budget_ms;
+                self.report_text(owner, format!("tick exceeded its {budget_ms} ms budget"));
             }
 
             if raised {
