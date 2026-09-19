@@ -1,5 +1,6 @@
 pub mod api;
 pub mod draw;
+mod geometry;
 pub mod ops;
 pub mod registry;
 pub mod runtime;
@@ -21,6 +22,7 @@ pub use api::keymap;
 
 use api::ctx::Ctx;
 use draw::Buffers;
+use geometry::Geometry;
 use ops::{Level, Op, OpBuffer};
 use registry::{Kind, KindTag, Registry};
 use runtime::Layers;
@@ -30,13 +32,6 @@ use source::{SourceId, Sources};
 pub enum KeyOutcome {
     Consumed,
     Fallthrough,
-}
-
-#[derive(Default)]
-struct Geometry {
-    epoch: Epoch,
-    size: Size,
-    panes: Vec<(PaneId, Rect)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,7 +49,7 @@ pub struct LuaSubsystem {
     opts: Rc<RefCell<Opts>>,
     load_failures: Rc<RefCell<Vec<LoadFailure>>>,
     buffers: Rc<Buffers>,
-    geometry: RefCell<Geometry>,
+    geometry: Rc<RefCell<Geometry>>,
 }
 
 impl LuaSubsystem {
@@ -69,6 +64,7 @@ impl LuaSubsystem {
         let ops = Rc::new(OpBuffer::new());
         let opts = Rc::new(RefCell::new(Opts::default()));
         let load_failures = Rc::new(RefCell::new(Vec::new()));
+        let geometry = Rc::new(RefCell::new(Geometry::default()));
 
         api::install(
             &lua,
@@ -77,6 +73,7 @@ impl LuaSubsystem {
             ops.clone(),
             opts.clone(),
             load_failures.clone(),
+            geometry.clone(),
         )
         .map_err(|err| anyhow::anyhow!("{err:#}"))?;
 
@@ -89,7 +86,7 @@ impl LuaSubsystem {
             opts,
             load_failures,
             buffers: Rc::new(Buffers::new()),
-            geometry: RefCell::new(Geometry::default()),
+            geometry,
         })
     }
 
@@ -136,17 +133,20 @@ impl LuaSubsystem {
         std::mem::take(&mut *self.load_failures.borrow_mut())
     }
 
-    // `focus` is part of the frozen begin_frame ABI ahead of the task that reads it
-    // (pane-aware keymaps / a focus-reading Ctx method); nothing consumes it yet.
     pub fn begin_frame(
         &self,
         epoch: Epoch,
         size: Size,
         panes: Vec<(PaneId, Rect)>,
-        _focus: Option<PaneId>,
+        focus: Option<PaneId>,
     ) {
         self.buffers.begin(epoch.clone());
-        *self.geometry.borrow_mut() = Geometry { epoch, size, panes };
+        *self.geometry.borrow_mut() = Geometry {
+            epoch,
+            size,
+            panes,
+            focus,
+        };
     }
 
     pub fn dispatch_tick(&self) {

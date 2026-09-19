@@ -1,5 +1,7 @@
 use std::cell::RefCell;
 
+use neotmux_core::proto::{PaneId, SplitDir};
+
 use crate::source::SourceId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -14,6 +16,8 @@ pub enum Op {
     Quit,
     Notify { level: Level, text: String },
     Log { level: Level, text: String },
+    PaneSplit { dir: SplitDir },
+    PaneFocus { pane: PaneId },
 }
 
 #[derive(Default)]

@@ -3,6 +3,7 @@ mod input;
 mod logging;
 mod notify;
 mod overlay;
+mod panes;
 mod render;
 mod signals;
 
@@ -67,6 +68,14 @@ fn main() -> anyhow::Result<()> {
             Op::Log { level, text } | Op::Notify { level, text } => {
                 let tag = lua.sources().name(id).unwrap_or_else(|| id.to_string());
                 logging::log(level, &tag, &text);
+            }
+            Op::PaneSplit { dir } => {
+                let tag = lua.sources().name(id).unwrap_or_else(|| id.to_string());
+                logging::log(Level::Info, &tag, &panes::split_note(dir));
+            }
+            Op::PaneFocus { pane } => {
+                let tag = lua.sources().name(id).unwrap_or_else(|| id.to_string());
+                logging::log(Level::Info, &tag, &panes::focus_note(pane));
             }
         }
     }

@@ -3,6 +3,7 @@ pub mod event;
 pub mod keymap;
 pub mod log;
 pub mod opt;
+pub mod pane;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -10,6 +11,7 @@ use std::rc::Rc;
 use mlua::{Function, Lua, Table, Value};
 
 use crate::LoadFailure;
+use crate::geometry::Geometry;
 use crate::ops::{Level, Op, OpBuffer};
 use crate::registry::{Kind, RegistrationId, Registry};
 use crate::source::{self, SourceId, Sources};
@@ -86,13 +88,14 @@ fn install_require_wrapper(
     Ok(())
 }
 
-pub fn install(
+pub(crate) fn install(
     lua: &Lua,
     sources: Rc<Sources>,
     registry: Rc<Registry>,
     ops: Rc<OpBuffer>,
     opts: Rc<RefCell<Opts>>,
     load_failures: Rc<RefCell<Vec<LoadFailure>>>,
+    geometry: Rc<RefCell<Geometry>>,
 ) -> mlua::Result<()> {
     let neotmux = lua.create_table()?;
 
@@ -136,6 +139,12 @@ pub fn install(
         status.set("provider", provider)?;
         let status = seal(lua, status, "neotmux.status")?;
         neotmux.set("status", status)?;
+    }
+
+    {
+        let pane = pane::install(lua, sources.clone(), ops.clone(), geometry)?;
+        let pane = seal(lua, pane, "neotmux.pane")?;
+        neotmux.set("pane", pane)?;
     }
 
     let log = log::install(lua, sources.clone(), ops.clone())?;

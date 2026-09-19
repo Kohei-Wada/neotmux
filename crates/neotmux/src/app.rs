@@ -5,7 +5,7 @@ use crossterm::event::{self, Event};
 use neotmux_core::proto::{
     DrawCmd, Epoch, GridSnapshot, PaneId, Rect as PRect, Size, StatusFragment,
 };
-use neotmux_lua::ops::Op;
+use neotmux_lua::ops::{Level, Op};
 use neotmux_lua::{Event as LuaEvent, KeyOutcome, LuaSubsystem};
 use neotmux_term::pty::{PtyEvent, PtyHandle};
 use neotmux_term::state::TermState;
@@ -15,6 +15,7 @@ use crate::input::{encode_key, key_spec};
 use crate::logging;
 use crate::notify::Notifications;
 use crate::overlay::{self, PaneRects};
+use crate::panes;
 use crate::render::{draw_grid, layout};
 use crate::signals::ShutdownSignal;
 
@@ -179,6 +180,14 @@ pub fn run(
                     let tag = lua.sources().name(id).unwrap_or_else(|| id.to_string());
                     notifications.push(level, &tag, &text);
                     logging::log(level, &tag, &text);
+                }
+                Op::PaneSplit { dir } => {
+                    let tag = lua.sources().name(id).unwrap_or_else(|| id.to_string());
+                    logging::log(Level::Info, &tag, &panes::split_note(dir));
+                }
+                Op::PaneFocus { pane } => {
+                    let tag = lua.sources().name(id).unwrap_or_else(|| id.to_string());
+                    logging::log(Level::Info, &tag, &panes::focus_note(pane));
                 }
             }
         }
