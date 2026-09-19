@@ -41,7 +41,12 @@ is v0.2.
 
 Exit criteria, each mechanically checkable:
 
-1. No feature name (`status`, `clock`, and their kind) appears in core sources.
+1. No file under `crates/*/src/` contains anything a plugin *displays* — a time format, a
+   status line's wording, a label. The framework for drawing those things belongs in core;
+   their content does not. Checked by deleting the shipped runtime layer's `lua/plugin/`
+   directory: neotmux still starts, runs a shell, and exits cleanly, with no status line and
+   no missing-file error. A word grep cannot check this — `os.clock`, `StatusFragment` and
+   `strip_prefix` are all legitimate — so the check is the deletion, not the grep.
 2. Someone given only this spec and `docs/plugins.md` can write a plugin that is
    not one of the examples.
 3. A plugin that loops forever leaves the terminal usable and produces a
