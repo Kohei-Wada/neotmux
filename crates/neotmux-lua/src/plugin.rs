@@ -7,7 +7,7 @@ use std::rc::Rc;
 use mlua::chunk::ChunkMode;
 use mlua::{Function, Lua, Table, Value, Variadic};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct PluginId(u32);
 
 pub const ANONYMOUS: PluginId = PluginId(0);

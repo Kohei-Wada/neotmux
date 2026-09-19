@@ -48,7 +48,6 @@ pub enum DrawCmd {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-#[non_exhaustive]
 pub struct StatusFragment {
     pub text: String,
     pub fg: Color,

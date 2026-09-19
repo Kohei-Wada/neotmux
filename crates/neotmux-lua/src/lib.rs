@@ -1,4 +1,5 @@
 pub mod api;
+pub mod draw;
 pub mod ops;
 pub mod plugin;
 pub mod registry;
