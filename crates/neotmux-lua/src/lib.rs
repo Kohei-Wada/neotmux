@@ -208,6 +208,10 @@ impl LuaSubsystem {
 
         for (owner, ids) in by_source {
             let mut raised = false;
+            let mut errors: Vec<String> = Vec::new();
+            // Taken before the group runs: a discarded frame takes its ops back out too, so a
+            // frame nobody sees does not leave its splits and notifications behind (§5.1).
+            let mark = self.ops.mark();
             // The budget is per source per frame, so it spans the whole group: a source that
             // has already spent its slice must not get a fresh one from its next callback.
             self.budget.enter();
@@ -239,7 +243,7 @@ impl LuaSubsystem {
                     if self.budget.overran() {
                         break;
                     }
-                    self.report(owner, &err);
+                    errors.push(format!("{err}"));
                 }
             }
             let outcome = self.budget.leave();
@@ -258,6 +262,21 @@ impl LuaSubsystem {
             };
             let overran = report.is_some();
 
+            // An overrun loses the frame even when the tick returned normally: a plugin that
+            // `pcall`s around its own loop swallows the budget error (§5.4) and would
+            // otherwise keep output the budget says it has lost (§5.1).
+            if raised || overran {
+                self.buffers.discard(owner);
+                self.ops.discard_from(owner, mark);
+            } else {
+                self.buffers.commit(owner);
+            }
+
+            // The host's account of the frame is pushed after the discard, never into it: it
+            // is what the plugin author is left with once their own output is gone.
+            for text in errors {
+                self.report_text(owner, text);
+            }
             if let Some(text) = report {
                 self.report_text(owner, text);
                 if self.overrun.count(owner, limit) {
@@ -265,15 +284,6 @@ impl LuaSubsystem {
                 }
             } else {
                 self.overrun.forgive(owner);
-            }
-
-            // An overrun loses the frame even when the tick returned normally: a plugin that
-            // `pcall`s around its own loop swallows the budget error (§5.4) and would
-            // otherwise keep output the budget says it has lost (§5.1).
-            if raised || overran {
-                self.buffers.discard(owner);
-            } else {
-                self.buffers.commit(owner);
             }
         }
         Budget::disarm(&self.lua);

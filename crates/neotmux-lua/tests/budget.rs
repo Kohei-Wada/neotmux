@@ -489,16 +489,24 @@ fn built_layers(layers: &[&[(&str, &str)]]) -> (Vec<tempfile::TempDir>, LuaSubsy
 /// ambiguous handle. The first interned match — the earlier layer — wins, deliberately.
 #[test]
 fn resubscribe_restores_the_first_source_interned_under_a_shared_name() {
+    // Each layer draws its tag before spinning, and the spin is switched off once one of them
+    // is back: a discarded frame keeps neither drawing nor ops, so the tag has to come from a
+    // frame that completes.
     let spinner = |tag: &str| {
         format!(
             "neotmux.opt.tick_budget_ms = 5 neotmux.opt.tick_overrun_limit = 1
-             neotmux.on_tick(function() neotmux.notify('info', '{tag}') while true do end end)"
+             _G.spin = true
+             neotmux.on_tick(function(ctx)
+               ctx:text(nil, 0, 0, '{tag}')
+               if _G.spin then while true do end end
+             end)"
         )
     };
     let first = format!(
         "{}
          neotmux.keymap.set('C-r', function()
            neotmux.notify('info', tostring(neotmux.resubscribe('init')))
+           _G.spin = false
            return true
          end)",
         spinner("first")
@@ -517,11 +525,7 @@ fn resubscribe_restores_the_first_source_interned_under_a_shared_name() {
     assert_eq!(notifications(&sub), vec!["true".to_string()]);
 
     frame(&sub);
-    let ran = notifications(&sub);
-    assert!(
-        ran.contains(&"first".to_string()) && !ran.contains(&"second".to_string()),
-        "{ran:?}"
-    );
+    assert_eq!(texts(&sub), vec!["first".to_string()]);
 }
 
 /// §5.4's `pcall` hole: the budget error is catchable, so the tick returns normally. What it
@@ -687,4 +691,95 @@ fn a_budget_of_zero_says_nothing_about_a_long_c_call() {
     }
 
     assert_eq!(tick_owners(&sub), vec!["plugin/hog".to_string()]);
+}
+
+/// §5.1's "the host discards that plugin's command buffer": the drawing is only half of it.
+/// A tick that splits the window and then spins would otherwise split it once per frame right
+/// up to the park.
+#[test]
+fn an_overrunning_tick_loses_the_ops_it_pushed_as_well_as_its_drawing() {
+    let (_dir, sub) = built(&[
+        (
+            "init.lua",
+            "neotmux.opt.tick_budget_ms = 5 require('plugin.neighbour') \
+             require('plugin.spinner')",
+        ),
+        (
+            "lua/plugin/spinner.lua",
+            "neotmux.on_tick(function(ctx)
+               ctx:text(nil, 0, 0, 'drawn')
+               neotmux.pane.split('horizontal')
+               neotmux.notify('info', 'splitting')
+               while true do end
+             end)
+             return {}",
+        ),
+        (
+            "lua/plugin/neighbour.lua",
+            "neotmux.on_tick(function() neotmux.notify('info', 'neighbour') end) return {}",
+        ),
+    ]);
+
+    frame(&sub);
+
+    let ops = sub.drain_ops();
+    assert!(
+        !ops.iter().any(|(_, op)| matches!(op, Op::PaneSplit { .. })),
+        "the discarded frame still split the window: {ops:?}"
+    );
+    let notes: Vec<&str> = ops
+        .iter()
+        .filter_map(|(_, op)| match op {
+            Op::Notify { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        notes,
+        vec!["neighbour"],
+        "the discard took a notification it did not push"
+    );
+    // The overrun report is pushed after the discard, so the discard must not eat it.
+    let overruns: Vec<&str> = ops
+        .iter()
+        .filter_map(|(_, op)| match op {
+            Op::Log { text, .. } if text.contains("budget") => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(overruns.len(), 1, "{ops:?}");
+}
+
+/// A tick that raises loses its frame, and the ops it pushed on the way to raising go with it
+/// — but the error the host reports for it does not.
+#[test]
+fn a_raising_tick_loses_its_ops_but_is_still_reported() {
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.bad')"),
+        (
+            "lua/plugin/bad.lua",
+            "neotmux.on_tick(function()
+               neotmux.pane.split('vertical')
+               error('nope')
+             end)
+             return {}",
+        ),
+    ]);
+
+    frame(&sub);
+
+    let ops = sub.drain_ops();
+    assert!(
+        !ops.iter().any(|(_, op)| matches!(op, Op::PaneSplit { .. })),
+        "{ops:?}"
+    );
+    let logs: Vec<&str> = ops
+        .iter()
+        .filter_map(|(_, op)| match op {
+            Op::Log { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(logs.len(), 1, "{ops:?}");
+    assert!(logs[0].contains("nope"), "{logs:?}");
 }
