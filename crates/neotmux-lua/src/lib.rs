@@ -13,12 +13,24 @@ use std::rc::Rc;
 use mlua::chunk::ChunkMode;
 use mlua::{Function, Lua};
 
+use neotmux_core::proto::{DrawCmd, Epoch, PaneId, Rect, Size, StatusFragment};
+
 pub use api::Opts;
 
-use ops::{Op, OpBuffer};
+use api::ctx::Ctx;
+use draw::Buffers;
+use ops::{Level, Op, OpBuffer};
 use plugin::{PluginId, Plugins};
 use registry::{KindTag, Registry};
 use runtime::Layers;
+
+#[derive(Default)]
+struct Geometry {
+    epoch: Epoch,
+    size: Size,
+    panes: Vec<(PaneId, Rect)>,
+    focus: Option<PaneId>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoadFailure {
@@ -34,6 +46,8 @@ pub struct LuaSubsystem {
     ops: Rc<OpBuffer>,
     opts: Rc<RefCell<Opts>>,
     load_failures: Rc<RefCell<Vec<LoadFailure>>>,
+    buffers: Rc<Buffers>,
+    geometry: RefCell<Geometry>,
 }
 
 impl LuaSubsystem {
@@ -67,6 +81,8 @@ impl LuaSubsystem {
             ops,
             opts,
             load_failures,
+            buffers: Rc::new(Buffers::new()),
+            geometry: RefCell::new(Geometry::default()),
         })
     }
 
@@ -107,6 +123,22 @@ impl LuaSubsystem {
         std::mem::take(&mut *self.load_failures.borrow_mut())
     }
 
+    pub fn begin_frame(
+        &self,
+        epoch: Epoch,
+        size: Size,
+        panes: Vec<(PaneId, Rect)>,
+        focus: Option<PaneId>,
+    ) {
+        self.buffers.begin(epoch.clone());
+        *self.geometry.borrow_mut() = Geometry {
+            epoch,
+            size,
+            panes,
+            focus,
+        };
+    }
+
     pub fn dispatch_tick(&self) {
         let ids = self.registry.snapshot(KindTag::Tick);
         for id in ids {
@@ -120,10 +152,44 @@ impl LuaSubsystem {
                 continue;
             };
 
+            let ctx = {
+                let geometry = self.geometry.borrow();
+                Ctx::new(
+                    owner,
+                    self.buffers.clone(),
+                    geometry.size,
+                    geometry.panes.clone(),
+                    geometry.focus,
+                )
+            };
+
             self.plugins.push(owner);
-            let _ = func.call::<()>(());
+            let result = self.lua.scope(|scope| {
+                let ctx = scope.create_userdata(ctx)?;
+                func.call::<()>(ctx)
+            });
             self.plugins.pop();
+
+            match result {
+                Ok(()) => self.buffers.commit(owner),
+                Err(err) => {
+                    self.buffers.discard(owner);
+                    let name = self.plugins.name(owner).unwrap_or_default();
+                    self.ops.push(
+                        owner,
+                        Op::Log {
+                            level: Level::Error,
+                            text: format!("{name}: {err}"),
+                        },
+                    );
+                }
+            }
         }
+    }
+
+    pub fn frame_output(&self) -> (Vec<DrawCmd>, Vec<StatusFragment>) {
+        let epoch = self.geometry.borrow().epoch.clone();
+        self.buffers.applicable(&epoch)
     }
 
     pub fn drain_ops(&self) -> Vec<(PluginId, Op)> {
