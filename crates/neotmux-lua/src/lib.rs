@@ -163,6 +163,9 @@ impl LuaSubsystem {
 
     /// The op carries the source, and every sink prefixes the source's name when it renders
     /// one, so the text must not name it again or the line reads "plugin/x: plugin/x: ...".
+    ///
+    /// Error, not warn: a frame the plugin author meant to draw was thrown away, and the log
+    /// is the only place that says so.
     fn report_text(&self, owner: SourceId, text: String) {
         self.ops.push(
             owner,
@@ -297,6 +300,9 @@ impl LuaSubsystem {
 
     /// The offender keeps its keymaps and event handlers: only what it was measured doing is
     /// taken away, and `neotmux.resubscribe` gives it back (§5.3).
+    ///
+    /// Notified at warn, where the per-frame overrun is logged at error: this is the one event
+    /// the user has to see on screen, and it is recoverable — nothing is broken beyond repair.
     fn unsubscribe_overrunning(&self, owner: SourceId, limit: u32) {
         self.overrun.park(&self.registry, owner);
         api::forget_if_no_longer_drawing(&self.registry, &self.buffers, owner);

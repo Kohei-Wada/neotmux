@@ -150,10 +150,26 @@ One consequence worth knowing: if your plugin gets a callback from a library and
 the **library** owns it, because that is where it was written. Errors are reported against the
 library, and a rollback of your plugin will not remove it.
 
+The tick budget inherits this, and it is worth spelling out. Write
+
+```lua
+neotmux.on_tick(require('lib.helper').tick)
+```
+
+and the callback was written in `lib/helper`, so `lib/helper` is what the log blames and
+`lib/helper` is what gets parked after five overruns — **including the ticks every other
+plugin registered from that same library**, because they are one source sharing one slice.
+This is the model working as intended: the slow code is the library's, and that is where a fix
+belongs. It is still a surprise the first time. If you want your own name on it, write your own
+function and call the library from inside it.
+
 ## When things break
 
 - **A tick raises.** That source's drawing for the frame is thrown away and its previous frame
-  is shown again. Other sources are unaffected. The error is logged with your name.
+  is shown again — as long as the window has not changed shape since, because a frame drawn
+  for a different size or pane layout is dropped rather than shown stale. Anything the tick
+  queued before it raised goes with the frame: a `split`, a `notify`, a `quit` is part of the
+  frame you lost. Other sources are unaffected. The error is logged with your name.
 - **Two tick callbacks from one file, one of them raises.** Both are thrown away — your frame
   is the union of what your callbacks drew, and half of it is not a frame.
 - **A key callback raises.** It is logged and treated as not consuming, so a broken handler
@@ -181,8 +197,12 @@ A coroutine does not help — the measurement follows into `coroutine.wrap`. In 
 ```
 
 What you lose is **that frame's drawing, all of it** — including what your other callbacks
-already drew, because your frame is their union. Your previous frame is shown again. Other
-sources are untouched, and your keymaps and event handlers keep working.
+already drew, because your frame is their union — and everything else that tick queued: a
+`neotmux.pane.split`, a `neotmux.notify`, a `neotmux.quit`. A frame the host throws away does
+not get to act on the world either. Your previous frame is shown again, unless the window has
+resized or its panes have changed since, in which case that frame is dropped instead of shown
+at the wrong size. Other sources are untouched, and your keymaps and event handlers keep
+working.
 
 After **5 consecutive** overruns your tick subscription is removed and a notification names
 you. Now nothing refreshes your drawing, so it is cleared rather than frozen. One tick that
