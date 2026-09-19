@@ -142,6 +142,19 @@ impl LuaSubsystem {
         std::mem::take(&mut *self.load_failures.borrow_mut())
     }
 
+    /// One place a raised Lua error becomes an attributed error op. M1b needs to tell an
+    /// overrun from a runtime error here.
+    fn report(&self, owner: SourceId, err: &mlua::Error) {
+        let name = self.sources.name(owner).unwrap_or_default();
+        self.ops.push(
+            owner,
+            Op::Log {
+                level: Level::Error,
+                text: format!("{name}: {err}"),
+            },
+        );
+    }
+
     pub fn begin_frame(
         &self,
         epoch: Epoch,
@@ -198,14 +211,7 @@ impl LuaSubsystem {
 
                 if let Err(err) = result {
                     raised = true;
-                    let name = self.sources.name(owner).unwrap_or_default();
-                    self.ops.push(
-                        owner,
-                        Op::Log {
-                            level: Level::Error,
-                            text: format!("{name}: {err}"),
-                        },
-                    );
+                    self.report(owner, &err);
                 }
             }
 
@@ -247,14 +253,7 @@ impl LuaSubsystem {
                 Ok(Value::Boolean(true)) => return KeyOutcome::Consumed,
                 Ok(_) => continue,
                 Err(err) => {
-                    let name = self.sources.name(owner).unwrap_or_default();
-                    self.ops.push(
-                        owner,
-                        Op::Log {
-                            level: Level::Error,
-                            text: format!("{name}: {err}"),
-                        },
-                    );
+                    self.report(owner, &err);
                 }
             }
         }
@@ -279,14 +278,7 @@ impl LuaSubsystem {
             Ok(Value::Boolean(true)) => KeyOutcome::Consumed,
             Ok(_) => KeyOutcome::Fallthrough,
             Err(err) => {
-                let name = self.sources.name(owner).unwrap_or_default();
-                self.ops.push(
-                    owner,
-                    Op::Log {
-                        level: Level::Error,
-                        text: format!("{name}: {err}"),
-                    },
-                );
+                self.report(owner, &err);
                 KeyOutcome::Fallthrough
             }
         }
@@ -320,14 +312,7 @@ impl LuaSubsystem {
             };
 
             if let Err(err) = func.call::<()>(table) {
-                let name = self.sources.name(owner).unwrap_or_default();
-                self.ops.push(
-                    owner,
-                    Op::Log {
-                        level: Level::Error,
-                        text: format!("{name}: {err}"),
-                    },
-                );
+                self.report(owner, &err);
             }
         }
     }
