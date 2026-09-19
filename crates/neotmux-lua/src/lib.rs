@@ -1,3 +1,4 @@
+pub mod ops;
 pub mod plugin;
 pub mod registry;
 pub mod runtime;
