@@ -20,6 +20,11 @@ pub enum Op {
     PaneFocus { pane: PaneId },
 }
 
+/// Where the buffer ended before a source's tick group ran, so that group's own ops can be
+/// taken back out if its frame is discarded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Mark(usize);
+
 #[derive(Default)]
 pub struct OpBuffer {
     ops: RefCell<Vec<(SourceId, Op)>>,
@@ -32,6 +37,23 @@ impl OpBuffer {
 
     pub fn push(&self, from: SourceId, op: Op) {
         self.ops.borrow_mut().push((from, op));
+    }
+
+    pub fn mark(&self) -> Mark {
+        Mark(self.ops.borrow().len())
+    }
+
+    /// Drops what `from` pushed after `mark`. Position alone would not do: a tick can push an
+    /// op attributed to the library its callback was written in, and that source's ops are not
+    /// this frame's to throw away.
+    pub fn discard_from(&self, from: SourceId, mark: Mark) {
+        let mut ops = self.ops.borrow_mut();
+        let mut index = 0;
+        ops.retain(|(owner, _)| {
+            let keep = index < mark.0 || *owner != from;
+            index += 1;
+            keep
+        });
     }
 
     pub fn drain(&self) -> Vec<(SourceId, Op)> {
@@ -73,6 +95,55 @@ mod tests {
         buf.push(a, Op::Quit);
         assert_eq!(buf.drain().len(), 1);
         assert!(buf.drain().is_empty());
+    }
+
+    #[test]
+    fn discarding_takes_back_one_source_and_leaves_the_rest() {
+        let sources = Sources::new();
+        let a = sources.intern("alpha");
+        let b = sources.intern("beta");
+        let buf = OpBuffer::new();
+        buf.push(a, Op::Quit);
+        let mark = buf.mark();
+        buf.push(
+            a,
+            Op::PaneSplit {
+                dir: SplitDir::Horizontal,
+            },
+        );
+        buf.push(b, Op::Quit);
+        buf.push(
+            a,
+            Op::PaneFocus {
+                pane: PaneId::from(1),
+            },
+        );
+
+        buf.discard_from(a, mark);
+
+        let left = buf.drain();
+        assert_eq!(left.len(), 2, "{left:?}");
+        assert_eq!(left[0], (a, Op::Quit), "an op pushed before the mark went");
+        assert_eq!(left[1].0, b, "another source's op went with the discard");
+    }
+
+    #[test]
+    fn an_op_pushed_after_a_discard_survives_it() {
+        let sources = Sources::new();
+        let a = sources.intern("alpha");
+        let buf = OpBuffer::new();
+        let mark = buf.mark();
+        buf.push(a, Op::Quit);
+        buf.discard_from(a, mark);
+        buf.push(
+            a,
+            Op::Log {
+                level: Level::Error,
+                text: "overran".to_string(),
+            },
+        );
+
+        assert_eq!(buf.drain().len(), 1);
     }
 
     #[test]

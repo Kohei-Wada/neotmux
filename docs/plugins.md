@@ -121,8 +121,9 @@ will not change.
 neotmux.log.info(text)    -- also .warn, .error
 neotmux.notify(level, text)  -- 'info' | 'warn' | 'error'; shown on screen and logged
 neotmux.quit()
-neotmux.opt.tick_budget_ms = 8
-neotmux.opt.tick_overrun_limit = 5
+neotmux.opt.tick_budget_ms = 8     -- per source per frame; 0 turns the budget off
+neotmux.opt.tick_overrun_limit = 5 -- consecutive overruns before the tick is dropped; >= 1
+neotmux.resubscribe(name)          -- give a dropped source its tick back; returns handles
 ```
 
 Logs go to `$XDG_STATE_HOME/neotmux/neotmux.log`, or wherever `--log` says. Notifications also
@@ -149,10 +150,26 @@ One consequence worth knowing: if your plugin gets a callback from a library and
 the **library** owns it, because that is where it was written. Errors are reported against the
 library, and a rollback of your plugin will not remove it.
 
+The tick budget inherits this, and it is worth spelling out. Write
+
+```lua
+neotmux.on_tick(require('lib.helper').tick)
+```
+
+and the callback was written in `lib/helper`, so `lib/helper` is what the log blames and
+`lib/helper` is what gets parked after five overruns — **including the ticks every other
+plugin registered from that same library**, because they are one source sharing one slice.
+This is the model working as intended: the slow code is the library's, and that is where a fix
+belongs. It is still a surprise the first time. If you want your own name on it, write your own
+function and call the library from inside it.
+
 ## When things break
 
 - **A tick raises.** That source's drawing for the frame is thrown away and its previous frame
-  is shown again. Other sources are unaffected. The error is logged with your name.
+  is shown again — as long as the window has not changed shape since, because a frame drawn
+  for a different size or pane layout is dropped rather than shown stale. Anything the tick
+  queued before it raised goes with the frame: a `split`, a `notify`, a `quit` is part of the
+  frame you lost. Other sources are unaffected. The error is logged with your name.
 - **Two tick callbacks from one file, one of them raises.** Both are thrown away — your frame
   is the union of what your callbacks drew, and half of it is not a frame.
 - **A key callback raises.** It is logged and treated as not consuming, so a broken handler
@@ -160,9 +177,94 @@ library, and a rollback of your plugin will not remove it.
 - **`require` fails in `init.lua`.** That entry is skipped, anything it registered before
   failing is removed, and the rest of your config still loads. A `require` *inside* a plugin
   raises normally — your plugin's missing dependency is your plugin's error.
+- **Your tick runs too long.** It is cut off, you lose the frame, and after five in a row you
+  lose the subscription. See the next section.
 - **You remove your last tick registration.** Your last frame goes with it. Drawing requires a
   tick; without one there is nothing to refresh what is on screen, so it is cleared rather than
   frozen.
+
+## The tick budget
+
+Your tick gets **8 ms per frame**, and it is 8 ms for the *file*, not for each callback: two
+`on_tick` callbacks written in the same file share one slice.
+
+What an overrun looks like from inside your plugin: nothing you can catch usefully. Your code
+stops between two instructions with an error you did not raise, wherever it happened to be.
+A coroutine does not help — the measurement follows into `coroutine.wrap`. In the log:
+
+```
+2026-09-20 10:11:12Z [ERROR] plugin/clock: tick exceeded its 8 ms budget
+```
+
+What you lose is **that frame's drawing, all of it** — including what your other callbacks
+already drew, because your frame is their union — and everything else that tick queued: a
+`neotmux.pane.split`, a `neotmux.notify`, a `neotmux.quit`. A frame the host throws away does
+not get to act on the world either. Your previous frame is shown again, unless the window has
+resized or its panes have changed since, in which case that frame is dropped instead of shown
+at the wrong size. Other sources are untouched, and your keymaps and event handlers keep
+working.
+
+After **5 consecutive** overruns your tick subscription is removed and a notification names
+you. Now nothing refreshes your drawing, so it is cleared rather than frozen. One tick that
+finishes inside the budget wipes the count, so this only happens to a plugin that is over
+every single frame.
+
+### Getting back
+
+```lua
+local handles = neotmux.resubscribe('plugin/clock')   -- handles, or nil if nothing was parked
+```
+
+You get back one handle per tick it restored — the same handle `on_tick` returns — and `nil`
+when there was nothing to restore. A restore always brings back at least one registration, so
+the list is never empty and `nil` cannot be mistaken for one. Keep the handles: a restored
+registration is a *new* one, and the handle you were holding before the park names an id that
+no longer exists, so `handle:remove()` on the old one does nothing.
+
+The name is the one the notification used. It is a display name, and two runtime layers that
+provide the same relative path share one — if that happens, the earlier layer's copy is the one
+restored, and the handles you get back do not tell you which of the two came back.
+
+You get a full 5 frames again, so a plugin that has not been fixed is dropped again.
+
+Re-`require`ing the module instead drops what was parked, so you do not end up subscribed
+twice — *unless* you have already called `resubscribe`. What it drops is what is still parked,
+and a restored registration is live, so re-`require`ing after a `resubscribe` leaves you with
+both. Remove the handles first.
+
+### Turning it off
+
+```lua
+neotmux.opt.tick_budget_ms = 0
+```
+
+Nothing is measured and nothing is counted — no hook is armed at all. This is what you want
+while stepping through a plugin with a debugger, and it means a `while true do end` freezes
+neotmux with no way out but killing it.
+
+### What the budget cannot cut off
+
+The hook that measures you fires between Lua instructions, so it cannot interrupt anything that
+is not Lua instructions. It still checks the clock when your tick returns, so these are still
+your overruns: you lose the frame and you are named in the log. They count towards the five
+only past **twice** the budget, because that measurement is wall clock over the whole frame —
+it includes the host's own work and a garbage collection step some other plugin triggered — and
+a plugin that is a millisecond over on a loaded machine has not done anything wrong:
+
+- **one long C call.** `string.rep(s, 1e8)`, a huge `table.concat`. Your code is not stopped —
+  there is no way to stop it mid-call — so the whole call runs and the rest of neotmux waits
+  for it. Measured: a tick doing one 120 MB `string.rep` blocked the frame for 189 ms against a
+  5 ms budget. The log says what was seen, not where the time went: `tick exceeded its 5 ms
+  budget: 189.4 ms, not cut off — no sample landed past the deadline`
+- **`__gc` finalizers.** Lua switches the hook off while a finalizer runs, so the same applies.
+  Measured: 162 ms in one finalizer
+- **`pcall`.** The budget error is an ordinary Lua error, so `pcall` catches it. It buys you
+  nothing: you still lose the frame and the overrun is still counted against your limit. An
+  unbounded `while true do pcall(f) end` does hang neotmux
+- **a host binding that blocks.** That would be our bug, not yours
+
+None of this is a sandbox. Plugins are trusted (below); the budget is there so an *accident*
+costs one plugin one frame instead of costing you the program.
 
 ## Reloading
 
@@ -173,7 +275,9 @@ package.loaded['plugin.clock'] = nil
 require('plugin.clock')
 ```
 
-Note what this does *not* do: your old registrations are still there. Keep the handles and
+Note what this does *not* do: your old registrations are still there. (The exception is a tick
+the budget is still holding for you: registering a tick again drops it. A tick you already got
+back with `resubscribe` is live, not held, so that one does not go.) Keep the handles and
 remove them first if re-running the chunk would register twice.
 
 ## What the sandbox is not

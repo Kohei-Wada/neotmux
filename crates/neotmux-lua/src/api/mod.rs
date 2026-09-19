@@ -14,6 +14,7 @@ use crate::LoadFailure;
 use crate::draw::Buffers;
 use crate::geometry::Geometry;
 use crate::ops::{Level, Op, OpBuffer};
+use crate::overrun::Overrun;
 use crate::registry::{Kind, KindTag, RegistrationId, Registry};
 use crate::source::{self, SourceId, Sources};
 
@@ -29,6 +30,7 @@ pub(crate) struct Shared {
     pub(crate) opts: Rc<RefCell<Opts>>,
     pub(crate) load_failures: Rc<RefCell<Vec<LoadFailure>>>,
     pub(crate) geometry: Rc<RefCell<Geometry>>,
+    pub(crate) overrun: Rc<Overrun>,
 }
 
 pub(crate) fn make_handle(
@@ -83,11 +85,14 @@ fn register(
     buffers: &Rc<Buffers>,
     kind: Kind,
     callback: Function,
-) -> mlua::Result<Table> {
+) -> mlua::Result<(SourceId, Table)> {
     let owner = attribute(sources, &callback);
     let key = Rc::new(lua.create_registry_value(callback)?);
     let id = registry.add(owner, kind, key);
-    make_handle(lua, registry.clone(), buffers.clone(), id)
+    Ok((
+        owner,
+        make_handle(lua, registry.clone(), buffers.clone(), id)?,
+    ))
 }
 
 /// The load convention, not `require`, owns isolation (§4.10). `loading` is set only while
@@ -155,6 +160,7 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
         opts,
         load_failures,
         geometry,
+        overrun,
     } = shared;
     let neotmux = lua.create_table()?;
 
@@ -162,8 +168,12 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
         let sources = sources.clone();
         let registry = registry.clone();
         let buffers = buffers.clone();
+        let parked = overrun.clone();
         let on_tick = lua.create_function(move |lua, callback: Function| {
-            register(lua, &sources, &registry, &buffers, Kind::Tick, callback)
+            let (owner, handle) =
+                register(lua, &sources, &registry, &buffers, Kind::Tick, callback)?;
+            parked.forget_parked(owner);
+            Ok(handle)
         })?;
         neotmux.set("on_tick", on_tick)?;
     }
@@ -173,14 +183,15 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
         let registry = registry.clone();
         let buffers = buffers.clone();
         let on_event = lua.create_function(move |lua, (name, callback): (String, Function)| {
-            register(
+            Ok(register(
                 lua,
                 &sources,
                 &registry,
                 &buffers,
                 Kind::Event(name),
                 callback,
-            )
+            )?
+            .1)
         })?;
         neotmux.set("on_event", on_event)?;
     }
@@ -190,7 +201,7 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
         let registry = registry.clone();
         let buffers = buffers.clone();
         let on_key = lua.create_function(move |lua, callback: Function| {
-            register(lua, &sources, &registry, &buffers, Kind::Key, callback)
+            Ok(register(lua, &sources, &registry, &buffers, Kind::Key, callback)?.1)
         })?;
         neotmux.set("on_key", on_key)?;
     }
@@ -248,6 +259,47 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
             Ok(())
         })?;
         neotmux.set("notify", notify)?;
+    }
+
+    {
+        // Top level, not a `neotmux.plugin` namespace: the host has no plugin concept (§4.1).
+        // The display name is the only handle a human has — it is what the notification
+        // reported — and two layers providing the same relative path share one on purpose
+        // (`source::display_name`). So a name can match more than one source, and the first
+        // interned match wins: `interned()` is in interning order, which is load order — the
+        // handles that come back do not say which of them it was.
+        let sources = sources.clone();
+        let registry = registry.clone();
+        let buffers = buffers.clone();
+        let resubscribe = lua.create_function(move |lua, name: String| {
+            let Some((id, _)) = sources
+                .interned()
+                .into_iter()
+                .find(|(_, interned)| *interned == name)
+            else {
+                return Ok(Value::Nil);
+            };
+            // Handles, not a bool: a restored registration has a fresh id, so the handle the
+            // caller held before the park is dead and this is the only way back to it. Nil
+            // when nothing was restored — a restore always brings back at least one
+            // registration, so an empty list is never the answer and nil cannot be mistaken
+            // for one.
+            let restored = overrun.restore(&registry, id);
+            if restored.is_empty() {
+                return Ok(Value::Nil);
+            }
+            let handles = lua.create_table()?;
+            for registration in restored {
+                handles.push(make_handle(
+                    lua,
+                    registry.clone(),
+                    buffers.clone(),
+                    registration,
+                )?)?;
+            }
+            Ok(Value::Table(handles))
+        })?;
+        neotmux.set("resubscribe", resubscribe)?;
     }
 
     let neotmux = seal(lua, neotmux, "neotmux")?;
