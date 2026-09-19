@@ -4,6 +4,11 @@ resolver = "3"
 
 [workspace.package]
 edition = "2024"
+description = "A terminal multiplexer whose core is pane management and whose everything else is a Lua plugin"
+homepage = "https://github.com/Kohei-Wada/neotmux"
+readme = "README.md"
+keywords = ["terminal", "multiplexer", "tmux", "lua", "tui"]
+categories = ["command-line-utilities"]
 rust-version = "1.95"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/Kohei-Wada/neotmux"

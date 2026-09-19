@@ -44,8 +44,21 @@ tmux compatibility in any form.
 See `docs/superpowers/specs/` for the design and `docs/superpowers/plans/` for the
 implementation plans.
 
+## Install
+
 ```sh
-make run     # run it
+cargo install --git https://github.com/Kohei-Wada/neotmux
+```
+
+`mlua` builds Lua 5.4 from vendored source, so a C compiler has to be on the machine. Nothing
+else is needed — no system Lua, no shared libraries.
+
+Configuration lives in `$XDG_CONFIG_HOME/neotmux` (or `~/.config/neotmux`): `init.lua` at the
+top, and modules under `lua/`, so `require('plugin.clock')` loads `lua/plugin/clock.lua`. The
+directory layout is a convention of where `init.lua` looks, not something the program enforces.
+
+```sh
+make run     # run it from a checkout
 make check   # fmt + clippy + tests
 ```
 
