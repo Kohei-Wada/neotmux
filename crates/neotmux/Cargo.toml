@@ -19,3 +19,4 @@ signal-hook.workspace = true
 portable-pty.workspace = true
 nix.workspace = true
 tempfile.workspace = true
+vt100.workspace = true

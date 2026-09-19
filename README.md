@@ -20,9 +20,29 @@ failure stays partial and attributable instead of freezing the whole UI.
 
 ## Status
 
-M0a (walking skeleton) works: `neotmux` runs a shell full-screen and exits cleanly.
-There is no plugin system yet — that is M1a. See `docs/superpowers/specs/` for the design
-and `docs/superpowers/plans/` for the implementation plans.
+Pre-release, and the plugin ABI is not stable yet.
+
+Working today: a shell running full-screen on a PTY, and a Lua layer that loads code from
+`$XDG_CONFIG_HOME/neotmux`, lets it register tick, event, keymap and status callbacks, draw
+into the frame, and log — with every registration and every API call attributed to the chunk
+it was written in, so a misbehaving one can be named.
+
+## Scope
+
+**v0.1** is the line at which you can write a plugin against the ABI. It is not the line at
+which neotmux is a daily driver. Getting there needs the per-frame instruction budget and the
+pane tree — splits, focus, resize, prefix key — plus `docs/plugins.md` and a default status
+line shipped as a plugin rather than built in.
+
+v0.1 deliberately does **not** include detach/attach. That is v0.2, and it is the largest
+structural change on the roadmap (the server/client split), which is exactly why it should
+happen against an ABI other people have already used instead of one nobody has touched.
+
+Also out of v0.1: scrollback and copy-mode, mouse, multiple sessions, a plugin manager, and
+tmux compatibility in any form.
+
+See `docs/superpowers/specs/` for the design and `docs/superpowers/plans/` for the
+implementation plans.
 
 ```sh
 make run     # run it

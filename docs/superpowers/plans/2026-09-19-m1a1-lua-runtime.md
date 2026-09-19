@@ -15,7 +15,7 @@
 - Edition 2024, rustc 1.95 or newer. Dependency versions are declared once in `[workspace.dependencies]`; members reference them with `workspace = true`
 - `mlua = { version = "0.12", features = ["lua54", "vendored"] }`
 - The VM is built with `Lua::new_with(libs, options)` — the **safe** constructor. `unsafe_new_with` is forbidden: the safe one is what disables `package.loadlib` and replaces the C searcher, and it rejects `StdLib::DEBUG` outright
-- Plugins are fully trusted (spec §7). No sandbox, no capability allow-list. What the sealing in Task 1 removes is the ability to *block*, not the ability to act
+- Plugins are fully trusted (spec §8). No sandbox, no capability allow-list. What the sealing in Task 1 removes is the ability to *block*, not the ability to act
 - `neotmux-core` and `neotmux-term` stay free of Lua. `neotmux-lua` never touches ratatui or a PTY
 - `neotmux-core::proto` carries no behaviour beyond what the container itself is: constructors, accessors, bounds checks, index arithmetic, resizing and `From`/`Display` conversions are in bounds; diffing, applying, I/O and state transitions are not
 - Indentation is spaces, never tabs. No code comments unless the *why* is non-obvious, and then one line
