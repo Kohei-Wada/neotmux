@@ -676,6 +676,7 @@ dependencies = [
  "crossterm",
  "neotmux-core",
  "neotmux-term",
+ "nix 0.28.0",
  "portable-pty",
  "ratatui",
 ]

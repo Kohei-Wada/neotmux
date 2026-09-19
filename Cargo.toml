@@ -13,6 +13,7 @@ neotmux-core = { path = "crates/neotmux-core" }
 neotmux-term = { path = "crates/neotmux-term" }
 anyhow = "1"
 crossterm = "0.29"
+nix = { version = "0.28", features = ["term"] }
 portable-pty = "0.9"
 ratatui = "0.30"
 vt100 = "0.16"

@@ -1,9 +1,10 @@
 use std::io::Read;
 use std::time::{Duration, Instant};
 
+use nix::sys::termios::{LocalFlags, Termios};
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 
-fn run_in_pty(env: &[(&str, &str)], input: &[u8]) -> (String, bool) {
+fn run_in_pty(env: &[(&str, &str)], input: &[u8]) -> (String, bool, Termios) {
     let pair = native_pty_system()
         .openpty(PtySize {
             rows: 24,
@@ -50,29 +51,51 @@ fn run_in_pty(env: &[(&str, &str)], input: &[u8]) -> (String, bool) {
         assert!(Instant::now() < deadline, "neotmux did not exit");
         std::thread::sleep(Duration::from_millis(50));
     };
+    let termios = pair.master.get_termios().expect("termios after exit");
     drop(pair.master);
     let out = collector.join().expect("collector");
-    (String::from_utf8_lossy(&out).into_owned(), status.success())
+    (
+        String::from_utf8_lossy(&out).into_owned(),
+        status.success(),
+        termios,
+    )
+}
+
+fn assert_termios_restored(termios: &Termios) {
+    assert!(
+        termios.local_flags.contains(LocalFlags::ECHO),
+        "echo was not restored"
+    );
+    assert!(
+        termios.local_flags.contains(LocalFlags::ICANON),
+        "icanon was not restored"
+    );
 }
 
 #[test]
 fn leaves_the_alternate_screen_on_clean_exit() {
-    let (out, ok) = run_in_pty(&[("SHELL", "/bin/sh")], b"exit\r");
+    let (out, ok, termios) = run_in_pty(&[("SHELL", "/bin/sh")], b"exit\r");
     assert!(ok, "expected a clean exit");
     assert!(
         out.contains("\x1b[?1049l"),
         "alternate screen was never left"
     );
+    assert_termios_restored(&termios);
 }
 
 #[test]
+#[cfg_attr(
+    not(debug_assertions),
+    ignore = "NEOTMUX_PANIC_TEST hatch is compiled out in release"
+)]
 fn leaves_the_alternate_screen_on_panic() {
-    let (out, ok) = run_in_pty(&[("SHELL", "/bin/sh"), ("NEOTMUX_PANIC_TEST", "1")], b"");
+    let (out, ok, termios) = run_in_pty(&[("SHELL", "/bin/sh"), ("NEOTMUX_PANIC_TEST", "1")], b"");
     assert!(!ok, "expected a failing exit");
     assert!(
         out.contains("\x1b[?1049l"),
         "alternate screen was never left"
     );
+    assert_termios_restored(&termios);
 }
 
 fn write_marker_shell(marker: &str) -> std::path::PathBuf {
@@ -90,7 +113,7 @@ fn renders_output_written_in_the_same_batch_as_exit() {
     let marker = "NEOTMUX_EOF_MARKER_4f2c";
     let shell = write_marker_shell(marker);
     let shell = shell.to_str().expect("utf8 path").to_owned();
-    let (out, ok) = run_in_pty(&[("SHELL", &shell)], b"");
+    let (out, ok, _termios) = run_in_pty(&[("SHELL", &shell)], b"");
     std::fs::remove_file(&shell).ok();
     assert!(ok, "expected a clean exit");
     assert!(
