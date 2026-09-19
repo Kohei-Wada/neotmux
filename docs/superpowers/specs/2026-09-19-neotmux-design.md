@@ -345,7 +345,7 @@ neotmux.on_tick(function(ctx)
   local w, h = ctx:size()                 -- the surface it is drawing into
   local rect = ctx:pane_rect(pane_id)
   ctx:text(pane_id, x, y, "hello")
-  ctx:rect(...) ctx:line(...) ctx:marker(...)
+  ctx:rect(...) ctx:line(...)
   ctx:status("12:34", { fg = "#ffffff" })  -- a fragment of the status line
 end)
 ```

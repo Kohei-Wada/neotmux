@@ -1,6 +1,6 @@
 use std::fs;
 
-use neotmux_core::proto::{DrawCmd, Epoch, PaneId, Rect, Size};
+use neotmux_core::proto::{Color, DrawCmd, Epoch, PaneId, Rect, Size};
 use neotmux_lua::runtime::Layers;
 use neotmux_lua::{KeyOutcome, LuaSubsystem};
 
@@ -286,6 +286,38 @@ fn a_bad_colour_raises_at_the_call() {
     frame(&sub, 24);
     let ops = sub.drain_ops();
     assert_eq!(ops.len(), 1, "a bad colour should have raised");
+}
+
+#[test]
+fn a_bg_on_line_is_refused_rather_than_discarded() {
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.liner')"),
+        (
+            "lua/plugin/liner.lua",
+            "neotmux.on_tick(function(ctx) ctx:line(nil, 0, 0, 3, 0, { bg = 1 }) end) return {}",
+        ),
+    ]);
+    frame(&sub, 24);
+    let ops = sub.drain_ops();
+    assert_eq!(ops.len(), 1, "a bg on line should have raised");
+    assert!(sub.frame_output().0.is_empty(), "the line was still drawn");
+}
+
+#[test]
+fn a_line_still_takes_an_fg() {
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.liner')"),
+        (
+            "lua/plugin/liner.lua",
+            "neotmux.on_tick(function(ctx) ctx:line(nil, 0, 0, 3, 0, { fg = 4 }) end) return {}",
+        ),
+    ]);
+    frame(&sub, 24);
+    assert!(sub.drain_ops().is_empty());
+    match &sub.frame_output().0[..] {
+        [DrawCmd::Line { fg, .. }] => assert_eq!(*fg, Color::Idx(4)),
+        other => panic!("unexpected commands: {other:?}"),
+    }
 }
 
 /// Helper for the per-source commit tests: every `Text` command as (y, text).

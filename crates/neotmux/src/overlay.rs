@@ -158,22 +158,6 @@ pub fn apply(frame: &mut Frame, area: Rect, cmds: &[DrawCmd], panes: &PaneRects)
                 };
                 draw_line(buf, area, bound, *from, *to, *fg);
             }
-            DrawCmd::Marker {
-                pane,
-                x,
-                y,
-                text,
-                fg,
-            } => {
-                let Some(bound) = bounds(panes, area, *pane) else {
-                    continue;
-                };
-                let colors = Colors {
-                    fg: *fg,
-                    bg: PColor::Default,
-                };
-                draw_text(buf, area, bound, (*x, *y), text, colors);
-            }
             // Non-exhaustive enum: an unknown future variant is silently skipped.
             _ => {}
         }
