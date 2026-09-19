@@ -113,6 +113,10 @@ pub fn run(
             match pty.output().try_recv() {
                 Ok(PtyEvent::Output(bytes)) => {
                     state.feed(&bytes);
+                    lua.dispatch_event(&LuaEvent::PaneOutput {
+                        pane: pane_id(),
+                        bytes,
+                    });
                     dirty = true;
                 }
                 Ok(PtyEvent::Eof) => {
