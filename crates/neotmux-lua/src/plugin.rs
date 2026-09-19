@@ -13,6 +13,8 @@ pub struct PluginId(u32);
 pub const ANONYMOUS: PluginId = PluginId(0);
 pub const INIT: PluginId = PluginId(1);
 
+const RESERVED: usize = 2;
+
 impl fmt::Display for PluginId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "#{}", self.0)
@@ -47,8 +49,10 @@ impl Plugins {
 
     pub fn intern(&self, name: &str) -> PluginId {
         let mut inner = self.inner.borrow_mut();
-        if let Some(pos) = inner.names.iter().position(|n| n == name) {
-            return PluginId(pos as u32);
+        // The reserved sentinel slots (anonymous/init) are display names only and must
+        // never be matched or reassigned, or a plugin literally named "init" would alias INIT.
+        if let Some(pos) = inner.names.iter().skip(RESERVED).position(|n| n == name) {
+            return PluginId((pos + RESERVED) as u32);
         }
         inner.names.push(name.to_string());
         PluginId(inner.names.len() as u32 - 1)
@@ -271,6 +275,40 @@ mod tests {
             names,
             vec![(a, "clock".to_string()), (b, "watcher".to_string())]
         );
+    }
+
+    #[test]
+    fn a_plugin_named_init_or_anonymous_does_not_alias_the_sentinel() {
+        let plugins = Plugins::new();
+        let init_named = plugins.intern("init");
+        let anon_named = plugins.intern("anonymous");
+        assert_ne!(init_named, INIT);
+        assert_ne!(anon_named, ANONYMOUS);
+        assert_ne!(init_named, anon_named);
+    }
+
+    #[test]
+    fn a_plugin_named_init_failing_does_not_disturb_inits_own_registrations() {
+        let dir = layer_with(&[("init", "error('boom')")]);
+        let (lua, plugins) = vm_with(&dir);
+        let registry = crate::registry::Registry::new();
+
+        let key = |body: &str| {
+            let f: mlua::Function = lua.load(body).eval().unwrap();
+            std::rc::Rc::new(lua.create_registry_value(f).unwrap())
+        };
+        let init_reg = registry.add(INIT, crate::registry::Kind::Tick, key("return function() end"));
+
+        let failed = lua
+            .load("local ok = pcall(require, 'plugin.init') return ok == false")
+            .eval::<bool>()
+            .unwrap();
+        assert!(failed);
+
+        let plugin_init_id = plugins.intern("init");
+        registry.remove_all_of(plugin_init_id);
+
+        assert_eq!(registry.owner(init_reg), Some(INIT));
     }
 
     #[test]

@@ -186,6 +186,20 @@ mod tests {
     }
 
     #[test]
+    fn remove_all_of_an_owner_with_no_registrations_is_a_no_op() {
+        let (_lua, reg, a, _) = setup();
+        assert_eq!(reg.remove_all_of(a), 0);
+    }
+
+    #[test]
+    fn remove_all_of_called_twice_removes_nothing_the_second_time() {
+        let (lua, reg, a, _) = setup();
+        reg.add(a, Kind::Tick, key(&lua, "return function() end"));
+        assert_eq!(reg.remove_all_of(a), 1);
+        assert_eq!(reg.remove_all_of(a), 0);
+    }
+
+    #[test]
     fn a_kind_carries_its_payload() {
         let (lua, reg, a, _) = setup();
         let id = reg.add(
