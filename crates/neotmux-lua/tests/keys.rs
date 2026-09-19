@@ -341,7 +341,7 @@ fn an_on_key_that_returns_false_falls_through_to_the_binding() {
 }
 
 #[test]
-fn on_key_callbacks_run_in_load_order_and_the_first_to_consume_stops_the_rest() {
+fn on_key_callbacks_run_in_registration_order_and_the_first_to_consume_stops_the_rest() {
     let (_d, sub) = built(&[
         (
             "init.lua",

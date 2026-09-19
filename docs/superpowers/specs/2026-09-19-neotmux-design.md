@@ -321,8 +321,11 @@ outside prefix mode and deny those keys to every other plugin through the confli
 is a notification with a veto, and nothing more: the host has no mode, no mode stack and no
 prefix concept, and everything modal is the plugin's own state.
 
-`on_key` callbacks run in registration order, which is load order — the same ordering rule
-drawing uses (§4.5). There is no priority and no ordering knob.
+**Callbacks of one kind run in registration order.** That is not the same thing as load order,
+and the two are not interchangeable: registration order is the order the `on_key` calls
+happened in, which for anything registered from inside a tick or a keymap is not where its
+chunk sat in the init chain. Drawing orders something else — sources, in load order (§4.5).
+There is no priority and no ordering knob for either.
 
 A callback that raises is logged against its own source and treated as not consuming, so one
 broken handler cannot swallow the keyboard.
@@ -360,6 +363,11 @@ replayed. Ergonomics are identical; cost is one reused `Vec` per plugin per fram
 returns. If any of them raises, the whole union is discarded and the source's previous frame
 stands — a partial union is not a frame, and committing per callback would make each callback
 overwrite the one before it.
+
+**Drawing composes sources in load order**, so a source loaded later draws over one loaded
+earlier. This is per source, not per callback and not per registration: the order a source's
+own tick callbacks were registered in decides nothing about what is on top, because they all
+land in that source's one buffer.
 
 **Replay validity.** Commands carry absolute coordinates and `PaneId`s, so replaying a stale
 buffer after a resize or a pane close would draw at wrong coordinates or into a dead pane.
