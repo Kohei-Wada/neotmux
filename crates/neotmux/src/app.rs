@@ -61,6 +61,24 @@ fn pane_rects(content: Size) -> PaneRects {
     map
 }
 
+/// A geometry change, whether from a real terminal resize or the status row
+/// appearing/disappearing: recompute the pane's size and rects, resize
+/// `TermState` and the PTY to match, and tell plugins about it.
+fn apply_geometry(
+    lua: &LuaSubsystem,
+    state: &mut TermState,
+    pty: &mut PtyHandle,
+    size: Size,
+    has_status: bool,
+) -> anyhow::Result<(Size, PaneRects)> {
+    let content = content_size(size, has_status);
+    let panes = pane_rects(content);
+    state.resize(content);
+    pty.resize(content)?;
+    lua.dispatch_event(&LuaEvent::Resized { size: content });
+    Ok((content, panes))
+}
+
 pub fn run(
     terminal: &mut DefaultTerminal,
     shutdown: &ShutdownSignal,
@@ -128,12 +146,9 @@ pub fn run(
                     }
                     Event::Resize(cols, rows) => {
                         size = clamp_to_at_least_one(Size { rows, cols });
-                        content = content_size(size, has_status);
-                        panes = pane_rects(content);
-                        state.resize(content);
-                        pty.resize(content)?;
+                        (content, panes) =
+                            apply_geometry(lua, &mut state, &mut pty, size, has_status)?;
                         dirty = true;
-                        lua.dispatch_event(&LuaEvent::Resized { size: content });
                     }
                     _ => {}
                 }
@@ -175,12 +190,8 @@ pub fn run(
         let now_has_status = !frame_output.1.is_empty();
         if now_has_status != has_status {
             has_status = now_has_status;
-            content = content_size(size, has_status);
-            panes = pane_rects(content);
-            state.resize(content);
-            pty.resize(content)?;
+            (content, panes) = apply_geometry(lua, &mut state, &mut pty, size, has_status)?;
             dirty = true;
-            lua.dispatch_event(&LuaEvent::Resized { size: content });
         }
 
         if frame_output != last_frame_output {

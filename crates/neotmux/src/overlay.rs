@@ -206,6 +206,7 @@ mod tests {
     use neotmux_core::proto::Color;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
+    use ratatui::style::Color as RColor;
 
     use super::*;
 
@@ -294,5 +295,118 @@ mod tests {
         let buf = render((10, 1), |frame, area| draw_status(frame, area, &fragments));
         assert_eq!(buf[(0, 0)].symbol(), "A");
         assert_eq!(buf[(2, 0)].symbol(), "B");
+    }
+
+    fn line(from: (u16, u16), to: (u16, u16)) -> Vec<DrawCmd> {
+        vec![DrawCmd::Line {
+            pane: None,
+            from,
+            to,
+            fg: Color::Default,
+        }]
+    }
+
+    #[test]
+    fn a_horizontal_line_is_drawn_between_its_endpoints() {
+        let cmds = line((1, 2), (4, 2));
+        let panes = PaneRects::new();
+        let buf = render((10, 5), |frame, area| apply(frame, area, &cmds, &panes));
+        for x in 1..=4 {
+            assert_eq!(buf[(x, 2)].symbol(), "#", "x={x}");
+        }
+        assert_eq!(buf[(0, 2)].symbol(), " ");
+        assert_eq!(buf[(5, 2)].symbol(), " ");
+    }
+
+    #[test]
+    fn a_vertical_line_is_drawn_between_its_endpoints() {
+        let cmds = line((2, 0), (2, 3));
+        let panes = PaneRects::new();
+        let buf = render((10, 5), |frame, area| apply(frame, area, &cmds, &panes));
+        for y in 0..=3 {
+            assert_eq!(buf[(2, y)].symbol(), "#", "y={y}");
+        }
+        assert_eq!(buf[(2, 4)].symbol(), " ");
+    }
+
+    #[test]
+    fn a_diagonal_line_going_down_right_is_drawn() {
+        let cmds = line((0, 0), (3, 3));
+        let panes = PaneRects::new();
+        let buf = render((10, 5), |frame, area| apply(frame, area, &cmds, &panes));
+        for i in 0..=3 {
+            assert_eq!(buf[(i, i)].symbol(), "#", "i={i}");
+        }
+    }
+
+    #[test]
+    fn a_diagonal_line_going_up_right_is_drawn() {
+        let cmds = line((0, 3), (3, 0));
+        let panes = PaneRects::new();
+        let buf = render((10, 5), |frame, area| apply(frame, area, &cmds, &panes));
+        for i in 0..=3u16 {
+            assert_eq!(buf[(i, 3 - i)].symbol(), "#", "i={i}");
+        }
+    }
+
+    #[test]
+    fn reversed_endpoints_draw_the_same_diagonal() {
+        let cmds = line((3, 3), (0, 0));
+        let panes = PaneRects::new();
+        let buf = render((10, 5), |frame, area| apply(frame, area, &cmds, &panes));
+        for i in 0..=3 {
+            assert_eq!(buf[(i, i)].symbol(), "#", "i={i}");
+        }
+    }
+
+    #[test]
+    fn a_rect_command_fills_its_area() {
+        let cmds = vec![DrawCmd::Rect {
+            pane: None,
+            rect: PRect::new(1, 1, 3, 2),
+            fg: Color::Default,
+            bg: Color::Idx(2),
+        }];
+        let panes = PaneRects::new();
+        let buf = render((10, 5), |frame, area| apply(frame, area, &cmds, &panes));
+        for y in 1..3 {
+            for x in 1..4 {
+                assert_eq!(buf[(x, y)].symbol(), " ", "x={x} y={y}");
+                assert_eq!(buf[(x, y)].bg, RColor::Indexed(2), "x={x} y={y}");
+            }
+        }
+        assert_eq!(buf[(0, 1)].bg, RColor::Reset);
+        assert_eq!(buf[(4, 1)].bg, RColor::Reset);
+    }
+
+    #[test]
+    fn a_rect_straddling_its_bounds_edges_is_clipped() {
+        let pane = PaneId::from(1);
+        let cmds = vec![DrawCmd::Rect {
+            pane: Some(pane),
+            rect: PRect::new(3, 1, 10, 10),
+            fg: Color::Default,
+            bg: Color::Idx(4),
+        }];
+        let mut panes = PaneRects::new();
+        panes.insert(pane, PRect::new(0, 0, 5, 3));
+        let buf = render((10, 5), |frame, area| apply(frame, area, &cmds, &panes));
+        assert_eq!(buf[(3, 1)].bg, RColor::Indexed(4));
+        assert_eq!(buf[(4, 2)].bg, RColor::Indexed(4));
+        assert_eq!(buf[(5, 1)].bg, RColor::Reset, "past the pane's right edge");
+        assert_eq!(buf[(3, 3)].bg, RColor::Reset, "past the pane's bottom edge");
+    }
+
+    #[test]
+    fn a_zero_sized_rect_draws_nothing() {
+        let cmds = vec![DrawCmd::Rect {
+            pane: None,
+            rect: PRect::new(2, 2, 0, 0),
+            fg: Color::Default,
+            bg: Color::Idx(9),
+        }];
+        let panes = PaneRects::new();
+        let buf = render((10, 5), |frame, area| apply(frame, area, &cmds, &panes));
+        assert_eq!(buf[(2, 2)].bg, RColor::Reset);
     }
 }
