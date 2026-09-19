@@ -565,3 +565,38 @@ fn deleting_the_shipped_plugins_leaves_a_working_multiplexer() {
     nt.send("\x04"); // EOF: the last pane's shell exits, so neotmux does
     assert!(nt.exited_cleanly(PATIENCE), "neotmux did not exit cleanly");
 }
+
+/// Builds the install layout in a temp prefix: the Makefile puts the shipped runtime layer
+/// in place, and the already-built test binary stands in for the copy `cargo install` makes.
+fn install_into(prefix: &Path) {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let status = std::process::Command::new("make")
+        .current_dir(&root)
+        .arg("install-runtime")
+        .arg(format!("PREFIX={}", prefix.display()))
+        .status()
+        .expect("run make install-runtime");
+    assert!(status.success(), "make install-runtime failed");
+
+    std::fs::create_dir_all(prefix.join("bin")).expect("create bin");
+    std::fs::copy(env!("CARGO_BIN_EXE_neotmux"), prefix.join("bin/neotmux")).expect("copy binary");
+}
+
+/// The layer an install actually produces, not the one in the source tree. Every other test
+/// here points `NEOTMUX_RUNTIME` at `runtime/`, so they exercise the layer's content and
+/// never its installed layout — which is how an install that copied `init.lua` but not the
+/// module it requires shipped, raising on every single start.
+#[test]
+fn an_installed_neotmux_starts_on_its_shipped_layer() {
+    let prefix = tempfile::tempdir().expect("prefix");
+    install_into(prefix.path());
+
+    let mut nt = Neotmux::start_installed(prefix.path(), "cat");
+    nt.wait_for_screen("panes 1 focus 1", PATIENCE);
+
+    let log = nt.log_text();
+    assert!(
+        log.is_empty(),
+        "the installed layer reported a failure:\n{log}"
+    );
+}
