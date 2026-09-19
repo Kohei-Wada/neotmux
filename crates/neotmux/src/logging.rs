@@ -71,7 +71,7 @@ fn timestamp() -> String {
     let time_of_day = secs % 86_400;
     let (year, month, day) = civil_from_days(days);
     format!(
-        "{year:04}-{month:02}-{day:02} {:02}:{:02}:{:02}",
+        "{year:04}-{month:02}-{day:02} {:02}:{:02}:{:02}Z",
         time_of_day / 3600,
         (time_of_day / 60) % 60,
         time_of_day % 60
@@ -101,11 +101,12 @@ mod tests {
     #[test]
     fn timestamp_has_the_expected_shape() {
         let ts = timestamp();
-        assert_eq!(ts.len(), 19, "{ts}");
+        assert_eq!(ts.len(), 20, "{ts}");
         assert_eq!(ts.as_bytes()[4], b'-');
         assert_eq!(ts.as_bytes()[7], b'-');
         assert_eq!(ts.as_bytes()[10], b' ');
         assert_eq!(ts.as_bytes()[13], b':');
         assert_eq!(ts.as_bytes()[16], b':');
+        assert_eq!(ts.as_bytes()[19], b'Z', "{ts} is missing its UTC zone marker");
     }
 }
