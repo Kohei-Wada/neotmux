@@ -518,6 +518,16 @@ path.
   **sampling point**, not the accounting unit: it reads `Instant` and compares the current
   plugin's elapsed tick time against the budget
 - default budget 8 ms per plugin per frame, `neotmux.opt.tick_budget_ms`
+- **`tick_budget_ms = 0` switches the budget off**: no hook is armed, nothing is measured and
+  nothing is counted. The trust model is "you installed it" (§8), so an opt-out is consistent,
+  and someone stepping through a plugin under a breakpoint needs one. The alternative — every
+  tick overrunning at its first sample — unsubscribes every source after K frames
+- the hook is armed for the duration of tick dispatch and removed after it, not for the VM's
+  lifetime: with `LUA_MASKCOUNT` set Lua 5.4 sets `trap` and routes every instruction through
+  `luaG_traceexec` whatever n is, so an always-armed hook taxes key handling, event dispatch
+  and config load — none of which the budget applies to. Measured on one key callback running
+  20M Lua iterations: 108 ms always armed, 72 ms armed per frame; arming and removing costs
+  ~62 ns per frame
 - on overrun the hook returns `Err`, which mlua converts to a real Lua error
   (`callback_error_ext` → `lua_error`), unwinding to the host's protected call — so the tick,
   and only that tick, is rolled back. `luaD_pcall` restores `allowhook`, so the hook survives

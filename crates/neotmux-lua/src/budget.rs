@@ -63,6 +63,9 @@ impl Budget {
     /// in a weak registry table and silently removes itself when it is missing, so
     /// `coroutine.wrap(function() while true do end end)()` would switch the budget off.
     pub fn arm(lua: &Lua, budget: &Rc<Budget>) -> mlua::Result<()> {
+        if !budget.enabled() {
+            return Ok(());
+        }
         let budget = budget.clone();
         lua.set_global_hook(
             HookTriggers::new().every_nth_instruction(SAMPLE_EVERY_N_INSTRUCTIONS),
@@ -85,6 +88,12 @@ impl Budget {
 
     pub fn disarm(lua: &Lua) {
         lua.remove_global_hook();
+    }
+    /// `tick_budget_ms = 0` switches the budget off entirely: no hook, no measurement, no
+    /// counting (§5.1). Someone stepping through a plugin under a breakpoint needs that, and
+    /// the alternative — every tick overrunning at its first sample — unsubscribes everything.
+    pub fn enabled(&self) -> bool {
+        self.opts.borrow().tick_budget_ms != 0
     }
 }
 
@@ -151,6 +160,22 @@ mod tests {
 
         assert_eq!(result.unwrap(), 10_000_000);
         assert!(!budget.overran());
+    }
+
+    #[test]
+    fn a_budget_of_zero_arms_no_hook_at_all() {
+        let (lua, budget) = armed(0);
+        let long: Function = lua
+            .load("return function() local n = 0 for _ = 1, 5000000 do n = n + 1 end return n end")
+            .eval()
+            .unwrap();
+
+        budget.enter();
+        let result = long.call::<i64>(());
+        budget.leave();
+
+        assert_eq!(result.unwrap(), 5_000_000);
+        assert!(!budget.overran(), "a disabled budget recorded an overrun");
     }
 
     #[test]

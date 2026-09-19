@@ -368,3 +368,32 @@ fn a_restored_tick_is_dropped_again_if_it_keeps_overrunning() {
     frame(&sub);
     assert!(tick_owners(&sub).is_empty());
 }
+
+/// A heavy but bounded tick: every non-zero budget in the suite would cut it off, so its
+/// survival is the budget being off rather than the loop being quick.
+const HEAVY: &str = "neotmux.on_tick(function(ctx)
+     local n = 0
+     for _ = 1, 20000000 do n = n + 1 end
+     ctx:text(nil, 0, 0, 'heavy')
+   end)
+   return {}";
+
+#[test]
+fn a_budget_of_zero_measures_nothing_and_unsubscribes_nobody() {
+    let (_dir, sub) = built(&[
+        (
+            "init.lua",
+            "neotmux.opt.tick_budget_ms = 0 neotmux.opt.tick_overrun_limit = 2 \
+             require('plugin.heavy')",
+        ),
+        ("lua/plugin/heavy.lua", HEAVY),
+    ]);
+
+    for _ in 0..3 {
+        frame(&sub);
+        assert_eq!(texts(&sub), vec!["heavy".to_string()]);
+        assert!(logs(&sub).is_empty());
+    }
+
+    assert_eq!(tick_owners(&sub), vec!["plugin/heavy".to_string()]);
+}
