@@ -409,9 +409,10 @@ fn pairs_over_the_sealed_top_level_table_sees_the_real_fields() {
     let dir = layer(&[(
         "init.lua",
         r#"
-        local count = 0
-        for _ in pairs(neotmux) do count = count + 1 end
-        neotmux.notify("info", tostring(count))
+        local names = {}
+        for name in pairs(neotmux) do names[#names + 1] = name end
+        table.sort(names)
+        neotmux.notify("info", table.concat(names, " "))
         "#,
     )]);
     let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
@@ -424,8 +425,11 @@ fn pairs_over_the_sealed_top_level_table_sees_the_real_fields() {
     let Op::Notify { text, .. } = op else {
         unreachable!()
     };
-    let count: usize = text.parse().unwrap();
-    assert_eq!(count, 9, "expected all top-level fields, got {count}");
+    assert_eq!(
+        text,
+        "keymap log notify on_event on_tick opt pane quit status",
+        "the top-level ABI surface changed"
+    );
 }
 
 #[test]
