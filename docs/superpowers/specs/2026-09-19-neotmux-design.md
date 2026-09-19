@@ -356,7 +356,9 @@ Calls **append to a command buffer; they do not mutate the frame.** The host app
 buffer after the tick. Direct mutation (what ttymap's `MapApi` does today) cannot be rolled
 back: a plugin interrupted mid-draw leaves half a line on screen and there is no previous
 value to fall back to. A recorded list can be discarded wholesale and the previous one
-replayed. Ergonomics are identical; cost is one reused `Vec` per plugin per frame.
+replayed. Ergonomics are identical; cost is a freshly allocated `Vec` of commands per source
+per frame — nothing is pooled or reused, and if that ever shows up in a profile it is a change
+behind this interface, not a change to it.
 
 **The unit of commit is the source, not the callback.** A source may register more than one
 `on_tick`; its frame is the union of what all of them drew, committed once after the last one
@@ -415,7 +417,8 @@ Command buffers from before step 3 fail the epoch check and are not replayed.
 
 ### 4.9 Logging and notification
 
-- log destination: `$XDG_STATE_HOME/neotmux/neotmux.log`; `--log <path>` overrides; `--log-level`
+- log destination: `$XDG_STATE_HOME/neotmux/neotmux.log`; `--log <path>` overrides it. There
+  is no level flag: `neotmux.log.{info,warn,error}` all reach the file
 - log initialisation failure is reported on stderr **before raw mode is entered**, then
   startup continues. A full-screen TUI cannot use stderr afterwards (ttymap #226 is the silent
   version of this bug)
@@ -549,15 +552,16 @@ which is what makes §9's "every host function returns promptly" test possible t
 
 ### 5.3 Overrun policy, and why it is reversible
 
-- overruns are counted per plugin; the counter resets on any tick that completes within budget
+- overruns are counted per source; the counter resets on any tick that completes within budget
 - after K consecutive overruns (default 5, `neotmux.opt.tick_overrun_limit`) the **tick**
-  subscription is removed and a notification names the plugin. Its keymaps, event handlers and
-  status provider are untouched
-- **unsubscribing is not terminal.** `neotmux.plugin.resubscribe(name)` restores it and
-  `neotmux.plugin.reload(name)` re-runs the chunk; both exist in the ABI from M1b even though
-  reload's full implementation lands later. Without a recovery path the only cure is
-  restarting neotmux, which kills every shell the user is running — paying for a plugin bug
-  with the entire reason the program exists
+  subscription is removed and a notification names the source. Its keymaps and event handlers
+  are untouched, and its last frame is dropped rather than replayed (§4.5)
+- **unsubscribing is not terminal.** `neotmux.resubscribe(name)` restores it, taking the
+  source name the notification reported. There is no `neotmux.plugin` namespace — the host has
+  no plugin concept (§4.1) — and there is no host reload function: re-running a chunk is
+  `package.loaded[m] = nil; require(m)`, written in Lua, because the host has nothing to add
+  to it. Without a recovery path the only cure is restarting neotmux, which kills every shell
+  the user is running — paying for a plugin bug with the entire reason the program exists
 
 ### 5.4 What the budget does not catch
 
