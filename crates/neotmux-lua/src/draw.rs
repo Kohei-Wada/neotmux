@@ -118,11 +118,7 @@ mod tests {
     }
 
     fn fragment(s: &str) -> StatusFragment {
-        StatusFragment {
-            text: s.to_string(),
-            fg: Color::Default,
-            bg: Color::Default,
-        }
+        StatusFragment::new(s, Color::Default, Color::Default)
     }
 
     #[test]
