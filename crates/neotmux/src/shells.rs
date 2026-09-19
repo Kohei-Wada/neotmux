@@ -48,11 +48,17 @@ impl Shells {
 
     /// Ends the pane's child and drops its PTY. EOF on the master only means no slave fd is
     /// open any more — a child that closed its descriptors and kept running is alive and
-    /// sending it — so the child is signalled and then reaped without blocking: one pane's
-    /// daemonised child must never be able to stall the frame loop the others share.
+    /// sending it — so the child is hung up on without blocking: one pane's daemonised child
+    /// must never be able to stall the frame loop the others share.
+    ///
+    /// What that buys and what it costs: SIGHUP goes out and nothing is waited for, so the
+    /// call is over in microseconds, but it is the only signal sent. A child that handles or
+    /// ignores SIGHUP outlives the pane, and outlives neotmux — init inherits it. The
+    /// `try_wait` reaps a child that had already died; one that dies a moment later stays a
+    /// zombie until neotmux exits and init reaps it in turn.
     pub fn close(&mut self, pane: PaneId) {
         if let Some(mut shell) = self.shells.remove(&pane) {
-            let _ = shell.pty.kill();
+            let _ = shell.pty.hangup();
             let _ = shell.pty.try_wait();
         }
     }
@@ -265,8 +271,10 @@ mod tests {
         let started = Instant::now();
         shells.close(pane(1));
         let took = started.elapsed();
+        // Well under portable-pty's own 200 ms SIGHUP grace period, which is what `close`
+        // sidesteps: a second would pass whether or not the frame loop was being held.
         assert!(
-            took < Duration::from_secs(1),
+            took < Duration::from_millis(100),
             "closing waited {took:?} on a child that had only closed its descriptors"
         );
         assert_eq!(shells.len(), 0);
