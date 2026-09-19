@@ -16,8 +16,15 @@ fn run_in_pty(env: &[(&str, &str)], input: &[u8]) -> (String, bool, Termios) {
         })
         .expect("openpty");
 
+    let isolation = tempfile::tempdir().expect("isolation dir");
+    let log = isolation.path().join("neotmux.log");
+
     let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_neotmux"));
     cmd.env("TERM", "xterm-256color");
+    cmd.env("HOME", isolation.path());
+    cmd.env("XDG_CONFIG_HOME", isolation.path());
+    cmd.arg("--log");
+    cmd.arg(&log);
     for (k, v) in env {
         cmd.env(k, v);
     }
@@ -110,9 +117,16 @@ fn send_signal_and_capture(sig: Signal) -> (bool, Option<String>, Termios) {
         })
         .expect("openpty");
 
+    let isolation = tempfile::tempdir().expect("isolation dir");
+    let log = isolation.path().join("neotmux.log");
+
     let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_neotmux"));
     cmd.env("TERM", "xterm-256color");
     cmd.env("SHELL", "/bin/sh");
+    cmd.env("HOME", isolation.path());
+    cmd.env("XDG_CONFIG_HOME", isolation.path());
+    cmd.arg("--log");
+    cmd.arg(&log);
     let mut child = pair.slave.spawn_command(cmd).expect("spawn");
     drop(pair.slave);
 

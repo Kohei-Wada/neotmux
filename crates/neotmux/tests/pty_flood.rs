@@ -43,9 +43,16 @@ fn a_flooding_child_does_not_starve_ctrl_c() {
         })
         .expect("openpty");
 
+    let isolation = tempfile::tempdir().expect("isolation dir");
+    let log = isolation.path().join("neotmux.log");
+
     let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_neotmux"));
     cmd.env("TERM", "xterm-256color");
     cmd.env("SHELL", &shell_path);
+    cmd.env("HOME", isolation.path());
+    cmd.env("XDG_CONFIG_HOME", isolation.path());
+    cmd.arg("--log");
+    cmd.arg(&log);
     let child = pair.slave.spawn_command(cmd).expect("spawn neotmux");
     drop(pair.slave);
     let mut guard = ChildGuard(child);

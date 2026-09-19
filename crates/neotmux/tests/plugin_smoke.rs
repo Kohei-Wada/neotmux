@@ -16,12 +16,16 @@ fn run_neotmux(runtime_dir: &Path, log: &Path) {
         })
         .expect("openpty");
 
+    let home = tempfile::tempdir().expect("isolated home");
+
     let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_neotmux"));
     cmd.arg("--log");
     cmd.arg(log);
     cmd.env("NEOTMUX_RUNTIME", runtime_dir);
     cmd.env("SHELL", "/bin/true");
     cmd.env("TERM", "xterm-256color");
+    cmd.env("HOME", home.path());
+    cmd.env("XDG_CONFIG_HOME", home.path());
     let mut child = pair.slave.spawn_command(cmd).expect("spawn");
     drop(pair.slave);
 

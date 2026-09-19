@@ -17,9 +17,16 @@ fn produces_no_output_while_idle() {
         })
         .expect("openpty");
 
+    let isolation = tempfile::tempdir().expect("isolation dir");
+    let log = isolation.path().join("neotmux.log");
+
     let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_neotmux"));
     cmd.env("TERM", "xterm-256color");
     cmd.env("SHELL", "/bin/sh");
+    cmd.env("HOME", isolation.path());
+    cmd.env("XDG_CONFIG_HOME", isolation.path());
+    cmd.arg("--log");
+    cmd.arg(&log);
     let mut child = pair.slave.spawn_command(cmd).expect("spawn");
     drop(pair.slave);
 
