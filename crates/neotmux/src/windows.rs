@@ -96,6 +96,15 @@ impl Windows {
             .collect()
     }
 
+    /// Every pane the session holds, hidden windows included. Lazy, because the sampler asks
+    /// on every frame and reads `/proc` on few of them: a caller that decides not to look
+    /// pays nothing.
+    pub fn all_panes(&self) -> impl Iterator<Item = PaneId> + '_ {
+        self.entries
+            .iter()
+            .flat_map(|entry| entry.layout.rects.keys().copied())
+    }
+
     pub fn current_id(&self) -> WindowId {
         self.entries[self.current].id
     }
@@ -266,6 +275,22 @@ mod tests {
             windows.panes(),
             vec![(ws(1), vec![first]), (ws(2), vec![hidden, split])]
         );
+    }
+
+    /// What `pane.info` is sampled over: the panes of every window, not the shown one's.
+    #[test]
+    fn every_window_contributes_its_panes() {
+        let (mut windows, first) = Windows::new(ws(1), surface());
+        let hidden = windows.create(ws(2), surface());
+        let split = windows.take_pane_id();
+        windows
+            .current_mut()
+            .split(SplitDir::Vertical, split)
+            .expect("fits");
+
+        let mut all: Vec<PaneId> = windows.all_panes().collect();
+        all.sort_unstable();
+        assert_eq!(all, vec![first, hidden, split]);
     }
 
     #[test]
