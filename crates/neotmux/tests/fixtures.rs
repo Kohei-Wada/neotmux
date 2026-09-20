@@ -616,6 +616,136 @@ fn a_horizontal_split_draws_a_divider_row_between_the_panes() {
     );
 }
 
+/// The junctions, one per set of arms that can meet in a cell. A tee is named for the arm
+/// that is on its own, which is the way its stem points.
+const CROSS: &str = "\u{253c}";
+const TEE_RIGHT: &str = "\u{251c}";
+const TEE_LEFT: &str = "\u{2524}";
+const TEE_DOWN: &str = "\u{252c}";
+
+/// A short wait for a keystroke that changes nothing on screen — moving the focus — before
+/// the next one is sent.
+const FOCUS_SETTLE: Duration = Duration::from_millis(500);
+
+/// The crossing cell of a 2x2 grid is in the vertical gutter and in the horizontal one, so
+/// it is inside neither pane's extent and no pane draws it. It used to be left blank: a
+/// cross with a hole in the middle.
+#[test]
+fn a_two_by_two_grid_meets_in_a_cross() {
+    let (mut nt, _init) = start_shipped("", "cat");
+    nt.send("\x02v"); // C-b v: a left pane and a right one
+    nt.wait_for_cell(PANE_TOP, DIVIDER_COL, VERTICAL_DIVIDER, PATIENCE);
+    nt.send("\x02-"); // C-b -: the right one, split
+    nt.wait_for_cell(DIVIDER_ROW, DIVIDER_COL + 1, HORIZONTAL_DIVIDER, PATIENCE);
+    nt.send("\x02h"); // C-b h: back to the left pane
+    nt.settle(FOCUS_SETTLE);
+    nt.send("\x02-"); // C-b -: and split that one too
+    nt.wait_for_cell(DIVIDER_ROW, 0, HORIZONTAL_DIVIDER, PATIENCE);
+
+    nt.wait_for_cell(DIVIDER_ROW, DIVIDER_COL, CROSS, PATIENCE);
+    let screen = nt.screen_after(Duration::from_millis(200));
+    assert_eq!(
+        (
+            nt.cell(DIVIDER_ROW - 1, DIVIDER_COL),
+            nt.cell(DIVIDER_ROW + 1, DIVIDER_COL),
+            nt.cell(DIVIDER_ROW, DIVIDER_COL - 1),
+            nt.cell(DIVIDER_ROW, DIVIDER_COL + 1),
+        ),
+        (
+            VERTICAL_DIVIDER.to_string(),
+            VERTICAL_DIVIDER.to_string(),
+            HORIZONTAL_DIVIDER.to_string(),
+            HORIZONTAL_DIVIDER.to_string(),
+        ),
+        "the cross does not have four arms to be a cross of:\n{screen}"
+    );
+}
+
+/// A full-height pane on the left with the right-hand column split: the right column's
+/// divider runs into the vertical one and stops. Three arms, not four, so `┼` would draw a
+/// left arm through the middle of the left pane's output.
+#[test]
+fn a_divider_running_into_another_from_the_right_is_a_tee() {
+    let (mut nt, _init) = start_shipped("", "cat");
+    nt.send("\x02v"); // C-b v: the new pane on the right is the focused one
+    nt.wait_for_cell(PANE_TOP, DIVIDER_COL, VERTICAL_DIVIDER, PATIENCE);
+    nt.send("\x02-"); // C-b -: so this splits the right-hand column
+    nt.wait_for_cell(DIVIDER_ROW, DIVIDER_COL + 1, HORIZONTAL_DIVIDER, PATIENCE);
+
+    nt.wait_for_cell(DIVIDER_ROW, DIVIDER_COL, TEE_RIGHT, PATIENCE);
+    let screen = nt.screen_after(Duration::from_millis(200));
+    assert_ne!(
+        nt.cell(DIVIDER_ROW, DIVIDER_COL - 1),
+        HORIZONTAL_DIVIDER.to_string(),
+        "an arm was drawn into the left pane, which is not divided there:\n{screen}"
+    );
+}
+
+/// The mirror image: the column that is split is the left one, so the arm points the other
+/// way.
+#[test]
+fn a_divider_running_into_another_from_the_left_is_the_mirror_tee() {
+    let (mut nt, _init) = start_shipped("", "cat");
+    nt.send("\x02v");
+    nt.wait_for_cell(PANE_TOP, DIVIDER_COL, VERTICAL_DIVIDER, PATIENCE);
+    nt.send("\x02h"); // C-b h: onto the left-hand column
+    nt.settle(FOCUS_SETTLE);
+    nt.send("\x02-");
+    nt.wait_for_cell(DIVIDER_ROW, 0, HORIZONTAL_DIVIDER, PATIENCE);
+
+    nt.wait_for_cell(DIVIDER_ROW, DIVIDER_COL, TEE_LEFT, PATIENCE);
+    let screen = nt.screen_after(Duration::from_millis(200));
+    assert_ne!(
+        nt.cell(DIVIDER_ROW, DIVIDER_COL + 1),
+        HORIZONTAL_DIVIDER.to_string(),
+        "an arm was drawn into the right pane, which is not divided there:\n{screen}"
+    );
+}
+
+/// A wide pane above two side by side: the vertical divider starts at the horizontal one and
+/// goes down only.
+#[test]
+fn a_divider_starting_at_another_and_going_down_is_a_tee_down() {
+    let (mut nt, _init) = start_shipped("", "cat");
+    nt.send("\x02-"); // C-b -: the new pane along the bottom is the focused one
+    nt.wait_for_cell(DIVIDER_ROW, 0, HORIZONTAL_DIVIDER, PATIENCE);
+    nt.send("\x02v"); // C-b v: so this splits the bottom half in two
+    nt.wait_for_cell(DIVIDER_ROW + 1, DIVIDER_COL, VERTICAL_DIVIDER, PATIENCE);
+
+    nt.wait_for_cell(DIVIDER_ROW, DIVIDER_COL, TEE_DOWN, PATIENCE);
+    let screen = nt.screen_after(Duration::from_millis(200));
+    assert_ne!(
+        nt.cell(DIVIDER_ROW - 1, DIVIDER_COL),
+        VERTICAL_DIVIDER.to_string(),
+        "an arm was drawn up into the top pane, which is not divided:\n{screen}"
+    );
+}
+
+/// Nothing crosses a lone divider, so nothing along it is a junction. Two arms in line are a
+/// line carrying on.
+#[test]
+fn a_lone_divider_has_no_junction_anywhere_along_it() {
+    let (mut nt, _init) = start_shipped("", "cat");
+    nt.send("\x02v");
+    nt.wait_for_cell(PANE_TOP, DIVIDER_COL, VERTICAL_DIVIDER, PATIENCE);
+
+    let screen = nt.screen_after(Duration::from_millis(500));
+    let ruled = pane_rows(&screen)
+        .take(PANE_ROWS)
+        .filter(|row| row.chars().nth(DIVIDER_COL as usize) == VERTICAL_DIVIDER.chars().next())
+        .count();
+    assert_eq!(
+        ruled, PANE_ROWS,
+        "the divider is not whole from top to bottom:\n{screen}"
+    );
+    for junction in [CROSS, TEE_RIGHT, TEE_LEFT, TEE_DOWN] {
+        assert!(
+            !screen.contains(junction),
+            "{junction:?} was drawn where nothing crosses:\n{screen}"
+        );
+    }
+}
+
 /// `C-b r` and five presses of the left arrow: the divider is five columns further left
 /// than it was, which is the only place a resize can be seen. The mode is the plugin's own
 /// state, so the keys in it never reach a shell, and the key that leaves it gives them back.
