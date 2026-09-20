@@ -1,6 +1,6 @@
 use std::fs::File;
 use std::io::{self, IsTerminal};
-use std::os::fd::{AsFd, OwnedFd};
+use std::os::fd::{AsFd, AsRawFd, OwnedFd};
 use std::time::{Duration, Instant};
 
 use neotmux_term::wakeup::Wakeup;
@@ -24,9 +24,10 @@ pub enum Ready {
 }
 
 /// The file neotmux's own input arrives on: stdin when it is a terminal and `/dev/tty`
-/// otherwise, which is the rule `crossterm::event` applies to pick the same file. Waiting
-/// here rather than in `crossterm::event::poll` is what makes a hangup observable at all —
-/// crossterm reacts to one by reading zero bytes in a loop that has no way out.
+/// otherwise. Neotmux both waits on it and reads it, because nothing else can: a library
+/// that registers this file edge-triggered and then reads one bufferful per edge strands
+/// everything past the first 1024 bytes of a paste, and a hangup it answers by reading zero
+/// bytes in a loop has no way out.
 pub struct Terminal {
     fd: OwnedFd,
 }
@@ -85,6 +86,52 @@ impl Terminal {
                         return Ok(Ready::Idle);
                     }
                 }
+                Err(err) => return Err(err.into()),
+            }
+        }
+    }
+
+    /// Appends everything the terminal has to give right now to `out` and returns how much
+    /// that was, so a paste of any size arrives in one pass rather than a bufferful per
+    /// keystroke. Zero means the terminal reported end of file, which is a hangup.
+    ///
+    /// The drain is gated on `poll(2)` rather than on `O_NONBLOCK` and `EAGAIN`: when stdin
+    /// is the terminal this descriptor shares its open file description with stdout, and a
+    /// non-blocking flag set here would be a non-blocking flag on every write the renderer
+    /// makes.
+    pub fn read(&self, out: &mut Vec<u8>) -> io::Result<usize> {
+        let mut total = 0;
+        let mut chunk = [0u8; 4096];
+        loop {
+            // The first read needs no gate: the caller only gets here because the wait said
+            // the terminal was readable.
+            match nix::unistd::read(self.fd.as_raw_fd(), &mut chunk) {
+                Ok(0) => return Ok(total),
+                Ok(n) => {
+                    out.extend_from_slice(&chunk[..n]);
+                    total += n;
+                }
+                Err(Errno::EINTR) => continue,
+                Err(err) => return Err(err.into()),
+            }
+            if !self.readable()? {
+                return Ok(total);
+            }
+        }
+    }
+
+    /// Whether another read would return anything, asked of the kernel rather than found out
+    /// by blocking in one.
+    fn readable(&self) -> io::Result<bool> {
+        let mut watched = [PollFd::new(self.fd.as_fd(), PollFlags::POLLIN)];
+        loop {
+            match poll(&mut watched, PollTimeout::ZERO) {
+                Ok(0) => return Ok(false),
+                Ok(_) => {
+                    let revents = watched[0].revents().unwrap_or_else(PollFlags::empty);
+                    return Ok(revents.contains(PollFlags::POLLIN));
+                }
+                Err(Errno::EINTR) => {}
                 Err(err) => return Err(err.into()),
             }
         }
@@ -267,6 +314,69 @@ mod tests {
             tty.wait(Some(&wakeup), deadline).expect("wait"),
             Ready::Output
         );
+    }
+
+    /// A pipe rather than a PTY, because what is being measured is the drain: a pipe hands
+    /// over everything written to it at once, where a PTY's line discipline may still be
+    /// catching up when the first `poll` returns.
+    #[test]
+    fn everything_waiting_is_read_in_one_pass() {
+        let (read_end, write_end) = nix::unistd::pipe().expect("pipe");
+        let tty = Terminal { fd: read_end };
+        // More than the 1024 bytes one edge-triggered read used to hand over, and more than
+        // the 4096-byte chunk the drain reads at a time.
+        // Written in one call into a pipe big enough to hold it, so everything really is
+        // waiting by the time the drain starts. `write_end` stays alive: dropping it would
+        // be a hangup rather than a quiet pipe.
+        let paste = vec![b'x'; 9000];
+        assert_eq!(
+            nix::unistd::write(write_end.as_fd(), &paste).expect("write"),
+            9000
+        );
+
+        assert_eq!(
+            tty.wait(None, Instant::now() + Duration::from_secs(5))
+                .expect("wait"),
+            Ready::Input
+        );
+        let mut out = Vec::new();
+        assert_eq!(
+            tty.read(&mut out).expect("read"),
+            9000,
+            "the drain stopped short of what was waiting"
+        );
+        assert_eq!(out, vec![b'x'; 9000]);
+    }
+
+    #[test]
+    fn the_bytes_read_are_the_bytes_that_were_written() {
+        let (master, slave) = pty_pair();
+        let tty = slave_terminal(&slave);
+        nix::unistd::write(master.as_fd(), b"hello\n").expect("write");
+
+        assert_eq!(
+            tty.wait(None, Instant::now() + Duration::from_secs(5))
+                .expect("wait"),
+            Ready::Input
+        );
+        let mut out = Vec::new();
+        assert!(tty.read(&mut out).expect("read") > 0);
+        assert!(
+            out.starts_with(b"hello"),
+            "read back {out:?} rather than what was written"
+        );
+    }
+
+    /// The caller reads a hangup out of this, so it may not look like a quiet terminal.
+    #[test]
+    fn end_of_file_is_reported_as_no_bytes_at_all() {
+        let (read_end, write_end) = nix::unistd::pipe().expect("pipe");
+        let tty = Terminal { fd: read_end };
+        drop(write_end);
+
+        let mut out = Vec::new();
+        assert_eq!(tty.read(&mut out).expect("read"), 0);
+        assert!(out.is_empty());
     }
 
     #[test]

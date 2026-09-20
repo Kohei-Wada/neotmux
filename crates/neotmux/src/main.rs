@@ -1,6 +1,8 @@
 mod app;
+mod decode;
 mod frame;
 mod input;
+mod keys;
 mod logging;
 mod notify;
 mod overlay;

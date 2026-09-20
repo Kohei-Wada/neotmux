@@ -1,18 +1,6 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+//! Keys out: the spec a binding is looked up by, and the bytes a pane's child is typed.
 
-fn modifier_param(modifiers: KeyModifiers) -> u8 {
-    let mut param = 1;
-    if modifiers.contains(KeyModifiers::SHIFT) {
-        param += 1;
-    }
-    if modifiers.contains(KeyModifiers::ALT) {
-        param += 2;
-    }
-    if modifiers.contains(KeyModifiers::CONTROL) {
-        param += 4;
-    }
-    param
-}
+use crate::keys::{Key, KeyCode};
 
 fn cursor_key(final_byte: u8, modifier: u8) -> Vec<u8> {
     if modifier > 1 {
@@ -38,13 +26,9 @@ fn low_function_key(letter: u8, modifier: u8) -> Vec<u8> {
     }
 }
 
-/// Turns a key event into the spec string `LuaSubsystem::dispatch_key` expects
+/// Turns a key into the spec string `LuaSubsystem::dispatch_key` expects
 /// (e.g. `C-x`, `M-Left`, `.`), matching what `keymap::normalise` produces.
-pub fn key_spec(key: &KeyEvent) -> Option<String> {
-    if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
-        return None;
-    }
-
+pub fn key_spec(key: &Key) -> String {
     let key_part = match key.code {
         KeyCode::Char(c) => c.to_string(),
         KeyCode::Enter => "Enter".to_string(),
@@ -63,34 +47,29 @@ pub fn key_spec(key: &KeyEvent) -> Option<String> {
         KeyCode::Insert => "Insert".to_string(),
         KeyCode::Delete => "Delete".to_string(),
         KeyCode::F(n) => format!("F{n}"),
-        _ => return None,
     };
 
     let mut spec = String::new();
-    if key.modifiers.contains(KeyModifiers::CONTROL) {
+    if key.mods.ctrl {
         spec.push_str("C-");
     }
-    if key.modifiers.contains(KeyModifiers::ALT) {
+    if key.mods.alt {
         spec.push_str("M-");
     }
-    if key.modifiers.contains(KeyModifiers::SHIFT) && !matches!(key.code, KeyCode::Char(_)) {
+    // A shifted character is already the shifted character, so saying so again would make
+    // `A` and `S-A` two different bindings for one keystroke.
+    if key.mods.shift && !matches!(key.code, KeyCode::Char(_)) {
         spec.push_str("S-");
     }
     spec.push_str(&key_part);
-    Some(spec)
+    spec
 }
 
-pub fn encode_key(key: KeyEvent) -> Option<Vec<u8>> {
-    if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
-        return None;
-    }
-
-    let alt = key.modifiers.contains(KeyModifiers::ALT);
-    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-    let modifier = modifier_param(key.modifiers);
+pub fn encode_key(key: Key) -> Option<Vec<u8>> {
+    let modifier = key.mods.param();
 
     let mut bytes = match key.code {
-        KeyCode::Char(c) if ctrl => {
+        KeyCode::Char(c) if key.mods.ctrl => {
             let upper = c.to_ascii_uppercase();
             if upper.is_ascii() {
                 vec![(upper as u8) & 0x1f]
@@ -128,7 +107,7 @@ pub fn encode_key(key: KeyEvent) -> Option<Vec<u8>> {
             };
             tilde_key(code, modifier)
         }
-        _ => return None,
+        KeyCode::F(_) => return None,
     };
 
     let has_no_parameterised_form = matches!(
@@ -140,7 +119,7 @@ pub fn encode_key(key: KeyEvent) -> Option<Vec<u8>> {
             | KeyCode::Backspace
             | KeyCode::Esc
     );
-    if alt && has_no_parameterised_form {
+    if key.mods.alt && has_no_parameterised_form {
         bytes.insert(0, 0x1b);
     }
     Some(bytes)
@@ -148,12 +127,12 @@ pub fn encode_key(key: KeyEvent) -> Option<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use crate::keys::{Key, KeyCode, Modifiers};
 
     use super::encode_key;
 
-    fn key(code: KeyCode) -> KeyEvent {
-        KeyEvent::new(code, KeyModifiers::NONE)
+    fn key(code: KeyCode) -> Key {
+        Key::plain(code)
     }
 
     #[test]
@@ -167,9 +146,9 @@ mod tests {
 
     #[test]
     fn control_characters_are_masked() {
-        let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+        let ctrl_c = Key::new(KeyCode::Char('c'), Modifiers::CTRL);
         assert_eq!(encode_key(ctrl_c).unwrap(), vec![0x03]);
-        let ctrl_d = KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL);
+        let ctrl_d = Key::new(KeyCode::Char('d'), Modifiers::CTRL);
         assert_eq!(encode_key(ctrl_d).unwrap(), vec![0x04]);
     }
 
@@ -191,22 +170,22 @@ mod tests {
 
     #[test]
     fn alt_prefixes_with_escape() {
-        let alt_a = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::ALT);
+        let alt_a = Key::new(KeyCode::Char('a'), Modifiers::ALT);
         assert_eq!(encode_key(alt_a).unwrap(), b"\x1ba");
     }
 
     #[test]
     fn alt_prefixes_keys_with_no_parameterised_csi_form() {
         assert_eq!(
-            encode_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::ALT)).unwrap(),
+            encode_key(Key::new(KeyCode::Backspace, Modifiers::ALT)).unwrap(),
             vec![0x1b, 0x7f]
         );
         assert_eq!(
-            encode_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::ALT)).unwrap(),
+            encode_key(Key::new(KeyCode::Enter, Modifiers::ALT)).unwrap(),
             b"\x1b\r"
         );
         assert_eq!(
-            encode_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::ALT)).unwrap(),
+            encode_key(Key::new(KeyCode::Esc, Modifiers::ALT)).unwrap(),
             vec![0x1b, 0x1b]
         );
     }
@@ -214,7 +193,7 @@ mod tests {
     #[test]
     fn alt_on_keys_with_a_parameterised_csi_form_uses_the_modifier_not_an_escape_prefix() {
         assert_eq!(
-            encode_key(KeyEvent::new(KeyCode::Left, KeyModifiers::ALT)).unwrap(),
+            encode_key(Key::new(KeyCode::Left, Modifiers::ALT)).unwrap(),
             b"\x1b[1;3D"
         );
     }
@@ -224,8 +203,8 @@ mod tests {
         assert!(encode_key(key(KeyCode::F(13))).is_none());
     }
 
-    fn modified(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
-        KeyEvent::new(code, modifiers)
+    fn modified(code: KeyCode, mods: Modifiers) -> Key {
+        Key::new(code, mods)
     }
 
     #[test]
@@ -254,19 +233,19 @@ mod tests {
     #[test]
     fn ctrl_arrows_use_the_xterm_modifier_parameter() {
         assert_eq!(
-            encode_key(modified(KeyCode::Left, KeyModifiers::CONTROL)).unwrap(),
+            encode_key(modified(KeyCode::Left, Modifiers::CTRL)).unwrap(),
             b"\x1b[1;5D"
         );
         assert_eq!(
-            encode_key(modified(KeyCode::Right, KeyModifiers::CONTROL)).unwrap(),
+            encode_key(modified(KeyCode::Right, Modifiers::CTRL)).unwrap(),
             b"\x1b[1;5C"
         );
         assert_eq!(
-            encode_key(modified(KeyCode::Up, KeyModifiers::CONTROL)).unwrap(),
+            encode_key(modified(KeyCode::Up, Modifiers::CTRL)).unwrap(),
             b"\x1b[1;5A"
         );
         assert_eq!(
-            encode_key(modified(KeyCode::Down, KeyModifiers::CONTROL)).unwrap(),
+            encode_key(modified(KeyCode::Down, Modifiers::CTRL)).unwrap(),
             b"\x1b[1;5B"
         );
     }
@@ -274,11 +253,11 @@ mod tests {
     #[test]
     fn alt_arrows_use_the_xterm_modifier_parameter() {
         assert_eq!(
-            encode_key(modified(KeyCode::Up, KeyModifiers::ALT)).unwrap(),
+            encode_key(modified(KeyCode::Up, Modifiers::ALT)).unwrap(),
             b"\x1b[1;3A"
         );
         assert_eq!(
-            encode_key(modified(KeyCode::Left, KeyModifiers::ALT)).unwrap(),
+            encode_key(modified(KeyCode::Left, Modifiers::ALT)).unwrap(),
             b"\x1b[1;3D"
         );
     }
@@ -286,14 +265,18 @@ mod tests {
     #[test]
     fn shift_arrows_use_the_xterm_modifier_parameter() {
         assert_eq!(
-            encode_key(modified(KeyCode::Up, KeyModifiers::SHIFT)).unwrap(),
+            encode_key(modified(KeyCode::Up, Modifiers::SHIFT)).unwrap(),
             b"\x1b[1;2A"
         );
     }
 
     #[test]
     fn combined_modifiers_sum_into_the_parameter() {
-        let ctrl_alt_shift = KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SHIFT;
+        let ctrl_alt_shift = Modifiers {
+            shift: true,
+            alt: true,
+            ctrl: true,
+        };
         assert_eq!(
             encode_key(modified(KeyCode::Up, ctrl_alt_shift)).unwrap(),
             b"\x1b[1;8A"
@@ -303,11 +286,11 @@ mod tests {
     #[test]
     fn modified_home_and_end_use_the_xterm_modifier_parameter() {
         assert_eq!(
-            encode_key(modified(KeyCode::Home, KeyModifiers::CONTROL)).unwrap(),
+            encode_key(modified(KeyCode::Home, Modifiers::CTRL)).unwrap(),
             b"\x1b[1;5H"
         );
         assert_eq!(
-            encode_key(modified(KeyCode::End, KeyModifiers::CONTROL)).unwrap(),
+            encode_key(modified(KeyCode::End, Modifiers::CTRL)).unwrap(),
             b"\x1b[1;5F"
         );
     }
@@ -315,19 +298,19 @@ mod tests {
     #[test]
     fn modified_tilde_keys_add_the_modifier_parameter() {
         assert_eq!(
-            encode_key(modified(KeyCode::PageUp, KeyModifiers::CONTROL)).unwrap(),
+            encode_key(modified(KeyCode::PageUp, Modifiers::CTRL)).unwrap(),
             b"\x1b[5;5~"
         );
         assert_eq!(
-            encode_key(modified(KeyCode::PageDown, KeyModifiers::CONTROL)).unwrap(),
+            encode_key(modified(KeyCode::PageDown, Modifiers::CTRL)).unwrap(),
             b"\x1b[6;5~"
         );
         assert_eq!(
-            encode_key(modified(KeyCode::Insert, KeyModifiers::CONTROL)).unwrap(),
+            encode_key(modified(KeyCode::Insert, Modifiers::CTRL)).unwrap(),
             b"\x1b[2;5~"
         );
         assert_eq!(
-            encode_key(modified(KeyCode::Delete, KeyModifiers::CONTROL)).unwrap(),
+            encode_key(modified(KeyCode::Delete, Modifiers::CTRL)).unwrap(),
             b"\x1b[3;5~"
         );
     }
@@ -335,11 +318,11 @@ mod tests {
     #[test]
     fn modified_low_function_keys_use_the_csi_form() {
         assert_eq!(
-            encode_key(modified(KeyCode::F(1), KeyModifiers::CONTROL)).unwrap(),
+            encode_key(modified(KeyCode::F(1), Modifiers::CTRL)).unwrap(),
             b"\x1b[1;5P"
         );
         assert_eq!(
-            encode_key(modified(KeyCode::F(4), KeyModifiers::ALT)).unwrap(),
+            encode_key(modified(KeyCode::F(4), Modifiers::ALT)).unwrap(),
             b"\x1b[1;3S"
         );
     }
@@ -347,11 +330,11 @@ mod tests {
     #[test]
     fn modified_high_function_keys_add_the_modifier_parameter() {
         assert_eq!(
-            encode_key(modified(KeyCode::F(5), KeyModifiers::CONTROL)).unwrap(),
+            encode_key(modified(KeyCode::F(5), Modifiers::CTRL)).unwrap(),
             b"\x1b[15;5~"
         );
         assert_eq!(
-            encode_key(modified(KeyCode::F(12), KeyModifiers::ALT)).unwrap(),
+            encode_key(modified(KeyCode::F(12), Modifiers::ALT)).unwrap(),
             b"\x1b[24;3~"
         );
     }
@@ -360,42 +343,60 @@ mod tests {
     fn key_spec_builds_control_and_meta_specs() {
         use super::key_spec;
 
-        let ctrl_x = KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL);
-        assert_eq!(key_spec(&ctrl_x).as_deref(), Some("C-x"));
+        let ctrl_x = Key::new(KeyCode::Char('x'), Modifiers::CTRL);
+        assert_eq!(key_spec(&ctrl_x), "C-x");
 
-        let alt_left = modified(KeyCode::Left, KeyModifiers::ALT);
-        assert_eq!(key_spec(&alt_left).as_deref(), Some("M-Left"));
+        let alt_left = modified(KeyCode::Left, Modifiers::ALT);
+        assert_eq!(key_spec(&alt_left), "M-Left");
 
         let dot = key(KeyCode::Char('.'));
-        assert_eq!(key_spec(&dot).as_deref(), Some("."));
+        assert_eq!(key_spec(&dot), ".");
     }
 
+    /// Every key form the decoder produces has to survive the trip back to the bytes a
+    /// terminal would have sent, because that is the trip a keystroke makes into a pane.
     #[test]
-    fn key_spec_is_none_for_release_events() {
-        use super::key_spec;
-        use crossterm::event::KeyEventKind;
-
-        let released = KeyEvent::new_with_kind(
-            KeyCode::Char('a'),
-            KeyModifiers::NONE,
-            KeyEventKind::Release,
-        );
-        assert_eq!(key_spec(&released), None);
-    }
-
-    #[test]
-    fn only_press_and_repeat_produce_bytes() {
-        use crossterm::event::KeyEventKind;
-
-        let released = KeyEvent::new_with_kind(
-            KeyCode::Char('a'),
-            KeyModifiers::NONE,
-            KeyEventKind::Release,
-        );
-        assert!(encode_key(released).is_none());
-
-        let repeated =
-            KeyEvent::new_with_kind(KeyCode::Char('a'), KeyModifiers::NONE, KeyEventKind::Repeat);
-        assert_eq!(encode_key(repeated).unwrap(), b"a");
+    fn decoding_bytes_and_encoding_them_again_is_the_identity() {
+        for bytes in [
+            &b"a"[..],
+            "あ".as_bytes(),
+            &[0x02],
+            b"\r",
+            b"\t",
+            &[0x7f],
+            &[0x1b],
+            b"\x1ba",
+            b"\x1b[A",
+            b"\x1b[B",
+            b"\x1b[C",
+            b"\x1b[D",
+            b"\x1b[H",
+            b"\x1b[F",
+            b"\x1b[Z",
+            b"\x1b[2~",
+            b"\x1b[3~",
+            b"\x1b[5~",
+            b"\x1b[6~",
+            b"\x1b[15~",
+            b"\x1b[24~",
+            b"\x1bOP",
+            b"\x1bOS",
+            b"\x1b[1;5D",
+            b"\x1b[1;3A",
+            b"\x1b[1;2A",
+            b"\x1b[1;8A",
+            b"\x1b[5;5~",
+            b"\x1b[24;3~",
+            b"\x1b[1;5P",
+        ] {
+            let keys = crate::decode::Decoder::default().feed(bytes);
+            assert_eq!(keys.len(), 1, "{bytes:?} did not decode to one key");
+            assert_eq!(
+                encode_key(keys[0]).as_deref(),
+                Some(bytes),
+                "{bytes:?} did not survive the round trip as {:?}",
+                keys[0]
+            );
+        }
     }
 }

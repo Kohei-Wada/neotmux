@@ -166,6 +166,25 @@ impl Neotmux {
         }
     }
 
+    /// Resizes the outer terminal. The kernel announces this to neotmux as `SIGWINCH` and in
+    /// no other way — nothing is sent on the terminal to say so — so this is the only way a
+    /// test can exercise the path a real resize takes.
+    pub fn resize(&mut self, rows: u16, cols: u16) {
+        self.master
+            .resize(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .expect("resize pty");
+        self.parser
+            .lock()
+            .unwrap()
+            .screen_mut()
+            .set_size(rows, cols);
+    }
+
     pub fn send(&mut self, s: &str) {
         self.writer.write_all(s.as_bytes()).expect("write to pty");
         self.writer.flush().expect("flush pty");
@@ -282,10 +301,46 @@ impl Neotmux {
             }
             assert!(
                 Instant::now() < deadline,
-                "marker {marker:?} never reached the log:\n{text}"
+                "marker {marker:?} never reached the log:\n{text}\n{}",
+                self.threads()
             );
             std::thread::sleep(Duration::from_millis(20));
         }
+    }
+
+    /// What every thread of the neotmux process is doing, as the kernel sees it: its state
+    /// letter and the function it is sleeping in. A `wait_for_log` that times out on a
+    /// runner nobody can reproduce on is otherwise a bare "it never said that" — this says
+    /// whether the loop is blocked in a read, spinning, or gone.
+    fn threads(&self) -> String {
+        let Some(pid) = self.child.process_id() else {
+            return "the process is already gone".to_string();
+        };
+        let Ok(tasks) = std::fs::read_dir(format!("/proc/{pid}/task")) else {
+            return format!("no /proc/{pid}/task to read");
+        };
+        let mut report = format!("threads of neotmux ({pid}):");
+        for task in tasks.flatten() {
+            let dir = task.path();
+            let read = |name: &str| {
+                std::fs::read_to_string(dir.join(name))
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string()
+            };
+            let stat = read("stat");
+            let state = stat
+                .rsplit_once(')')
+                .and_then(|(_, rest)| rest.split_whitespace().next().map(str::to_string))
+                .unwrap_or_default();
+            report.push_str(&format!(
+                "\n  {} {} state={state} wchan={}",
+                task.file_name().to_string_lossy(),
+                read("comm"),
+                read("wchan"),
+            ));
+        }
+        report
     }
 
     pub fn log_text(&self) -> String {
@@ -338,6 +393,5 @@ impl Drop for Neotmux {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
-        let _ = &self.master;
     }
 }

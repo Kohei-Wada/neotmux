@@ -753,7 +753,6 @@ name = "neotmux"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "crossterm",
  "neotmux-core",
  "neotmux-lua",
  "neotmux-term",
