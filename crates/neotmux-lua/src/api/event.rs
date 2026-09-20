@@ -1,68 +1,44 @@
+//! Turning an [`Event`] into what a Lua subscriber is handed.
+//!
+//! The event itself is a `proto` type: it is raised where the panes are and dispatched where
+//! the plugins are, which from M3 are two processes. What it looks like in Lua is this
+//! layer's business and stays here.
+
 use mlua::{Lua, LuaString, Table};
 
-use neotmux_proto::{PaneId, Size, WindowId};
+use neotmux_proto::Event;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Event {
-    PaneOutput { pane: PaneId, bytes: Vec<u8> },
-    Resized { size: Size },
-    PaneOpened { pane: PaneId },
-    PaneClosed { pane: PaneId },
-    FocusChanged { pane: PaneId },
-    WindowOpened { window: WindowId },
-    WindowClosed { window: WindowId },
-    WindowChanged { window: WindowId },
+/// `pane_output`'s bytes are the only payload expensive enough to copy per subscriber, so
+/// build the Lua string for it once, up front.
+pub(crate) fn shared_bytes(event: &Event, lua: &Lua) -> mlua::Result<Option<LuaString>> {
+    match event {
+        Event::PaneOutput { bytes, .. } => Ok(Some(lua.create_string(bytes)?)),
+        _ => Ok(None),
+    }
 }
 
-impl Event {
-    pub fn name(&self) -> &'static str {
-        match self {
-            Event::PaneOutput { .. } => "pane_output",
-            Event::Resized { .. } => "resized",
-            Event::PaneOpened { .. } => "pane_opened",
-            Event::PaneClosed { .. } => "pane_closed",
-            Event::FocusChanged { .. } => "focus_changed",
-            Event::WindowOpened { .. } => "window_opened",
-            Event::WindowClosed { .. } => "window_closed",
-            Event::WindowChanged { .. } => "window_changed",
+/// A fresh table per subscriber: sharing one table would let a subscriber's edit
+/// (e.g. `e.bytes = processed`) leak into what the next subscriber sees.
+pub(crate) fn table(event: &Event, lua: &Lua, bytes: Option<&LuaString>) -> mlua::Result<Table> {
+    let table = lua.create_table()?;
+    match event {
+        Event::PaneOutput { pane, .. } => {
+            table.set("pane", pane.get())?;
+            let bytes = bytes.expect("pane_output always carries a shared bytes string");
+            table.set("bytes", bytes.clone())?;
+        }
+        Event::Resized { size } => {
+            table.set("rows", size.rows)?;
+            table.set("cols", size.cols)?;
+        }
+        Event::PaneOpened { pane } | Event::PaneClosed { pane } | Event::FocusChanged { pane } => {
+            table.set("pane", pane.get())?;
+        }
+        Event::WindowOpened { window }
+        | Event::WindowClosed { window }
+        | Event::WindowChanged { window } => {
+            table.set("window", window.get())?;
         }
     }
-
-    /// `pane_output`'s bytes are the only payload expensive enough to copy
-    /// per subscriber, so build the Lua string for it once, up front.
-    pub(crate) fn shared_bytes(&self, lua: &Lua) -> mlua::Result<Option<LuaString>> {
-        match self {
-            Event::PaneOutput { bytes, .. } => Ok(Some(lua.create_string(bytes)?)),
-            _ => Ok(None),
-        }
-    }
-
-    /// A fresh table per subscriber: sharing one table would let a
-    /// subscriber's edit (e.g. `e.bytes = processed`) leak into what the
-    /// next subscriber sees.
-    pub(crate) fn table(&self, lua: &Lua, bytes: Option<&LuaString>) -> mlua::Result<Table> {
-        let table = lua.create_table()?;
-        match self {
-            Event::PaneOutput { pane, .. } => {
-                table.set("pane", pane.get())?;
-                let bytes = bytes.expect("pane_output always carries a shared bytes string");
-                table.set("bytes", bytes.clone())?;
-            }
-            Event::Resized { size } => {
-                table.set("rows", size.rows)?;
-                table.set("cols", size.cols)?;
-            }
-            Event::PaneOpened { pane }
-            | Event::PaneClosed { pane }
-            | Event::FocusChanged { pane } => {
-                table.set("pane", pane.get())?;
-            }
-            Event::WindowOpened { window }
-            | Event::WindowClosed { window }
-            | Event::WindowChanged { window } => {
-                table.set("window", window.get())?;
-            }
-        }
-        Ok(table)
-    }
+    Ok(table)
 }

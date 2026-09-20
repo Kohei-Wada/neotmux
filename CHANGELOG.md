@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+### Two processes, one socket
+
+Neotmux is now a server that holds the session and a client that holds the terminal, talking
+over a unix socket at `$XDG_RUNTIME_DIR/neotmux/default.sock` — `/tmp/neotmux-<uid>/` where
+that variable is unset, and one file per session so that a second session is a second name in
+the same directory rather than a protocol. Running `neotmux` still just starts neotmux: with
+nothing listening it starts the server itself and then attaches to it.
+
+The server owns the panes, their children, the layout and the terminal state behind each
+pane. The client owns the terminal, raw mode, key decoding, the drawing — **and the Lua
+layer**, which is where M3 puts it: the server holds other people's long-running jobs, so a
+plugin that freezes should cost one client rather than every session. A frame is one exchange:
+the server says what happened and what the session looks like, the client ticks its plugins
+against it and answers with the ops they raised and what they drew, and the server applies
+that and sends back the picture. Keys that no plugin bound, resizes, and the pane reads
+`neotmux.pane.content` makes all cross the same socket.
+
+`neotmux.clipboard.set` writes OSC 52 to standard output, and standard output is now the
+client's terminal in the process that runs the plugin — the same terminal ratatui draws on,
+which is what the call always claimed.
+
+Nothing about using neotmux changed. Two things are worth knowing. A session outlives the
+client that was looking at it by a few seconds rather than dying with it, which is the shape
+detach and attach need; while it has a client, a second one is turned away with a reason
+rather than left waiting. And `PROTOCOL_VERSION` is 2: a client and a server built from
+different commits refuse each other by name and number rather than trying to survive it, so
+replacing the binary under a running session means restarting it.
+
 ### Pasting more than 1024 bytes
 
 A paste larger than 1024 bytes used to lose its tail. Exactly one bufferful arrived; the rest

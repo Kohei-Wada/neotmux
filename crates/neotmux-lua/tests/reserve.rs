@@ -3,9 +3,11 @@
 
 use std::fs;
 
+use neotmux_lua::LuaSubsystem;
 use neotmux_lua::runtime::Layers;
-use neotmux_lua::{Geometry, LuaSubsystem};
-use neotmux_proto::{DrawCmd, Epoch, PaneId, Rect, Reserved, Size};
+use neotmux_proto::{DrawCmd, Epoch, Geometry, PaneId, Rect, Reserved, Size};
+
+mod support;
 
 const SURFACE: Size = Size { rows: 24, cols: 80 };
 
@@ -16,7 +18,11 @@ fn built(files: &[(&str, &str)]) -> (tempfile::TempDir, LuaSubsystem) {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, body).unwrap();
     }
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     assert!(sub.run_init().is_empty());
     (dir, sub)
 }

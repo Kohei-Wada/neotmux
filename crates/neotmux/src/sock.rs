@@ -1,0 +1,312 @@
+//! Where the socket lives, and how one neotmux tells a live server from the file a dead one
+//! left behind.
+//!
+//! The path is `$XDG_RUNTIME_DIR/neotmux/<session>.sock`, falling back to
+//! `/tmp/neotmux-<uid>/<session>.sock` where that variable is unset. One socket per session
+//! rather than one per server with the sessions named inside it, which is tmux's
+//! arrangement: the whole point of M3 is that a session's cost is its own, and a file per
+//! session means killing one, finding one, or listing them is `ls` rather than a protocol.
+//! There is one name today — `default` — and the directory is what will hold the rest.
+//!
+//! The permissions are set rather than left to `umask`: the directory is `0700` and the
+//! socket `0600`, and a directory that is already there is checked to be a directory, ours,
+//! and no more open than that before anything is put in it. On `$XDG_RUNTIME_DIR` that is
+//! belt and braces; under `/tmp`, where anyone can create a name, it is the whole defence.
+
+use std::fs;
+use std::io;
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
+use std::os::unix::net::{UnixListener, UnixStream};
+use std::path::{Path, PathBuf};
+
+use anyhow::Context as _;
+
+/// The only session name there is until more than one session is a thing.
+const DEFAULT_SESSION: &str = "default";
+
+const DIR_MODE: u32 = 0o700;
+const SOCKET_MODE: u32 = 0o600;
+
+/// The socket and the lock beside it.
+pub struct Paths {
+    pub socket: PathBuf,
+    pub lock: PathBuf,
+}
+
+impl Paths {
+    pub fn resolve(env: &dyn Fn(&str) -> Option<std::ffi::OsString>) -> anyhow::Result<Self> {
+        let dir = runtime_dir(env);
+        make_dir(&dir).with_context(|| format!("prepare {}", dir.display()))?;
+        Ok(Self {
+            socket: dir.join(format!("{DEFAULT_SESSION}.sock")),
+            lock: dir.join(format!("{DEFAULT_SESSION}.lock")),
+        })
+    }
+}
+
+fn runtime_dir(env: &dyn Fn(&str) -> Option<std::ffi::OsString>) -> PathBuf {
+    match env("XDG_RUNTIME_DIR")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+    {
+        Some(xdg) => xdg.join("neotmux"),
+        // Keyed by uid, because `/tmp` is shared and a bare `neotmux` there would be the
+        // first user to log in owning the name for everybody.
+        None => PathBuf::from(format!("/tmp/neotmux-{}", nix::unistd::getuid())),
+    }
+}
+
+/// Makes the directory `0700` and refuses one that is not a directory, not ours, or open to
+/// anyone else. `create_dir` is subject to `umask`, so the mode is set afterwards either way.
+fn make_dir(dir: &Path) -> anyhow::Result<()> {
+    match fs::DirBuilder::new().mode(DIR_MODE).create(dir) {
+        Ok(()) => {}
+        Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {}
+        Err(err) => return Err(err.into()),
+    }
+    // Not `metadata`: a symlink planted where the directory should be must be seen as a
+    // symlink rather than followed to wherever it points.
+    let meta = fs::symlink_metadata(dir)?;
+    anyhow::ensure!(meta.is_dir(), "{} is not a directory", dir.display());
+    anyhow::ensure!(
+        meta.uid() == nix::unistd::getuid().as_raw(),
+        "{} belongs to uid {} rather than to you",
+        dir.display(),
+        meta.uid()
+    );
+    fs::set_permissions(dir, fs::Permissions::from_mode(DIR_MODE))?;
+    Ok(())
+}
+
+/// Whether a server is listening on `socket` right now.
+///
+/// Asked by connecting, which is the only question with no race in it: a listening server
+/// answers a connect at every instant of its life, and a socket file with nothing behind it
+/// answers `ECONNREFUSED`. Anything else — a full backlog, a permission error — is neither
+/// "dead" nor an invitation to delete the file, so it counts as busy.
+pub fn connect(socket: &Path) -> io::Result<Option<UnixStream>> {
+    match UnixStream::connect(socket) {
+        Ok(stream) => Ok(Some(stream)),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(err) if err.kind() == io::ErrorKind::ConnectionRefused => Ok(None),
+        Err(err) => Err(err),
+    }
+}
+
+/// The right to be the server for this session, held for as long as the process lives.
+///
+/// Connecting says whether a server is listening; it does not say that no *other* process is
+/// between that question and its own `bind`. This does: whoever holds the lock is the one
+/// allowed to unlink a refused socket and put a new one there, so two neotmuxes starting at
+/// the same instant cannot both decide the socket is stale and cannot clobber each other —
+/// and neither can clobber a live server, because the lock holder connects first and stands
+/// down if anything answers.
+pub struct Lock {
+    _held: nix::fcntl::Flock<fs::File>,
+}
+
+impl Lock {
+    /// `None` when somebody else holds it, which means somebody else is already becoming the
+    /// server for this session.
+    pub fn take(paths: &Paths) -> anyhow::Result<Option<Self>> {
+        let file = fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .mode(SOCKET_MODE)
+            .open(&paths.lock)
+            .with_context(|| format!("open {}", paths.lock.display()))?;
+        match nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusiveNonblock) {
+            Ok(held) => Ok(Some(Self { _held: held })),
+            Err((_, nix::errno::Errno::EWOULDBLOCK)) => Ok(None),
+            Err((_, err)) => Err(err).context("lock the session"),
+        }
+    }
+}
+
+/// Binds the session's socket, replacing one a dead server left behind. Only ever called
+/// under [`Lock`].
+pub fn bind(paths: &Paths) -> anyhow::Result<Option<UnixListener>> {
+    if connect(&paths.socket)?.is_some() {
+        // Somebody won the race between the lock and here, or was already serving when we
+        // took a lock nobody else wanted. Either way this process is not the server.
+        return Ok(None);
+    }
+    match fs::remove_file(&paths.socket) {
+        Ok(()) => {}
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+        Err(err) => return Err(err).context("replace the stale socket"),
+    }
+    let listener = UnixListener::bind(&paths.socket)
+        .with_context(|| format!("bind {}", paths.socket.display()))?;
+    // After the bind rather than through `umask`, which is the caller's and not ours. The
+    // window is covered by the directory, which nobody else can even enter.
+    fs::set_permissions(&paths.socket, fs::Permissions::from_mode(SOCKET_MODE))?;
+    Ok(Some(listener))
+}
+
+/// Takes the socket away on the way out — but only if it is still the one this server bound.
+///
+/// A server whose directory was emptied under it, or that outlived a replacement, would
+/// otherwise unlink the *next* server's socket on its way out and leave a live server
+/// nobody can reach. The name is not the identity; the inode is.
+pub fn unbind(paths: &Paths, bound: &UnixListener) {
+    let Ok(ours) = bound.local_addr().and_then(|addr| {
+        addr.as_pathname()
+            .map(fs::symlink_metadata)
+            .unwrap_or_else(|| Err(io::Error::other("an unnamed socket")))
+    }) else {
+        return;
+    };
+    let Ok(there) = fs::symlink_metadata(&paths.socket) else {
+        return;
+    };
+    if (there.dev(), there.ino()) == (ours.dev(), ours.ino()) {
+        let _ = fs::remove_file(&paths.socket);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn env(value: Option<&str>) -> impl Fn(&str) -> Option<std::ffi::OsString> + use<> {
+        let value = value.map(std::ffi::OsString::from);
+        move |key| (key == "XDG_RUNTIME_DIR").then(|| value.clone()).flatten()
+    }
+
+    #[test]
+    fn the_runtime_dir_follows_xdg_when_it_is_set_to_an_absolute_path() {
+        assert_eq!(
+            runtime_dir(&env(Some("/run/user/1000"))),
+            PathBuf::from("/run/user/1000/neotmux")
+        );
+    }
+
+    /// `/tmp` is shared, so the name has to be one user's or the first person to log in owns
+    /// it for everybody. An empty or relative `XDG_RUNTIME_DIR` is no answer at all.
+    #[test]
+    fn without_xdg_the_directory_is_keyed_by_uid_under_tmp() {
+        let uid = nix::unistd::getuid();
+        for unusable in [None, Some(""), Some("relative/path")] {
+            assert_eq!(
+                runtime_dir(&env(unusable)),
+                PathBuf::from(format!("/tmp/neotmux-{uid}")),
+                "{unusable:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_missing_directory_is_made_private_rather_than_left_to_the_umask() {
+        let parent = tempfile::tempdir().expect("tempdir");
+        let dir = parent.path().join("neotmux");
+        make_dir(&dir).expect("make the directory");
+        let mode = fs::symlink_metadata(&dir)
+            .expect("stat")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, DIR_MODE, "{mode:o}");
+    }
+
+    #[test]
+    fn a_directory_left_open_to_everyone_is_closed_again() {
+        let parent = tempfile::tempdir().expect("tempdir");
+        let dir = parent.path().join("neotmux");
+        fs::create_dir(&dir).expect("create");
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o777)).expect("open it up");
+        make_dir(&dir).expect("make the directory");
+        let mode = fs::symlink_metadata(&dir)
+            .expect("stat")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, DIR_MODE, "{mode:o}");
+    }
+
+    #[test]
+    fn something_that_is_not_a_directory_is_refused_rather_than_used() {
+        let parent = tempfile::tempdir().expect("tempdir");
+        let path = parent.path().join("neotmux");
+        fs::write(&path, b"not a directory").expect("write");
+        assert!(make_dir(&path).is_err());
+    }
+
+    #[test]
+    fn a_socket_nobody_is_listening_on_is_reported_as_nobody_there() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let socket = dir.path().join("default.sock");
+        assert!(connect(&socket).expect("connect").is_none(), "no file");
+
+        let listener = UnixListener::bind(&socket).expect("bind");
+        assert!(connect(&socket).expect("connect").is_some());
+
+        // Given a moment: a connection the listener never accepted is still queued on it as
+        // it closes, and the kernel answers the next connect out of that queue until it has
+        // torn it down. What matters is that the file it leaves behind is not mistaken for a
+        // server, not how many microseconds that takes.
+        drop(listener);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while connect(&socket).expect("connect").is_some() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the file the dead listener left behind was taken for a live server"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+
+    #[test]
+    fn a_bind_replaces_the_socket_a_dead_server_left_and_makes_it_private() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = Paths {
+            socket: dir.path().join("default.sock"),
+            lock: dir.path().join("default.lock"),
+        };
+        drop(UnixListener::bind(&paths.socket).expect("bind a listener and drop it"));
+
+        let listener = bind(&paths).expect("bind").expect("nobody was listening");
+        assert!(connect(&paths.socket).expect("connect").is_some());
+        let mode = fs::symlink_metadata(&paths.socket)
+            .expect("stat")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, SOCKET_MODE, "{mode:o}");
+        drop(listener);
+    }
+
+    #[test]
+    fn a_bind_stands_down_rather_than_clobber_a_server_that_is_listening() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = Paths {
+            socket: dir.path().join("default.sock"),
+            lock: dir.path().join("default.lock"),
+        };
+        let live = UnixListener::bind(&paths.socket).expect("bind");
+
+        assert!(
+            bind(&paths).expect("bind").is_none(),
+            "a live server's socket was replaced"
+        );
+        assert!(connect(&paths.socket).expect("connect").is_some());
+        drop(live);
+    }
+
+    #[test]
+    fn only_one_process_at_a_time_holds_the_right_to_be_the_server() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = Paths {
+            socket: dir.path().join("default.sock"),
+            lock: dir.path().join("default.lock"),
+        };
+        let held = Lock::take(&paths).expect("take").expect("nobody held it");
+        // Same process, a second descriptor: `flock` is per open file description, so this
+        // is the contention another process would see.
+        assert!(
+            Lock::take(&paths).expect("take").is_none(),
+            "two processes could both have become the server"
+        );
+        drop(held);
+        assert!(Lock::take(&paths).expect("take").is_some());
+    }
+}

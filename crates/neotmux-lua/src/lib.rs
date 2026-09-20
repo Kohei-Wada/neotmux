@@ -1,7 +1,6 @@
 pub mod api;
 pub mod budget;
 pub mod draw;
-pub mod geometry;
 pub mod ops;
 pub mod overrun;
 mod paneinfo;
@@ -21,17 +20,17 @@ use std::time::Duration;
 use mlua::chunk::ChunkMode;
 use mlua::{Function, Lua, Value};
 
-use neotmux_proto::{DrawCmd, Epoch, Level, PaneId, PaneInfo, Reserved, Size, WindowId};
-use neotmux_term::terminals::PaneTerminals;
+use neotmux_proto::{
+    DrawCmd, Epoch, Event, Geometry, Level, PaneId, PaneInfo, Reserved, Size, WindowId,
+};
+use neotmux_term::read::PaneRead;
 
 pub use api::Opts;
-pub use api::event::Event;
 pub use api::keymap;
 
 use api::ctx::Ctx;
 use budget::{Budget, Outcome};
 use draw::Buffers;
-pub use geometry::{Geometry, Window};
 use ops::{Op, OpBuffer};
 use overrun::Overrun;
 use paneinfo::PaneInfos;
@@ -65,10 +64,6 @@ pub struct LuaSubsystem {
     buffers: Rc<Buffers>,
     geometry: Rc<RefCell<Geometry>>,
     pane_info: Rc<RefCell<PaneInfos>>,
-    /// Every pane's terminal, shared with the host: it feeds them, and `neotmux.pane.content`
-    /// reads them. Created here with the rest of the shared state because every binding is
-    /// wired at build time; the host takes its handle with `terminals()`.
-    terminals: Rc<PaneTerminals>,
     budget: Rc<Budget>,
     overrun: Rc<Overrun>,
     reservations: Rc<Reservations>,
@@ -76,7 +71,7 @@ pub struct LuaSubsystem {
 }
 
 impl LuaSubsystem {
-    pub fn build(layers: Layers) -> anyhow::Result<Self> {
+    pub fn build(layers: Layers, panes: Rc<dyn PaneRead>) -> anyhow::Result<Self> {
         let lua = vm::new_vm().map_err(|err| anyhow::anyhow!("{err:#}"))?;
         runtime::install(&lua, &layers).map_err(|err| anyhow::anyhow!("{err:#}"))?;
         let home = layers
@@ -92,7 +87,6 @@ impl LuaSubsystem {
         let load_failures = Rc::new(RefCell::new(Vec::new()));
         let geometry = Rc::new(RefCell::new(Geometry::default()));
         let pane_info = Rc::new(RefCell::new(PaneInfos::new()));
-        let terminals = Rc::new(PaneTerminals::new());
         let reservations = Rc::new(Reservations::new());
         let window_ids = Rc::new(WindowIds::new());
         let buffers = Rc::new(Buffers::new());
@@ -111,7 +105,7 @@ impl LuaSubsystem {
                 load_failures: load_failures.clone(),
                 geometry: geometry.clone(),
                 pane_info: pane_info.clone(),
-                terminals: terminals.clone(),
+                panes,
                 overrun: overrun.clone(),
                 reservations: reservations.clone(),
                 window_ids: window_ids.clone(),
@@ -132,7 +126,6 @@ impl LuaSubsystem {
             buffers,
             geometry,
             pane_info,
-            terminals,
             budget,
             overrun,
             reservations,
@@ -208,12 +201,6 @@ impl LuaSubsystem {
 
     /// The id the host gives the window it opens itself, before any Lua has run. Taken
     /// from the same counter `window.create()` draws on, so the two can never collide.
-    /// The terminals `neotmux.pane.content` reads. The host takes this handle and feeds them;
-    /// nothing is copied out of them until a plugin asks.
-    pub fn terminals(&self) -> Rc<PaneTerminals> {
-        self.terminals.clone()
-    }
-
     pub fn reserve_window_id(&self) -> WindowId {
         self.window_ids.take()
     }
@@ -444,7 +431,7 @@ impl LuaSubsystem {
             return;
         }
 
-        let bytes = match event.shared_bytes(&self.lua) {
+        let bytes = match api::event::shared_bytes(event, &self.lua) {
             Ok(bytes) => bytes,
             Err(err) => {
                 let name = event.name();
@@ -467,7 +454,7 @@ impl LuaSubsystem {
             let Ok(func) = self.lua.registry_value::<Function>(&callback) else {
                 continue;
             };
-            let table = match event.table(&self.lua, bytes.as_ref()) {
+            let table = match api::event::table(event, &self.lua, bytes.as_ref()) {
                 Ok(table) => table,
                 Err(err) => {
                     let name = event.name();
@@ -480,6 +467,15 @@ impl LuaSubsystem {
                 self.report(owner, &err);
             }
         }
+    }
+
+    /// Whether anything is subscribed to an event. The host asks about `pane_output` before
+    /// it copies a pane's bytes across a socket for nobody.
+    pub fn has_subscriber(&self, event: &str) -> bool {
+        self.registry
+            .snapshot(KindTag::Event)
+            .into_iter()
+            .any(|id| matches!(self.registry.kind(id), Some(Kind::Event(name)) if name == event))
     }
 
     pub fn frame_output(&self) -> Vec<DrawCmd> {

@@ -3,9 +3,8 @@ use std::rc::Rc;
 
 use mlua::{Lua, Table, Value};
 
-use neotmux_proto::WindowId;
+use neotmux_proto::{Geometry, WindowId};
 
-use crate::geometry::Geometry;
 use crate::ops::{Op, OpBuffer};
 use crate::source::{self, Sources};
 use crate::window::WindowIds;

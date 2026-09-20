@@ -1,10 +1,12 @@
 use std::fs;
 
+use neotmux_lua::LuaSubsystem;
 use neotmux_lua::ops::Op;
 use neotmux_lua::registry::KindTag;
 use neotmux_lua::runtime::Layers;
-use neotmux_lua::{Geometry, LuaSubsystem};
-use neotmux_proto::{DrawCmd, Epoch, Level, PaneId, Rect, Size};
+use neotmux_proto::{DrawCmd, Epoch, Geometry, Level, PaneId, Rect, Size};
+
+mod support;
 
 fn built(files: &[(&str, &str)]) -> (tempfile::TempDir, LuaSubsystem) {
     let dir = tempfile::tempdir().unwrap();
@@ -13,7 +15,11 @@ fn built(files: &[(&str, &str)]) -> (tempfile::TempDir, LuaSubsystem) {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, body).unwrap();
     }
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     assert!(sub.run_init().is_empty());
     (dir, sub)
 }
@@ -486,7 +492,7 @@ fn built_layers(layers: &[&[(&str, &str)]]) -> (Vec<tempfile::TempDir>, LuaSubsy
         dirs.push(dir);
     }
     let paths = dirs.iter().map(|d| d.path().to_path_buf()).collect();
-    let sub = LuaSubsystem::build(Layers::from_paths(paths)).unwrap();
+    let sub = LuaSubsystem::build(Layers::from_paths(paths), support::panes()).unwrap();
     assert!(sub.run_init().is_empty());
     (dirs, sub)
 }

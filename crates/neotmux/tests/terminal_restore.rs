@@ -32,6 +32,7 @@ fn run_in_pty_sized(
     cmd.env("TERM", "xterm-256color");
     cmd.env("HOME", isolation.path());
     cmd.env("XDG_CONFIG_HOME", isolation.path());
+    cmd.env("XDG_RUNTIME_DIR", isolation.path());
     cmd.arg("--log");
     cmd.arg(&log);
     for (k, v) in env {
@@ -134,6 +135,7 @@ fn send_signal_and_capture(sig: Signal) -> (bool, Option<String>, Termios) {
     cmd.env("SHELL", "/bin/sh");
     cmd.env("HOME", isolation.path());
     cmd.env("XDG_CONFIG_HOME", isolation.path());
+    cmd.env("XDG_RUNTIME_DIR", isolation.path());
     cmd.arg("--log");
     cmd.arg(&log);
     let mut child = pair.slave.spawn_command(cmd).expect("spawn");
@@ -371,6 +373,7 @@ impl AbandonedTerminal {
         cmd.env("SHELL", "/bin/cat");
         cmd.env("HOME", isolation.path());
         cmd.env("XDG_CONFIG_HOME", isolation.path());
+        cmd.env("XDG_RUNTIME_DIR", isolation.path());
         cmd.arg("--log");
         cmd.arg(isolation.path().join("neotmux.log"));
         let child = pair.slave.spawn_command(cmd).expect("spawn");

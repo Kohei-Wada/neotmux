@@ -1,7 +1,7 @@
-use neotmux_proto::{PaneId, Rect, Size, WindowId};
+use crate::{PaneId, Rect, Size, WindowId};
 
 /// A window as Lua can ask about it: its id, and the panes it holds in layout order.
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Window {
     pub id: WindowId,
     /// Left to right, top to bottom. A hidden window's order is the one it was last
@@ -17,7 +17,7 @@ pub struct Window {
 /// `panes` and `focus` are the **current** window's. A pane in a hidden window is not
 /// in the list: Lua asks about the session in front of the user, and a plugin that wants to
 /// know what else exists asks `window.list()` and `window.panes(id)`.
-#[derive(Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Geometry {
     pub size: Size,
     pub panes: Vec<(PaneId, Rect)>,

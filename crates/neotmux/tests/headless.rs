@@ -1,18 +1,21 @@
-//! A session driven with no terminal at all: no ratatui, no `/dev/tty`, no signal handler.
-//! It is told how big its surface is, handed keys, stepped a frame at a time, and read back
-//! out of the frames it produces. This is the property the library exists for, so it is
-//! tested as a property rather than through any of the session's internals.
+//! A session driven with no terminal at all: no ratatui, no `/dev/tty`, no signal handler,
+//! and no socket either. The two halves M3 puts in two processes — the session and the
+//! plugins — are both here, passing the same messages to each other across a function call.
+//! This is the property the library exists for, so it is tested as a property rather than
+//! through any of the session's internals.
 
 use std::fs;
 use std::time::{Duration, Instant};
 
-use neotmux::notify::Notifications;
-use neotmux::session::{End, Session};
+use neotmux::plugins::Plugins;
+use neotmux::session::Session;
+use neotmux_lua::KeyOutcome;
 use neotmux_lua::LuaSubsystem;
 use neotmux_lua::runtime::Layers;
 use neotmux_proto::frame::Frame;
 use neotmux_proto::keys::{Key, KeyCode};
-use neotmux_proto::{DrawCmd, Size};
+use neotmux_proto::msg::{Attach, End};
+use neotmux_proto::{DrawCmd, Reserved, Size, WindowId};
 use neotmux_term::wakeup::{Wakeup, wakeup};
 
 const SURFACE: Size = Size { rows: 10, cols: 40 };
@@ -20,23 +23,43 @@ const SURFACE: Size = Size { rows: 10, cols: 40 };
 /// small fraction of it.
 const PATIENCE: Duration = Duration::from_secs(20);
 
-fn lua(files: &[(&str, &str)]) -> (tempfile::TempDir, LuaSubsystem) {
+/// The two halves, wired to each other: the session with the panes in it, and the plugins
+/// that are told about them. A real client builds the Lua layer first and hands it the
+/// socket; here the session is built first and the Lua layer reads its terminals directly.
+fn halves(files: &[(&str, &str)]) -> (tempfile::TempDir, Wakeup, Session, Plugins) {
     let dir = tempfile::tempdir().expect("tempdir");
     for (rel, body) in files {
         let path = dir.path().join(rel);
         fs::create_dir_all(path.parent().expect("parent")).expect("create layer dir");
         fs::write(path, body).expect("write layer file");
     }
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()]))
-        .expect("build the Lua subsystem");
-    assert!(sub.run_init().is_empty(), "the layer failed to load");
-    (dir, sub)
+    let (wakeup, waker) = wakeup().expect("wakeup");
+    let session = Session::new(
+        &Attach {
+            size: SURFACE,
+            first_window: WindowId::from(1),
+            reserved: Reserved::default(),
+            gutter: 0,
+            wants_pane_output: false,
+        },
+        waker,
+    )
+    .expect("start a session");
+    let lua = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        session.terminals().clone(),
+    )
+    .expect("build the Lua subsystem");
+    assert!(lua.run_init().is_empty(), "the layer failed to load");
+    (dir, wakeup, session, Plugins::new(lua))
 }
 
-fn session(lua: &LuaSubsystem) -> (Wakeup, Session) {
-    let (wakeup, waker) = wakeup().expect("wakeup");
-    let session = Session::new(SURFACE, lua, waker).expect("start a session");
-    (wakeup, session)
+/// A key as the client would offer it: to the plugins first, and on to the focused pane only
+/// if nobody wanted it.
+fn key(session: &mut Session, plugins: &Plugins, key: Key) {
+    if plugins.key(key) == KeyOutcome::Fallthrough {
+        session.key(key).expect("key");
+    }
 }
 
 fn typed(text: &str) -> Vec<Key> {
@@ -65,26 +88,38 @@ fn screen(frame: &Frame) -> String {
     out
 }
 
-/// Steps the session until `done` accepts a frame it produced, or patience runs out. The
-/// frames go nowhere: nothing draws them, and nothing here has a screen to draw them on.
+/// One whole frame: the session says what happened, the plugins tick against it, and the
+/// session turns what they asked for into the picture. The two messages are exactly the ones
+/// that cross the socket in the real thing.
+fn frame<'a>(session: &'a mut Session, plugins: &mut Plugins) -> neotmux::session::Pass<'a> {
+    let tick = session.tick().expect("tick");
+    let tock = plugins.respond(tick);
+    let mut pass = session.advance(&tock).expect("advance");
+    // What the ops did, told to the plugins before anything else happens — the same round
+    // the client keeps its keyboard out of.
+    plugins.catch_up(std::mem::take(&mut pass.steps));
+    pass
+}
+
+/// Runs frames until `done` accepts one, or patience runs out. The frames go nowhere:
+/// nothing draws them, and nothing here has a screen to draw them on.
 fn step_until(
     session: &mut Session,
-    lua: &LuaSubsystem,
-    notifications: &mut Notifications,
+    plugins: &mut Plugins,
     mut done: impl FnMut(&Frame) -> bool,
 ) -> bool {
     let deadline = Instant::now() + PATIENCE;
     while Instant::now() < deadline {
-        let step = session.advance(lua, notifications).expect("advance");
-        if let Some(frame) = &step.frame
-            && done(frame)
+        let pass = frame(session, plugins);
+        if let Some(shown) = &pass.frame
+            && done(shown)
         {
             return true;
         }
-        if step.end.is_some() {
+        if pass.end.is_some() {
             return false;
         }
-        drop(step);
+        drop(pass);
         std::thread::sleep(Duration::from_millis(5));
     }
     false
@@ -92,18 +127,16 @@ fn step_until(
 
 #[test]
 fn a_session_runs_with_no_terminal_and_what_was_typed_comes_back_in_a_frame() {
-    let (_dir, lua) = lua(&[("init.lua", "return {}")]);
-    let (_wakeup, mut session) = session(&lua);
-    let mut notifications = Notifications::new();
+    let (_dir, _wakeup, mut session, mut plugins) = halves(&[("init.lua", "return {}")]);
 
-    for key in typed("echo neotmux-is-headless\n") {
-        session.key(&lua, key).expect("key");
+    for typed in typed("echo neotmux-is-headless\n") {
+        key(&mut session, &plugins, typed);
     }
 
     // The line the child echoed back is the whole round trip: a key the session was handed
     // reached the shell, and the shell's output reached a frame the session produced.
     assert!(
-        step_until(&mut session, &lua, &mut notifications, |frame| {
+        step_until(&mut session, &mut plugins, |frame| {
             screen(frame).contains("neotmux-is-headless")
         }),
         "nothing the session was typed ever came back in a frame"
@@ -112,12 +145,10 @@ fn a_session_runs_with_no_terminal_and_what_was_typed_comes_back_in_a_frame() {
 
 #[test]
 fn a_frame_carries_the_pane_it_is_showing() {
-    let (_dir, lua) = lua(&[("init.lua", "return {}")]);
-    let (_wakeup, mut session) = session(&lua);
-    let mut notifications = Notifications::new();
+    let (_dir, _wakeup, mut session, mut plugins) = halves(&[("init.lua", "return {}")]);
 
-    let step = session.advance(&lua, &mut notifications).expect("advance");
-    let frame = step.frame.expect("the first frame is always produced");
+    let pass = frame(&mut session, &mut plugins);
+    let frame = pass.frame.expect("the first frame is always produced");
     assert_eq!(frame.size, SURFACE);
     assert_eq!(frame.panes.len(), 1, "one shell, one pane");
     let pane = &frame.panes[0];
@@ -130,7 +161,7 @@ fn a_frame_carries_the_pane_it_is_showing() {
 
 #[test]
 fn a_frame_carries_what_the_sources_drew_and_what_they_notified() {
-    let (_dir, lua) = lua(&[
+    let (_dir, _wakeup, mut session, mut plugins) = halves(&[
         ("init.lua", "require('plugin.painter')"),
         (
             "lua/plugin/painter.lua",
@@ -139,12 +170,10 @@ fn a_frame_carries_what_the_sources_drew_and_what_they_notified() {
              return {}",
         ),
     ]);
-    let (_wakeup, mut session) = session(&lua);
-    let mut notifications = Notifications::new();
-    // `notify` ran at load time, so its op is waiting where a host's own startup drain
-    // would have taken it; the first step takes it instead.
-    let step = session.advance(&lua, &mut notifications).expect("advance");
-    let frame = step.frame.expect("a frame");
+    // `notify` ran at load time, so its op is waiting where a client's own startup drain
+    // would have taken it; the first frame takes it instead.
+    let pass = frame(&mut session, &mut plugins);
+    let frame = pass.frame.expect("a frame");
 
     assert!(
         frame.overlay.iter().any(|cmd| matches!(
@@ -160,22 +189,20 @@ fn a_frame_carries_what_the_sources_drew_and_what_they_notified() {
 
 #[test]
 fn a_session_ends_when_its_last_shell_does_and_still_produces_that_frame() {
-    let (_dir, lua) = lua(&[("init.lua", "return {}")]);
-    let (_wakeup, mut session) = session(&lua);
-    let mut notifications = Notifications::new();
+    let (_dir, _wakeup, mut session, mut plugins) = halves(&[("init.lua", "return {}")]);
 
-    for key in typed("exit\n") {
-        session.key(&lua, key).expect("key");
+    for typed in typed("exit\n") {
+        key(&mut session, &plugins, typed);
     }
 
     let deadline = Instant::now() + PATIENCE;
     let mut ended = None;
     while Instant::now() < deadline && ended.is_none() {
-        let step = session.advance(&lua, &mut notifications).expect("advance");
-        if step.end.is_some() {
-            ended = Some((matches!(step.end, Some(End::Eof)), step.frame.is_some()));
+        let pass = frame(&mut session, &mut plugins);
+        if pass.end.is_some() {
+            ended = Some((matches!(pass.end, Some(End::Eof)), pass.frame.is_some()));
         } else {
-            drop(step);
+            drop(pass);
             std::thread::sleep(Duration::from_millis(5));
         }
     }

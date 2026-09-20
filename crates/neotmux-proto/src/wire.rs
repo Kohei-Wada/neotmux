@@ -13,10 +13,17 @@
 
 use std::fmt;
 
+use std::collections::BTreeMap;
+
 use crate::frame::{Frame, Notice, OwnedFrame, OwnedPaneFrame, PaneFrame};
 use crate::keys::{Key, KeyCode, Modifiers};
+use crate::msg::{
+    Attach, End, Extent, Lines, OwnedToClient, Read, Reading, SessionOp, Step, Tick, ToClient,
+    ToServer, Tock,
+};
 use crate::{
-    Color, DrawCmd, GridSnapshot, Level, PROTOCOL_VERSION, PaneId, PaneRects, Rect, Size, SnapCell,
+    Color, Dir, DrawCmd, Edge, Epoch, Event, Geometry, GridSnapshot, Level, PROTOCOL_VERSION,
+    PaneId, PaneInfo, PaneRects, Rect, Reserved, Size, SnapCell, SplitDir, Window, WindowId,
 };
 
 /// The length of the handshake, which is the one message with a fixed size.
@@ -72,50 +79,15 @@ pub fn decode_hello(bytes: &[u8]) -> Result<(), WireError> {
 
 pub fn encode_frame(frame: &Frame<'_>) -> Vec<u8> {
     let mut w = Writer::new();
-    w.size(frame.size);
-    w.len(frame.panes.len());
-    for pane in &frame.panes {
-        w.pane_frame(pane);
-    }
-    w.pane_rects(frame.rects);
-    w.opt_pane(frame.cursor);
-    w.len(frame.overlay.len());
-    for cmd in frame.overlay {
-        w.draw_cmd(cmd);
-    }
-    w.len(frame.notices.len());
-    for notice in &frame.notices {
-        w.notice(notice);
-    }
+    w.frame(frame);
     w.finish()
 }
 
 pub fn decode_frame(bytes: &[u8]) -> Result<OwnedFrame, WireError> {
     let mut r = Reader::new(bytes);
-    let size = r.size()?;
-    let mut panes = Vec::new();
-    for _ in 0..r.len()? {
-        panes.push(r.pane_frame()?);
-    }
-    let rects = r.pane_rects()?;
-    let cursor = r.opt_pane()?;
-    let mut overlay = Vec::new();
-    for _ in 0..r.len()? {
-        overlay.push(r.draw_cmd()?);
-    }
-    let mut notices = Vec::new();
-    for _ in 0..r.len()? {
-        notices.push(r.notice()?);
-    }
+    let frame = r.frame()?;
     r.finish()?;
-    Ok(OwnedFrame {
-        size,
-        panes,
-        rects,
-        cursor,
-        overlay,
-        notices,
-    })
+    Ok(frame)
 }
 
 pub fn encode_key(key: Key) -> Vec<u8> {
@@ -651,6 +623,865 @@ impl<'a> Reader<'a> {
     }
 }
 
+const TO_SERVER_ATTACH: u8 = 0;
+const TO_SERVER_KEY: u8 = 1;
+const TO_SERVER_RESIZE: u8 = 2;
+const TO_SERVER_READ: u8 = 3;
+const TO_SERVER_TOCK: u8 = 4;
+
+const TO_CLIENT_TICK: u8 = 0;
+const TO_CLIENT_DONE: u8 = 1;
+const TO_CLIENT_READING: u8 = 2;
+const TO_CLIENT_REFUSED: u8 = 3;
+
+const STEP_GEOMETRY: u8 = 0;
+const STEP_BANDS: u8 = 1;
+const STEP_EVENT: u8 = 2;
+
+const EVENT_PANE_OUTPUT: u8 = 0;
+const EVENT_RESIZED: u8 = 1;
+const EVENT_PANE_OPENED: u8 = 2;
+const EVENT_PANE_CLOSED: u8 = 3;
+const EVENT_FOCUS_CHANGED: u8 = 4;
+const EVENT_WINDOW_OPENED: u8 = 5;
+const EVENT_WINDOW_CLOSED: u8 = 6;
+const EVENT_WINDOW_CHANGED: u8 = 7;
+
+const OP_QUIT: u8 = 0;
+const OP_PANE_SPLIT: u8 = 1;
+const OP_PANE_FOCUS: u8 = 2;
+const OP_PANE_RESIZE: u8 = 3;
+const OP_WINDOW_CREATE: u8 = 4;
+const OP_WINDOW_FOCUS: u8 = 5;
+
+const SPLIT_HORIZONTAL: u8 = 0;
+const SPLIT_VERTICAL: u8 = 1;
+
+const DIR_LEFT: u8 = 0;
+const DIR_RIGHT: u8 = 1;
+const DIR_UP: u8 = 2;
+const DIR_DOWN: u8 = 3;
+
+const READ_REVISION: u8 = 0;
+const READ_CONTENT: u8 = 1;
+const READ_HISTORY_EXTENT: u8 = 2;
+const READ_HISTORY: u8 = 3;
+const READ_FREEZE: u8 = 4;
+const READ_UNFREEZE: u8 = 5;
+const READ_IS_FROZEN: u8 = 6;
+
+const READING_REVISION: u8 = 0;
+const READING_TEXT: u8 = 1;
+const READING_EXTENT: u8 = 2;
+const READING_DID: u8 = 3;
+const READING_FROZEN: u8 = 4;
+
+const END_QUIT: u8 = 0;
+const END_EOF: u8 = 1;
+
+pub fn encode_to_server(msg: &ToServer) -> Vec<u8> {
+    let mut w = Writer::new();
+    match msg {
+        ToServer::Attach(attach) => {
+            w.u8(TO_SERVER_ATTACH);
+            w.size(attach.size);
+            w.u32(attach.first_window.get());
+            w.reserved(attach.reserved);
+            w.u16(attach.gutter);
+            w.bool(attach.wants_pane_output);
+        }
+        ToServer::Key(key) => {
+            w.u8(TO_SERVER_KEY);
+            w.key(*key);
+        }
+        ToServer::Resize(size) => {
+            w.u8(TO_SERVER_RESIZE);
+            w.size(*size);
+        }
+        ToServer::Read(read) => {
+            w.u8(TO_SERVER_READ);
+            w.read(*read);
+        }
+        ToServer::Tock(tock) => {
+            w.u8(TO_SERVER_TOCK);
+            w.tock(tock);
+        }
+    }
+    w.finish()
+}
+
+pub fn decode_to_server(bytes: &[u8]) -> Result<ToServer, WireError> {
+    let mut r = Reader::new(bytes);
+    let msg = match r.u8()? {
+        TO_SERVER_ATTACH => ToServer::Attach(Attach {
+            size: r.size()?,
+            first_window: r.window()?,
+            reserved: r.reserved()?,
+            gutter: r.u16()?,
+            wants_pane_output: r.bool()?,
+        }),
+        TO_SERVER_KEY => ToServer::Key(r.key()?),
+        TO_SERVER_RESIZE => ToServer::Resize(r.size()?),
+        TO_SERVER_READ => ToServer::Read(r.read()?),
+        TO_SERVER_TOCK => ToServer::Tock(r.tock()?),
+        _ => return Err(WireError::Malformed("client message discriminant")),
+    };
+    r.finish()?;
+    Ok(msg)
+}
+
+pub fn encode_to_client(msg: &ToClient<'_>) -> Vec<u8> {
+    let mut w = Writer::new();
+    match msg {
+        ToClient::Tick(tick) => {
+            w.u8(TO_CLIENT_TICK);
+            w.tick(tick);
+        }
+        ToClient::Done(done) => {
+            w.u8(TO_CLIENT_DONE);
+            w.done(done);
+        }
+        ToClient::Reading(reading) => {
+            w.u8(TO_CLIENT_READING);
+            w.reading(reading);
+        }
+        ToClient::Refused(why) => {
+            w.u8(TO_CLIENT_REFUSED);
+            w.str(why);
+        }
+    }
+    w.finish()
+}
+
+pub fn decode_to_client(bytes: &[u8]) -> Result<OwnedToClient, WireError> {
+    let mut r = Reader::new(bytes);
+    let msg = match r.u8()? {
+        TO_CLIENT_TICK => OwnedToClient::Tick(r.tick()?),
+        TO_CLIENT_DONE => OwnedToClient::Done(r.done()?),
+        TO_CLIENT_READING => OwnedToClient::Reading(r.reading()?),
+        TO_CLIENT_REFUSED => OwnedToClient::Refused(r.string()?),
+        _ => return Err(WireError::Malformed("server message discriminant")),
+    };
+    r.finish()?;
+    Ok(msg)
+}
+
+impl Writer {
+    fn u64(&mut self, v: u64) {
+        self.bytes.extend_from_slice(&v.to_le_bytes());
+    }
+
+    fn opt_u64(&mut self, v: Option<u64>) {
+        match v {
+            None => self.bool(false),
+            Some(n) => {
+                self.bool(true);
+                self.u64(n);
+            }
+        }
+    }
+
+    fn opt_str(&mut self, v: Option<&str>) {
+        match v {
+            None => self.bool(false),
+            Some(s) => {
+                self.bool(true);
+                self.str(s);
+            }
+        }
+    }
+
+    fn opt_window(&mut self, v: Option<WindowId>) {
+        match v {
+            None => self.bool(false),
+            Some(w) => {
+                self.bool(true);
+                self.u32(w.get());
+            }
+        }
+    }
+
+    fn reserved(&mut self, v: Reserved) {
+        self.u16(v.top);
+        self.u16(v.bottom);
+        self.u16(v.left);
+        self.u16(v.right);
+    }
+
+    fn split_dir(&mut self, v: SplitDir) {
+        self.u8(match v {
+            SplitDir::Horizontal => SPLIT_HORIZONTAL,
+            SplitDir::Vertical => SPLIT_VERTICAL,
+        });
+    }
+
+    fn dir(&mut self, v: Dir) {
+        self.u8(match v {
+            Dir::Left => DIR_LEFT,
+            Dir::Right => DIR_RIGHT,
+            Dir::Up => DIR_UP,
+            Dir::Down => DIR_DOWN,
+        });
+    }
+
+    fn epoch(&mut self, v: &Epoch) {
+        self.size(v.size());
+        self.len(v.panes().len());
+        for pane in v.panes() {
+            self.u32(pane.get());
+        }
+        self.opt_pane(v.focus());
+    }
+
+    fn geometry(&mut self, v: &Geometry) {
+        self.size(v.size);
+        self.len(v.panes.len());
+        for (pane, rect) in &v.panes {
+            self.u32(pane.get());
+            self.rect(*rect);
+        }
+        self.opt_pane(v.focus);
+        self.len(v.windows.len());
+        for window in &v.windows {
+            self.u32(window.id.get());
+            self.len(window.panes.len());
+            for pane in &window.panes {
+                self.u32(pane.get());
+            }
+        }
+        self.opt_window(v.window);
+    }
+
+    fn pane_info(&mut self, v: &BTreeMap<PaneId, PaneInfo>) {
+        self.len(v.len());
+        for (pane, info) in v {
+            self.u32(pane.get());
+            self.opt_str(info.command.as_deref());
+            self.opt_str(info.cwd.as_deref());
+        }
+    }
+
+    fn event(&mut self, v: &Event) {
+        match v {
+            Event::PaneOutput { pane, bytes } => {
+                self.u8(EVENT_PANE_OUTPUT);
+                self.u32(pane.get());
+                self.len(bytes.len());
+                self.bytes.extend_from_slice(bytes);
+            }
+            Event::Resized { size } => {
+                self.u8(EVENT_RESIZED);
+                self.size(*size);
+            }
+            Event::PaneOpened { pane } => {
+                self.u8(EVENT_PANE_OPENED);
+                self.u32(pane.get());
+            }
+            Event::PaneClosed { pane } => {
+                self.u8(EVENT_PANE_CLOSED);
+                self.u32(pane.get());
+            }
+            Event::FocusChanged { pane } => {
+                self.u8(EVENT_FOCUS_CHANGED);
+                self.u32(pane.get());
+            }
+            Event::WindowOpened { window } => {
+                self.u8(EVENT_WINDOW_OPENED);
+                self.u32(window.get());
+            }
+            Event::WindowClosed { window } => {
+                self.u8(EVENT_WINDOW_CLOSED);
+                self.u32(window.get());
+            }
+            Event::WindowChanged { window } => {
+                self.u8(EVENT_WINDOW_CHANGED);
+                self.u32(window.get());
+            }
+        }
+    }
+
+    fn step(&mut self, v: &Step) {
+        match v {
+            Step::Geometry(geometry) => {
+                self.u8(STEP_GEOMETRY);
+                self.geometry(geometry);
+            }
+            Step::Bands { surface, applied } => {
+                self.u8(STEP_BANDS);
+                self.size(*surface);
+                self.reserved(*applied);
+            }
+            Step::Event(event) => {
+                self.u8(STEP_EVENT);
+                self.event(event);
+            }
+        }
+    }
+
+    fn tick(&mut self, v: &Tick) {
+        self.len(v.steps.len());
+        for step in &v.steps {
+            self.step(step);
+        }
+        self.epoch(&v.epoch);
+        self.geometry(&v.geometry);
+        match &v.pane_info {
+            None => self.bool(false),
+            Some(info) => {
+                self.bool(true);
+                self.pane_info(info);
+            }
+        }
+        self.len(v.revisions.len());
+        for (pane, revision) in &v.revisions {
+            self.u32(pane.get());
+            self.u64(*revision);
+        }
+    }
+
+    fn op(&mut self, v: &SessionOp) {
+        match v {
+            SessionOp::Quit => self.u8(OP_QUIT),
+            SessionOp::PaneSplit { dir } => {
+                self.u8(OP_PANE_SPLIT);
+                self.split_dir(*dir);
+            }
+            SessionOp::PaneFocus { pane } => {
+                self.u8(OP_PANE_FOCUS);
+                self.u32(pane.get());
+            }
+            SessionOp::PaneResize { dir, cells } => {
+                self.u8(OP_PANE_RESIZE);
+                self.dir(*dir);
+                self.u16(*cells);
+            }
+            SessionOp::WindowCreate { window } => {
+                self.u8(OP_WINDOW_CREATE);
+                self.u32(window.get());
+            }
+            SessionOp::WindowFocus { window } => {
+                self.u8(OP_WINDOW_FOCUS);
+                self.u32(window.get());
+            }
+        }
+    }
+
+    fn tock(&mut self, v: &Tock) {
+        self.len(v.ops.len());
+        for (tag, op) in &v.ops {
+            self.str(tag);
+            self.op(op);
+        }
+        self.len(v.overlay.len());
+        for cmd in &v.overlay {
+            self.draw_cmd(cmd);
+        }
+        self.len(v.notices.len());
+        for notice in &v.notices {
+            self.notice(notice);
+        }
+        self.reserved(v.reserved);
+        self.u16(v.gutter);
+        self.bool(v.wants_pane_output);
+    }
+
+    fn read(&mut self, v: Read) {
+        match v {
+            Read::Revision { pane } => {
+                self.u8(READ_REVISION);
+                self.u32(pane.get());
+            }
+            Read::Content {
+                pane,
+                last,
+                pad,
+                wrapped,
+            } => {
+                self.u8(READ_CONTENT);
+                self.u32(pane.get());
+                self.opt_u64(last);
+                self.bool(pad);
+                self.bool(wrapped);
+            }
+            Read::HistoryExtent { pane } => {
+                self.u8(READ_HISTORY_EXTENT);
+                self.u32(pane.get());
+            }
+            Read::History {
+                pane,
+                from,
+                count,
+                pad,
+                wrapped,
+            } => {
+                self.u8(READ_HISTORY);
+                self.u32(pane.get());
+                self.u64(from);
+                self.u64(count);
+                self.bool(pad);
+                self.bool(wrapped);
+            }
+            Read::Freeze { pane } => {
+                self.u8(READ_FREEZE);
+                self.u32(pane.get());
+            }
+            Read::Unfreeze { pane } => {
+                self.u8(READ_UNFREEZE);
+                self.u32(pane.get());
+            }
+            Read::IsFrozen { pane } => {
+                self.u8(READ_IS_FROZEN);
+                self.u32(pane.get());
+            }
+        }
+    }
+
+    fn lines(&mut self, v: &Lines) {
+        self.len(v.lines.len());
+        for line in &v.lines {
+            self.str(line);
+        }
+        match &v.wrapped {
+            None => self.bool(false),
+            Some(wrapped) => {
+                self.bool(true);
+                self.len(wrapped.len());
+                for flag in wrapped {
+                    self.bool(*flag);
+                }
+            }
+        }
+        self.u64(v.revision);
+    }
+
+    fn reading(&mut self, v: &Reading) {
+        match v {
+            Reading::Revision(revision) => {
+                self.u8(READING_REVISION);
+                self.opt_u64(*revision);
+            }
+            Reading::Text(text) => {
+                self.u8(READING_TEXT);
+                match text {
+                    None => self.bool(false),
+                    Some(text) => {
+                        self.bool(true);
+                        self.lines(text);
+                    }
+                }
+            }
+            Reading::Extent(extent) => {
+                self.u8(READING_EXTENT);
+                match extent {
+                    None => self.bool(false),
+                    Some(extent) => {
+                        self.bool(true);
+                        self.u64(extent.len);
+                        self.u64(extent.dropped);
+                    }
+                }
+            }
+            Reading::Did(did) => {
+                self.u8(READING_DID);
+                self.bool(*did);
+            }
+            Reading::Frozen(frozen) => {
+                self.u8(READING_FROZEN);
+                match frozen {
+                    None => self.bool(false),
+                    Some(frozen) => {
+                        self.bool(true);
+                        self.bool(*frozen);
+                    }
+                }
+            }
+        }
+    }
+
+    fn done(&mut self, v: &crate::msg::Done<'_>) {
+        self.len(v.steps.len());
+        for step in &v.steps {
+            self.step(step);
+        }
+        match v.frame {
+            None => self.bool(false),
+            Some(frame) => {
+                self.bool(true);
+                self.frame(frame);
+            }
+        }
+        match v.end {
+            None => self.bool(false),
+            Some(end) => {
+                self.bool(true);
+                self.u8(match end {
+                    End::Quit => END_QUIT,
+                    End::Eof => END_EOF,
+                });
+            }
+        }
+    }
+
+    fn frame(&mut self, v: &Frame<'_>) {
+        self.size(v.size);
+        self.len(v.panes.len());
+        for pane in &v.panes {
+            self.pane_frame(pane);
+        }
+        self.pane_rects(v.rects);
+        self.opt_pane(v.cursor);
+        self.len(v.overlay.len());
+        for cmd in v.overlay {
+            self.draw_cmd(cmd);
+        }
+        self.len(v.notices.len());
+        for notice in &v.notices {
+            self.notice(notice);
+        }
+    }
+}
+
+impl Reader<'_> {
+    fn u64(&mut self) -> Result<u64, WireError> {
+        let b = self.take(8)?;
+        Ok(u64::from_le_bytes([
+            b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
+        ]))
+    }
+
+    fn opt_u64(&mut self) -> Result<Option<u64>, WireError> {
+        if self.bool()? {
+            Ok(Some(self.u64()?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn opt_string(&mut self) -> Result<Option<String>, WireError> {
+        if self.bool()? {
+            Ok(Some(self.string()?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn window(&mut self) -> Result<WindowId, WireError> {
+        Ok(WindowId::from(self.u32()?))
+    }
+
+    fn opt_window(&mut self) -> Result<Option<WindowId>, WireError> {
+        if self.bool()? {
+            Ok(Some(self.window()?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn reserved(&mut self) -> Result<Reserved, WireError> {
+        let top = self.u16()?;
+        let bottom = self.u16()?;
+        let mut reserved = Reserved::horizontal(top, bottom);
+        reserved.add(Edge::Left, self.u16()?);
+        reserved.add(Edge::Right, self.u16()?);
+        Ok(reserved)
+    }
+
+    fn split_dir(&mut self) -> Result<SplitDir, WireError> {
+        match self.u8()? {
+            SPLIT_HORIZONTAL => Ok(SplitDir::Horizontal),
+            SPLIT_VERTICAL => Ok(SplitDir::Vertical),
+            _ => Err(WireError::Malformed("split direction")),
+        }
+    }
+
+    fn dir(&mut self) -> Result<Dir, WireError> {
+        match self.u8()? {
+            DIR_LEFT => Ok(Dir::Left),
+            DIR_RIGHT => Ok(Dir::Right),
+            DIR_UP => Ok(Dir::Up),
+            DIR_DOWN => Ok(Dir::Down),
+            _ => Err(WireError::Malformed("direction")),
+        }
+    }
+
+    fn epoch(&mut self) -> Result<Epoch, WireError> {
+        let size = self.size()?;
+        let mut panes = Vec::new();
+        for _ in 0..self.len()? {
+            panes.push(self.pane()?);
+        }
+        let focus = self.opt_pane()?;
+        Ok(Epoch::new(size, panes, focus))
+    }
+
+    fn geometry(&mut self) -> Result<Geometry, WireError> {
+        let size = self.size()?;
+        let mut panes = Vec::new();
+        for _ in 0..self.len()? {
+            panes.push((self.pane()?, self.rect()?));
+        }
+        let focus = self.opt_pane()?;
+        let mut windows = Vec::new();
+        for _ in 0..self.len()? {
+            let id = self.window()?;
+            let mut held = Vec::new();
+            for _ in 0..self.len()? {
+                held.push(self.pane()?);
+            }
+            windows.push(Window { id, panes: held });
+        }
+        Ok(Geometry {
+            size,
+            panes,
+            focus,
+            windows,
+            window: self.opt_window()?,
+        })
+    }
+
+    fn pane_info(&mut self) -> Result<BTreeMap<PaneId, PaneInfo>, WireError> {
+        let mut info = BTreeMap::new();
+        for _ in 0..self.len()? {
+            let pane = self.pane()?;
+            info.insert(
+                pane,
+                PaneInfo {
+                    command: self.opt_string()?,
+                    cwd: self.opt_string()?,
+                },
+            );
+        }
+        Ok(info)
+    }
+
+    fn event(&mut self) -> Result<Event, WireError> {
+        Ok(match self.u8()? {
+            EVENT_PANE_OUTPUT => {
+                let pane = self.pane()?;
+                let n = self.len()?;
+                Event::PaneOutput {
+                    pane,
+                    bytes: self.take(n)?.to_vec(),
+                }
+            }
+            EVENT_RESIZED => Event::Resized { size: self.size()? },
+            EVENT_PANE_OPENED => Event::PaneOpened { pane: self.pane()? },
+            EVENT_PANE_CLOSED => Event::PaneClosed { pane: self.pane()? },
+            EVENT_FOCUS_CHANGED => Event::FocusChanged { pane: self.pane()? },
+            EVENT_WINDOW_OPENED => Event::WindowOpened {
+                window: self.window()?,
+            },
+            EVENT_WINDOW_CLOSED => Event::WindowClosed {
+                window: self.window()?,
+            },
+            EVENT_WINDOW_CHANGED => Event::WindowChanged {
+                window: self.window()?,
+            },
+            _ => return Err(WireError::Malformed("event discriminant")),
+        })
+    }
+
+    fn step(&mut self) -> Result<Step, WireError> {
+        Ok(match self.u8()? {
+            STEP_GEOMETRY => Step::Geometry(self.geometry()?),
+            STEP_BANDS => Step::Bands {
+                surface: self.size()?,
+                applied: self.reserved()?,
+            },
+            STEP_EVENT => Step::Event(self.event()?),
+            _ => return Err(WireError::Malformed("step discriminant")),
+        })
+    }
+
+    fn tick(&mut self) -> Result<Tick, WireError> {
+        let mut steps = Vec::new();
+        for _ in 0..self.len()? {
+            steps.push(self.step()?);
+        }
+        let epoch = self.epoch()?;
+        let geometry = self.geometry()?;
+        let pane_info = if self.bool()? {
+            Some(self.pane_info()?)
+        } else {
+            None
+        };
+        let mut revisions = BTreeMap::new();
+        for _ in 0..self.len()? {
+            revisions.insert(self.pane()?, self.u64()?);
+        }
+        Ok(Tick {
+            steps,
+            epoch,
+            geometry,
+            pane_info,
+            revisions,
+        })
+    }
+
+    fn op(&mut self) -> Result<SessionOp, WireError> {
+        Ok(match self.u8()? {
+            OP_QUIT => SessionOp::Quit,
+            OP_PANE_SPLIT => SessionOp::PaneSplit {
+                dir: self.split_dir()?,
+            },
+            OP_PANE_FOCUS => SessionOp::PaneFocus { pane: self.pane()? },
+            OP_PANE_RESIZE => SessionOp::PaneResize {
+                dir: self.dir()?,
+                cells: self.u16()?,
+            },
+            OP_WINDOW_CREATE => SessionOp::WindowCreate {
+                window: self.window()?,
+            },
+            OP_WINDOW_FOCUS => SessionOp::WindowFocus {
+                window: self.window()?,
+            },
+            _ => return Err(WireError::Malformed("op discriminant")),
+        })
+    }
+
+    fn tock(&mut self) -> Result<Tock, WireError> {
+        let mut ops = Vec::new();
+        for _ in 0..self.len()? {
+            ops.push((self.string()?, self.op()?));
+        }
+        let mut overlay = Vec::new();
+        for _ in 0..self.len()? {
+            overlay.push(self.draw_cmd()?);
+        }
+        let mut notices = Vec::new();
+        for _ in 0..self.len()? {
+            notices.push(self.notice()?);
+        }
+        Ok(Tock {
+            ops,
+            overlay,
+            notices,
+            reserved: self.reserved()?,
+            gutter: self.u16()?,
+            wants_pane_output: self.bool()?,
+        })
+    }
+
+    fn read(&mut self) -> Result<Read, WireError> {
+        Ok(match self.u8()? {
+            READ_REVISION => Read::Revision { pane: self.pane()? },
+            READ_CONTENT => Read::Content {
+                pane: self.pane()?,
+                last: self.opt_u64()?,
+                pad: self.bool()?,
+                wrapped: self.bool()?,
+            },
+            READ_HISTORY_EXTENT => Read::HistoryExtent { pane: self.pane()? },
+            READ_HISTORY => Read::History {
+                pane: self.pane()?,
+                from: self.u64()?,
+                count: self.u64()?,
+                pad: self.bool()?,
+                wrapped: self.bool()?,
+            },
+            READ_FREEZE => Read::Freeze { pane: self.pane()? },
+            READ_UNFREEZE => Read::Unfreeze { pane: self.pane()? },
+            READ_IS_FROZEN => Read::IsFrozen { pane: self.pane()? },
+            _ => return Err(WireError::Malformed("read discriminant")),
+        })
+    }
+
+    fn lines(&mut self) -> Result<Lines, WireError> {
+        let mut lines = Vec::new();
+        for _ in 0..self.len()? {
+            lines.push(self.string()?);
+        }
+        let wrapped = if self.bool()? {
+            let mut flags = Vec::new();
+            for _ in 0..self.len()? {
+                flags.push(self.bool()?);
+            }
+            Some(flags)
+        } else {
+            None
+        };
+        Ok(Lines {
+            lines,
+            wrapped,
+            revision: self.u64()?,
+        })
+    }
+
+    fn reading(&mut self) -> Result<Reading, WireError> {
+        Ok(match self.u8()? {
+            READING_REVISION => Reading::Revision(self.opt_u64()?),
+            READING_TEXT => Reading::Text(if self.bool()? {
+                Some(self.lines()?)
+            } else {
+                None
+            }),
+            READING_EXTENT => Reading::Extent(if self.bool()? {
+                Some(Extent {
+                    len: self.u64()?,
+                    dropped: self.u64()?,
+                })
+            } else {
+                None
+            }),
+            READING_DID => Reading::Did(self.bool()?),
+            READING_FROZEN => Reading::Frozen(if self.bool()? {
+                Some(self.bool()?)
+            } else {
+                None
+            }),
+            _ => return Err(WireError::Malformed("reading discriminant")),
+        })
+    }
+
+    fn done(&mut self) -> Result<crate::msg::OwnedDone, WireError> {
+        let mut steps = Vec::new();
+        for _ in 0..self.len()? {
+            steps.push(self.step()?);
+        }
+        let frame = if self.bool()? {
+            Some(self.frame()?)
+        } else {
+            None
+        };
+        let end = if self.bool()? {
+            Some(match self.u8()? {
+                END_QUIT => End::Quit,
+                END_EOF => End::Eof,
+                _ => return Err(WireError::Malformed("end discriminant")),
+            })
+        } else {
+            None
+        };
+        Ok(crate::msg::OwnedDone { steps, frame, end })
+    }
+
+    fn frame(&mut self) -> Result<OwnedFrame, WireError> {
+        let size = self.size()?;
+        let mut panes = Vec::new();
+        for _ in 0..self.len()? {
+            panes.push(self.pane_frame()?);
+        }
+        let rects = self.pane_rects()?;
+        let cursor = self.opt_pane()?;
+        let mut overlay = Vec::new();
+        for _ in 0..self.len()? {
+            overlay.push(self.draw_cmd()?);
+        }
+        let mut notices = Vec::new();
+        for _ in 0..self.len()? {
+            notices.push(self.notice()?);
+        }
+        Ok(OwnedFrame {
+            size,
+            panes,
+            rects,
+            cursor,
+            overlay,
+            notices,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1092,6 +1923,297 @@ mod tests {
             let _ = decode_frame(&bytes);
             let _ = decode_key(&bytes);
             let _ = decode_hello(&bytes);
+        }
+    }
+
+    fn geometry_of() -> Geometry {
+        Geometry {
+            size: Size { rows: 24, cols: 80 },
+            panes: vec![
+                (PaneId::from(1), Rect::new(0, 0, 40, 24)),
+                (PaneId::from(2), Rect::new(40, 0, 40, 24)),
+            ],
+            focus: Some(PaneId::from(2)),
+            windows: vec![
+                Window {
+                    id: WindowId::from(1),
+                    panes: vec![PaneId::from(1), PaneId::from(2)],
+                },
+                Window {
+                    id: WindowId::from(2),
+                    panes: vec![PaneId::from(3)],
+                },
+            ],
+            window: Some(WindowId::from(1)),
+        }
+    }
+
+    fn round_trip_to_server(msg: ToServer) {
+        let bytes = encode_to_server(&msg);
+        assert_eq!(decode_to_server(&bytes), Ok(msg));
+    }
+
+    #[test]
+    fn an_attach_round_trips() {
+        round_trip_to_server(ToServer::Attach(Attach {
+            size: Size { rows: 24, cols: 80 },
+            first_window: WindowId::from(7),
+            reserved: Reserved::horizontal(1, 2),
+            gutter: 1,
+            wants_pane_output: true,
+        }));
+    }
+
+    #[test]
+    fn a_key_a_resize_and_every_read_round_trip() {
+        round_trip_to_server(ToServer::Key(Key::plain(KeyCode::Char('q'))));
+        round_trip_to_server(ToServer::Resize(Size { rows: 3, cols: 9 }));
+        for read in [
+            Read::Revision {
+                pane: PaneId::from(1),
+            },
+            Read::Content {
+                pane: PaneId::from(1),
+                last: Some(4),
+                pad: true,
+                wrapped: false,
+            },
+            Read::Content {
+                pane: PaneId::from(1),
+                last: None,
+                pad: false,
+                wrapped: true,
+            },
+            Read::HistoryExtent {
+                pane: PaneId::from(2),
+            },
+            Read::History {
+                pane: PaneId::from(2),
+                from: 3,
+                count: u64::MAX,
+                pad: false,
+                wrapped: true,
+            },
+            Read::Freeze {
+                pane: PaneId::from(3),
+            },
+            Read::Unfreeze {
+                pane: PaneId::from(3),
+            },
+            Read::IsFrozen {
+                pane: PaneId::from(3),
+            },
+        ] {
+            round_trip_to_server(ToServer::Read(read));
+        }
+    }
+
+    #[test]
+    fn a_tick_carries_its_steps_in_order() {
+        let tick = Tick {
+            steps: vec![
+                Step::Event(Event::PaneOutput {
+                    pane: PaneId::from(1),
+                    bytes: b"hello\x1b[0m".to_vec(),
+                }),
+                Step::Geometry(geometry_of()),
+                Step::Bands {
+                    surface: Size { rows: 24, cols: 80 },
+                    applied: Reserved::vertical(3, 4),
+                },
+                Step::Event(Event::WindowChanged {
+                    window: WindowId::from(2),
+                }),
+                Step::Event(Event::Resized {
+                    size: Size { rows: 1, cols: 1 },
+                }),
+            ],
+            epoch: Epoch::new(
+                Size { rows: 24, cols: 80 },
+                vec![PaneId::from(2), PaneId::from(1)],
+                Some(PaneId::from(1)),
+            ),
+            geometry: geometry_of(),
+            revisions: BTreeMap::from([(PaneId::from(1), 7), (PaneId::from(2), 0)]),
+            pane_info: Some(BTreeMap::from([
+                (
+                    PaneId::from(1),
+                    PaneInfo {
+                        command: Some("vim".to_string()),
+                        cwd: None,
+                    },
+                ),
+                (PaneId::from(2), PaneInfo::default()),
+            ])),
+        };
+        let bytes = encode_to_client(&ToClient::Tick(&tick));
+        assert_eq!(decode_to_client(&bytes), Ok(OwnedToClient::Tick(tick)));
+    }
+
+    #[test]
+    fn a_tick_with_nothing_resampled_says_so() {
+        let tick = Tick {
+            steps: Vec::new(),
+            epoch: Epoch::default(),
+            geometry: Geometry::default(),
+            pane_info: None,
+            revisions: BTreeMap::new(),
+        };
+        let bytes = encode_to_client(&ToClient::Tick(&tick));
+        assert_eq!(decode_to_client(&bytes), Ok(OwnedToClient::Tick(tick)));
+    }
+
+    #[test]
+    fn a_tock_round_trips_with_every_op() {
+        let tock = Tock {
+            ops: vec![
+                ("plugin/prefix".to_string(), SessionOp::Quit),
+                (
+                    "plugin/prefix".to_string(),
+                    SessionOp::PaneSplit {
+                        dir: SplitDir::Vertical,
+                    },
+                ),
+                (
+                    "init".to_string(),
+                    SessionOp::PaneFocus {
+                        pane: PaneId::from(9),
+                    },
+                ),
+                (
+                    "init".to_string(),
+                    SessionOp::PaneResize {
+                        dir: Dir::Down,
+                        cells: 5,
+                    },
+                ),
+                (
+                    "init".to_string(),
+                    SessionOp::WindowCreate {
+                        window: WindowId::from(4),
+                    },
+                ),
+                (
+                    "init".to_string(),
+                    SessionOp::WindowFocus {
+                        window: WindowId::from(4),
+                    },
+                ),
+            ],
+            overlay: vec![DrawCmd::Text {
+                pane: None,
+                x: 1,
+                y: 2,
+                text: "painted".to_string(),
+                fg: Color::Idx(3),
+                bg: Color::Default,
+            }],
+            notices: vec![Notice {
+                level: Level::Warn,
+                tag: "clock".to_string(),
+                text: "noticed".to_string(),
+            }],
+            reserved: Reserved::horizontal(1, 0),
+            gutter: 2,
+            wants_pane_output: true,
+        };
+        round_trip_to_server(ToServer::Tock(tock));
+    }
+
+    #[test]
+    fn a_finished_frame_a_reading_and_a_refusal_round_trip() {
+        let frame = frame_of(vec![OwnedPaneFrame {
+            pane: PaneId::from(1),
+            rect: Rect::new(0, 0, 2, 2),
+            grid: grid_of(2, 2, &["a", "b", "c", "d"]),
+        }]);
+        let steps = vec![
+            Step::Geometry(geometry_of()),
+            Step::Event(Event::PaneOpened {
+                pane: PaneId::from(2),
+            }),
+        ];
+        let borrowed = frame.frame();
+        let done = crate::msg::Done {
+            steps: steps.clone(),
+            frame: Some(&borrowed),
+            end: Some(End::Quit),
+        };
+        let bytes = encode_to_client(&ToClient::Done(&done));
+        assert_eq!(
+            decode_to_client(&bytes),
+            Ok(OwnedToClient::Done(crate::msg::OwnedDone {
+                steps,
+                frame: Some(frame),
+                end: Some(End::Quit),
+            }))
+        );
+
+        for end in [None, Some(End::Quit), Some(End::Eof)] {
+            let done = crate::msg::Done {
+                steps: Vec::new(),
+                frame: None,
+                end,
+            };
+            let bytes = encode_to_client(&ToClient::Done(&done));
+            assert_eq!(
+                decode_to_client(&bytes),
+                Ok(OwnedToClient::Done(crate::msg::OwnedDone {
+                    steps: Vec::new(),
+                    frame: None,
+                    end,
+                }))
+            );
+        }
+
+        for reading in [
+            Reading::Revision(Some(12)),
+            Reading::Revision(None),
+            Reading::Text(Some(Lines {
+                lines: vec!["one".to_string(), "two".to_string()],
+                wrapped: Some(vec![true, false]),
+                revision: 3,
+            })),
+            Reading::Text(None),
+            Reading::Extent(Some(Extent { len: 4, dropped: 1 })),
+            Reading::Extent(None),
+            Reading::Did(true),
+            Reading::Frozen(Some(false)),
+            Reading::Frozen(None),
+        ] {
+            let bytes = encode_to_client(&ToClient::Reading(&reading));
+            assert_eq!(
+                decode_to_client(&bytes),
+                Ok(OwnedToClient::Reading(reading))
+            );
+        }
+
+        let bytes = encode_to_client(&ToClient::Refused("already attached"));
+        assert_eq!(
+            decode_to_client(&bytes),
+            Ok(OwnedToClient::Refused("already attached".to_string()))
+        );
+    }
+
+    #[test]
+    fn a_message_nobody_sent_is_malformed_rather_than_a_panic() {
+        assert_eq!(
+            decode_to_server(&[250]),
+            Err(WireError::Malformed("client message discriminant"))
+        );
+        assert_eq!(
+            decode_to_client(&[250]),
+            Err(WireError::Malformed("server message discriminant"))
+        );
+        assert_eq!(decode_to_server(&[]), Err(WireError::Truncated));
+        for tag in 0u8..5 {
+            for len in 1..12 {
+                let bytes: Vec<u8> = std::iter::once(tag)
+                    .chain(std::iter::repeat_n(0, len))
+                    .collect();
+                let _ = decode_to_server(&bytes);
+                let _ = decode_to_client(&bytes);
+            }
         }
     }
 }

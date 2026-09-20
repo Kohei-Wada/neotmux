@@ -6,14 +6,16 @@ use std::time::{Duration, Instant};
 
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 
-/// The env/args every neotmux test invocation needs: an isolated HOME and
-/// XDG_CONFIG_HOME (so the binary never touches the developer's own config)
-/// and a log file inside that same isolation directory.
+/// The env/args every neotmux test invocation needs: an isolated HOME,
+/// XDG_CONFIG_HOME and XDG_RUNTIME_DIR (so the binary never touches the
+/// developer's own config, and never shares a session with the test running
+/// beside it) and a log file inside that same isolation directory.
 pub fn base_command(exe: &Path, log: &Path, isolation: &Path) -> CommandBuilder {
     let mut cmd = CommandBuilder::new(exe);
     cmd.env("TERM", "xterm-256color");
     cmd.env("HOME", isolation);
     cmd.env("XDG_CONFIG_HOME", isolation);
+    cmd.env("XDG_RUNTIME_DIR", isolation);
     cmd.arg("--log");
     cmd.arg(log);
     cmd

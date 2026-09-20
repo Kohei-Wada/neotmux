@@ -1,21 +1,25 @@
+use std::collections::BTreeMap;
+use std::rc::Rc;
 use std::time::Instant;
 
 use anyhow::Context as _;
-use neotmux_lua::ops::Op;
-use neotmux_lua::{Event as LuaEvent, Geometry, KeyOutcome, LuaSubsystem, Window as LuaWindow};
-use neotmux_proto::{DrawCmd, Level, PaneId, Rect as PRect, Reserved, Size, WindowId};
+use neotmux_proto::msg::{Attach, End, SessionOp, Step, Tick, Tock};
+use neotmux_proto::{
+    DrawCmd, Event, Geometry, Level, PaneId, PaneInfo, Rect as PRect, Reserved, Size,
+    Window as LuaWindow, WindowId,
+};
 use neotmux_term::pty::PtyHandle;
 use neotmux_term::state::clamp_to_min_grid;
+use neotmux_term::terminals::PaneTerminals;
 use neotmux_term::wakeup::Waker;
 
-use crate::input::{encode_key, key_spec};
+use crate::input::encode_key;
 use crate::logging;
-use crate::notify::Notifications;
 use crate::paneinfo::PaneInfoCache;
 use crate::procinfo;
 use crate::shells::Shells;
 use crate::windows::{Shown, Surface, Windows};
-use neotmux_proto::frame::{Frame, PaneFrame};
+use neotmux_proto::frame::{Frame, Notice, PaneFrame};
 use neotmux_proto::keys::Key;
 
 const MAX_CHUNKS_PER_FRAME: usize = 32;
@@ -48,7 +52,19 @@ pub struct Session {
     /// What each pane is running, sampled on its own cadence rather than per frame.
     pane_info: PaneInfoCache,
     dirty: bool,
-    last_frame_output: Vec<DrawCmd>,
+    last_overlay: Vec<DrawCmd>,
+    /// What has happened to the session since the client was last told, in order. A batch
+    /// with one geometry attached would be a lie: a `pane_opened` handler must see the pane
+    /// it is being told about, so the geometry moves between the events exactly as it does
+    /// when both halves are one process.
+    steps: Vec<Step>,
+    /// Whether any plugin is subscribed to `pane_output`. Nothing is, almost always, and a
+    /// pane's bytes are the one payload worth not sending.
+    wants_pane_output: bool,
+    /// The last pane's child is gone. The session ends after one more frame, which is what
+    /// draws that pane's final output.
+    ended: bool,
+    terminals: Rc<PaneTerminals>,
 }
 
 /// What draining the panes found: `Eof` means the last pane is gone and the session ends
@@ -60,15 +76,18 @@ enum Drained {
 }
 
 impl Session {
-    pub fn new(size: Size, lua: &LuaSubsystem, waker: Waker) -> anyhow::Result<Self> {
+    /// Starts the session a client has just asked for. The size, the reservations, the
+    /// gutter and the first window's id all come from the client, because all four are the
+    /// client's to know: the terminal is its, and window ids are the Lua layer's.
+    pub fn new(attach: &Attach, waker: Waker) -> anyhow::Result<Self> {
         let surface = Surface {
-            size,
-            reserved: lua.reserved(),
-            gutter: lua.opt().pane_gutter,
+            size: clamp_to_min_grid(attach.size),
+            reserved: attach.reserved,
+            gutter: attach.gutter,
         };
-        let (windows, first) = Windows::new(lua.reserve_window_id(), surface);
-        lua.lay_out_reservations(size, windows.current().applied_bands());
-        let mut shells = Shells::new(waker, lua.terminals());
+        let (windows, first) = Windows::new(attach.first_window, surface);
+        let terminals = Rc::new(PaneTerminals::new());
+        let mut shells = Shells::new(waker, terminals.clone());
         shells.open(
             first,
             PtyHandle::default_shell_command(),
@@ -80,14 +99,29 @@ impl Session {
             shells,
             pane_info: PaneInfoCache::new(),
             dirty: true,
-            last_frame_output: Vec::new(),
+            last_overlay: Vec::new(),
+            steps: Vec::new(),
+            wants_pane_output: attach.wants_pane_output,
+            ended: false,
+            terminals,
         };
-        session.refresh_pane_info(lua);
-        // Before the first key rather than at the first frame: keys are pumped before the
-        // tick, and a plugin asking `pane.list()` from `on_key` must not see an empty
-        // session on the very first one.
-        session.publish_geometry(lua);
+        session.lay_out_reservations();
+        // Before the first key rather than at the first tick: a plugin asking `pane.list()`
+        // from `on_key` must not see an empty session on the very first key.
+        session.publish_geometry();
         Ok(session)
+    }
+
+    /// The pane terminals, which answer the reads the Lua layer asks across the socket.
+    pub fn terminals(&self) -> &Rc<PaneTerminals> {
+        &self.terminals
+    }
+
+    fn lay_out_reservations(&mut self) {
+        self.steps.push(Step::Bands {
+            surface: self.surface.size,
+            applied: self.windows.current().applied_bands(),
+        });
     }
 
     /// Resizes every pane of the shown window that is big enough to be shown; the rest
@@ -101,22 +135,25 @@ impl Session {
     /// A geometry change, whether from a real terminal resize, a band being reserved or
     /// released, or the gutter changing: recompute the layout, hand the bands their place in
     /// it, resize the panes to match, and tell the Lua layer about it (§4.8).
-    fn apply_geometry(&mut self, lua: &LuaSubsystem) -> anyhow::Result<()> {
+    fn apply_geometry(&mut self) -> anyhow::Result<()> {
         self.windows.resurface(self.surface);
-        lua.lay_out_reservations(self.surface.size, self.windows.current().applied_bands());
+        self.lay_out_reservations();
         self.fit()?;
-        lua.dispatch_event(&LuaEvent::Resized {
-            size: self.windows.current().content,
-        });
+        let size = self.windows.current().content;
+        self.steps.push(Step::Event(Event::Resized { size }));
         self.dirty = true;
         Ok(())
     }
 
     /// At most `MAX_CHUNKS_PER_FRAME` chunks per pane, so a flooding child cannot starve
     /// input or the other panes.
-    fn drain_panes(&mut self, lua: &LuaSubsystem) -> anyhow::Result<Drained> {
+    fn drain_panes(&mut self) -> anyhow::Result<Drained> {
+        let wanted = self.wants_pane_output;
+        let steps = &mut self.steps;
         let drained = self.shells.drain(MAX_CHUNKS_PER_FRAME, |pane, bytes| {
-            lua.dispatch_event(&LuaEvent::PaneOutput { pane, bytes });
+            if wanted {
+                steps.push(Step::Event(Event::PaneOutput { pane, bytes }));
+            }
         })?;
         if drained.output {
             self.dirty = true;
@@ -128,7 +165,7 @@ impl Session {
             return Ok(Drained::Eof);
         }
         for pane in drained.closed {
-            self.close_pane(pane, lua)?;
+            self.close_pane(pane)?;
         }
         Ok(Drained::More)
     }
@@ -136,7 +173,7 @@ impl Session {
     /// A pane's child ended: reap it, give its space to its sibling, and move focus if it
     /// was the focused one. The other panes keep running. The pane may belong to a window
     /// nobody is looking at, and closing the last pane of one closes the window too.
-    fn close_pane(&mut self, pane: PaneId, lua: &LuaSubsystem) -> anyhow::Result<()> {
+    fn close_pane(&mut self, pane: PaneId) -> anyhow::Result<()> {
         self.shells.close(pane);
         self.pane_info.invalidate();
         let was_shown = self.windows.current().rects.contains_key(&pane);
@@ -150,32 +187,33 @@ impl Session {
             return Ok(());
         }
         self.fit()?;
-        self.republish_geometry(lua);
-        lua.dispatch_event(&LuaEvent::PaneClosed { pane });
+        self.republish_geometry();
+        self.steps.push(Step::Event(Event::PaneClosed { pane }));
         if closed.window_closed {
-            lua.dispatch_event(&LuaEvent::WindowClosed {
+            self.steps.push(Step::Event(Event::WindowClosed {
                 window: closed.window,
-            });
+            }));
         }
         if let Some(window) = closed.switched_to {
-            lua.dispatch_event(&LuaEvent::WindowChanged { window });
+            self.steps
+                .push(Step::Event(Event::WindowChanged { window }));
         }
         let after = self.windows.current().focus();
         if was_shown
             && after != before
             && let Some(focus) = after
         {
-            lua.dispatch_event(&LuaEvent::FocusChanged { pane: focus });
+            self.steps
+                .push(Step::Event(Event::FocusChanged { pane: focus }));
         }
         self.dirty = true;
         Ok(())
     }
 
-    /// A key the session was given. One nobody bound belongs to the focused pane and to no
-    /// other; with no pane focused there is no shell left to type into.
-    pub fn key(&mut self, lua: &LuaSubsystem, key: Key) -> anyhow::Result<()> {
-        if lua.dispatch_key(&key_spec(&key)) == KeyOutcome::Fallthrough
-            && let Some(focus) = self.windows.current().focus()
+    /// A key nobody on the client bound. It belongs to the focused pane and to no other;
+    /// with no pane focused there is no shell left to type into.
+    pub fn key(&mut self, key: Key) -> anyhow::Result<()> {
+        if let Some(focus) = self.windows.current().focus()
             && let Some(bytes) = encode_key(key)
         {
             self.shells.write(focus, &bytes)?;
@@ -185,67 +223,60 @@ impl Session {
 
     /// The terminal changed size. Nothing arrives on the terminal to say so — `SIGWINCH` is
     /// the whole of the announcement — so the new size is asked for rather than read.
-    pub fn resize(&mut self, size: Size, lua: &LuaSubsystem) -> anyhow::Result<()> {
+    pub fn resize(&mut self, size: Size) -> anyhow::Result<()> {
         self.surface.size = clamp_to_min_grid(size);
-        self.apply_geometry(lua)
+        self.apply_geometry()
     }
 
-    /// Every op a source raised this frame, applied in the order they were pushed (§4.6).
-    /// Returns whether one of them asked to quit.
-    fn drain_ops(
-        &mut self,
-        lua: &LuaSubsystem,
-        notifications: &mut Notifications,
-    ) -> anyhow::Result<bool> {
+    /// Every op the tick raised, applied in the order they were pushed (§4.6). Returns
+    /// whether one of them asked to quit.
+    ///
+    /// `log` and `notify` are not here: they never leave the client, which is where the
+    /// source that raised them is. A refusal does come back here, and is logged against
+    /// whoever asked — the op is applied after the tick, so there is nobody left to answer.
+    fn apply_ops(&mut self, ops: &[(String, SessionOp)]) -> anyhow::Result<bool> {
         let mut quit = false;
         let mut spawned = 0usize;
-        for (id, op) in lua.drain_ops() {
-            let tag = lua.sources().name(id).unwrap_or_else(|| id.to_string());
+        for (tag, op) in ops {
             match op {
-                Op::Quit => quit = true,
-                Op::Log { level, text } => logging::log(level, &tag, &text),
-                Op::Notify { level, text } => {
-                    notifications.push(level, &tag, &text);
-                    logging::log(level, &tag, &text);
-                }
-                Op::PaneSplit { dir } if spawned >= MAX_NEW_SHELLS_PER_FRAME => logging::log(
-                    Level::Error,
-                    &tag,
-                    &format!(
-                        "pane.split('{dir}') refused: at most {MAX_NEW_SHELLS_PER_FRAME} new \
-                         shells per frame"
-                    ),
-                ),
-                Op::PaneSplit { dir } => {
-                    spawned += 1;
-                    self.apply_split(lua, &tag, dir)?;
-                }
-                Op::PaneFocus { pane } => self.apply_focus(lua, &tag, pane),
-                Op::PaneResize { dir, cells } => self.apply_resize(lua, &tag, dir, cells)?,
-                Op::WindowCreate { .. } if spawned >= MAX_NEW_SHELLS_PER_FRAME => logging::log(
-                    Level::Error,
-                    &tag,
-                    &format!(
-                        "window.create() refused: at most {MAX_NEW_SHELLS_PER_FRAME} new \
+                SessionOp::Quit => quit = true,
+                SessionOp::PaneSplit { dir } if spawned >= MAX_NEW_SHELLS_PER_FRAME => {
+                    logging::log(
+                        Level::Error,
+                        tag,
+                        &format!(
+                            "pane.split('{dir}') refused: at most {MAX_NEW_SHELLS_PER_FRAME} new \
                              shells per frame"
-                    ),
-                ),
-                Op::WindowCreate { window } => {
-                    spawned += 1;
-                    self.apply_window_create(lua, &tag, window)?;
+                        ),
+                    )
                 }
-                Op::WindowFocus { window } => self.apply_window_focus(lua, &tag, window)?,
+                SessionOp::PaneSplit { dir } => {
+                    spawned += 1;
+                    self.apply_split(tag, *dir)?;
+                }
+                SessionOp::PaneFocus { pane } => self.apply_focus(tag, *pane),
+                SessionOp::PaneResize { dir, cells } => self.apply_resize(tag, *dir, *cells)?,
+                SessionOp::WindowCreate { .. } if spawned >= MAX_NEW_SHELLS_PER_FRAME => {
+                    logging::log(
+                        Level::Error,
+                        tag,
+                        &format!(
+                            "window.create() refused: at most {MAX_NEW_SHELLS_PER_FRAME} new \
+                             shells per frame"
+                        ),
+                    )
+                }
+                SessionOp::WindowCreate { window } => {
+                    spawned += 1;
+                    self.apply_window_create(tag, *window)?;
+                }
+                SessionOp::WindowFocus { window } => self.apply_window_focus(tag, *window)?,
             }
         }
         Ok(quit)
     }
 
-    fn apply_split(
-        &mut self,
-        lua: &LuaSubsystem,
-        tag: &str,
-        dir: neotmux_proto::SplitDir,
-    ) -> anyhow::Result<()> {
+    fn apply_split(&mut self, tag: &str, dir: neotmux_proto::SplitDir) -> anyhow::Result<()> {
         let new = self.windows.take_pane_id();
         if let Err(refused) = self.windows.current_mut().split(dir, new) {
             logging::log(
@@ -274,9 +305,11 @@ impl Session {
 
         self.pane_info.invalidate();
         self.fit()?;
-        self.republish_geometry(lua);
-        lua.dispatch_event(&LuaEvent::PaneOpened { pane: new });
-        lua.dispatch_event(&LuaEvent::FocusChanged { pane: new });
+        self.republish_geometry();
+        self.steps
+            .push(Step::Event(Event::PaneOpened { pane: new }));
+        self.steps
+            .push(Step::Event(Event::FocusChanged { pane: new }));
         self.dirty = true;
         Ok(())
     }
@@ -284,12 +317,7 @@ impl Session {
     /// A new window, with one pane and one shell in it. It is not shown: `window.focus`
     /// is a separate op, so `focus(create())` in one tick opens it and switches to it in that
     /// order while `create()` alone leaves it running out of sight.
-    fn apply_window_create(
-        &mut self,
-        lua: &LuaSubsystem,
-        tag: &str,
-        window: WindowId,
-    ) -> anyhow::Result<()> {
+    fn apply_window_create(&mut self, tag: &str, window: WindowId) -> anyhow::Result<()> {
         let first = self.windows.create(window, self.surface);
         let started = pane_size(self.windows.rect(first), first).and_then(|size| {
             self.shells
@@ -308,20 +336,15 @@ impl Session {
         }
         // The pane list is unchanged — the new pane is not in the shown window — but the
         // window list is, and a `window_opened` handler must see what it is told about.
-        self.republish_geometry(lua);
-        lua.dispatch_event(&LuaEvent::WindowOpened { window });
+        self.republish_geometry();
+        self.steps.push(Step::Event(Event::WindowOpened { window }));
         self.dirty = true;
         Ok(())
     }
 
     /// Shows another window: its panes are caught up with a surface that may have changed
     /// while they were hidden, then resized to it.
-    fn apply_window_focus(
-        &mut self,
-        lua: &LuaSubsystem,
-        tag: &str,
-        window: WindowId,
-    ) -> anyhow::Result<()> {
+    fn apply_window_focus(&mut self, tag: &str, window: WindowId) -> anyhow::Result<()> {
         match self.windows.show(window, self.surface) {
             Shown::NoSuchWindow => {
                 logging::log(
@@ -336,10 +359,12 @@ impl Session {
         }
         self.pane_info.invalidate();
         self.fit()?;
-        self.republish_geometry(lua);
-        lua.dispatch_event(&LuaEvent::WindowChanged { window });
+        self.republish_geometry();
+        self.steps
+            .push(Step::Event(Event::WindowChanged { window }));
         if let Some(focus) = self.windows.current().focus() {
-            lua.dispatch_event(&LuaEvent::FocusChanged { pane: focus });
+            self.steps
+                .push(Step::Event(Event::FocusChanged { pane: focus }));
         }
         self.dirty = true;
         Ok(())
@@ -349,7 +374,6 @@ impl Session {
     /// after the tick, so there is nobody left to answer.
     fn apply_resize(
         &mut self,
-        lua: &LuaSubsystem,
         tag: &str,
         dir: neotmux_proto::Dir,
         cells: u16,
@@ -363,12 +387,12 @@ impl Session {
             return Ok(());
         }
         self.fit()?;
-        self.republish_geometry(lua);
+        self.republish_geometry();
         self.dirty = true;
         Ok(())
     }
 
-    fn apply_focus(&mut self, lua: &LuaSubsystem, tag: &str, pane: PaneId) {
+    fn apply_focus(&mut self, tag: &str, pane: PaneId) {
         if !self.windows.current_mut().set_focus(pane) {
             logging::log(
                 Level::Error,
@@ -377,8 +401,8 @@ impl Session {
             );
             return;
         }
-        self.republish_geometry(lua);
-        lua.dispatch_event(&LuaEvent::FocusChanged { pane });
+        self.republish_geometry();
+        self.steps.push(Step::Event(Event::FocusChanged { pane }));
         self.dirty = true;
     }
 
@@ -389,7 +413,7 @@ impl Session {
     /// Every pane the session holds, hidden windows included: what a pane in the window you
     /// are not looking at is running is exactly the question a sidebar exists to answer, and
     /// the cadence rather than the number of panes is what bounds the bill.
-    fn refresh_pane_info(&mut self, lua: &LuaSubsystem) {
+    fn refresh_pane_info(&mut self) -> Option<BTreeMap<PaneId, PaneInfo>> {
         let shells = &self.shells;
         let panes = self.windows.all_panes();
         let refreshed = self.pane_info.refresh(Instant::now(), panes, |pane| {
@@ -398,21 +422,31 @@ impl Session {
                 None => Default::default(),
             }
         });
-        if refreshed {
-            lua.publish_pane_info(self.pane_info.snapshot());
-        }
+        refreshed.then(|| self.pane_info.snapshot())
     }
 
-    /// Hands Lua this frame's geometry.
-    fn publish_geometry(&self, lua: &LuaSubsystem) {
-        lua.begin_frame(self.windows.current().epoch(), self.geometry());
+    /// Every pane's read stamp. Cheap to gather — it is a number per pane — and it travels
+    /// with the tick so that the cheap half of reading a pane stays cheap on the other side
+    /// of a socket.
+    fn revisions(&self) -> BTreeMap<PaneId, u64> {
+        self.windows
+            .all_panes()
+            .filter_map(|pane| Some((pane, self.terminals.revision(pane)?)))
+            .collect()
+    }
+
+    /// Puts this session's geometry in the record the client replays, so the very first key
+    /// is dispatched against a session that exists.
+    fn publish_geometry(&mut self) {
+        let geometry = self.geometry();
+        self.steps.push(Step::Geometry(geometry));
     }
 
     /// The tree changed mid-frame. A `pane_opened` handler calling `pane.list()` must see the
     /// pane it is being told about, and a `pane_closed` handler must not see the dead one —
-    /// so the geometry catches up before any of those events is dispatched.
-    fn republish_geometry(&self, lua: &LuaSubsystem) {
-        lua.republish_geometry(self.geometry());
+    /// so the geometry catches up before any of those events is recorded.
+    fn republish_geometry(&mut self) {
+        self.publish_geometry();
     }
 
     /// The session as Lua reads it: the shown window's panes and rects, and every window
@@ -457,13 +491,12 @@ impl Session {
 
     /// What this frame shows. Producing it is the session's work; putting it on a screen is
     /// not, and nothing below this line knows what kind of screen there is.
-    fn frame(&mut self, notifications: &mut Notifications) -> Frame<'_> {
+    fn frame(&mut self, notices: Vec<Notice>) -> Frame<'_> {
         // The shown window's panes only: a hidden pane's terminal goes on taking its
         // child's output, but copying its grid out for a frame nobody draws it in would put
         // every window on every frame's bill.
         let shown: Vec<PaneId> = self.windows.current().rects.keys().copied().collect();
         self.shells.snapshot(shown.into_iter());
-        notifications.expire(Instant::now());
         self.dirty = false;
 
         let shells = &self.shells;
@@ -482,58 +515,87 @@ impl Session {
                 .collect(),
             rects: &layout.rects,
             cursor: layout.focus(),
-            overlay: &self.last_frame_output,
-            notices: notifications.visible(),
+            overlay: &self.last_overlay,
+            notices,
         }
     }
 
-    /// One pass of the session's own work: the panes' output, the tick, the ops it raised,
-    /// and the frame that came of it. The frame is `None` when nothing changed and the last
-    /// one still stands.
-    pub fn advance(
-        &mut self,
-        lua: &LuaSubsystem,
-        notifications: &mut Notifications,
-    ) -> anyhow::Result<Step<'_>> {
-        let drained = self.drain_panes(lua)?;
+    /// Keeps the session running with nobody looking at it: the children go on being read,
+    /// so one that fills its pipe is not blocked by a client that closed its terminal.
+    /// `true` means the last of them is gone and the session is over.
+    ///
+    /// Whatever happened is kept rather than thrown away, so whoever looks next is told.
+    pub fn idle(&mut self) -> anyhow::Result<bool> {
+        if self.drain_panes()? == Drained::Eof {
+            self.ended = true;
+        }
+        Ok(self.ended)
+    }
 
-        self.refresh_pane_info(lua);
-        self.publish_geometry(lua);
-        lua.dispatch_tick();
+    /// Nobody is subscribed to anything any more, because nobody is running any plugins.
+    /// Without this an unattached session would go on copying every pane's output into a
+    /// record no client has asked for.
+    pub fn forget_pane_output(&mut self) {
+        self.wants_pane_output = false;
+        self.steps
+            .retain(|step| !matches!(step, Step::Event(Event::PaneOutput { .. })));
+    }
 
-        if self.drain_ops(lua, notifications)? {
-            return Ok(Step {
+    /// The first half of a frame: the panes' output, and everything the client's Lua layer
+    /// has to be told before it ticks. The tick itself happens in the other process.
+    pub fn tick(&mut self) -> anyhow::Result<Tick> {
+        if self.drain_panes()? == Drained::Eof {
+            self.ended = true;
+        }
+        let pane_info = self.refresh_pane_info();
+        Ok(Tick {
+            steps: std::mem::take(&mut self.steps),
+            epoch: self.windows.current().epoch(),
+            geometry: self.geometry(),
+            pane_info,
+            revisions: self.revisions(),
+        })
+    }
+
+    /// The second half: what the tick asked for, applied, and the frame that came of it.
+    /// The frame is `None` when nothing changed and the last one still stands.
+    pub fn advance(&mut self, tock: &Tock) -> anyhow::Result<Pass<'_>> {
+        self.wants_pane_output = tock.wants_pane_output;
+        if self.apply_ops(&tock.ops)? {
+            return Ok(Pass {
+                steps: std::mem::take(&mut self.steps),
                 frame: None,
                 end: Some(End::Quit),
             });
         }
 
-        let frame_output = lua.frame_output();
         // After the frame's output is in hand, never before: both of these change the size of
         // the surface, and this frame's buffers were committed against the old one.
-        let reserved_changed = self.reserved_changed(lua.reserved());
-        let gutter_changed = self.gutter_changed(lua.opt().pane_gutter);
+        let reserved_changed = self.reserved_changed(tock.reserved);
+        let gutter_changed = self.gutter_changed(tock.gutter);
         if reserved_changed || gutter_changed {
-            self.apply_geometry(lua)?;
+            self.apply_geometry()?;
         }
 
-        if frame_output != self.last_frame_output {
+        if tock.overlay != self.last_overlay {
             self.dirty = true;
         }
-        self.last_frame_output = frame_output;
+        self.last_overlay.clone_from(&tock.overlay);
         // A live notification needs a later frame just to notice it expired
         // and stop being drawn, even if nothing else changed.
-        if !notifications.is_empty() {
+        if !tock.notices.is_empty() {
             self.dirty = true;
         }
 
-        let eof = drained == Drained::Eof;
+        let eof = self.ended;
+        let steps = std::mem::take(&mut self.steps);
         let frame = if self.dirty || eof {
-            Some(self.frame(notifications))
+            Some(self.frame(tock.notices.clone()))
         } else {
             None
         };
-        Ok(Step {
+        Ok(Pass {
+            steps,
             frame,
             end: eof.then_some(End::Eof),
         })
@@ -541,19 +603,15 @@ impl Session {
 }
 
 /// What one pass of the session produced.
-pub struct Step<'a> {
+pub struct Pass<'a> {
+    /// What applying the tick's reply did to the session, in order. It is answered in the
+    /// same breath as the frame rather than held for the next tick: a key handler must see
+    /// the session as it is, and between the reply and this it is not.
+    pub steps: Vec<Step>,
     /// The frame to show, if this pass changed anything.
     pub frame: Option<Frame<'a>>,
     /// Why the session is over, if it is.
     pub end: Option<End>,
-}
-
-/// The two ways a session ends of its own accord: a source asked it to, or its last pane's
-/// child did. A signal is neither — it ends the loop rather than the session.
-#[derive(PartialEq, Eq)]
-pub enum End {
-    Quit,
-    Eof,
 }
 /// A pane with no rect is a bug in the layout, not a 0x0 pane: spawning a PTY at the default
 /// size would turn it into a terminal nothing can draw on, which is far harder to find.

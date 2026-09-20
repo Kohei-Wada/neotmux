@@ -14,11 +14,10 @@ use std::rc::Rc;
 
 use mlua::{Function, Lua, Table, Value};
 
-use neotmux_term::terminals::PaneTerminals;
+use neotmux_term::read::PaneRead;
 
 use crate::LoadFailure;
 use crate::draw::Buffers;
-use crate::geometry::Geometry;
 use crate::ops::{Op, OpBuffer};
 use crate::overrun::Overrun;
 use crate::paneinfo::PaneInfos;
@@ -26,7 +25,7 @@ use crate::registry::{Kind, KindTag, RegistrationId, Registry};
 use crate::reserve::Reservations;
 use crate::source::{self, SourceId, Sources};
 use crate::window::WindowIds;
-use neotmux_proto::Level;
+use neotmux_proto::{Geometry, Level};
 
 pub use opt::Opts;
 
@@ -41,7 +40,7 @@ pub(crate) struct Shared {
     pub(crate) load_failures: Rc<RefCell<Vec<LoadFailure>>>,
     pub(crate) geometry: Rc<RefCell<Geometry>>,
     pub(crate) pane_info: Rc<RefCell<PaneInfos>>,
-    pub(crate) terminals: Rc<PaneTerminals>,
+    pub(crate) panes: Rc<dyn PaneRead>,
     pub(crate) overrun: Rc<Overrun>,
     pub(crate) reservations: Rc<Reservations>,
     pub(crate) window_ids: Rc<WindowIds>,
@@ -179,7 +178,7 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
         load_failures,
         geometry,
         pane_info,
-        terminals,
+        panes,
         overrun,
         reservations,
         window_ids,
@@ -248,7 +247,7 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
             ops.clone(),
             geometry.clone(),
             pane_info,
-            terminals,
+            panes,
         )?;
         let pane = seal(lua, pane, "neotmux.pane")?;
         neotmux.set("pane", pane)?;

@@ -1,8 +1,10 @@
 use std::fs;
 
 use neotmux_lua::runtime::Layers;
-use neotmux_lua::{Geometry, KeyOutcome, LuaSubsystem};
-use neotmux_proto::{Color, DrawCmd, Epoch, PaneId, Rect, Size};
+use neotmux_lua::{KeyOutcome, LuaSubsystem};
+use neotmux_proto::{Color, DrawCmd, Epoch, Geometry, PaneId, Rect, Size};
+
+mod support;
 
 fn layer(files: &[(&str, &str)]) -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
@@ -16,7 +18,11 @@ fn layer(files: &[(&str, &str)]) -> tempfile::TempDir {
 
 fn built(files: &[(&str, &str)]) -> (tempfile::TempDir, LuaSubsystem) {
     let dir = layer(files);
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     assert!(sub.run_init().is_empty());
     (dir, sub)
 }
