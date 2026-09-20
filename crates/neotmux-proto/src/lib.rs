@@ -15,3 +15,9 @@ pub use level::Level;
 pub use paneinfo::PaneInfo;
 pub use panerects::PaneRects;
 pub use reserve::{Axis, Edge, Reserved};
+
+/// Bumped whenever any type here changes shape; checked before the first frame decodes so a
+/// version mismatch fails outright instead of trying to survive one.
+///
+/// - 1: initial version.
+pub const PROTOCOL_VERSION: u32 = 1;
