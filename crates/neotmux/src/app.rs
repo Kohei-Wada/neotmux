@@ -439,21 +439,19 @@ impl Session {
     /// Samples what each pane is running, if the cadence says it is time, and hands the
     /// result to Lua. Reading `/proc` for every pane on every frame is the syscall storm this
     /// exists to avoid, so most frames do nothing here.
-    /// The shown window's panes and no others: `pane.info` answers about the panes
-    /// `pane.list` reports, so a hidden pane is absent rather than described — and reading
-    /// `/proc` for panes nobody can see would be a syscall bill that grows with the
-    /// windows.
+    ///
+    /// Every pane the session holds, hidden windows included: what a pane in the window you
+    /// are not looking at is running is exactly the question a sidebar exists to answer, and
+    /// the cadence rather than the number of panes is what bounds the bill.
     fn refresh_pane_info(&mut self, lua: &LuaSubsystem) {
-        let shown: Vec<PaneId> = self.windows.current().rects.keys().copied().collect();
         let shells = &self.shells;
-        let refreshed = self
-            .pane_info
-            .refresh(Instant::now(), shown.into_iter(), |pane| {
-                match shells.foreground(pane) {
-                    Some(pid) => procinfo::read(pid),
-                    None => Default::default(),
-                }
-            });
+        let panes = self.windows.all_panes();
+        let refreshed = self.pane_info.refresh(Instant::now(), panes, |pane| {
+            match shells.foreground(pane) {
+                Some(pid) => procinfo::read(pid),
+                None => Default::default(),
+            }
+        });
         if refreshed {
             lua.publish_pane_info(self.pane_info.snapshot());
         }

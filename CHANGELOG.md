@@ -53,9 +53,23 @@ until you turn it on — `require('neotmux.defaults').sidebar = true` — like t
 watcher and unlike the status bar: a status line spends a row, a sidebar spends a third of the
 width.
 
-It is an ordinary file making ordinary API calls, and it needed no new ones. A pane in a
-window nobody is looking at shows an em dash instead of a command, because `pane.info` answers
-about the shown window's panes and no others.
+It is an ordinary file making ordinary API calls, and it needed no new ones. A pane whose
+command the host could not read shows an em dash; every other pane, hidden window or not,
+shows what it is running.
+
+### `pane.info` describes every pane, not only the ones on screen
+
+`neotmux.pane.info(id)` now answers for any pane the host owns, so a pane found through
+`window.panes()` reports its foreground command and working directory the way a pane in front
+of you does. It used to sample the shown window's panes alone, and a hidden pane was
+indistinguishable from one that had gone.
+
+The restriction was about cost — two `/proc` reads per pane — and the cadence is what actually
+bounds that: the facts are sampled at most every 250 ms however often they are asked for, and
+sampling eight panes across eight windows instead of one is not measurable as idle CPU.
+
+A pane whose read failed is still a table with the field absent rather than `nil`; `nil` means
+no pane has that id. One pane's dead child does not disturb the others' facts.
 
 `C-b b` folds it, when the prefix is loaded too: the sidebar puts that command in the prefix's
 own table, because the sidebar is the optional plugin and the prefix is the standard one.

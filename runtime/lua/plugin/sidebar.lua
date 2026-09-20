@@ -72,18 +72,15 @@ if package.loaded["plugin.prefix"] then
   require("plugin.prefix").commands["b"] = M.toggle
 end
 
--- What a pane is running, or nil where the host has not got it.
---
--- `pane.info` answers about the panes of the window being shown and no others — reading
--- /proc for panes nobody can see is a syscall bill that grows with the windows — so a pane
--- in a hidden window has no command here. That is the host's decision, not a gap this plugin
--- works around.
+-- What a pane is running, or nil where the host has not got it. Every pane the session
+-- holds, hidden windows included: `pane.info` answers for all of them.
 local function command(pane)
   local info = neotmux.pane.info(pane)
   return info and info.command
 end
 
--- What a pane row says when the host has no command for the pane.
+-- What a pane row says when the host could not read the pane's command — a child that exited
+-- between the sample and the tick, or a pane that closed while the rows were being built.
 local UNKNOWN = "\u{2014}" -- em dash
 
 -- One row of the sidebar: a marker, an indent, a number, and for a pane its command.

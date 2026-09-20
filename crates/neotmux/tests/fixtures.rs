@@ -1679,9 +1679,10 @@ fn pane_ids_do_not_collide_across_windows() {
 }
 
 /// `pane.list` answers about the window being shown, so a hidden window's pane is not in it
-/// — and `pane.info` must not start describing panes nobody can see either.
+/// — but `pane.info` describes it all the same. What the pane in the window you are not
+/// looking at is running is the question a sidebar exists to answer.
 #[test]
-fn a_hidden_windows_pane_is_in_no_list_and_has_no_info() {
+fn a_hidden_windows_pane_is_in_no_list_but_still_reports_what_it_is_running() {
     let (mut nt, _init) = start(
         "require('plugin.windows') require('plugin.paneinfo')",
         "/bin/cat",
@@ -1691,21 +1692,94 @@ fn a_hidden_windows_pane_is_in_no_list_and_has_no_info() {
     nt.wait_for_screen("UP", PATIENCE);
     nt.send("\x17"); // C-w: a second window, shown; the first window's pane is now hidden
     nt.wait_for_log("windows window_changed 2", PATIENCE);
+    nt.send("\x12"); // C-r: what the shown window's `pane.list` holds
     nt.settle(Duration::from_millis(700));
 
     let log = nt.log_text();
-    let after: Vec<&str> = log
-        .lines()
-        .skip_while(|line| !line.contains("window_changed 2"))
-        .filter(|line| line.contains("paneinfo "))
-        .collect();
+    let report = line_with(&log, "windows report");
     assert!(
-        after.iter().any(|line| line.contains("paneinfo 2")),
-        "the shown window's pane stopped being described:\n{log}"
+        report.contains("panes=2"),
+        "the hidden window's pane is in the shown window's list: {report}"
+    );
+    // The last word on each pane, not any line about it: the hidden one was described before
+    // it was hidden, and a sample that dropped it would say so afterwards.
+    let latest = |pane: &str| {
+        let marker = format!("paneinfo {pane} ");
+        log.lines()
+            .rfind(|line| line.contains(&marker))
+            .unwrap_or_else(|| panic!("nothing was ever logged about pane {pane}:\n{log}"))
+            .to_string()
+    };
+    assert!(
+        latest("2").contains("command=cat cwd=/"),
+        "the shown window's pane has no info: {}",
+        latest("2")
     );
     assert!(
-        !after.iter().any(|line| line.contains("paneinfo 1")),
-        "a hidden pane is still being described:\n{after:?}"
+        latest("1").contains("command=cat cwd=/"),
+        "the hidden window's pane stopped reporting its command and directory: {}",
+        latest("1")
+    );
+}
+
+/// The facts are sampled while the pane is hidden, not caught up with when it is shown again:
+/// a `cd` and a command started after the window went away are both reported.
+#[test]
+fn a_hidden_panes_command_and_directory_follow_what_it_does_while_it_is_hidden() {
+    let (mut nt, _init) = start(
+        "require('plugin.windows') require('plugin.paneinfo')",
+        "bash",
+    );
+    nt.wait_for_log("paneinfo 1 command=bash", PATIENCE);
+
+    // Both happen a second after the line is sent, so neither can have been sampled before
+    // the window was hidden.
+    let target = std::fs::canonicalize("/tmp").expect("canonicalise /tmp");
+    nt.send(&format!(
+        "sleep 1; cd {}; tail -f /dev/null\n",
+        target.display()
+    ));
+    nt.send("\x17"); // C-w: a second window, shown; the first window's pane is now hidden
+    nt.wait_for_log("windows window_changed 2", PATIENCE);
+
+    let deadline = std::time::Instant::now() + PATIENCE;
+    loop {
+        let log = nt.log_text();
+        let (_, hidden) = log
+            .split_once("window_changed 2")
+            .expect("the window was hidden");
+        let found = hidden.lines().any(|line| {
+            line.contains("paneinfo 1 command=tail")
+                && line.contains(&format!("cwd={}", target.display()))
+        });
+        if found {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the hidden pane never reported the command and directory it took on:\n{log}"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// Every pane is sampled now, so a pane that closed must leave the sample rather than sit in
+/// it answering with whatever it was running when it died.
+#[test]
+fn a_closed_pane_leaves_no_stale_info_behind() {
+    let (mut nt, _init) = start(
+        "require('plugin.splitter') require('plugin.paneinfo')",
+        "bash",
+    );
+    nt.wait_for_log("paneinfo 1 command=bash", PATIENCE);
+    nt.send("\x02"); // C-b: split, focusing the new pane
+    nt.wait_for_log("paneinfo 2 command=bash", PATIENCE);
+
+    nt.send("exit\n");
+    let log = nt.wait_for_log("paneinfo gone 2=", PATIENCE);
+    assert!(
+        line_with(&log, "paneinfo gone 2=").contains("gone 2=nil"),
+        "a closed pane is still being described:\n{log}"
     );
 }
 
@@ -2073,11 +2147,9 @@ fn the_shipped_sidebar_lists_the_session_and_narrows_the_panes() {
 
     nt.send("\x02c"); // C-b c: a second window, which the sidebar has to pick up
     nt.wait_for_screen("2.1 cat", PATIENCE);
-    let screen = nt.screen_after(Duration::ZERO);
-    assert!(
-        screen.contains("1.1"),
-        "the window nobody is looking at left the sidebar:\n{screen}"
-    );
+    // The first window's pane is hidden now, and naming what it is running is most of why a
+    // sidebar is worth a third of the width.
+    nt.wait_for_screen("1.1 cat", PATIENCE);
 }
 
 /// What is left of the band when the sidebar is folded: the markers column.
