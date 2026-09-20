@@ -1,5 +1,5 @@
--- A fixed sidebar down the left: every window, every window's panes, and what each pane is
--- running.
+-- A sidebar down the left: every window, every window's panes, and what each pane is
+-- running. `C-b b` folds it to the markers column and back, when the prefix is loaded.
 --
 -- Off by default, unlike the status bar: a status line spends a row nobody was using for
 -- anything else, while a sidebar is an opinion about screen real estate — twenty-four columns
@@ -7,17 +7,23 @@
 --
 --   require('neotmux.defaults').sidebar = true
 --
--- Nothing here is a host feature. `neotmux.reserve('left', n)` takes the band, `ctx:reserved()`
--- answers where it landed, and the rest is `window.list`, `window.panes`, `pane.info` and
--- `pane.current` read from a tick.
+-- Nothing here is a host feature. `neotmux.reserve('left', n)` takes the band,
+-- `handle:resize_to(n)` folds it, `ctx:reserved()` answers where it landed, and the rest is
+-- `window.list`, `window.panes`, `pane.info` and `pane.current` read from a tick.
 local segments = require("status.segments")
 
 local M = {}
 
--- Fixed at load, because the reservation is: `neotmux.reserve` is asked once, while the file
--- is being required, and the host is never told a band changed width. Edit it here, or leave
--- the sidebar off.
-local WIDTH = 24
+-- The two states the band is ever in, both read when it is swapped, so assigning to either
+-- from your own `init.lua` takes effect on the next fold.
+--
+-- Closed is a rail rather than nothing: one column is the marker column, so folded you still
+-- see how many windows and panes there are and which of them you are in — you just cannot
+-- read their names. A band of nothing would be a band you have to remember is there.
+M.widths = {
+  open = 24,
+  closed = 1,
+}
 
 -- Catppuccin Mocha, the palette the status bar was drawn from. Every field is read on the
 -- tick, so assigning to one from your own init.lua takes effect.
@@ -39,7 +45,32 @@ M.markers = {
   pane = " ",
 }
 
-M.band = neotmux.reserve("left", WIDTH)
+M.band = neotmux.reserve("left", M.widths.open)
+
+-- Which of the two the band is in. The rows are the same either way: `segments.draw` cuts a
+-- run that does not fit, so the rail is the open sidebar with everything but the markers
+-- clipped off, and there is no second way of drawing this to keep in step with the first.
+M.open = true
+
+-- Swap the two. A resize keeps the band's place on the left edge, which a remove and a fresh
+-- reservation would not: folding would walk the sidebar inside anybody who reserved after it.
+function M.toggle()
+  -- Nil if the left edge was already spoken for when this file loaded.
+  if not M.band then
+    return
+  end
+  local want = M.open and M.widths.closed or M.widths.open
+  if M.band:resize_to(want) then
+    M.open = not M.open
+  end
+end
+
+-- The prefix is the standard plugin and this one is optional, so this is the direction the
+-- knowledge goes in: bound only if the prefix is already loaded, which it is by the time the
+-- sidebar loads unless it was turned off.
+if package.loaded["plugin.prefix"] then
+  require("plugin.prefix").commands["b"] = M.toggle
+end
 
 -- What a pane is running, or nil where the host has not got it.
 --
