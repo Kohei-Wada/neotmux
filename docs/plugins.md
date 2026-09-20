@@ -228,6 +228,9 @@ neotmux.pane.revision(id)     -- a number that moves when the pane is fed, or ni
 neotmux.pane.content(id, opts) -- { line, ... }, revision, wrapped — or nil, nil, nil
 neotmux.pane.history(id)      -- how many lines are above the screen, how many fell off
 neotmux.pane.scrollback(id, opts) -- { line, ... }, revision, wrapped — or nil, nil, nil
+neotmux.pane.freeze(id)       -- hold the pane still; false if there is no such pane
+neotmux.pane.unfreeze(id)     -- let it catch up; false if there is no such pane
+neotmux.pane.frozen(id)       -- true, false, or nil for no such pane
 neotmux.pane.split('horizontal' | 'vertical')
 neotmux.pane.focus(id)
 neotmux.pane.resize('left' | 'right' | 'up' | 'down', cells)
@@ -350,6 +353,48 @@ the same way, which is where the top of a wrapped command line usually is.
 A resize clears the flags. The terminal drops them on every row when the column count
 changes, because the old wrap points no longer describe the new width, and neotmux does not
 invent replacements.
+
+#### Holding a pane still
+
+A selection highlight over a pane that is still printing is a highlight over different text a
+moment later: the lines move under it and the tint stays where it was put. `freeze` stops
+that.
+
+```lua
+neotmux.pane.freeze(id)
+-- the pane draws, reads and numbers its history as it was at this moment
+neotmux.pane.unfreeze(id)
+```
+
+While a pane is frozen the host draws the screen as it was when you froze it, and
+`pane.content`, `pane.scrollback` and `pane.history` all answer about that same held instant
+— **the frozen text, not the live text**. That is the point: a plugin computing a selection
+against text the host is not drawing has computed the wrong selection, and being handed the
+live text silently would defeat the freeze. `pane.revision` is held with them, so it is still
+true that the revision a read comes back with is the revision of what was read, and a watcher
+polling it does not re-read the same held text on every frame.
+
+Nothing is lost. The child's output goes on being read from its PTY, parsed, and fed into the
+live screen underneath, and `pane_output` goes on being dispatched for every chunk of it —
+freezing decides what is drawn and what is read, not whether the child is heard. Unfreezing
+shows everything that arrived.
+
+Four things worth knowing:
+
+- **A second `freeze` keeps the snapshot it already has.** It answers `true`, because the pane
+  is frozen when it returns, but it does not re-take the view — re-anchoring it would move a
+  selection out from under whoever took one. Unfreeze and freeze again if that is what you
+  want.
+- **A resize reaches the child, not the held view.** The pane's PTY and its live screen are
+  resized as usual, because a child must never be lied to about its terminal. The frozen view
+  keeps the size it was taken at and is clipped to whatever room the pane now has; unfreezing
+  shows the reflowed screen. A selection anchored to a frozen line survives the resize, and
+  what it names after the unfreeze is the reflowed text, which is a different thing.
+- **Freezing is not a lifeline.** A pane whose child exits closes like any other, frozen or
+  not: `pane_closed` is dispatched, and every read about it answers `nil` from then on.
+- **It costs what the pane costs.** The held view is a copy of the pane's whole screen,
+  scrollback included — a pane with a full 10 000-line history is tens of megabytes of it.
+  Freeze the pane you are working in, not every pane.
 
 #### What a pane has already said
 

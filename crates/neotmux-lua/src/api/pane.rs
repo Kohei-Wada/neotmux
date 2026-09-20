@@ -209,6 +209,7 @@ pub(crate) fn install(
         // where 0 is the oldest line it still holds, and `lines` bounds the read the way
         // `content`'s does. Reading moves the terminal's position in its scrollback and puts
         // it back before answering, so nothing a person is looking at moves.
+        let terminals = terminals.clone();
         let scrollback = lua.create_function(move |lua, (pane, opts): (u32, Option<Table>)| {
             let (from, lines) = match &opts {
                 Some(opts) => (
@@ -227,6 +228,34 @@ pub(crate) fn install(
             answer(lua, text)
         })?;
         pane.set("scrollback", scrollback)?;
+    }
+
+    {
+        // Immediate, not an op: a plugin freezes a pane in order to read it in the same
+        // call, and an op applied after the tick would hand it the live text it froze to
+        // get away from. Nothing about the tree changes, so there is nothing for the rest of
+        // the frame to catch up with.
+        let terminals = terminals.clone();
+        let freeze =
+            lua.create_function(move |_, pane: u32| Ok(terminals.freeze(PaneId::from(pane))))?;
+        pane.set("freeze", freeze)?;
+    }
+
+    {
+        let terminals = terminals.clone();
+        let unfreeze =
+            lua.create_function(move |_, pane: u32| Ok(terminals.unfreeze(PaneId::from(pane))))?;
+        pane.set("unfreeze", unfreeze)?;
+    }
+
+    {
+        let frozen = lua.create_function(move |_, pane: u32| {
+            Ok(match terminals.is_frozen(PaneId::from(pane)) {
+                Some(frozen) => Value::Boolean(frozen),
+                None => Value::Nil,
+            })
+        })?;
+        pane.set("frozen", frozen)?;
     }
 
     {

@@ -13,6 +13,17 @@ struct Terminal {
     state: TermState,
     queries: Queries,
     revision: u64,
+    /// The revision as it was when the pane was frozen, or `None` while it is live. A frozen
+    /// pane answers with this, so the revision a read comes back with is the revision of
+    /// what was read: the live one goes on moving as the child prints, and a watcher that
+    /// believed it would re-read the same held text on every frame.
+    frozen_revision: Option<u64>,
+}
+
+impl Terminal {
+    fn read_revision(&self) -> u64 {
+        self.frozen_revision.unwrap_or(self.revision)
+    }
 }
 
 /// Every pane's terminal, a hidden window's included, behind one shared handle.
@@ -43,6 +54,7 @@ impl PaneTerminals {
                 state: TermState::new(size, scrollback),
                 queries: Queries::default(),
                 revision: 0,
+                frozen_revision: None,
             },
         );
     }
@@ -90,7 +102,41 @@ impl PaneTerminals {
     /// cursor moves it too — and that is the whole contract: it is the cheap question a
     /// watcher asks every frame so that the expensive one is asked only when it has to be.
     pub fn revision(&self, pane: PaneId) -> Option<u64> {
-        self.panes.borrow().get(&pane).map(|t| t.revision)
+        self.panes.borrow().get(&pane).map(Terminal::read_revision)
+    }
+
+    /// Holds the pane still: until [`PaneTerminals::unfreeze`] it draws, reads and numbers
+    /// its history as it is at this moment, while its child's output goes on being parsed
+    /// into the live screen underneath. `false` for a pane that does not exist.
+    ///
+    /// Freezing a pane that is already frozen keeps the snapshot it is holding rather than
+    /// taking another, so a caller that has anchored a selection to it does not lose it; the
+    /// answer is still `true`, because the pane is frozen when the call returns.
+    pub fn freeze(&self, pane: PaneId) -> bool {
+        let mut panes = self.panes.borrow_mut();
+        let Some(terminal) = panes.get_mut(&pane) else {
+            return false;
+        };
+        if terminal.state.freeze() {
+            terminal.frozen_revision = Some(terminal.revision);
+        }
+        true
+    }
+
+    /// Catches a frozen pane back up with everything that arrived while it was held. `false`
+    /// for a pane that does not exist.
+    pub fn unfreeze(&self, pane: PaneId) -> bool {
+        let mut panes = self.panes.borrow_mut();
+        let Some(terminal) = panes.get_mut(&pane) else {
+            return false;
+        };
+        terminal.state.unfreeze();
+        terminal.frozen_revision = None;
+        true
+    }
+
+    pub fn is_frozen(&self, pane: PaneId) -> Option<bool> {
+        self.panes.borrow().get(&pane).map(|t| t.state.is_frozen())
     }
 
     /// How many lines the pane holds above its visible screen, and how many have already
@@ -114,7 +160,7 @@ impl PaneTerminals {
             wrapped: want
                 .wrapped
                 .then(|| terminal.state.history_wrapped(from, count)),
-            revision: terminal.revision,
+            revision: terminal.read_revision(),
         })
     }
 
@@ -126,7 +172,7 @@ impl PaneTerminals {
         Some(Text {
             lines: terminal.state.lines(last, want.trailing),
             wrapped: want.wrapped.then(|| terminal.state.wrapped(last)),
-            revision: terminal.revision,
+            revision: terminal.read_revision(),
         })
     }
 }
@@ -221,6 +267,50 @@ mod tests {
         assert_eq!(history.lines, vec!["one", "two"]);
         assert_eq!(Some(history.revision), terminals.revision(pane(1)));
         assert_eq!(lines(&terminals, 1), vec!["three", "four"]);
+    }
+
+    /// The revision a read comes back with has to be the revision of what was read. A frozen
+    /// pane hands back held text, so it hands back the held revision — otherwise a watcher
+    /// comparing revisions re-reads the same text on every frame the child says anything.
+    #[test]
+    fn a_frozen_panes_revision_stands_still_and_catches_up_when_it_is_let_go() {
+        let terminals = terminals();
+        terminals.feed(pane(1), b"before");
+        let held = terminals.revision(pane(1)).expect("a live pane");
+        assert!(terminals.freeze(pane(1)));
+
+        terminals.feed(pane(1), b"\r\nafter");
+        assert_eq!(terminals.revision(pane(1)), Some(held));
+        let text = terminals
+            .content(pane(1), None, Want::default())
+            .expect("a frozen pane");
+        assert_eq!(text.revision, held);
+        assert_eq!(text.lines[0], "before");
+        assert_eq!(text.lines[1], "");
+
+        assert!(terminals.unfreeze(pane(1)));
+        assert_ne!(terminals.revision(pane(1)), Some(held));
+        assert_eq!(lines(&terminals, 1)[1], "after");
+    }
+
+    #[test]
+    fn freezing_a_pane_nobody_has_says_so_rather_than_raising() {
+        let terminals = terminals();
+        assert!(!terminals.freeze(pane(4242)));
+        assert!(!terminals.unfreeze(pane(4242)));
+        assert_eq!(terminals.is_frozen(pane(4242)), None);
+    }
+
+    /// Freezing is not a lifeline: the pane's child ending closes the pane, and a frozen
+    /// pane is a pane.
+    #[test]
+    fn a_frozen_pane_that_closes_is_gone_like_any_other() {
+        let terminals = terminals();
+        terminals.feed(pane(1), b"held");
+        terminals.freeze(pane(1));
+        terminals.close(pane(1));
+        assert_eq!(terminals.content(pane(1), None, Want::default()), None);
+        assert_eq!(terminals.is_frozen(pane(1)), None);
     }
 
     /// A shell exiting between one pass of a watcher's loop and the next is not the watcher's

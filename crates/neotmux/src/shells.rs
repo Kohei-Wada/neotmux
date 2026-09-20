@@ -434,6 +434,76 @@ mod tests {
         }
     }
 
+    /// The mutation freezing exists for, at the host's own seam: `snapshot` hands the
+    /// renderer the held grid while `drain` goes on reading the pane's PTY into the live
+    /// one. Nothing here writes to the terminal — the child does, on its own, throughout.
+    #[test]
+    fn a_frozen_panes_grid_stops_moving_while_its_pty_keeps_being_read() {
+        let (wakeup, waker) = wakeup().expect("wakeup");
+        let terminals = Rc::new(PaneTerminals::new());
+        let mut shells = Shells::new(waker, terminals.clone());
+        let _wakeup = wakeup;
+
+        let mut cmd = CommandBuilder::new("sh");
+        cmd.args([
+            "-c",
+            "i=0; while :; do echo line$i; i=$((i+1)); sleep 0.02; done",
+        ]);
+        let size = Size { rows: 4, cols: 20 };
+        shells.open(pane(1), cmd, size).expect("spawn");
+
+        let drawn = |shells: &Shells| {
+            shells
+                .grid(pane(1))
+                .map(|grid| {
+                    (0..grid.size.rows)
+                        .flat_map(|row| (0..grid.size.cols).map(move |col| (row, col)))
+                        .filter_map(|(row, col)| grid.cell(row, col))
+                        .map(|cell| cell.text.as_str())
+                        .collect::<String>()
+                })
+                .unwrap_or_default()
+        };
+        let pump = |shells: &mut Shells| {
+            let drained = shells.drain(32, |_, _| {}).expect("drain");
+            shells.snapshot(std::iter::once(pane(1)));
+            drained.output
+        };
+
+        // Let the child get two lines out, so the grid has something on it that would keep
+        // changing.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !drawn(&shells).contains("line1") {
+            assert!(Instant::now() < deadline, "the child never produced output");
+            pump(&mut shells);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+
+        assert!(terminals.freeze(pane(1)));
+        let held = drawn(&shells);
+        let mut fed = false;
+        let until = Instant::now() + Duration::from_millis(300);
+        while Instant::now() < until {
+            fed |= pump(&mut shells);
+            assert_eq!(drawn(&shells), held, "the frozen pane's grid moved");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(
+            fed,
+            "the pane's PTY was not read at all while it was frozen"
+        );
+
+        assert!(terminals.unfreeze(pane(1)));
+        pump(&mut shells);
+        assert_ne!(
+            drawn(&shells),
+            held,
+            "unfreezing did not show what arrived while the pane was held"
+        );
+
+        shells.close(pane(1));
+    }
+
     #[test]
     fn closing_the_last_shell_empties_the_collection() {
         let (_wakeup, mut shells) = shells();

@@ -8,6 +8,24 @@ pub struct TermState {
     /// Lines that have fallen out of the front of the history, counted as they go: nothing
     /// downstream can work it out afterwards. See [`crate::evictions`].
     dropped: usize,
+    /// The pane as it was at the moment it was frozen, or `None` while it is live. Every
+    /// read goes through [`TermState::reading`], so one field decides what the pane draws
+    /// as, what its text says and how long its history is, and those three cannot come
+    /// apart.
+    frozen: Option<Box<Frozen>>,
+}
+
+/// A pane held still: a copy of the whole screen, scrollback included, and the eviction
+/// count that numbers it.
+///
+/// A copy of the screen rather than of the lines, because it is the same `vt100::Screen`
+/// every reader here already takes, so freezing changes which screen they are given and
+/// nothing else. It costs what the pane costs — a full 10 000-line history is tens of
+/// megabytes — which is the price of the pane's text, its grid and its history all
+/// describing one instant.
+struct Frozen {
+    screen: vt100::Screen,
+    dropped: usize,
 }
 
 fn color_from_vt100(c: vt100::Color) -> Color {
@@ -37,6 +55,7 @@ impl TermState {
         Self {
             parser: vt100::Parser::new(size.rows, size.cols, scrollback),
             dropped: 0,
+            frozen: None,
         }
     }
 
@@ -64,6 +83,51 @@ impl TermState {
         });
     }
 
+    /// Holds the pane still: from here until [`TermState::unfreeze`], every read answers
+    /// about the pane as it is now. The parser is untouched, so output goes on being parsed
+    /// into the live screen underneath and nothing is lost.
+    ///
+    /// `false` only if it was already frozen, and then the snapshot it is already holding is
+    /// kept: re-taking it would move an anchor a caller had taken against it.
+    pub fn freeze(&mut self) -> bool {
+        if self.frozen.is_some() {
+            return false;
+        }
+        self.frozen = Some(Box::new(Frozen {
+            screen: self.parser.screen().clone(),
+            dropped: self.dropped,
+        }));
+        true
+    }
+
+    /// Catches the pane back up: every read answers about the live screen again, which shows
+    /// everything that arrived while it was held. `false` if it was not frozen.
+    pub fn unfreeze(&mut self) -> bool {
+        self.frozen.take().is_some()
+    }
+
+    pub fn is_frozen(&self) -> bool {
+        self.frozen.is_some()
+    }
+
+    /// The screen every read answers from: the frozen one while the pane is held, the live
+    /// one otherwise.
+    fn reading(&self) -> &vt100::Screen {
+        match &self.frozen {
+            Some(frozen) => &frozen.screen,
+            None => self.parser.screen(),
+        }
+    }
+
+    /// The same screen, for the reads that reach the history and therefore have to move the
+    /// screen's own position in it ([`crate::scrollback`]).
+    fn reading_mut(&mut self) -> &mut vt100::Screen {
+        match &mut self.frozen {
+            Some(frozen) => &mut frozen.screen,
+            None => self.parser.screen_mut(),
+        }
+    }
+
     pub fn resize(&mut self, size: Size) {
         let size = clamp_to_min_grid(size);
         self.parser.screen_mut().set_size(size.rows, size.cols);
@@ -77,43 +141,53 @@ impl TermState {
     /// What the pane is showing, as plain-text lines (`crate::lines`). `last` bounds the work
     /// to the bottom of the screen rather than trimming an answer that was built in full.
     pub fn lines(&self, last: Option<usize>, trailing: Trailing) -> Vec<String> {
-        crate::lines::visible(self.parser.screen(), last, trailing)
+        crate::lines::visible(self.reading(), last, trailing)
     }
 
     /// Whether each of those lines runs on into the next (`crate::wrap`).
     pub fn wrapped(&self, last: Option<usize>) -> Vec<bool> {
-        crate::wrap::visible(self.parser.screen(), last)
+        crate::wrap::visible(self.reading(), last)
     }
 
     /// How many lines the pane holds above its visible screen, and how many have fallen out
     /// of the front of it. `&mut` because reading the length goes through the screen's own
     /// position in the scrollback — see [`crate::scrollback`].
     pub fn history_extent(&mut self) -> History {
+        let dropped = match &self.frozen {
+            Some(frozen) => frozen.dropped,
+            None => self.dropped,
+        };
         History {
-            len: crate::scrollback::len(self.parser.screen_mut()),
-            dropped: self.dropped,
+            len: crate::scrollback::len(self.reading_mut()),
+            dropped,
         }
     }
 
     /// Lines from above the visible screen, oldest first, numbered as
     /// [`crate::scrollback`] describes.
     pub fn history(&mut self, from: usize, count: usize, trailing: Trailing) -> Vec<String> {
-        crate::scrollback::lines(self.parser.screen_mut(), from, count, trailing)
+        crate::scrollback::lines(self.reading_mut(), from, count, trailing)
     }
 
     /// Whether each of those history lines runs on into the next (`crate::wrap`).
     pub fn history_wrapped(&mut self, from: usize, count: usize) -> Vec<bool> {
-        crate::wrap::history(self.parser.screen_mut(), from, count)
+        crate::wrap::history(self.reading_mut(), from, count)
     }
 
+    /// The grid the child is writing into, which is the size the PTY was told. A frozen
+    /// pane keeps being resized underneath, so this is the live size either way — what the
+    /// frozen screen is is [`TermState::snapshot_into`]'s business and nobody else's.
     pub fn size(&self) -> Size {
         let (rows, cols) = self.parser.screen().size();
         Size { rows, cols }
     }
 
+    /// The grid the renderer draws: the frozen one while the pane is held, so the display
+    /// stops moving while the PTY goes on being read.
     pub fn snapshot_into(&self, out: &mut GridSnapshot) {
-        let screen = self.parser.screen();
-        let size = self.size();
+        let screen = self.reading();
+        let (rows, cols) = screen.size();
+        let size = Size { rows, cols };
         out.resize(size);
         out.cursor = screen.cursor_position();
         out.hide_cursor = screen.hide_cursor();
@@ -363,6 +437,122 @@ mod tests {
         s.feed(b"1\r\n2\r\n3\r\n4");
         assert_eq!(s.lines(None, Trailing::Trim), vec!["3", "4"]);
         assert_eq!(snap(&s).cell(0, 0).unwrap().text, "3");
+    }
+
+    /// The whole point: the grid the renderer is handed stops moving, while the parser goes
+    /// on taking everything the child says.
+    #[test]
+    fn a_frozen_pane_draws_what_it_drew_while_its_child_keeps_talking() {
+        let mut s = TermState::new(Size { rows: 2, cols: 8 }, 100);
+        s.feed(b"before");
+        assert!(s.freeze());
+
+        s.feed(b"\r\nafter");
+        assert_eq!(snap(&s).cell(0, 0).unwrap().text, "b");
+        assert_eq!(snap(&s).cell(1, 0).unwrap().text, "");
+        assert_eq!(s.lines(None, Trailing::Trim), vec!["before", ""]);
+
+        assert!(s.unfreeze());
+        assert_eq!(s.lines(None, Trailing::Trim), vec!["before", "after"]);
+        assert_eq!(snap(&s).cell(1, 0).unwrap().text, "a");
+    }
+
+    /// A plugin computing a selection wants the text it is drawing the selection over, and
+    /// silently handing it the live text defeats the freeze.
+    #[test]
+    fn a_frozen_panes_text_and_history_are_the_frozen_ones() {
+        let mut s = TermState::new(Size { rows: 2, cols: 8 }, 100);
+        s.feed(b"1\r\n2\r\n3\r\n4");
+        assert!(s.freeze());
+        let held = s.history_extent();
+
+        s.feed(b"\r\n5\r\n6\r\n7");
+        assert_eq!(s.lines(None, Trailing::Trim), vec!["3", "4"]);
+        assert_eq!(s.history(0, 10, Trailing::Trim), vec!["1", "2"]);
+        assert_eq!(s.history_extent(), held);
+
+        s.unfreeze();
+        assert_eq!(s.lines(None, Trailing::Trim), vec!["6", "7"]);
+        assert_eq!(
+            s.history(0, 10, Trailing::Trim),
+            vec!["1", "2", "3", "4", "5"]
+        );
+    }
+
+    /// Nothing is lost while the pane is held: the parser kept every line, and unfreezing
+    /// shows them all.
+    #[test]
+    fn what_arrived_while_the_pane_was_frozen_is_there_when_it_is_let_go() {
+        let mut s = TermState::new(Size { rows: 2, cols: 8 }, 100);
+        s.freeze();
+        s.feed(b"1\r\n2\r\n3\r\n4");
+        assert_eq!(s.history_extent(), History { len: 0, dropped: 0 });
+        s.unfreeze();
+        assert_eq!(s.history(0, 10, Trailing::Trim), vec!["1", "2"]);
+        assert_eq!(s.lines(None, Trailing::Trim), vec!["3", "4"]);
+    }
+
+    /// Eviction goes on underneath, and the frozen numbering is the one that was frozen —
+    /// so `dropped + index` still names the frozen line while the pane is held.
+    #[test]
+    fn the_eviction_count_is_held_with_everything_else_and_catches_up_after() {
+        let mut s = ringed();
+        s.feed(b"1\r\n2\r\n3\r\n4\r\n5");
+        s.freeze();
+        s.feed(b"\r\n6\r\n7\r\n8");
+        assert_eq!(s.history_extent(), History { len: 3, dropped: 0 });
+        s.unfreeze();
+        assert_eq!(s.history_extent(), History { len: 4, dropped: 2 });
+    }
+
+    /// Re-taking the snapshot would move an anchor a caller had already taken against it.
+    #[test]
+    fn freezing_a_frozen_pane_keeps_the_snapshot_it_already_has() {
+        let mut s = TermState::new(Size { rows: 2, cols: 8 }, 100);
+        s.feed(b"first");
+        s.freeze();
+        s.feed(b"\r\nsecond");
+        assert!(!s.freeze(), "the second freeze claimed to have taken one");
+        assert_eq!(s.lines(None, Trailing::Trim), vec!["first", ""]);
+    }
+
+    #[test]
+    fn unfreezing_a_live_pane_changes_nothing() {
+        let mut s = TermState::new(Size { rows: 2, cols: 8 }, 100);
+        assert!(!s.unfreeze());
+        assert!(!s.is_frozen());
+    }
+
+    /// The child is never lied to: a resize reaches the live grid and the PTY, and the
+    /// frozen view keeps the size it was taken at until the pane is let go.
+    #[test]
+    fn a_resize_while_frozen_reaches_the_child_and_not_the_held_view() {
+        let mut s = TermState::new(Size { rows: 2, cols: 8 }, 100);
+        s.feed(b"abcdefgh");
+        s.freeze();
+
+        s.resize(Size { rows: 4, cols: 4 });
+        assert_eq!(
+            s.size(),
+            Size { rows: 4, cols: 4 },
+            "the child was not resized"
+        );
+        assert_eq!(snap(&s).size, Size { rows: 2, cols: 8 });
+        assert_eq!(s.lines(None, Trailing::Trim), vec!["abcdefgh", ""]);
+
+        s.unfreeze();
+        assert_eq!(snap(&s).size, Size { rows: 4, cols: 4 });
+    }
+
+    /// The cursor report a child asks for describes the child's own grid, never the held
+    /// one: the pane is frozen for whoever is looking at it, not for the program in it.
+    #[test]
+    fn a_frozen_pane_still_reports_its_childs_own_cursor() {
+        let mut s = TermState::new(Size { rows: 4, cols: 20 }, 0);
+        s.feed(b"ab");
+        s.freeze();
+        s.feed(b"\r\ncd");
+        assert_eq!(s.cursor(), (1, 2));
     }
 
     #[test]
