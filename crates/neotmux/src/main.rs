@@ -10,6 +10,7 @@ mod tui;
 use std::env;
 use std::path::{Path, PathBuf};
 
+use anyhow::Context as _;
 use neotmux::plugins::Plugins;
 use neotmux::{logging, reads};
 use neotmux_lua::LuaSubsystem;
@@ -22,16 +23,19 @@ use neotmux_proto::Level;
 struct Cli {
     log: Option<PathBuf>,
     server: bool,
+    kill: bool,
     warnings: Vec<String>,
 }
 
 fn parse_args(mut args: impl Iterator<Item = String>) -> Cli {
     let mut log = None;
     let mut server = false;
+    let mut kill = false;
     let mut warnings = Vec::new();
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--server" => server = true,
+            "--kill" => kill = true,
             "--log" => match args.next() {
                 Some(value) if !value.starts_with('-') => {
                     log = Some(PathBuf::from(value));
@@ -48,6 +52,7 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Cli {
     Cli {
         log,
         server,
+        kill,
         warnings,
     }
 }
@@ -94,7 +99,27 @@ fn main() -> anyhow::Result<()> {
     if cli.server {
         return start::serve();
     }
+    if cli.kill {
+        return kill();
+    }
     client()
+}
+
+/// Ends the session's server from outside, for the case the protocol cannot reach: a client
+/// built against another version is refused by the handshake, and the session it cannot
+/// speak to would otherwise be unreachable and immortal.
+fn kill() -> anyhow::Result<()> {
+    let paths = neotmux::sock::Paths::resolve(&|key| env::var_os(key))?;
+    let Some(pid) = neotmux::sock::holder(&paths)? else {
+        anyhow::bail!("no neotmux session is running");
+    };
+    nix::sys::signal::kill(
+        nix::unistd::Pid::from_raw(pid),
+        nix::sys::signal::Signal::SIGTERM,
+    )
+    .with_context(|| format!("signal the neotmux server (pid {pid})"))?;
+    println!("neotmux: asked the session (pid {pid}) to end");
+    Ok(())
 }
 
 fn client() -> anyhow::Result<()> {
@@ -216,6 +241,14 @@ mod tests {
         let flag = parse_args(args(&["--server", "--log", "/tmp/x.log"]));
         assert!(flag.server);
         assert_eq!(flag.log, Some(PathBuf::from("/tmp/x.log")));
+        assert!(flag.warnings.is_empty());
+    }
+
+    #[test]
+    fn the_kill_flag_is_recognised_and_is_not_a_warning() {
+        let flag = parse_args(args(&["--kill"]));
+        assert!(flag.kill);
+        assert!(!flag.server);
         assert!(flag.warnings.is_empty());
     }
 }

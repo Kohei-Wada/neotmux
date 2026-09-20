@@ -118,11 +118,31 @@ impl Lock {
             .open(&paths.lock)
             .with_context(|| format!("open {}", paths.lock.display()))?;
         match nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusiveNonblock) {
-            Ok(held) => Ok(Some(Self { _held: held })),
+            Ok(mut held) => {
+                use std::io::{Seek, SeekFrom, Write as _};
+                held.set_len(0).context("truncate the lock")?;
+                held.seek(SeekFrom::Start(0)).context("seek the lock")?;
+                writeln!(held, "{}", std::process::id()).context("write the lock's pid")?;
+                Ok(Some(Self { _held: held }))
+            }
             Err((_, nix::errno::Errno::EWOULDBLOCK)) => Ok(None),
             Err((_, err)) => Err(err).context("lock the session"),
         }
     }
+}
+
+/// The pid of the process serving this session, or `None` when nobody is.
+///
+/// The lock is what answers "is anybody there" — a lock this process can take is a lock
+/// nobody holds, whatever a file left behind says. The pid inside it is only the name of
+/// whoever holds it, and is never read without the lock having refused first.
+pub fn holder(paths: &Paths) -> anyhow::Result<Option<i32>> {
+    if Lock::take(paths)?.is_some() {
+        return Ok(None);
+    }
+    let text = fs::read_to_string(&paths.lock)
+        .with_context(|| format!("read {}", paths.lock.display()))?;
+    Ok(text.trim().parse().ok())
 }
 
 /// Binds the session's socket, replacing one a dead server left behind. Only ever called
@@ -308,5 +328,24 @@ mod tests {
         );
         drop(held);
         assert!(Lock::take(&paths).expect("take").is_some());
+    }
+
+    #[test]
+    fn the_lock_holder_is_named_while_it_is_held_and_nobody_after() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = Paths {
+            socket: dir.path().join("default.sock"),
+            lock: dir.path().join("default.lock"),
+        };
+        assert_eq!(holder(&paths).expect("holder"), None, "nobody holds it yet");
+
+        let held = Lock::take(&paths).expect("take").expect("nobody held it");
+        assert_eq!(
+            holder(&paths).expect("holder"),
+            Some(std::process::id() as i32)
+        );
+
+        drop(held);
+        assert_eq!(holder(&paths).expect("holder"), None, "it was given back");
     }
 }

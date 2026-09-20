@@ -12,9 +12,32 @@ use neotmux_proto::wire::{self, HELLO_LEN};
 use neotmux_proto::{OwnedToClient, PROTOCOL_VERSION};
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 
+mod session;
+
 /// Long enough for a process to start and a shell to be forked on a loaded machine; a
 /// passing run takes a small fraction of it.
 const PATIENCE: Duration = Duration::from_secs(20);
+
+/// A test's own `$XDG_RUNTIME_DIR`, dropped last among the locals declared after it so that
+/// whatever a test did with its session — including ending it itself, as the `--kill` tests
+/// do — has already happened by the time this reaches for it.
+struct TestRuntime(tempfile::TempDir);
+
+impl TestRuntime {
+    fn new() -> Self {
+        Self(tempfile::tempdir().expect("runtime dir"))
+    }
+
+    fn path(&self) -> &Path {
+        self.0.path()
+    }
+}
+
+impl Drop for TestRuntime {
+    fn drop(&mut self) {
+        session::end_session(self.0.path());
+    }
+}
 
 fn socket_in(runtime: &Path) -> PathBuf {
     runtime.join("neotmux/default.sock")
@@ -155,7 +178,7 @@ fn started(runtime: &Path) -> Client {
 /// the client does not kill the session.
 #[test]
 fn the_server_outlives_a_client_that_disconnects() {
-    let runtime = tempfile::tempdir().expect("runtime dir");
+    let runtime = TestRuntime::new();
     let mut client = started(runtime.path());
 
     client.kill();
@@ -189,7 +212,7 @@ fn the_server_outlives_a_client_that_disconnects() {
 /// enough after the client is gone that only an immortal session can answer it.
 #[test]
 fn a_session_with_nobody_looking_at_it_outlives_the_old_linger() {
-    let runtime = tempfile::tempdir().expect("runtime dir");
+    let runtime = TestRuntime::new();
     let mut client = started(runtime.path());
 
     client.kill();
@@ -212,7 +235,7 @@ fn a_session_with_nobody_looking_at_it_outlives_the_old_linger() {
 /// problem, not the split's.
 #[test]
 fn a_second_client_is_refused_and_says_why() {
-    let runtime = tempfile::tempdir().expect("runtime dir");
+    let runtime = TestRuntime::new();
     let _first = started(runtime.path());
 
     let mut second = Client::start(runtime.path(), "/bin/cat");
@@ -228,7 +251,7 @@ fn a_second_client_is_refused_and_says_why() {
 /// pane's grid afterwards — and only a kept terminal state can show it again.
 #[test]
 fn a_second_client_is_shown_the_session_the_first_one_left() {
-    let runtime = tempfile::tempdir().expect("runtime dir");
+    let runtime = TestRuntime::new();
     let mut first = Client::start(runtime.path(), "/bin/cat");
     wait_for_socket(&socket_in(runtime.path()));
     first.send("still-here-after-the-detach\r");
@@ -245,7 +268,7 @@ fn a_second_client_is_shown_the_session_the_first_one_left() {
 /// the detached session's shell must still be there for the client that comes next.
 #[test]
 fn a_detached_session_survives_a_connection_that_never_attaches() {
-    let runtime = tempfile::tempdir().expect("runtime dir");
+    let runtime = TestRuntime::new();
     let mut first = Client::start(runtime.path(), "/bin/cat");
     wait_for_socket(&socket_in(runtime.path()));
     first.send("still-here-after-the-non-client\r");
@@ -287,7 +310,7 @@ fn greet_and_send_message(socket: &Path, payload: &[u8]) {
 /// found, and must not take the server itself down with it.
 #[test]
 fn a_detached_session_survives_a_connection_whose_first_message_is_not_an_attach() {
-    let runtime = tempfile::tempdir().expect("runtime dir");
+    let runtime = TestRuntime::new();
     let mut first = Client::start(runtime.path(), "/bin/cat");
     wait_for_socket(&socket_in(runtime.path()));
     first.send("still-here-after-the-bad-message\r");
@@ -317,7 +340,7 @@ fn a_detached_session_survives_a_connection_whose_first_message_is_not_an_attach
 /// count — the second number `stty size` prints — is asserted.
 #[test]
 fn a_session_is_refitted_to_the_terminal_that_attaches_to_it() {
-    let runtime = tempfile::tempdir().expect("runtime dir");
+    let runtime = TestRuntime::new();
     let first = Client::start_sized(runtime.path(), "/bin/sh", 24, 80);
     wait_for_socket(&socket_in(runtime.path()));
     drop(first);
@@ -331,7 +354,7 @@ fn a_session_is_refitted_to_the_terminal_that_attaches_to_it() {
 /// rather than believed — and a session starts on it as if it had never been there.
 #[test]
 fn a_socket_a_dead_server_left_behind_is_replaced() {
-    let runtime = tempfile::tempdir().expect("runtime dir");
+    let runtime = TestRuntime::new();
     let socket = socket_in(runtime.path());
     std::fs::create_dir_all(socket.parent().expect("a parent")).expect("create the directory");
     drop(UnixListener::bind(&socket).expect("bind a listener and drop it"));
@@ -354,7 +377,7 @@ fn a_socket_a_dead_server_left_behind_is_replaced() {
 /// to negotiate — §2.1.
 #[test]
 fn a_client_meeting_another_protocol_says_both_numbers_and_exits() {
-    let runtime = tempfile::tempdir().expect("runtime dir");
+    let runtime = TestRuntime::new();
     let socket = socket_in(runtime.path());
     std::fs::create_dir_all(socket.parent().expect("a parent")).expect("create the directory");
     let listener = UnixListener::bind(&socket).expect("bind");
@@ -386,7 +409,7 @@ fn a_client_meeting_another_protocol_says_both_numbers_and_exits() {
 /// back to the screen. The whole point of the split is that nothing about this changed.
 #[test]
 fn a_session_over_the_socket_still_carries_a_keystroke_to_its_shell_and_back() {
-    let runtime = tempfile::tempdir().expect("runtime dir");
+    let runtime = TestRuntime::new();
     let _client = started(runtime.path());
 }
 
@@ -394,7 +417,7 @@ fn a_session_over_the_socket_still_carries_a_keystroke_to_its_shell_and_back() {
 /// to waiting rather than falling over, and the next client gets its session.
 #[test]
 fn a_client_that_greets_and_leaves_without_attaching_costs_nothing() {
-    let runtime = tempfile::tempdir().expect("runtime dir");
+    let runtime = TestRuntime::new();
     let client = started(runtime.path());
 
     for _ in 0..3 {
@@ -419,4 +442,42 @@ fn a_client_that_greets_and_leaves_without_attaching_costs_nothing() {
 
     // Still the same session, still talking to its shell.
     drop(client);
+}
+
+/// The way out of an immortal session, and the one that does not go through the protocol.
+#[test]
+fn kill_ends_a_session_nobody_is_attached_to() {
+    let runtime = TestRuntime::new();
+    let mut client = started(runtime.path());
+    client.kill();
+    drop(client);
+
+    let status = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .arg("--kill")
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .status()
+        .expect("run --kill");
+    assert!(status.success());
+
+    let socket = socket_in(runtime.path());
+    let deadline = Instant::now() + PATIENCE;
+    while UnixStream::connect(&socket).is_ok() {
+        assert!(Instant::now() < deadline, "the session outlived --kill");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn kill_with_nothing_running_says_so_and_fails() {
+    let runtime = TestRuntime::new();
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .arg("--kill")
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run --kill");
+    assert!(!out.status.success());
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(said.contains("no neotmux session is running"), "{said}");
 }
