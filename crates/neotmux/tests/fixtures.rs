@@ -1674,6 +1674,12 @@ fn a_pane_that_closes_while_being_read_does_not_raise() {
 
     nt.send("\x04"); // C-d: EOF for the focused pane's cat
     nt.wait_for_log("splitter pane_closed 2", PATIENCE);
+    // The pane does not exist any more, so nothing may still be reading its terminal.
+    let log = nt.wait_for_log("content 2 closed=", PATIENCE);
+    assert!(
+        line_with(&log, "content 2 closed=").contains("closed=nil"),
+        "a dead pane was still showing something:\n{log}"
+    );
     nt.settle(Duration::from_millis(500));
     assert!(!nt.log_text().contains("[ERROR]"), "{}", nt.log_text());
 

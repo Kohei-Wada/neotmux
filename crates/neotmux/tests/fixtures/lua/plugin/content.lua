@@ -38,6 +38,8 @@ end)
 
 neotmux.on_event("pane_closed", function(event)
   seen[event.pane] = nil
+  -- The pane is gone by the time this is dispatched, so its terminal must be gone with it.
+  neotmux.log.info("content " .. event.pane .. " closed=" .. tostring(neotmux.pane.content(event.pane)))
 end)
 
 neotmux.on_tick(function()
