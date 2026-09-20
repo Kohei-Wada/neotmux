@@ -10,4 +10,4 @@ pub use geom::{Dir, Size, SplitDir};
 pub use grid::{Color, GridSnapshot, SnapCell};
 pub use ids::{PaneId, WindowId};
 pub use paneinfo::PaneInfo;
-pub use reserve::{Edge, Reserved};
+pub use reserve::{Axis, Edge, Reserved};

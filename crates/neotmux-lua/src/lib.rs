@@ -486,20 +486,20 @@ impl LuaSubsystem {
         self.buffers.applicable()
     }
 
-    /// The rows every source has been granted, per edge. Whether the terminal can afford
-    /// them is the host's judgement, not this layer's.
+    /// What every source has been granted, per edge. Whether the terminal can afford it is
+    /// the host's judgement, not this layer's.
     pub fn reserved(&self) -> Reserved {
         self.reservations.totals()
     }
 
-    /// The host has settled the surface: hand every granted reservation its band, or none at
-    /// all when the surface could not afford them.
+    /// The host has settled the surface: hand every granted reservation its band, out of the
+    /// bands the host says it actually applied.
     ///
     /// Called at a frame boundary only. A `neotmux.reserve` or `handle:remove()` from inside
     /// a tick changes what `reserved()` reports, but not the bands this frame is being drawn
     /// against — the same discipline `pane.split` follows, and what keeps a reservation from
     /// invalidating the epoch of a frame already being composed.
-    pub fn lay_out_reservations(&self, surface: Size, applied: bool) {
+    pub fn lay_out_reservations(&self, surface: Size, applied: Reserved) {
         self.reservations.lay_out(surface, applied);
     }
 

@@ -81,7 +81,7 @@ impl Session {
             gutter: lua.opt().pane_gutter,
         };
         let (windows, first) = Windows::new(lua.reserve_window_id(), surface);
-        lua.lay_out_reservations(size, windows.current().bands_applied(surface.reserved));
+        lua.lay_out_reservations(size, windows.current().applied_bands());
         let mut shells = Shells::new(waker, lua.terminals());
         shells.open(
             first,
@@ -111,10 +111,7 @@ impl Session {
     /// it, resize the panes to match, and tell the Lua layer about it (§4.8).
     fn apply_geometry(&mut self, lua: &LuaSubsystem) -> anyhow::Result<()> {
         self.windows.resurface(self.surface);
-        lua.lay_out_reservations(
-            self.surface.size,
-            self.windows.current().bands_applied(self.surface.reserved),
-        );
+        lua.lay_out_reservations(self.surface.size, self.windows.current().applied_bands());
         self.fit()?;
         lua.dispatch_event(&LuaEvent::Resized {
             size: self.windows.current().content,
