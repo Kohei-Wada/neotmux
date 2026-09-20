@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### The bar counts panes and windows the way a person does
+
+Split, end the shell in the new pane, split again: the number on the bar used to climb — 2,
+then 3, then 4 — with never more than two panes on screen. The ids were right. A `PaneId` is
+allocated once and never reused, and a `WindowId` likewise, because a plugin holding id 2 must
+not find that it now means something else. Showing one to a person was the mistake.
+
+The bar shows positions instead: where the pane sits in `pane.list()`, which is in layout
+order, and where the window sits in `window.list()`. Both close the gap when one goes, so a
+block is numbered the way tmux numbers them. Nothing in the host changed and no id was
+renumbered — `status/position.lua` is a loop over a list the bar already had.
+
+A block now reads `1.2  nvim`: the window's position, the focused pane's position, the command.
+
 ### Panes you can move between and resize
 
 `neotmux.pane.resize('left' | 'right' | 'up' | 'down', cells)` moves the boundary between the
@@ -54,6 +68,26 @@ An unknown id answers `nil`, and a fact that could not be read is an absent fiel
 raises, because a shell exiting is not a plugin's error. The facts are sampled by the host at
 most every 250 ms and a call reads the last sample, so asking on every tick for every pane
 costs no syscalls. Read from `/proc`: Linux-only, and unknown everywhere else.
+
+### A status bar, not a debug line
+
+The shipped `status` plugin now reserves the **top** row and draws what a status bar is for:
+every window on the left, the one being shown capped in colour with what its focused pane is
+running beside it, and on the right that command and its working directory, each behind its
+own icon. `panes 2 focus 1` is gone.
+
+It is composed from scratch every tick, so it follows the focus, a command starting or
+finishing and a `cd` with no keystroke to prompt it. The directory is written the way a shell
+prompt writes it — `$HOME` as `~` — and loses its leading components when the space runs out.
+
+`$HOME` reaches it as `neotmux.home`, the one value out of the process environment the host
+publishes: the VM has no `os.getenv`, and this is the same read the `~/.config/neotmux` layer
+is resolved from, so the two cannot disagree. It is `nil` where the process had no `HOME`, and
+the path is then written out in full.
+
+The colours (Catppuccin Mocha), the caps and the icons are fields on the module, read on the
+tick: `require('plugin.status').caps = { left = '', right = '' }` is the whole escape for a
+terminal without a Nerd Font.
 
 ### The status line is a plugin now
 
