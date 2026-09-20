@@ -1,16 +1,20 @@
 pub mod draw;
+pub mod frame;
 pub mod geom;
 pub mod grid;
 pub mod ids;
+pub mod keys;
 pub mod level;
 pub mod paneinfo;
 pub mod panerects;
 pub mod reserve;
 
 pub use draw::{DrawCmd, Epoch, Rect};
+pub use frame::{Frame, Notice, OwnedFrame, OwnedPaneFrame, PaneFrame};
 pub use geom::{Dir, Size, SplitDir};
 pub use grid::{Color, GridSnapshot, SnapCell};
 pub use ids::{PaneId, WindowId};
+pub use keys::{Key, KeyCode, Modifiers};
 pub use level::Level;
 pub use paneinfo::PaneInfo;
 pub use panerects::PaneRects;

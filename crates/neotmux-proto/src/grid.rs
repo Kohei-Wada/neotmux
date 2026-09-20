@@ -36,7 +36,7 @@ impl SnapCell {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct GridSnapshot {
     pub size: Size,

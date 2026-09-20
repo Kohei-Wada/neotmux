@@ -7,13 +7,14 @@
 //! catching the signals a process gets belong to whoever is driving the session.
 
 pub mod decode;
-pub mod frame;
 pub mod input;
-pub mod keys;
 pub mod logging;
 pub mod notify;
 pub mod panes;
 pub mod session;
+
+// Both moved into `neotmux-proto`: a frame and a key are what the wire carries.
+pub use neotmux_proto::{frame, keys};
 
 mod paneinfo;
 mod procinfo;
