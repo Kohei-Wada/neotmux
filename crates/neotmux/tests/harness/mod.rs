@@ -187,6 +187,24 @@ impl Neotmux {
             .unwrap_or_default()
     }
 
+    /// One cell's background, as it reached the outer terminal. A tint is a colour and
+    /// nothing else — the glyph it leaves alone is what `cell` already answers — so this is
+    /// the only way a PTY test can see one at all. `None` for a cell left at the terminal's
+    /// own background or set from the palette rather than by name.
+    pub fn cell_bg(&self, row: u16, col: u16) -> Option<(u8, u8, u8)> {
+        match self
+            .parser
+            .lock()
+            .unwrap()
+            .screen()
+            .cell(row, col)?
+            .bgcolor()
+        {
+            vt100::Color::Rgb(r, g, b) => Some((r, g, b)),
+            _ => None,
+        }
+    }
+
     /// The row the shipped status bar reserves for itself, as text.
     pub fn status(&self) -> String {
         self.screen_contents()
