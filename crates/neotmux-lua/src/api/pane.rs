@@ -187,13 +187,18 @@ pub(crate) fn install(
     }
 
     {
-        // The cheap half of reading the history, as `revision` is of reading the screen: a
-        // number, with no line built to answer it.
+        // The cheap half of reading the history, as `revision` is of reading the screen: two
+        // numbers, with no line built to answer them. The second is what makes the first
+        // safe to hold on to — a line number means a different line after the ring drops
+        // one, and nothing else in the read path shows that it happened.
         let terminals = terminals.clone();
         let history = lua.create_function(move |_, pane: u32| {
-            Ok(match terminals.history_len(PaneId::from(pane)) {
-                Some(len) => Value::Integer(len as i64),
-                None => Value::Nil,
+            Ok(match terminals.history_extent(PaneId::from(pane)) {
+                Some(history) => (
+                    Value::Integer(history.len as i64),
+                    Value::Integer(history.dropped as i64),
+                ),
+                None => (Value::Nil, Value::Nil),
             })
         })?;
         pane.set("history", history)?;

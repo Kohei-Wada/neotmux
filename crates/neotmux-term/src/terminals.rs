@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use neotmux_core::proto::{GridSnapshot, PaneId, Size};
 
 use crate::query::Queries;
-use crate::read::{Text, Want};
+use crate::read::{History, Text, Want};
 use crate::state::TermState;
 
 /// One pane's terminal: the screen its child writes into, the reply path that answers the
@@ -93,14 +93,14 @@ impl PaneTerminals {
         self.panes.borrow().get(&pane).map(|t| t.revision)
     }
 
-    /// How many lines the pane holds above its visible screen. `None` for a pane that does
-    /// not exist. This is the cheap half of reading the history, the way `revision` is the
+    /// How many lines the pane holds above its visible screen, and how many have already
+    /// fallen out of the front of it. `None` for a pane that does not exist. This is the cheap half of reading the history, the way `revision` is the
     /// cheap half of reading the screen: it builds no lines.
-    pub fn history_len(&self, pane: PaneId) -> Option<usize> {
+    pub fn history_extent(&self, pane: PaneId) -> Option<History> {
         self.panes
             .borrow_mut()
             .get_mut(&pane)
-            .map(|t| t.state.history_len())
+            .map(|t| t.state.history_extent())
     }
 
     /// Lines from above the pane's visible screen, oldest first, with the revision they were
@@ -200,7 +200,7 @@ mod tests {
     fn a_pane_nobody_has_answers_nothing_rather_than_raising() {
         let terminals = terminals();
         assert_eq!(terminals.content(pane(4242), None, Want::default()), None);
-        assert_eq!(terminals.history_len(pane(4242)), None);
+        assert_eq!(terminals.history_extent(pane(4242)), None);
         assert_eq!(terminals.history(pane(4242), 0, 10, Want::default()), None);
         assert_eq!(terminals.revision(pane(4242)), None);
         assert_eq!(terminals.size(pane(4242)), None);
@@ -214,7 +214,7 @@ mod tests {
         let terminals = PaneTerminals::new();
         terminals.open(pane(1), Size { rows: 2, cols: 8 }, 100);
         terminals.feed(pane(1), b"one\r\ntwo\r\nthree\r\nfour");
-        assert_eq!(terminals.history_len(pane(1)), Some(2));
+        assert_eq!(terminals.history_extent(pane(1)).map(|h| h.len), Some(2));
         let history = terminals
             .history(pane(1), 0, 10, Want::default())
             .expect("a live pane");

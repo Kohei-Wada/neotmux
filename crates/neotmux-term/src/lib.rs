@@ -1,3 +1,4 @@
+pub mod evictions;
 pub mod lines;
 pub mod pty;
 pub mod query;

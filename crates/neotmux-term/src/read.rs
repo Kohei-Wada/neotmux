@@ -26,3 +26,14 @@ pub struct Text {
     /// The revision the read was taken at.
     pub revision: u64,
 }
+
+/// Where a pane's history begins, and how long it is.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct History {
+    /// How many lines the pane holds above its visible screen.
+    pub len: usize,
+    /// How many lines have fallen out of the front of it since the pane opened, so history
+    /// line `i` is the `dropped + i`th line the pane ever scrolled away. See
+    /// [`crate::evictions`] for the one case in which this can be low.
+    pub dropped: usize,
+}

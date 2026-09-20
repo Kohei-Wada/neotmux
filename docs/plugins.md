@@ -226,7 +226,7 @@ neotmux.pane.rect(id)    -- { x = , y = , w = , h = }, or nil
 neotmux.pane.info(id)    -- { command = ..., cwd = ... }, or nil
 neotmux.pane.revision(id)     -- a number that moves when the pane is fed, or nil
 neotmux.pane.content(id, opts) -- { line, ... }, revision, wrapped — or nil, nil, nil
-neotmux.pane.history(id)      -- how many lines are above the screen, or nil
+neotmux.pane.history(id)      -- how many lines are above the screen, how many fell off
 neotmux.pane.scrollback(id, opts) -- { line, ... }, revision, wrapped — or nil, nil, nil
 neotmux.pane.split('horizontal' | 'vertical')
 neotmux.pane.focus(id)
@@ -357,7 +357,7 @@ invent replacements.
 are:
 
 ```lua
-local n = neotmux.pane.history(id)                              -- 0 if it has not scrolled
+local n, dropped = neotmux.pane.history(id)                     -- 0, 0 if it has not scrolled
 local all  = neotmux.pane.scrollback(id)                        -- the whole history
 local tail = neotmux.pane.scrollback(id, { from = n - 10, lines = 10 })  -- the last ten
 ```
@@ -381,6 +381,33 @@ many, each new line drops the oldest and every number shifts down by one — so 
 holding a position across that will find it pointing one line later for each line dropped.
 `history()` sitting still at the limit while the pane is producing output is what that looks
 like.
+
+**The second number `history()` returns is how many lines have gone that way** since the pane
+opened. That is what makes a saved position safe to hold: `dropped + index` is a number
+nothing renumbers, so save it and convert back when you use it.
+
+```lua
+local _, dropped = neotmux.pane.history(id)
+local anchor = dropped + index          -- save this, not the index
+
+local _, now = neotmux.pane.history(id)
+if anchor < now then
+  -- the line it named is gone; there is nothing to fall back to
+else
+  local line = neotmux.pane.scrollback(id, { from = anchor - now, lines = 1 })[1]
+end
+```
+
+The revision will not tell you this: it moves on any output at all, and stands still for none
+of the evictions.
+
+**The count can be low, in one case.** The terminal does not report evictions; the host counts
+them by watching the lines the terminal appends, and that count is exact as long as no single
+read from the pane's PTY appends as many lines as the pane holds. A read is at most 8 KiB and
+the pane holds 10 000 lines, so ordinary output — which needs a byte per line — cannot reach
+it. A child that sends thousands of scroll sequences in one chunk can, and then `dropped` is
+lower than the truth. Everything the plugin could have anchored to is gone in that case
+anyway, so what it loses is the numbering rather than the ability to notice.
 
 **Reading does not scroll the pane.** The terminal's own position in its scrollback is moved
 to reach the lines and put back before you are answered, inside one call, so nobody watching

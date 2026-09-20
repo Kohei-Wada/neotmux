@@ -200,3 +200,28 @@ fn the_wrapped_option_says_which_history_rows_run_on_into_the_next() {
 
     assert_eq!(ticked(&sub), vec!["true,false"]);
 }
+
+/// An anchored line number means a different line once the ring drops one, and the count of
+/// what it dropped is the only way to see it. Four lines of ring, six scrolled away.
+#[test]
+fn history_also_reports_how_many_lines_have_fallen_out_of_the_front() {
+    let (_dir, sub) = built(
+        "local len, dropped = neotmux.pane.history(1)\n\
+         neotmux.log.info(len .. '+' .. dropped)",
+    );
+    sub.terminals().open(pane(1), SIZE, 4);
+    sub.terminals().feed(pane(1), b"1\r\n2\r\n3\r\n4\r\n5");
+    assert_eq!(ticked(&sub), vec!["3+0"]);
+
+    sub.terminals().feed(pane(1), b"\r\n6\r\n7\r\n8");
+    assert_eq!(ticked(&sub), vec!["4+2"]);
+}
+
+#[test]
+fn a_pane_nobody_has_reports_neither_number() {
+    let (_dir, sub) = built(
+        "local len, dropped = neotmux.pane.history(4242)\n\
+         neotmux.log.info(tostring(len) .. '+' .. tostring(dropped))",
+    );
+    assert_eq!(ticked(&sub), vec!["nil+nil"]);
+}
