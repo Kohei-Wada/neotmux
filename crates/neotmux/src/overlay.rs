@@ -3,8 +3,8 @@ use ratatui::Frame;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 
+use crate::draw::color;
 use crate::panes::PaneRects;
-use crate::render::color;
 
 #[derive(Clone, Copy)]
 struct Colors {

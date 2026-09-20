@@ -1,15 +1,16 @@
 mod app;
 mod decode;
+mod draw;
 mod frame;
 mod input;
 mod keys;
 mod logging;
+mod notices;
 mod notify;
 mod overlay;
 mod paneinfo;
 mod panes;
 mod procinfo;
-mod render;
 mod shells;
 mod signals;
 mod tty;

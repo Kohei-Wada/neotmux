@@ -8,22 +8,26 @@ use neotmux_term::pty::PtyHandle;
 use neotmux_term::state::clamp_to_min_grid;
 use neotmux_term::wakeup::{Waker, Wakeup, wakeup};
 use ratatui::DefaultTerminal;
-use ratatui::layout::Rect;
 
 use crate::decode::Decoder;
-use crate::frame::FRAME;
+use crate::draw;
+use crate::frame::{Frame, PaneFrame};
 use crate::input::{encode_key, key_spec};
 use crate::keys::Key;
 use crate::logging;
 use crate::notify::Notifications;
-use crate::overlay;
 use crate::paneinfo::PaneInfoCache;
 use crate::procinfo;
-use crate::render::{cursor_position, draw_grid};
 use crate::shells::Shells;
 use crate::signals::{self, ShutdownSignal};
 use crate::tty::{Ready, Terminal};
 use crate::windows::{Shown, Surface, Windows};
+
+/// How long one pass of the frame loop lasts: the tick's cadence, and the closest together
+/// two draws can be. A frame no longer spends its remainder asleep — the loop pumps input
+/// until the deadline instead — so the rate is still a property of the loop rather than of
+/// whatever the input wait happens to do.
+const FRAME: std::time::Duration = std::time::Duration::from_millis(16);
 
 const MAX_CHUNKS_PER_FRAME: usize = 32;
 
@@ -466,56 +470,104 @@ impl Session {
         true
     }
 
-    fn render(
-        &mut self,
-        terminal: &mut DefaultTerminal,
-        notifications: &mut Notifications,
-        cmds: &[DrawCmd],
-    ) -> anyhow::Result<()> {
+    /// What this frame shows. Producing it is the session's work; putting it on a screen is
+    /// not, and nothing below this line knows what kind of screen there is.
+    fn frame(&mut self, notifications: &mut Notifications) -> Frame<'_> {
         // The shown window's panes only: a hidden pane's terminal goes on taking its
         // child's output, but copying its grid out for a frame nobody draws it in would put
         // every window on every frame's bill.
         let shown: Vec<PaneId> = self.windows.current().rects.keys().copied().collect();
         self.shells.snapshot(shown.into_iter());
         notifications.expire(Instant::now());
+        self.dirty = false;
 
         let shells = &self.shells;
-        let pane_layout = self.windows.current();
-        terminal
-            .draw(|frame| {
-                let area = frame.area();
-                let focus = pane_layout.focus();
-                let mut focused_cell = None;
-                for (pane, rect) in pane_layout.showable() {
-                    let Some(grid) = shells.grid(pane) else {
-                        continue;
-                    };
-                    let cell = Rect {
-                        x: area.x + rect.x,
-                        y: area.y + rect.y,
-                        width: rect.w,
-                        height: rect.h,
-                    }
-                    .intersection(area);
-                    draw_grid(frame, cell, grid);
-                    if focus == Some(pane) {
-                        focused_cell = Some((cell, grid));
-                    }
-                }
-                if let Some(position) =
-                    focused_cell.and_then(|(cell, grid)| cursor_position(cell, grid))
-                {
-                    frame.set_cursor_position(position);
-                }
-                // The whole area, not the pane area: a `pane = nil` command is in surface
-                // coordinates, which is what lets a source draw in the band it reserved.
-                overlay::apply(frame, area, cmds, &pane_layout.rects);
-                notifications.render(frame, area);
-            })
-            .context("draw")?;
-        self.dirty = false;
-        Ok(())
+        let layout = self.windows.current();
+        Frame {
+            panes: layout
+                .showable()
+                .filter_map(|(pane, rect)| {
+                    Some(PaneFrame {
+                        pane,
+                        rect,
+                        grid: shells.grid(pane)?,
+                    })
+                })
+                .collect(),
+            rects: &layout.rects,
+            cursor: layout.focus(),
+            overlay: &self.last_frame_output,
+            notices: notifications.visible(),
+        }
     }
+
+    /// One pass of the session's own work: the panes' output, the tick, the ops it raised,
+    /// and the frame that came of it. The frame is `None` when nothing changed and the last
+    /// one still stands.
+    fn advance(
+        &mut self,
+        lua: &LuaSubsystem,
+        notifications: &mut Notifications,
+    ) -> anyhow::Result<Step<'_>> {
+        let drained = self.drain_panes(lua)?;
+
+        self.refresh_pane_info(lua);
+        self.publish_geometry(lua);
+        lua.dispatch_tick();
+
+        if self.drain_ops(lua, notifications)? {
+            return Ok(Step {
+                frame: None,
+                end: Some(End::Quit),
+            });
+        }
+
+        let frame_output = lua.frame_output();
+        // After the frame's output is in hand, never before: both of these change the size of
+        // the surface, and this frame's buffers were committed against the old one.
+        let reserved_changed = self.reserved_changed(lua.reserved());
+        let gutter_changed = self.gutter_changed(lua.opt().pane_gutter);
+        if reserved_changed || gutter_changed {
+            self.apply_geometry(lua)?;
+        }
+
+        if frame_output != self.last_frame_output {
+            self.dirty = true;
+        }
+        self.last_frame_output = frame_output;
+        // A live notification needs a later frame just to notice it expired
+        // and stop being drawn, even if nothing else changed.
+        if !notifications.is_empty() {
+            self.dirty = true;
+        }
+
+        let eof = drained == Drained::Eof;
+        let frame = if self.dirty || eof {
+            Some(self.frame(notifications))
+        } else {
+            None
+        };
+        Ok(Step {
+            frame,
+            end: eof.then_some(End::Eof),
+        })
+    }
+}
+
+/// What one pass of the session produced.
+struct Step<'a> {
+    /// The frame to show, if this pass changed anything.
+    frame: Option<Frame<'a>>,
+    /// Why the session is over, if it is.
+    end: Option<End>,
+}
+
+/// The two ways a session ends of its own accord: a source asked it to, or its last pane's
+/// child did. A signal is neither — it ends the loop rather than the session.
+#[derive(PartialEq, Eq)]
+enum End {
+    Quit,
+    Eof,
 }
 
 /// What one read of the terminal produced.
@@ -646,39 +698,15 @@ pub fn run(
             session.resize(terminal_size(terminal)?, lua)?;
         }
 
-        let drained = session.drain_panes(lua)?;
-
-        session.refresh_pane_info(lua);
-        session.publish_geometry(lua);
-        lua.dispatch_tick();
-
-        if session.drain_ops(lua, notifications)? {
+        let step = session.advance(lua, notifications)?;
+        if step.end == Some(End::Quit) {
             return Ok(None);
         }
-
-        let frame_output = lua.frame_output();
-        // After the frame's output is in hand, never before: both of these change the size of
-        // the surface, and this frame's buffers were committed against the old one.
-        let reserved_changed = session.reserved_changed(lua.reserved());
-        let gutter_changed = session.gutter_changed(lua.opt().pane_gutter);
-        if reserved_changed || gutter_changed {
-            session.apply_geometry(lua)?;
+        if let Some(frame) = &step.frame {
+            draw::show(terminal, frame)?;
         }
-
-        if frame_output != session.last_frame_output {
-            session.dirty = true;
-        }
-        // A live notification needs a later frame just to notice it expired
-        // and stop being drawn, even if nothing else changed.
-        if !notifications.is_empty() {
-            session.dirty = true;
-        }
-
-        let eof = drained == Drained::Eof;
-        if session.dirty || eof {
-            session.render(terminal, notifications, &frame_output)?;
-        }
-        session.last_frame_output = frame_output;
+        let eof = step.end == Some(End::Eof);
+        drop(step);
 
         if eof {
             break;
