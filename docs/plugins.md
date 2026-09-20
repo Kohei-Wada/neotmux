@@ -410,7 +410,7 @@ neotmux ships three plugins in the runtime layer an install puts on the search p
 
 | plugin | what it does |
 |---|---|
-| `status` | the default status line, on one reserved bottom row |
+| `status` | the default status bar, on one reserved top row |
 | `prefix` | a `C-b` prefix over `v`, `-`, `o`, `c` and `n` |
 | `borders` | a rule along every boundary between two panes |
 
@@ -462,6 +462,37 @@ entry for it, so a mistyped command never leaks a character into the shell.
 shipped layer's `require` finds it already loaded. Do not do it *and* set
 `defaults.prefix = false` — the module is loaded either way, and the flag then only looks
 like it turned something off.
+
+### Changing what the status bar looks like
+
+`plugin.status` reserves the top row and draws the windows on the left, then the focused
+pane's command and its working directory on the right. It returns four tables, all read every
+tick:
+
+```lua
+local status = require('plugin.status')
+status.colors.current = '#f5c2e7'   -- the cap on the window being shown
+status.caps = { left = '', right = '' }              -- no Nerd Font: no caps
+status.icons = { command = '', directory = '' }      -- and no icons
+status.home = '/home/you'           -- the prefix written `~`
+```
+
+The glyphs default to Nerd Font ones — a rounded cap either side (`U+E0B6`, `U+E0B4`), a
+terminal (`U+F489`) and a folder (`U+F4D4`). Without such a font they come out as boxes, and
+the two lines above are the whole escape: empty strings leave the coloured blocks and take the
+glyphs off.
+
+`colors` is Catppuccin Mocha, keyed by what each colour is for rather than by its name:
+`bar`, `current`, `inactive`, `on_current`, `on_inactive`, `body`, `body_text`, `module`,
+`module_text`, `icon`, `command`, `directory`.
+
+`home` is what gets written `~`, the way a shell prompt writes it. The VM has no `os.getenv`,
+so it is recovered from the search path the host built out of `$HOME` — which works when your
+config lives in `~/.config/neotmux` or neotmux is installed under `~/.local`, and is `nil`
+otherwise. A `nil` costs you the `~` and nothing else; assign to it if you want one anyway.
+
+A directory too long for the space left loses its leading components — `.../src/neotmux` —
+and is dropped along with its icon if not even its last component fits.
 
 ### Changing what the borders look like
 

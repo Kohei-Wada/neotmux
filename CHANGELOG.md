@@ -31,6 +31,21 @@ raises, because a shell exiting is not a plugin's error. The facts are sampled b
 most every 250 ms and a call reads the last sample, so asking on every tick for every pane
 costs no syscalls. Read from `/proc`: Linux-only, and unknown everywhere else.
 
+### A status bar, not a debug line
+
+The shipped `status` plugin now reserves the **top** row and draws what a status bar is for:
+every window on the left, the one being shown capped in colour with what its focused pane is
+running beside it, and on the right that command and its working directory, each behind its
+own icon. `panes 2 focus 1` is gone.
+
+It is composed from scratch every tick, so it follows the focus, a command starting or
+finishing and a `cd` with no keystroke to prompt it. The directory is written the way a shell
+prompt writes it — `$HOME` as `~` — and loses its leading components when the space runs out.
+
+The colours (Catppuccin Mocha), the caps and the icons are fields on the module, read on the
+tick: `require('plugin.status').caps = { left = '', right = '' }` is the whole escape for a
+terminal without a Nerd Font.
+
 ### The status line is a plugin now
 
 `neotmux.reserve('bottom', 1)` takes a band of the surface and returns a handle; the panes get
