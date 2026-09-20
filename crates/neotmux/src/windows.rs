@@ -83,9 +83,17 @@ impl Windows {
         pane
     }
 
-    /// The window ids, in creation order.
-    pub fn ids(&self) -> Vec<WindowId> {
-        self.entries.iter().map(|entry| entry.id).collect()
+    /// Every window in creation order, with its panes in layout order. A hidden window's
+    /// order is the one it was last assigned, so it is the arrangement it will be shown in
+    /// and not a different answer from the one `pane.list` gives once it is.
+    pub fn panes(&self) -> Vec<(WindowId, Vec<PaneId>)> {
+        self.entries
+            .iter()
+            .map(|entry| {
+                let panes = entry.layout.panes().into_iter().map(|(id, _)| id).collect();
+                (entry.id, panes)
+            })
+            .collect()
     }
 
     pub fn current_id(&self) -> WindowId {
@@ -200,6 +208,10 @@ mod tests {
         WindowId::from(id)
     }
 
+    fn ids(windows: &Windows) -> Vec<WindowId> {
+        windows.panes().into_iter().map(|(id, _)| id).collect()
+    }
+
     fn windows() -> Windows {
         Windows::new(ws(1), surface()).0
     }
@@ -207,7 +219,7 @@ mod tests {
     #[test]
     fn the_session_starts_with_one_window_holding_one_pane() {
         let (windows, first) = Windows::new(ws(1), surface());
-        assert_eq!(windows.ids(), vec![ws(1)]);
+        assert_eq!(ids(&windows), vec![ws(1)]);
         assert_eq!(windows.current_id(), ws(1));
         assert_eq!(windows.current().focus(), Some(first));
     }
@@ -232,8 +244,28 @@ mod tests {
     fn creating_a_window_does_not_show_it() {
         let mut windows = windows();
         windows.create(ws(2), surface());
-        assert_eq!(windows.ids(), vec![ws(1), ws(2)]);
+        assert_eq!(ids(&windows), vec![ws(1), ws(2)]);
         assert_eq!(windows.current_id(), ws(1));
+    }
+
+    /// What `window.panes` is built on: a window that is not being shown still reports the
+    /// panes it holds, in the order they are laid out.
+    #[test]
+    fn a_hidden_windows_panes_are_reported_in_layout_order() {
+        let (mut windows, first) = Windows::new(ws(1), surface());
+        let hidden = windows.create(ws(2), surface());
+        let split = windows.take_pane_id();
+        windows.show(ws(2), surface());
+        windows
+            .current_mut()
+            .split(SplitDir::Vertical, split)
+            .expect("fits");
+        windows.show(ws(1), surface());
+
+        assert_eq!(
+            windows.panes(),
+            vec![(ws(1), vec![first]), (ws(2), vec![hidden, split])]
+        );
     }
 
     #[test]
@@ -273,7 +305,7 @@ mod tests {
         assert!(!closed.window_closed);
         assert_eq!(closed.window, ws(1));
         assert_eq!(windows.current().focus(), Some(first));
-        assert_eq!(windows.ids(), vec![ws(1)]);
+        assert_eq!(ids(&windows), vec![ws(1)]);
     }
 
     #[test]
@@ -285,7 +317,7 @@ mod tests {
         assert!(closed.window_closed);
         assert_eq!(closed.window, ws(1));
         assert_eq!(closed.switched_to, Some(ws(2)));
-        assert_eq!(windows.ids(), vec![ws(2)]);
+        assert_eq!(ids(&windows), vec![ws(2)]);
     }
 
     /// The pane belongs to a window nobody is looking at, so what is shown must not move.

@@ -10,7 +10,7 @@ use crate::ops::{Op, OpBuffer};
 use crate::source::{self, Sources};
 use crate::window::WindowIds;
 
-/// `neotmux.window`, shaped like `neotmux.pane`. `list` and `current` read this frame's
+/// `neotmux.window`, shaped like `neotmux.pane`. `list`, `panes` and `current` read this frame's
 /// geometry; `create` and `focus` are ops on the buffer (§4.6), applied after the tick, so a
 /// callback never sees its own request take effect synchronously — `create` answers with the
 /// id the window *will* have, not with a window that is already there.
@@ -30,11 +30,40 @@ pub(crate) fn install(
                 .borrow()
                 .windows
                 .iter()
-                .map(|id| id.get())
+                .map(|window| window.id.get())
                 .collect();
             lua.create_sequence_from(ids)
         })?;
         window.set("list", list)?;
+    }
+
+    {
+        // The panes of any window, the hidden ones included, so a plugin can find a pane
+        // before it has said anything — `pane.list` stays the shown window's list. Finding
+        // is all it is: nothing here acts on a pane in a window nobody is looking at.
+        let geometry = geometry.clone();
+        let panes = lua.create_function(move |lua, id: u32| {
+            let id = WindowId::from(id);
+            let found = geometry
+                .borrow()
+                .windows
+                .iter()
+                .find(|window| window.id == id)
+                .map(|window| {
+                    window
+                        .panes
+                        .iter()
+                        .map(|pane| pane.get())
+                        .collect::<Vec<u32>>()
+                });
+            match found {
+                Some(found) => Ok(Value::Table(lua.create_sequence_from(found)?)),
+                // Nothing, the answer `pane.current` and `pane.rect` give. A window always
+                // holds at least one pane, so this is never an empty table.
+                None => Ok(Value::Nil),
+            }
+        })?;
+        window.set("panes", panes)?;
     }
 
     {
