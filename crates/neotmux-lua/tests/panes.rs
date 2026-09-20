@@ -1,6 +1,6 @@
 use std::fs;
 
-use neotmux_core::proto::{Epoch, PaneId, Rect, Size};
+use neotmux_core::proto::{Dir, Epoch, PaneId, Rect, Size};
 use neotmux_lua::ops::Op;
 use neotmux_lua::runtime::Layers;
 use neotmux_lua::{Geometry, LuaSubsystem};
@@ -21,11 +21,7 @@ fn built(files: &[(&str, &str)]) -> (tempfile::TempDir, LuaSubsystem) {
 fn publish(sub: &LuaSubsystem, panes: Vec<(PaneId, Rect)>, focus: PaneId) {
     let size = Size { rows: 24, cols: 80 };
     sub.begin_frame(
-        Epoch::new(
-            size,
-            panes.iter().map(|(id, _)| *id).collect(),
-            Some(focus),
-        ),
+        Epoch::new(size, panes.iter().map(|(id, _)| *id).collect(), Some(focus)),
         Geometry {
             size,
             panes,
@@ -87,7 +83,11 @@ fn a_pane_rect_read_from_a_key_handler_matches_the_one_read_from_a_tick() {
     sub.dispatch_tick();
 
     let lines = logged(&sub);
-    assert_eq!(lines, vec!["key 40,0,40,24", "tick 40,0,40,24"], "{lines:?}");
+    assert_eq!(
+        lines,
+        vec!["key 40,0,40,24", "tick 40,0,40,24"],
+        "{lines:?}"
+    );
 }
 
 #[test]
@@ -106,4 +106,63 @@ fn a_pane_nobody_has_has_no_rect() {
     side_by_side(&sub);
     sub.dispatch_key("C-x");
     assert_eq!(logged(&sub), vec!["key nil"]);
+}
+
+/// A resize is an op like a split: queued from wherever it was asked for, applied after the
+/// tick, and carrying the direction and the cells the caller named.
+#[test]
+fn a_resize_is_queued_as_an_op_with_the_direction_and_the_cells() {
+    let (_d, sub) = built(&[
+        ("init.lua", "require('plugin.grower')"),
+        (
+            "lua/plugin/grower.lua",
+            "neotmux.on_key(function() neotmux.pane.resize('left', 3) return true end)
+             return {}",
+        ),
+    ]);
+    side_by_side(&sub);
+    sub.dispatch_key("C-x");
+    let ops: Vec<Op> = sub.drain_ops().into_iter().map(|(_, op)| op).collect();
+    assert_eq!(
+        ops,
+        vec![Op::PaneResize {
+            dir: Dir::Left,
+            cells: 3
+        }]
+    );
+}
+
+/// A direction nobody can spell and a cell count that is not one are typos, so they raise —
+/// the shape `pane.split` and `keymap.set` already use for a malformed argument. A refusal
+/// cannot be returned here at all: the op is applied long after the call returns.
+#[test]
+fn a_malformed_resize_raises_and_queues_nothing() {
+    let (_d, sub) = built(&[
+        ("init.lua", "require('plugin.grower')"),
+        (
+            "lua/plugin/grower.lua",
+            "local function try(...)
+               local ok, err = pcall(neotmux.pane.resize, ...)
+               neotmux.log.info(tostring(ok) .. ' ' .. tostring(err))
+             end
+             neotmux.on_key(function() try('sideways', 1) try('left', 0) try('left', -2) return true end)
+             return {}",
+        ),
+    ]);
+    side_by_side(&sub);
+    sub.dispatch_key("C-x");
+    let lines = logged(&sub);
+    assert_eq!(lines.len(), 3, "{lines:?}");
+    assert!(
+        lines[0].starts_with("false") && lines[0].contains("unknown direction 'sideways'"),
+        "{lines:?}"
+    );
+    assert!(
+        lines[1].contains("positive number of cells, got 0"),
+        "{lines:?}"
+    );
+    assert!(
+        lines[2].contains("positive number of cells, got -2"),
+        "{lines:?}"
+    );
 }

@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use mlua::{Lua, Table, Value};
 
-use neotmux_core::proto::{PaneId, SplitDir};
+use neotmux_core::proto::{Dir, PaneId, SplitDir};
 
 use crate::api::rect;
 use crate::geometry::Geometry;
@@ -104,6 +104,31 @@ pub(crate) fn install(
             Ok(())
         })?;
         pane.set("split", split)?;
+    }
+
+    {
+        let sources = sources.clone();
+        let ops = ops.clone();
+        let resize = lua.create_function(move |lua, (dir, cells): (String, i64)| {
+            let dir = Dir::parse(&dir).ok_or_else(|| {
+                mlua::Error::RuntimeError(format!(
+                    "unknown direction '{dir}', expected 'left', 'right', 'up' or 'down'"
+                ))
+            })?;
+            // A cell count that is not a positive number of cells is a typo, not a refusal:
+            // it raises, as an unparseable key spec does.
+            let cells = u16::try_from(cells)
+                .ok()
+                .filter(|cells| *cells > 0)
+                .ok_or_else(|| {
+                    mlua::Error::RuntimeError(format!(
+                        "pane.resize takes a positive number of cells, got {cells}"
+                    ))
+                })?;
+            ops.push(source::caller(lua, &sources), Op::PaneResize { dir, cells });
+            Ok(())
+        })?;
+        pane.set("resize", resize)?;
     }
 
     {

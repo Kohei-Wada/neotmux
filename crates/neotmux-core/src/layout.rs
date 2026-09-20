@@ -290,10 +290,9 @@ fn descend(node: &Node, target: PaneId, rect: Rect, gutter: u16, steps: &mut Vec
         Node::Split(split) => {
             let (first, second) = divide(split, rect, gutter);
             let depth = steps.len();
-            for (into_first, child, child_rect) in [
-                (true, &split.first, first),
-                (false, &split.second, second),
-            ] {
+            for (into_first, child, child_rect) in
+                [(true, &split.first, first), (false, &split.second, second)]
+            {
                 steps.push(Step {
                     dir: split.dir,
                     rect,
@@ -916,11 +915,20 @@ mod tests {
                 let after = rect_of(&tree, from, surface, gutter);
                 let after_other = rect_of(&tree, other, surface, gutter);
                 let (grew, shrank) = match orientation {
-                    SplitDir::Vertical => (after.w as i32 - before.w as i32, after_other.w as i32 - before_other.w as i32),
-                    SplitDir::Horizontal => (after.h as i32 - before.h as i32, after_other.h as i32 - before_other.h as i32),
+                    SplitDir::Vertical => (
+                        after.w as i32 - before.w as i32,
+                        after_other.w as i32 - before_other.w as i32,
+                    ),
+                    SplitDir::Horizontal => (
+                        after.h as i32 - before.h as i32,
+                        after_other.h as i32 - before_other.h as i32,
+                    ),
                 };
                 assert_eq!(grew, 7, "{dir} at gutter {gutter}: {before:?} -> {after:?}");
-                assert_eq!(shrank, -7, "{dir} at gutter {gutter}: the neighbour did not pay");
+                assert_eq!(
+                    shrank, -7,
+                    "{dir} at gutter {gutter}: the neighbour did not pay"
+                );
             }
         }
     }
@@ -936,7 +944,11 @@ mod tests {
             .expect("there is room");
         let after = rect_of(&tree, pane(3), surface, 1);
         assert_eq!(after.w, before.w + 6);
-        assert_eq!(after.x, before.x - 6, "the boundary moved, not the far edge");
+        assert_eq!(
+            after.x,
+            before.x - 6,
+            "the boundary moved, not the far edge"
+        );
 
         let before = rect_of(&tree, pane(3), surface, 1);
         tree.resize(pane(3), Dir::Up, 4, surface, MIN, 1)

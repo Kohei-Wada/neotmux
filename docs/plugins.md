@@ -172,6 +172,7 @@ neotmux.pane.rect(id)    -- { x = , y = , w = , h = }, or nil
 neotmux.pane.info(id)    -- { command = ..., cwd = ... }, or nil
 neotmux.pane.split('horizontal' | 'vertical')
 neotmux.pane.focus(id)
+neotmux.pane.resize('left' | 'right' | 'up' | 'down', cells)
 ```
 
 `rect` answers out of the same published geometry `ctx:pane_rect` reads, in the same surface
@@ -197,6 +198,22 @@ Ask as often as you like. The facts are sampled by the host on its own cadence, 
 This is read from `/proc` and is therefore Linux-only. On any other platform both facts are
 simply unknown.
 
+`resize` **moves the boundary between the focused pane and its neighbour in that direction**,
+by exactly that many cells — so the pane grows by them and the neighbour loses them. There is
+no second rule for a pane at the edge: with no neighbour that way there is no boundary, and
+the call is refused rather than quietly moving the pane's other edge. The boundary moved is
+the nearest one, so a pane nested three splits deep resizes against what it is actually
+touching.
+
+Cells, not a fraction and not a percentage: after a `resize('right', 3)` the pane's rect is
+three columns wider, and thirty of them in a row move thirty columns.
+
+A direction nobody can spell and a count that is not a positive number of cells *raise* —
+they are typos. A refusal — no neighbour, or a pane that would end up below the minimum grid,
+counting the gutter — is logged against you and changes nothing. It cannot be returned to you
+the way `keymap.set` returns a lost race: the op is applied after the tick, long after your
+call returned.
+
 `split` and `focus` do not take effect while your callback is running. They are queued and
 applied after the tick, so `list()` returns the same thing immediately after a `split` as
 immediately before. This is deliberate: a callback that could reshape the world underneath the
@@ -205,8 +222,7 @@ callbacks running after it would make frame composition depend on dispatch order
 A frame forks at most three new shells, counting `pane.split` and `window.create` together.
 Each one costs the host a fork, an exec and a terminal, none of it inside the tick your budget
 was measured against, so the number of them one frame can be asked for is bounded; the fourth
-and beyond are refused and logged against you. There is no way to close or resize a pane from
-Lua in v0.1.
+and beyond are refused and logged against you. There is no way to close a pane from Lua in v0.1.
 
 `pane_opened`, `pane_closed` and `focus_changed` are dispatched against the layout as it is
 after the change, so a handler's `pane.list()` and `pane.current()` describe the event it is
