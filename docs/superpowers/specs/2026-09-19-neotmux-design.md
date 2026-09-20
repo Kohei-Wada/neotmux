@@ -90,12 +90,66 @@ the system are not, and belong in the crate that owns them.
 They are *not* a separate crate in M0a–M1b. The two arguments for a crate (the TUI client
 should not link the engine; external tools should be able to depend on the protocol alone)
 are both M3/M5 requirements. Promoting `mod` → `crate` later is mechanical; carrying an extra
-crate boundary and blanket `serde` derives through M0a is not free, and doing it now would
-freeze the open question below before it has been answered.
+crate boundary and blanket `serde` derives through M0a is not free, and doing it then would
+have frozen the question below before it was answered.
 
-**Open question, to be closed before M3:** are the Lua-facing types the same as the wire
-types? Sharing them couples wire compatibility to ABI compatibility. The alternative is a
-conversion layer in `neotmux-lua`.
+**Decision, taken 2026-09-20, closing the open question of whether the Lua-facing types are
+the wire types: they are the same types. One definition each, no conversion layer, and a
+protocol version that refuses a mismatch outright rather than trying to survive one.**
+
+The two boundaries overlap less than the question assumes. Thirteen of the fifteen types
+`proto` exports reach `neotmux-lua`; seven are reachable from a frame; the intersection is
+five — `PaneId`, `Size`, `Rect`, `Color`, `DrawCmd`. Four of those five are not two things
+with one name, they are one thing: a pane's identity is one number or the two sides are
+talking about different panes, and a cell's coordinates, a surface's extent and a terminal's
+three kinds of colour are the terminal's own vocabulary, closed sets that have not changed
+and have nowhere to grow. Mirroring them would produce four field-for-field copies whose only
+purpose is to be copied back. The whole of the coupling the question worried about is the
+fifth type.
+
+It is also the cheap one. The expensive thing on the wire is `GridSnapshot` — one `SnapCell`
+per cell per pane per frame — and it is not a Lua type at all; a conversion layer in
+`neotmux-lua` would never touch it, while mirroring it anywhere would turn a borrow that a
+serialiser can write straight through into a full copy of every screen every frame. Whatever
+is decided has to leave the grid single-definition, and sharing does that for free.
+`DrawCmd`, by contrast, is a handful of small values per frame, so if it ever does have to be
+mirrored the mirror is affordable — and it belongs in the codec, beside the encoder, not in
+`neotmux-lua`, because it is the wire's problem and not the plugin author's.
+
+What is genuinely coupled is that `DrawCmd` is an open verb set: it grows when a plugin
+author wants a new drawing call, and it has grown twice. Shared types make each such addition
+a protocol change. The question is what an old client does when it meets one, and the answer
+is that `#[non_exhaustive]` does not help. It constrains Rust callers in other crates — it is
+why the renderer's match already carries a wildcard arm — but it is a compile-time courtesy,
+not a wire representation: a decoder meeting an unknown discriminant has no length it could
+skip and no catch-all variant to decode into, so it fails, and it fails for the whole frame
+rather than the one command. Left alone that is a client stuck on its last good frame,
+complaining about deserialisation.
+
+So it is not left alone. `proto` carries a `PROTOCOL_VERSION`, bumped whenever any type in it
+changes shape, sent and checked before the first frame is decoded; a mismatch prints both
+numbers and exits non-zero. This is tmux's arrangement and for tmux's reason. tmux exchanges
+raw C structs — its ABI *is* its wire format — carries `PROTOCOL_VERSION` in the low byte of
+every message header rather than only a handshake, and on any mismatch the server replies
+`MSG_VERSION`, marks the peer bad, and the client prints `protocol version mismatch (client
+%d, server %u)` and exits 1. Its socket path is not versioned, so an old client really does
+reach a new server; refusing is the entire compatibility story, and the cost of a protocol
+change is that you restart the server after upgrading. That is precedent rather than warning
+here because the situation is the same: at M3 there is exactly one client, shipped in the
+same binary as the server, so skew is only possible when the binary on disk is replaced under
+a running server. That is a case to detect, not one to negotiate. A protocol whose only
+speaker is built from the same commit does not need forward compatibility; it needs to notice
+when that stops being true.
+
+Revisit when it does, on either of two triggers a person can check. First, when something not
+built from this workspace speaks the protocol — an external client, a client library, or a
+wire format documented for third parties — because from then on the versions genuinely differ
+and a refusal is no longer free. Second, when `PROTOCOL_VERSION` has been bumped three times
+by a change that added nothing a renderer needed, meaning an ABI-only growth of `DrawCmd`
+forced a refusal on a client that would have rendered every frame correctly without it; each
+bump records its reason beside the constant, so the count is readable. Either one says the
+two boundaries have started to move independently, and at that point `DrawCmd` — alone, in
+the codec — gets its mirror.
 
 ## 3. M0a — walking skeleton
 
