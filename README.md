@@ -39,9 +39,13 @@ v0.1 deliberately does **not** include detach/attach. That is v0.2, and it is th
 structural change on the roadmap (the server/client split), which is exactly why it should
 happen against an ABI other people have already used instead of one nobody has touched.
 
-Also out of v0.1: scrolling a pane back and copy-mode — a plugin can read the
-scrollback, but nothing moves the view — plus mouse, multiple sessions, a plugin
-manager, and tmux compatibility in any form.
+Copy mode is in, as a plugin: `C-b [` reads back over a pane's scrollback, selects a
+region and yanks it. What is still out is the pane's *own* view moving — the plugin
+draws the lines it wants seen over a grid the host never scrolls — and the system
+clipboard, which this ABI cannot reach, so a yank lands in a Lua register.
+
+Also out of v0.1: mouse, multiple sessions, a plugin manager, and tmux compatibility
+in any form.
 
 Writing one: `docs/plugins.md`, with three working plugins in `examples/`.
 
