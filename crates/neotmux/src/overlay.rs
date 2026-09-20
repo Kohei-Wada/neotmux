@@ -32,12 +32,12 @@ fn bounds(panes: &PaneRects, area: Rect, pane: Option<PaneId>) -> Option<PRect> 
 
 /// The one cell a local (x, y) names, or nothing when it falls outside its bound or off the
 /// surface. Every command goes through here, so clipping is decided once.
-fn cell_at<'b>(
-    buf: &'b mut Buffer,
+fn cell_at(
+    buf: &mut Buffer,
     area: Rect,
     bound: PRect,
     pos: (u16, u16),
-) -> Option<&'b mut ratatui::buffer::Cell> {
+) -> Option<&mut ratatui::buffer::Cell> {
     let (x, y) = pos;
     if x >= bound.w || y >= bound.h {
         return None;

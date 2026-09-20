@@ -39,8 +39,9 @@ v0.1 deliberately does **not** include detach/attach. That is v0.2, and it is th
 structural change on the roadmap (the server/client split), which is exactly why it should
 happen against an ABI other people have already used instead of one nobody has touched.
 
-Also out of v0.1: scrollback and copy-mode, mouse, multiple sessions, a plugin manager, and
-tmux compatibility in any form.
+Also out of v0.1: scrolling a pane back and copy-mode — a plugin can read the
+scrollback, but nothing moves the view — plus mouse, multiple sessions, a plugin
+manager, and tmux compatibility in any form.
 
 Writing one: `docs/plugins.md`, with three working plugins in `examples/`.
 
