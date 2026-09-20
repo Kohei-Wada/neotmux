@@ -111,6 +111,14 @@ impl PtyHandle {
         })
     }
 
+    /// The pty's foreground process group, which is what the user means by "what is this
+    /// pane doing": the shell while it is idle, the command it is running otherwise. It is
+    /// `tcgetpgrp(3)` on the master — portable-pty implements it that way on unix and answers
+    /// `None` everywhere else, which is the same answer a dead child gives.
+    pub fn foreground(&self) -> Option<i32> {
+        self.master.process_group_leader()
+    }
+
     pub fn wait(&mut self) -> io::Result<ExitStatus> {
         self.child.wait()
     }

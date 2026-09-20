@@ -1100,3 +1100,99 @@ fn a_focus_change_does_not_resize_every_pane() {
         "the status row did not survive the focus change:\n{screen}"
     );
 }
+
+/// What `pane.info` reports is the pane's *foreground* process, not the shell neotmux
+/// spawned: a user running `sleep` wants to read `sleep`, and reads the shell again the
+/// moment it finishes. Reporting the spawned child instead would say `bash` throughout, and
+/// that is the whole distinction this test exists to pin.
+#[test]
+fn a_panes_command_follows_what_it_is_running_and_falls_back_to_its_shell() {
+    let (mut nt, _init) = start("require('plugin.paneinfo')", "bash");
+    nt.wait_for_log("paneinfo 1 command=bash", PATIENCE);
+
+    nt.send("sleep 2\n");
+    nt.wait_for_log("paneinfo 1 command=sleep", PATIENCE);
+
+    // After the `sleep` line, not anywhere in the log: the shell was already reported once
+    // before the command ever ran, and that earlier line proves nothing.
+    let deadline = std::time::Instant::now() + PATIENCE;
+    loop {
+        let log = nt.log_text();
+        let (_, after) = log
+            .split_once("command=sleep")
+            .expect("the sleep was reported");
+        if after.contains("command=bash") {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the pane never reported its shell again once the command finished:\n{log}"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[test]
+fn a_panes_directory_follows_a_cd_in_it() {
+    let (mut nt, _init) = start("require('plugin.paneinfo')", "bash");
+    nt.wait_for_log("paneinfo 1 command=bash", PATIENCE);
+
+    let target = std::fs::canonicalize("/tmp").expect("canonicalise /tmp");
+    nt.send(&format!("cd {}\n", target.display()));
+
+    let log = nt.wait_for_log(&format!("cwd={}", target.display()), PATIENCE);
+    assert!(
+        line_with(&log, &format!("cwd={}", target.display())).contains("paneinfo 1"),
+        "{log}"
+    );
+}
+
+/// An id no pane has is not an error — a plugin holding a stale id asks the same question as
+/// one holding a live one. Nil, the way `pane.current()` answers nothing.
+#[test]
+fn an_unknown_pane_id_answers_nil_rather_than_raising() {
+    let (nt, _init) = start("require('plugin.paneinfo')", "/bin/cat");
+    let log = nt.wait_for_log("paneinfo unknown=", PATIENCE);
+    assert!(
+        line_with(&log, "paneinfo unknown=").contains("unknown=nil"),
+        "{log}"
+    );
+    assert!(!log.contains("[ERROR]"), "{log}");
+}
+
+/// A pane's child can exit between one tick and the next. That is an ordinary end, not an
+/// error, and the plugin asking about the panes that are left must not start raising.
+#[test]
+fn a_pane_whose_child_exited_does_not_raise() {
+    let (mut nt, _init) = start(
+        "require('plugin.paneinfo') require('plugin.splitter')",
+        "bash",
+    );
+    nt.wait_for_log("paneinfo 1 command=bash", PATIENCE);
+    nt.send("\x02"); // C-b: split
+    nt.wait_for_log("splitter pane_opened 2", PATIENCE);
+    nt.wait_for_log("paneinfo 2 command=bash", PATIENCE);
+
+    nt.send("exit\n");
+    nt.wait_for_log("splitter pane_closed 2", PATIENCE);
+    nt.settle(Duration::from_millis(500));
+
+    let log = nt.log_text();
+    assert!(!log.contains("[ERROR]"), "{log}");
+    // Still answering for the pane that is left, rather than having quietly stopped.
+    nt.send("sleep 1\n");
+    nt.wait_for_log("paneinfo 1 command=sleep", PATIENCE);
+}
+
+/// A plugin reading both facts every tick must not turn an idle session into one that
+/// redraws: the facts are sampled on the host's own cadence, and a sample that found nothing
+/// new produces no output at all.
+#[test]
+fn a_plugin_asking_every_tick_does_not_make_an_idle_session_redraw() {
+    let (mut nt, _init) = start("require('plugin.paneinfo')", "/bin/cat");
+    nt.wait_for_log("paneinfo 1 command=cat", PATIENCE);
+    nt.settle(Duration::from_millis(700));
+
+    let bytes = nt.bytes_in(Duration::from_secs(1));
+    assert_eq!(bytes, 0, "an idle session redrew {bytes} bytes");
+}

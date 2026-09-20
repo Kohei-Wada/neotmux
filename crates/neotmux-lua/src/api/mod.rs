@@ -16,6 +16,7 @@ use crate::draw::Buffers;
 use crate::geometry::Geometry;
 use crate::ops::{Level, Op, OpBuffer};
 use crate::overrun::Overrun;
+use crate::paneinfo::PaneInfos;
 use crate::registry::{Kind, KindTag, RegistrationId, Registry};
 use crate::reserve::Reservations;
 use crate::source::{self, SourceId, Sources};
@@ -32,6 +33,7 @@ pub(crate) struct Shared {
     pub(crate) opts: Rc<RefCell<Opts>>,
     pub(crate) load_failures: Rc<RefCell<Vec<LoadFailure>>>,
     pub(crate) geometry: Rc<RefCell<Geometry>>,
+    pub(crate) pane_info: Rc<RefCell<PaneInfos>>,
     pub(crate) overrun: Rc<Overrun>,
     pub(crate) reservations: Rc<Reservations>,
 }
@@ -165,6 +167,7 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
         opts,
         load_failures,
         geometry,
+        pane_info,
         overrun,
         reservations,
     } = shared;
@@ -225,7 +228,7 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
     }
 
     {
-        let pane = pane::install(lua, sources.clone(), ops.clone(), geometry)?;
+        let pane = pane::install(lua, sources.clone(), ops.clone(), geometry, pane_info)?;
         let pane = seal(lua, pane, "neotmux.pane")?;
         neotmux.set("pane", pane)?;
     }

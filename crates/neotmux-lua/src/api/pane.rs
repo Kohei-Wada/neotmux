@@ -7,6 +7,7 @@ use neotmux_core::proto::{PaneId, SplitDir};
 
 use crate::geometry::Geometry;
 use crate::ops::{Op, OpBuffer};
+use crate::paneinfo::PaneInfos;
 use crate::source::{self, Sources};
 
 /// The M2 pane API (§6), signatures frozen now. `list` and `current` read this frame's
@@ -17,6 +18,7 @@ pub(crate) fn install(
     sources: Rc<Sources>,
     ops: Rc<OpBuffer>,
     geometry: Rc<RefCell<Geometry>>,
+    pane_info: Rc<RefCell<PaneInfos>>,
 ) -> mlua::Result<Table> {
     let pane = lua.create_table()?;
 
@@ -43,6 +45,28 @@ pub(crate) fn install(
             })
         })?;
         pane.set("current", current)?;
+    }
+
+    {
+        // One call rather than a `command` and a `cwd`: both facts come from the one process
+        // the host looked at, and two calls could answer about two different ones.
+        let info = lua.create_function(move |lua, pane: u32| {
+            let pane_info = pane_info.borrow();
+            let Some(info) = pane_info.get(&PaneId::from(pane)) else {
+                return Ok(Value::Nil);
+            };
+            let table = lua.create_table()?;
+            // A fact that could not be determined is simply absent, which is `nil` to read —
+            // the same answer `pane.current()` gives for nothing.
+            if let Some(command) = &info.command {
+                table.set("command", command.as_str())?;
+            }
+            if let Some(cwd) = &info.cwd {
+                table.set("cwd", cwd.as_str())?;
+            }
+            Ok(Value::Table(table))
+        })?;
+        pane.set("info", info)?;
     }
 
     {
