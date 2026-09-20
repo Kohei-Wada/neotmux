@@ -15,7 +15,7 @@ pub(crate) fn end_session(runtime_dir: &Path) {
     }) else {
         return;
     };
-    if let Ok(Some(pid)) = neotmux::sock::holder(&paths) {
+    if let Ok(neotmux::sock::Holder::Pid(pid)) = neotmux::sock::holder(&paths) {
         let _ = nix::sys::signal::kill(
             nix::unistd::Pid::from_raw(pid),
             nix::sys::signal::Signal::SIGTERM,

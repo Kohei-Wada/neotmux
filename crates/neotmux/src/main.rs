@@ -110,8 +110,12 @@ fn main() -> anyhow::Result<()> {
 /// speak to would otherwise be unreachable and immortal.
 fn kill() -> anyhow::Result<()> {
     let paths = neotmux::sock::Paths::resolve(&|key| env::var_os(key))?;
-    let Some(pid) = neotmux::sock::holder(&paths)? else {
-        anyhow::bail!("no neotmux session is running");
+    let pid = match neotmux::sock::holder(&paths)? {
+        neotmux::sock::Holder::Nobody => anyhow::bail!("no neotmux session is running"),
+        neotmux::sock::Holder::Unconfirmed => anyhow::bail!(
+            "a neotmux session's lock is held, but its pid could not be confirmed; refusing to signal it"
+        ),
+        neotmux::sock::Holder::Pid(pid) => pid,
     };
     nix::sys::signal::kill(
         nix::unistd::Pid::from_raw(pid),

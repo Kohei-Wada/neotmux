@@ -106,43 +106,74 @@ pub struct Lock {
     _held: nix::fcntl::Flock<fs::File>,
 }
 
+/// Opens the lock file and tries to take it, without writing anything — asking whether the
+/// lock is held must not itself rewrite who holds it. Only [`Lock::take`], which is actually
+/// becoming the server, goes on to write a pid into what this returns.
+fn try_lock(paths: &Paths) -> anyhow::Result<Option<nix::fcntl::Flock<fs::File>>> {
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .mode(SOCKET_MODE)
+        .open(&paths.lock)
+        .with_context(|| format!("open {}", paths.lock.display()))?;
+    match nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusiveNonblock) {
+        Ok(held) => Ok(Some(held)),
+        Err((_, nix::errno::Errno::EWOULDBLOCK)) => Ok(None),
+        Err((_, err)) => Err(err).context("lock the session"),
+    }
+}
+
 impl Lock {
     /// `None` when somebody else holds it, which means somebody else is already becoming the
     /// server for this session.
     pub fn take(paths: &Paths) -> anyhow::Result<Option<Self>> {
-        let file = fs::OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .mode(SOCKET_MODE)
-            .open(&paths.lock)
-            .with_context(|| format!("open {}", paths.lock.display()))?;
-        match nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusiveNonblock) {
-            Ok(mut held) => {
-                use std::io::{Seek, SeekFrom, Write as _};
-                held.set_len(0).context("truncate the lock")?;
-                held.seek(SeekFrom::Start(0)).context("seek the lock")?;
-                writeln!(held, "{}", std::process::id()).context("write the lock's pid")?;
-                Ok(Some(Self { _held: held }))
-            }
-            Err((_, nix::errno::Errno::EWOULDBLOCK)) => Ok(None),
-            Err((_, err)) => Err(err).context("lock the session"),
-        }
+        let Some(mut held) = try_lock(paths)? else {
+            return Ok(None);
+        };
+        use std::io::{Seek, SeekFrom, Write as _};
+        held.set_len(0).context("truncate the lock")?;
+        held.seek(SeekFrom::Start(0)).context("seek the lock")?;
+        writeln!(held, "{}", std::process::id()).context("write the lock's pid")?;
+        Ok(Some(Self { _held: held }))
     }
 }
 
-/// The pid of the process serving this session, or `None` when nobody is.
+/// Who, if anyone, currently holds the session's lock.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Holder {
+    /// The lock is free: taking it would succeed.
+    Nobody,
+    /// The lock is held, but not by a pid this process could confirm is a live neotmux —
+    /// a stale write, a `comm` that raced the holder's exit, or a pid since recycled onto
+    /// some unrelated program. Something holds the session; nothing may be signalled on the
+    /// strength of a guess about who.
+    Unconfirmed,
+    /// The lock is held by a live process `/proc` says is neotmux.
+    Pid(i32),
+}
+
+/// Who holds the session's lock, established without ever handing back a pid this process
+/// could not confirm is actually a live neotmux.
 ///
 /// The lock is what answers "is anybody there" — a lock this process can take is a lock
-/// nobody holds, whatever a file left behind says. The pid inside it is only the name of
-/// whoever holds it, and is never read without the lock having refused first.
-pub fn holder(paths: &Paths) -> anyhow::Result<Option<i32>> {
-    if Lock::take(paths)?.is_some() {
-        return Ok(None);
+/// nobody holds, whatever a file left behind says. The pid inside it is only a hint, so it
+/// is confirmed against `/proc/<pid>/comm` before it is ever named: a pid can be recycled
+/// between the holder exiting and this reading the file, and a stranger must never be
+/// mistaken for the session `--kill` was asked for.
+pub fn holder(paths: &Paths) -> anyhow::Result<Holder> {
+    if try_lock(paths)?.is_some() {
+        return Ok(Holder::Nobody);
     }
     let text = fs::read_to_string(&paths.lock)
         .with_context(|| format!("read {}", paths.lock.display()))?;
-    Ok(text.trim().parse().ok())
+    let Some(pid) = text.trim().parse::<i32>().ok() else {
+        return Ok(Holder::Unconfirmed);
+    };
+    match crate::procinfo::command(pid) {
+        Some(comm) if comm == "neotmux" => Ok(Holder::Pid(pid)),
+        _ => Ok(Holder::Unconfirmed),
+    }
 }
 
 /// Binds the session's socket, replacing one a dead server left behind. Only ever called
@@ -331,21 +362,67 @@ mod tests {
     }
 
     #[test]
-    fn the_lock_holder_is_named_while_it_is_held_and_nobody_after() {
+    fn the_lock_is_free_before_being_taken_and_after_being_given_back() {
         let dir = tempfile::tempdir().expect("tempdir");
         let paths = Paths {
             socket: dir.path().join("default.sock"),
             lock: dir.path().join("default.lock"),
         };
-        assert_eq!(holder(&paths).expect("holder"), None, "nobody holds it yet");
-
-        let held = Lock::take(&paths).expect("take").expect("nobody held it");
         assert_eq!(
             holder(&paths).expect("holder"),
-            Some(std::process::id() as i32)
+            Holder::Nobody,
+            "nobody holds it yet"
         );
 
+        let held = Lock::take(&paths).expect("take").expect("nobody held it");
+        // Held by this test process, which is not itself neotmux: the honest answer is
+        // "somebody, unconfirmed" — never `Nobody`, and never this pid named outright.
+        assert_eq!(holder(&paths).expect("holder"), Holder::Unconfirmed);
+
         drop(held);
-        assert_eq!(holder(&paths).expect("holder"), None, "it was given back");
+        assert_eq!(
+            holder(&paths).expect("holder"),
+            Holder::Nobody,
+            "it was given back"
+        );
+    }
+
+    /// A lock file naming a live pid is not enough: the pid has to look like neotmux before
+    /// `--kill` may be pointed at it, or a stale write — or a recycled pid — could end up
+    /// signalling a stranger. Written directly rather than through `Lock::take`, which is
+    /// the honest shape of the failure: nothing here says the file's claim was ever true.
+    #[test]
+    fn a_held_lock_naming_a_live_pid_that_is_not_neotmux_is_not_handed_back() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = Paths {
+            socket: dir.path().join("default.sock"),
+            lock: dir.path().join("default.lock"),
+        };
+        let mut held = try_lock(&paths).expect("try_lock").expect("nobody held it");
+        use std::io::Write as _;
+        writeln!(held, "{}", std::process::id()).expect("write a live, non-neotmux pid");
+
+        assert_eq!(
+            holder(&paths).expect("holder"),
+            Holder::Unconfirmed,
+            "a held lock naming this test's own pid was handed back as a neotmux holder"
+        );
+    }
+
+    /// Asking who holds the lock must not itself become the answer: only becoming the
+    /// server, through `Lock::take`, may write a pid into the file.
+    #[test]
+    fn asking_who_holds_a_free_lock_does_not_write_to_it() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = Paths {
+            socket: dir.path().join("default.sock"),
+            lock: dir.path().join("default.lock"),
+        };
+        holder(&paths).expect("holder");
+        let text = fs::read_to_string(&paths.lock).unwrap_or_default();
+        assert!(
+            text.is_empty(),
+            "asking who holds a free lock wrote to it: {text:?}"
+        );
     }
 }

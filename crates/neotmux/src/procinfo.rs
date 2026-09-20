@@ -21,7 +21,7 @@ pub fn read(pid: i32) -> PaneInfo {
 
 /// `comm` rather than `cmdline`: the status line wants the name of the thing running, and
 /// `comm` is already that — no arguments, no NUL splitting, no quoting to undo.
-fn command(pid: i32) -> Option<String> {
+pub(crate) fn command(pid: i32) -> Option<String> {
     let text = fs::read_to_string(format!("/proc/{pid}/comm")).ok()?;
     let name = text.trim_end_matches('\n');
     (!name.is_empty()).then(|| name.to_string())
