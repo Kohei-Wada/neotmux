@@ -1,8 +1,8 @@
 use std::fs;
 
 use neotmux_lua::runtime::Layers;
-use neotmux_lua::{Geometry, KeyOutcome, LuaSubsystem};
-use neotmux_proto::{Color, DrawCmd, Epoch, PaneId, Rect, Size};
+use neotmux_lua::{KeyOutcome, LuaSubsystem};
+use neotmux_proto::{Color, DrawCmd, Epoch, Geometry, PaneId, Rect, Size};
 
 mod support;
 

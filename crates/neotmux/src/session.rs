@@ -3,8 +3,11 @@ use std::time::Instant;
 
 use anyhow::Context as _;
 use neotmux_lua::ops::Op;
-use neotmux_lua::{Event as LuaEvent, Geometry, KeyOutcome, LuaSubsystem, Window as LuaWindow};
-use neotmux_proto::{DrawCmd, Level, PaneId, Rect as PRect, Reserved, Size, WindowId};
+use neotmux_lua::{KeyOutcome, LuaSubsystem};
+use neotmux_proto::{
+    DrawCmd, Event, Geometry, Level, PaneId, Rect as PRect, Reserved, Size, Window as LuaWindow,
+    WindowId,
+};
 use neotmux_term::pty::PtyHandle;
 use neotmux_term::state::clamp_to_min_grid;
 use neotmux_term::terminals::PaneTerminals;
@@ -112,7 +115,7 @@ impl Session {
         self.windows.resurface(self.surface);
         lua.lay_out_reservations(self.surface.size, self.windows.current().applied_bands());
         self.fit()?;
-        lua.dispatch_event(&LuaEvent::Resized {
+        lua.dispatch_event(&Event::Resized {
             size: self.windows.current().content,
         });
         self.dirty = true;
@@ -123,7 +126,7 @@ impl Session {
     /// input or the other panes.
     fn drain_panes(&mut self, lua: &LuaSubsystem) -> anyhow::Result<Drained> {
         let drained = self.shells.drain(MAX_CHUNKS_PER_FRAME, |pane, bytes| {
-            lua.dispatch_event(&LuaEvent::PaneOutput { pane, bytes });
+            lua.dispatch_event(&Event::PaneOutput { pane, bytes });
         })?;
         if drained.output {
             self.dirty = true;
@@ -158,21 +161,21 @@ impl Session {
         }
         self.fit()?;
         self.republish_geometry(lua);
-        lua.dispatch_event(&LuaEvent::PaneClosed { pane });
+        lua.dispatch_event(&Event::PaneClosed { pane });
         if closed.window_closed {
-            lua.dispatch_event(&LuaEvent::WindowClosed {
+            lua.dispatch_event(&Event::WindowClosed {
                 window: closed.window,
             });
         }
         if let Some(window) = closed.switched_to {
-            lua.dispatch_event(&LuaEvent::WindowChanged { window });
+            lua.dispatch_event(&Event::WindowChanged { window });
         }
         let after = self.windows.current().focus();
         if was_shown
             && after != before
             && let Some(focus) = after
         {
-            lua.dispatch_event(&LuaEvent::FocusChanged { pane: focus });
+            lua.dispatch_event(&Event::FocusChanged { pane: focus });
         }
         self.dirty = true;
         Ok(())
@@ -282,8 +285,8 @@ impl Session {
         self.pane_info.invalidate();
         self.fit()?;
         self.republish_geometry(lua);
-        lua.dispatch_event(&LuaEvent::PaneOpened { pane: new });
-        lua.dispatch_event(&LuaEvent::FocusChanged { pane: new });
+        lua.dispatch_event(&Event::PaneOpened { pane: new });
+        lua.dispatch_event(&Event::FocusChanged { pane: new });
         self.dirty = true;
         Ok(())
     }
@@ -316,7 +319,7 @@ impl Session {
         // The pane list is unchanged — the new pane is not in the shown window — but the
         // window list is, and a `window_opened` handler must see what it is told about.
         self.republish_geometry(lua);
-        lua.dispatch_event(&LuaEvent::WindowOpened { window });
+        lua.dispatch_event(&Event::WindowOpened { window });
         self.dirty = true;
         Ok(())
     }
@@ -344,9 +347,9 @@ impl Session {
         self.pane_info.invalidate();
         self.fit()?;
         self.republish_geometry(lua);
-        lua.dispatch_event(&LuaEvent::WindowChanged { window });
+        lua.dispatch_event(&Event::WindowChanged { window });
         if let Some(focus) = self.windows.current().focus() {
-            lua.dispatch_event(&LuaEvent::FocusChanged { pane: focus });
+            lua.dispatch_event(&Event::FocusChanged { pane: focus });
         }
         self.dirty = true;
         Ok(())
@@ -385,7 +388,7 @@ impl Session {
             return;
         }
         self.republish_geometry(lua);
-        lua.dispatch_event(&LuaEvent::FocusChanged { pane });
+        lua.dispatch_event(&Event::FocusChanged { pane });
         self.dirty = true;
     }
 

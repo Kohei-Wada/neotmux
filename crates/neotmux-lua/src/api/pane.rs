@@ -3,12 +3,11 @@ use std::rc::Rc;
 
 use mlua::{Lua, Table, Value};
 
-use neotmux_proto::{Dir, PaneId, SplitDir};
+use neotmux_proto::{Dir, Geometry, PaneId, SplitDir};
 use neotmux_term::lines::Trailing;
 use neotmux_term::read::{PaneRead, Text, Want};
 
 use crate::api::rect;
-use crate::geometry::Geometry;
 use crate::ops::{Op, OpBuffer};
 use crate::paneinfo::PaneInfos;
 use crate::source::{self, Sources};

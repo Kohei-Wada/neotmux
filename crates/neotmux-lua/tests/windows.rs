@@ -2,10 +2,10 @@
 
 use std::fs;
 
+use neotmux_lua::LuaSubsystem;
 use neotmux_lua::ops::Op;
 use neotmux_lua::runtime::Layers;
-use neotmux_lua::{Geometry, LuaSubsystem, Window};
-use neotmux_proto::{Epoch, PaneId, Rect, Size, WindowId};
+use neotmux_proto::{Epoch, Geometry, PaneId, Rect, Size, Window, WindowId};
 
 mod support;
 

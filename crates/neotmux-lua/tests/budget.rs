@@ -1,10 +1,10 @@
 use std::fs;
 
+use neotmux_lua::LuaSubsystem;
 use neotmux_lua::ops::Op;
 use neotmux_lua::registry::KindTag;
 use neotmux_lua::runtime::Layers;
-use neotmux_lua::{Geometry, LuaSubsystem};
-use neotmux_proto::{DrawCmd, Epoch, Level, PaneId, Rect, Size};
+use neotmux_proto::{DrawCmd, Epoch, Geometry, Level, PaneId, Rect, Size};
 
 mod support;
 

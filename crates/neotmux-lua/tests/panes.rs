@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 
 use neotmux_lua::ops::Op;
 use neotmux_lua::runtime::Layers;
-use neotmux_lua::{Geometry, KeyOutcome, LuaSubsystem};
-use neotmux_proto::{Dir, Epoch, PaneId, Rect, Size};
+use neotmux_lua::{KeyOutcome, LuaSubsystem};
+use neotmux_proto::{Dir, Epoch, Geometry, PaneId, Rect, Size};
 
 mod support;
 

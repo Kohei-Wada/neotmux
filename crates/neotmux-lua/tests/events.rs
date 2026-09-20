@@ -1,8 +1,8 @@
 use std::fs;
 
+use neotmux_lua::LuaSubsystem;
 use neotmux_lua::runtime::Layers;
-use neotmux_lua::{Event, LuaSubsystem};
-use neotmux_proto::{PaneId, Size};
+use neotmux_proto::{Event, PaneId, Size};
 
 mod support;
 

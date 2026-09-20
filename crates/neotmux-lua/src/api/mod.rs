@@ -18,7 +18,6 @@ use neotmux_term::read::PaneRead;
 
 use crate::LoadFailure;
 use crate::draw::Buffers;
-use crate::geometry::Geometry;
 use crate::ops::{Op, OpBuffer};
 use crate::overrun::Overrun;
 use crate::paneinfo::PaneInfos;
@@ -26,7 +25,7 @@ use crate::registry::{Kind, KindTag, RegistrationId, Registry};
 use crate::reserve::Reservations;
 use crate::source::{self, SourceId, Sources};
 use crate::window::WindowIds;
-use neotmux_proto::Level;
+use neotmux_proto::{Geometry, Level};
 
 pub use opt::Opts;
 

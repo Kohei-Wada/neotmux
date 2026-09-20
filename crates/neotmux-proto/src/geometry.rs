@@ -1,4 +1,4 @@
-use neotmux_proto::{PaneId, Rect, Size, WindowId};
+use crate::{PaneId, Rect, Size, WindowId};
 
 /// A window as Lua can ask about it: its id, and the panes it holds in layout order.
 #[derive(Clone)]

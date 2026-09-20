@@ -1,7 +1,6 @@
 pub mod api;
 pub mod budget;
 pub mod draw;
-pub mod geometry;
 pub mod ops;
 pub mod overrun;
 mod paneinfo;
@@ -21,17 +20,17 @@ use std::time::Duration;
 use mlua::chunk::ChunkMode;
 use mlua::{Function, Lua, Value};
 
-use neotmux_proto::{DrawCmd, Epoch, Level, PaneId, PaneInfo, Reserved, Size, WindowId};
+use neotmux_proto::{
+    DrawCmd, Epoch, Event, Geometry, Level, PaneId, PaneInfo, Reserved, Size, WindowId,
+};
 use neotmux_term::read::PaneRead;
 
 pub use api::Opts;
-pub use api::event::Event;
 pub use api::keymap;
 
 use api::ctx::Ctx;
 use budget::{Budget, Outcome};
 use draw::Buffers;
-pub use geometry::{Geometry, Window};
 use ops::{Op, OpBuffer};
 use overrun::Overrun;
 use paneinfo::PaneInfos;
@@ -432,7 +431,7 @@ impl LuaSubsystem {
             return;
         }
 
-        let bytes = match event.shared_bytes(&self.lua) {
+        let bytes = match api::event::shared_bytes(event, &self.lua) {
             Ok(bytes) => bytes,
             Err(err) => {
                 let name = event.name();
@@ -455,7 +454,7 @@ impl LuaSubsystem {
             let Ok(func) = self.lua.registry_value::<Function>(&callback) else {
                 continue;
             };
-            let table = match event.table(&self.lua, bytes.as_ref()) {
+            let table = match api::event::table(event, &self.lua, bytes.as_ref()) {
                 Ok(table) => table,
                 Err(err) => {
                     let name = event.name();

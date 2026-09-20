@@ -1,6 +1,8 @@
 pub mod draw;
+pub mod event;
 pub mod frame;
 pub mod geom;
+pub mod geometry;
 pub mod grid;
 pub mod ids;
 pub mod keys;
@@ -11,8 +13,10 @@ pub mod reserve;
 pub mod wire;
 
 pub use draw::{DrawCmd, Epoch, Rect};
+pub use event::Event;
 pub use frame::{Frame, Notice, OwnedFrame, OwnedPaneFrame, PaneFrame};
 pub use geom::{Dir, Size, SplitDir};
+pub use geometry::{Geometry, Window};
 pub use grid::{Color, GridSnapshot, SnapCell};
 pub use ids::{PaneId, WindowId};
 pub use keys::{Key, KeyCode, Modifiers};
