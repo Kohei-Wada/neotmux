@@ -267,6 +267,7 @@ local h = neotmux.on_tick(fn)                    -- per-frame draw callback
 local h = neotmux.on_event(name, fn)             -- pane_output / resized
 local h = neotmux.on_key(fn)                     -- every key, before the bindings
 local h = neotmux.keymap.set(key, fn)            -- key binding
+local h = neotmux.reserve(edge, rows)            -- a band of the surface (§4.5)
 h:remove()                                       -- idempotent
 ```
 
@@ -351,19 +352,49 @@ neotmux.on_tick(function(ctx)
   local rect = ctx:pane_rect(pane_id)
   ctx:text(pane_id, x, y, "hello")
   ctx:rect(...) ctx:line(...)
-  ctx:status("12:34", { fg = "#ffffff" })  -- a fragment of the status line
+  local band = ctx:reserved()             -- this source's own reserved band, or nil
 end)
 ```
 
-The status line is contributed the same way as anything else drawn: `ctx:status(text,
-colours)` appends a fragment to the calling source's buffer for this frame. There is no
-separate status registration — a source that stops calling it stops contributing, and the
-host shows the status row only while some fragment exists.
+**There is no status line in the host.** `neotmux.reserve(edge, rows)` takes a band of `rows`
+rows off the `"top"` or `"bottom"` of the surface and returns a handle like every other
+registration (§4.3); the panes get what is left. A band is outside every pane's rect, so
+nothing a pane's child writes can land in it and nothing in it can be overwritten by a pane.
+A source draws in its band through the same `ctx:text` / `ctx:rect` / `ctx:line` as anywhere
+else, with `nil` for the pane, because `ctx:reserved()` answers in surface coordinates. A
+status line is then a plugin that wants one row at the bottom, and nothing about it is known
+to the host.
 
-`ctx:size()` and `ctx:pane_rect()` exist because without them a status plugin cannot know its
-own width — the clock in the exit criteria only worked because a clock ignores width. Both
-answer with a named table, as the `resized` event does, so there is one spelling of the
-question and no positional order to remember.
+`ctx:reserved()` is **per source**: two sources reserving the same edge get separate bands,
+allocated along that edge from the outside in, in the order they were granted — which, since
+a reservation is asked for while its chunk loads, is load order. A source that reserved
+nothing gets `nil`.
+
+`"left"` and `"right"` are deliberately unsupported. The named consumers are a status line
+(bottom) and a window list (top); a vertical band is a different axis with a different unit
+and no consumer today.
+
+A reservation is refused when the edge cannot hold it: at most four rows per edge, checked
+when it is asked for, returning `nil` plus a message and changing nothing — the `keymap.set`
+conflict shape, because losing rows to whoever asked first is not a programming error. A
+malformed edge or a row count no edge could ever hold raises, like every other malformed
+argument. The bound is a constant rather than a measurement of the terminal because
+`init.lua` runs before there is a session. The terminal's own limit is judged every frame
+instead: a surface that cannot leave the panes `MIN_GRID` rows as well applies **none** of
+the granted bands for that frame and every `ctx:reserved()` is `nil`, which is §6's hidden
+pane one level up — nothing is refused, nothing is torn down, and growing back brings the
+bands straight back.
+
+A `reserve` or `handle:remove()` from inside a tick takes effect on the **next** frame. The
+content size is part of the epoch (below), so changing it during a frame would invalidate the
+draw buffers that frame had already committed.
+
+`ctx:size()` and `ctx:pane_rect()` exist because without them a plugin drawing along an edge
+cannot know its own width — the clock in the exit criteria only worked because a clock
+ignores width. Both answer with a named table, as the `resized` event does, so there is one
+spelling of the question and no positional order to remember. `ctx:size()` is the area the
+panes have; `ctx:pane_rect()`, like every `nil`-pane coordinate, is in the surface's own
+frame, because a band at the top moves the panes down.
 
 Calls **append to a command buffer; they do not mutate the frame.** The host applies the
 buffer after the tick. Direct mutation (what ttymap's `MapApi` does today) cannot be rolled
@@ -488,8 +519,9 @@ This is nvim's shape: isolation lives in the thing that iterates what to load, n
 
 A fixture plugin **set**, not one plugin — the point is to exercise the ABI:
 
-- `clock` — a status-line contributor: an `on_tick` that calls `ctx:status()` with a string
-  sized from `ctx:size()`; asserted to produce a non-empty command buffer every frame
+- `clock` — a band plugin: `neotmux.reserve('bottom', 1)` and an `on_tick` that draws into
+  `ctx:reserved()` a string sized from `ctx:size()`; asserted to produce a non-empty command
+  buffer every frame, on a surface a row shorter than the terminal
 - `watcher` — consumes a payload-carrying `pane_output` event; asserted to observe bytes a
   harness wrote to the PTY
 - `binder` — `keymap.set` returning `true` for one key and `false` for another; asserted that
@@ -689,6 +721,12 @@ That leaves one case the refusal cannot prevent, because the user causes it afte
 falls below the minimum is not rendered for that frame and its PTY keeps its last valid size —
 it is hidden, not resized to something its child cannot handle and not destroyed. Growing the
 terminal back brings it straight back, because the tree never changed.
+
+A reserved band (§4.5) is the same case and behaves the same way: a surface that cannot spare
+the reserved rows and still leave the panes `MIN_GRID` rows applies none of them for that
+frame. All of them, not part of one — a half-honoured band is a band its owner would draw
+outside. The panes have the whole surface for as long as that lasts, every `ctx:reserved()`
+is `nil`, and growing back restores the bands without anyone re-asking.
 
 ### Focus
 

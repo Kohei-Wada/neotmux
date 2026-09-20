@@ -12,37 +12,6 @@ pub(crate) fn color(c: PColor) -> Color {
     }
 }
 
-/// Splits the terminal area into the pane area and the status row. The
-/// status row only exists (and only costs a row) when there is a status to
-/// show; otherwise the pane gets the whole area, exactly as before.
-pub fn layout(area: Rect, has_status: bool) -> (Rect, Rect) {
-    if has_status && area.height > 1 {
-        let pane = Rect {
-            x: area.x,
-            y: area.y,
-            width: area.width,
-            height: area.height - 1,
-        };
-        let status = Rect {
-            x: area.x,
-            y: area.y + area.height - 1,
-            width: area.width,
-            height: 1,
-        };
-        (pane, status)
-    } else {
-        (
-            area,
-            Rect {
-                x: area.x,
-                y: area.y + area.height,
-                width: area.width,
-                height: 0,
-            },
-        )
-    }
-}
-
 /// The one place the terminal's single cursor is put. It belongs in the focused pane, because
 /// that is where the keys are going, at that pane's own cursor cell.
 ///
@@ -142,30 +111,6 @@ mod tests {
                 .modifier
                 .contains(ratatui::style::Modifier::BOLD)
         );
-    }
-
-    #[test]
-    fn no_status_gives_the_pane_the_whole_area() {
-        let area = Rect::new(0, 0, 80, 24);
-        let (pane, status) = super::layout(area, false);
-        assert_eq!(pane, area);
-        assert_eq!(status.height, 0);
-    }
-
-    #[test]
-    fn a_status_reserves_the_bottom_row() {
-        let area = Rect::new(0, 0, 80, 24);
-        let (pane, status) = super::layout(area, true);
-        assert_eq!(pane, Rect::new(0, 0, 80, 23));
-        assert_eq!(status, Rect::new(0, 23, 80, 1));
-    }
-
-    #[test]
-    fn a_single_row_area_cannot_spare_a_status_row() {
-        let area = Rect::new(0, 0, 80, 1);
-        let (pane, status) = super::layout(area, true);
-        assert_eq!(pane, area);
-        assert_eq!(status.height, 0);
     }
 
     #[test]

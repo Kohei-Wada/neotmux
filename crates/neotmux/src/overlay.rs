@@ -1,4 +1,4 @@
-use neotmux_core::proto::{Color as PColor, DrawCmd, PaneId, Rect as PRect, StatusFragment};
+use neotmux_core::proto::{Color as PColor, DrawCmd, PaneId, Rect as PRect};
 use ratatui::Frame;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -13,7 +13,9 @@ struct Colors {
 }
 
 /// The local coordinate frame a command's (x, y) is relative to: either a
-/// pane's rect, or the whole surface for `pane: None`.
+/// pane's rect, or the whole surface for `pane: None`. Pane rects are in surface
+/// coordinates too, so both are offsets into the same `area` — which is the whole terminal,
+/// reserved bands included, so a `pane: nil` draw can reach one.
 fn bounds(panes: &PaneRects, area: Rect, pane: Option<PaneId>) -> Option<PRect> {
     match pane {
         Some(id) => panes.get(&id).copied(),
@@ -166,27 +168,6 @@ pub fn apply(frame: &mut Frame, area: Rect, cmds: &[DrawCmd], panes: &PaneRects)
     }
 }
 
-/// Renders the status fragments left to right across the status row.
-pub fn draw_status(frame: &mut Frame, area: Rect, fragments: &[StatusFragment]) {
-    if area.height == 0 {
-        return;
-    }
-    let buf = frame.buffer_mut();
-    let bound = PRect::new(0, 0, area.width, area.height);
-    let mut x = 0u16;
-    for fragment in fragments {
-        if x >= bound.w {
-            break;
-        }
-        let colors = Colors {
-            fg: fragment.fg,
-            bg: fragment.bg,
-        };
-        draw_text(buf, area, bound, (x, 0), &fragment.text, colors);
-        x += u16::try_from(fragment.text.chars().count()).unwrap_or(bound.w);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use neotmux_core::proto::Color;
@@ -270,17 +251,6 @@ mod tests {
         let buf = render((10, 2), |frame, area| apply(frame, area, &cmds, &panes));
         assert_eq!(buf[(2, 0)].symbol(), "L");
         assert_eq!(buf[(3, 0)].symbol(), " ");
-    }
-
-    #[test]
-    fn status_fragments_are_drawn_left_to_right() {
-        let fragments = vec![
-            StatusFragment::new("AA", Color::Default, Color::Default),
-            StatusFragment::new("BB", Color::Default, Color::Default),
-        ];
-        let buf = render((10, 1), |frame, area| draw_status(frame, area, &fragments));
-        assert_eq!(buf[(0, 0)].symbol(), "A");
-        assert_eq!(buf[(2, 0)].symbol(), "B");
     }
 
     fn line(from: (u16, u16), to: (u16, u16)) -> Vec<DrawCmd> {

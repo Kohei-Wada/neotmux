@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
 use crossterm::event::{self, Event};
-use neotmux_core::proto::{DrawCmd, PaneId, Size, StatusFragment};
+use neotmux_core::proto::{DrawCmd, PaneId, Reserved, Size};
 use neotmux_lua::ops::{Level, Op};
 use neotmux_lua::{Event as LuaEvent, KeyOutcome, LuaSubsystem};
 use neotmux_term::pty::PtyHandle;
@@ -17,7 +17,7 @@ use crate::logging;
 use crate::notify::Notifications;
 use crate::overlay;
 use crate::panes::PaneLayout;
-use crate::render::{cursor_position, draw_grid, layout};
+use crate::render::{cursor_position, draw_grid};
 use crate::shells::Shells;
 use crate::signals::{self, ShutdownSignal};
 use crate::tty::{Ready, Terminal};
@@ -49,17 +49,18 @@ fn terminal_size(terminal: &DefaultTerminal) -> anyhow::Result<Size> {
 /// The state one frame carries into the next. Every step of a frame is a method on it, so
 /// the loop in `run` reads as the order of the steps and nothing else.
 struct Session {
-    /// The whole terminal, status row included.
+    /// The whole terminal, reserved bands included.
     size: Size,
     layout: PaneLayout,
-    has_status: bool,
+    /// The rows sources have reserved at the edges, sampled at a frame boundary.
+    reserved: Reserved,
     /// The cells left between panes, from `neotmux.opt.pane_gutter`.
     gutter: u16,
     shells: Shells,
     /// Pane ids are never reused: a stale `pane.focus(id)` must not land on a new pane.
     next_pane: u32,
     dirty: bool,
-    last_frame_output: (Vec<DrawCmd>, Vec<StatusFragment>),
+    last_frame_output: Vec<DrawCmd>,
 }
 
 /// What draining the panes found: `Eof` means the last pane is gone and the session ends
@@ -71,10 +72,12 @@ enum Drained {
 }
 
 impl Session {
-    fn new(size: Size, gutter: u16, waker: Waker) -> anyhow::Result<Self> {
-        let has_status = false;
+    fn new(size: Size, lua: &LuaSubsystem, waker: Waker) -> anyhow::Result<Self> {
+        let gutter = lua.opt().pane_gutter;
+        let reserved = lua.reserved();
         let first = PaneId::from(FIRST_PANE);
-        let layout = PaneLayout::new(size, has_status, gutter, first);
+        let layout = PaneLayout::new(size, reserved, gutter, first);
+        lua.lay_out_reservations(size, layout.bands_applied(reserved));
         let mut shells = Shells::new(waker);
         shells.open(
             first,
@@ -84,12 +87,12 @@ impl Session {
         Ok(Self {
             size,
             layout,
-            has_status,
+            reserved,
             gutter,
             shells,
             next_pane: FIRST_PANE + 1,
             dirty: true,
-            last_frame_output: (Vec::new(), Vec::new()),
+            last_frame_output: Vec::new(),
         })
     }
 
@@ -99,12 +102,12 @@ impl Session {
         shells.fit(layout.showable())
     }
 
-    /// A geometry change, whether from a real terminal resize, the status row
-    /// appearing/disappearing or the gutter changing: recompute the layout, resize the panes to match, and tell the
-    /// Lua layer about it (§4.8).
+    /// A geometry change, whether from a real terminal resize, a band being reserved or
+    /// released, or the gutter changing: recompute the layout, hand the bands their place in
+    /// it, resize the panes to match, and tell the Lua layer about it (§4.8).
     fn apply_geometry(&mut self, lua: &LuaSubsystem) -> anyhow::Result<()> {
-        self.layout
-            .resurface(self.size, self.has_status, self.gutter);
+        self.layout.resurface(self.size, self.reserved, self.gutter);
+        lua.lay_out_reservations(self.size, self.layout.bands_applied(self.reserved));
         self.fit()?;
         lua.dispatch_event(&LuaEvent::Resized {
             size: self.layout.content,
@@ -330,13 +333,15 @@ impl Session {
         );
     }
 
-    /// Whether the status row just appeared or disappeared, which changes the panes' size.
-    fn status_row_changed(&mut self, status: &[StatusFragment]) -> bool {
-        let now_has_status = !status.is_empty();
-        if now_has_status == self.has_status {
+    /// Whether a band was reserved or released, which changes the panes' size. Sampled here,
+    /// at the frame boundary, and nowhere else: a `neotmux.reserve` from inside a tick would
+    /// otherwise change the content size — and with it the epoch — under a frame that had
+    /// already committed its drawing against the old one.
+    fn reserved_changed(&mut self, reserved: Reserved) -> bool {
+        if reserved == self.reserved {
             return false;
         }
-        self.has_status = now_has_status;
+        self.reserved = reserved;
         true
     }
 
@@ -355,18 +360,15 @@ impl Session {
         terminal: &mut DefaultTerminal,
         notifications: &mut Notifications,
         cmds: &[DrawCmd],
-        status: &[StatusFragment],
     ) -> anyhow::Result<()> {
         self.shells.snapshot();
         notifications.expire(Instant::now());
 
         let shells = &self.shells;
         let pane_layout = &self.layout;
-        let has_status = self.has_status;
         terminal
             .draw(|frame| {
                 let area = frame.area();
-                let (pane_area, status_area) = layout(area, has_status);
                 let focus = pane_layout.focus();
                 let mut focused_cell = None;
                 for (pane, rect) in pane_layout.showable() {
@@ -374,12 +376,12 @@ impl Session {
                         continue;
                     };
                     let cell = Rect {
-                        x: pane_area.x + rect.x,
-                        y: pane_area.y + rect.y,
+                        x: area.x + rect.x,
+                        y: area.y + rect.y,
                         width: rect.w,
                         height: rect.h,
                     }
-                    .intersection(pane_area);
+                    .intersection(area);
                     draw_grid(frame, cell, grid);
                     if focus == Some(pane) {
                         focused_cell = Some((cell, grid));
@@ -390,10 +392,9 @@ impl Session {
                 {
                     frame.set_cursor_position(position);
                 }
-                overlay::apply(frame, pane_area, cmds, &pane_layout.rects);
-                if has_status {
-                    overlay::draw_status(frame, status_area, status);
-                }
+                // The whole area, not the pane area: a `pane = nil` command is in surface
+                // coordinates, which is what lets a source draw in the band it reserved.
+                overlay::apply(frame, area, cmds, &pane_layout.rects);
                 notifications.render(frame, area);
             })
             .context("draw")?;
@@ -424,7 +425,7 @@ pub fn run(
 ) -> anyhow::Result<Option<i32>> {
     let tty = Terminal::open().context("open the terminal for input")?;
     let (wakeup, waker) = wakeup().context("open the panes' wakeup")?;
-    let mut session = Session::new(terminal_size(terminal)?, lua.opt().pane_gutter, waker)?;
+    let mut session = Session::new(terminal_size(terminal)?, lua, waker)?;
     session.publish_geometry(lua);
 
     #[cfg(debug_assertions)]
@@ -455,9 +456,11 @@ pub fn run(
         }
 
         let frame_output = lua.frame_output();
-        let status_changed = session.status_row_changed(&frame_output.1);
+        // After the frame's output is in hand, never before: both of these change the size of
+        // the surface, and this frame's buffers were committed against the old one.
+        let reserved_changed = session.reserved_changed(lua.reserved());
         let gutter_changed = session.gutter_changed(lua.opt().pane_gutter);
-        if status_changed || gutter_changed {
+        if reserved_changed || gutter_changed {
             session.apply_geometry(lua)?;
         }
 
@@ -472,8 +475,7 @@ pub fn run(
 
         let eof = drained == Drained::Eof;
         if session.dirty || eof {
-            let (cmds, status) = &frame_output;
-            session.render(terminal, notifications, cmds, status)?;
+            session.render(terminal, notifications, &frame_output)?;
         }
         session.last_frame_output = frame_output;
 
@@ -537,7 +539,7 @@ mod tests {
     #[test]
     fn the_first_pane_is_the_whole_surface() {
         let size = Size { rows: 24, cols: 80 };
-        let layout = PaneLayout::new(size, false, 0, PaneId::from(FIRST_PANE));
+        let layout = PaneLayout::new(size, Reserved::default(), 0, PaneId::from(FIRST_PANE));
         assert_eq!(
             pane_size(&layout, PaneId::from(FIRST_PANE)).expect("the first pane has a rect"),
             size
@@ -550,7 +552,7 @@ mod tests {
     fn a_pane_with_no_rect_is_an_error_not_a_zero_sized_terminal() {
         let layout = PaneLayout::new(
             Size { rows: 24, cols: 80 },
-            false,
+            Reserved::default(),
             0,
             PaneId::from(FIRST_PANE),
         );

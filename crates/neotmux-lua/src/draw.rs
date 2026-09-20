@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
-use neotmux_core::proto::{DrawCmd, Epoch, StatusFragment};
+use neotmux_core::proto::{DrawCmd, Epoch};
 
 use crate::source::SourceId;
 
@@ -9,7 +9,6 @@ use crate::source::SourceId;
 pub struct Committed {
     pub epoch: Epoch,
     pub cmds: Vec<DrawCmd>,
-    pub status: Vec<StatusFragment>,
 }
 
 #[derive(Default)]
@@ -43,16 +42,6 @@ impl Buffers {
         inner.scratch.entry(owner).or_default().cmds.push(cmd);
     }
 
-    pub fn status(&self, owner: SourceId, fragment: StatusFragment) {
-        let mut inner = self.inner.borrow_mut();
-        inner
-            .scratch
-            .entry(owner)
-            .or_default()
-            .status
-            .push(fragment);
-    }
-
     pub fn commit(&self, owner: SourceId) {
         let mut inner = self.inner.borrow_mut();
         let epoch = inner.epoch.clone();
@@ -77,24 +66,22 @@ impl Buffers {
 
     /// Everything committed under the frame this `begin` opened. A buffer left over from an
     /// earlier frame is replayed only while its epoch still matches.
-    pub fn applicable(&self) -> (Vec<DrawCmd>, Vec<StatusFragment>) {
+    pub fn applicable(&self) -> Vec<DrawCmd> {
         let inner = self.inner.borrow();
         let mut cmds = Vec::new();
-        let mut status = Vec::new();
         for entry in inner.committed.values() {
             if !entry.epoch.matches(&inner.epoch) {
                 continue;
             }
             cmds.extend(entry.cmds.iter().cloned());
-            status.extend(entry.status.iter().cloned());
         }
-        (cmds, status)
+        cmds
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use neotmux_core::proto::{Color, DrawCmd, Epoch, Size, StatusFragment};
+    use neotmux_core::proto::{Color, DrawCmd, Epoch, Size};
 
     use super::*;
     use crate::source::Sources;
@@ -114,10 +101,6 @@ mod tests {
         }
     }
 
-    fn fragment(s: &str) -> StatusFragment {
-        StatusFragment::new(s, Color::Default, Color::Default)
-    }
-
     #[test]
     fn a_committed_buffer_is_applicable_under_the_same_epoch() {
         let sources = Sources::new();
@@ -125,11 +108,8 @@ mod tests {
         let buffers = Buffers::new();
         buffers.begin(epoch(24));
         buffers.record(a, text("hi"));
-        buffers.status(a, fragment("st"));
         buffers.commit(a);
-        let (cmds, status) = buffers.applicable();
-        assert_eq!(cmds, vec![text("hi")]);
-        assert_eq!(status, vec![fragment("st")]);
+        assert_eq!(buffers.applicable(), vec![text("hi")]);
     }
 
     #[test]
@@ -141,9 +121,7 @@ mod tests {
         buffers.record(a, text("hi"));
         buffers.commit(a);
         buffers.begin(epoch(25));
-        let (cmds, status) = buffers.applicable();
-        assert!(cmds.is_empty());
-        assert!(status.is_empty());
+        assert!(buffers.applicable().is_empty());
     }
 
     #[test]
@@ -160,7 +138,7 @@ mod tests {
         buffers.record(a, text("half-written"));
         buffers.discard(a);
 
-        let (cmds, _) = buffers.applicable();
+        let cmds = buffers.applicable();
         assert_eq!(cmds, vec![text("good")]);
     }
 
@@ -175,7 +153,7 @@ mod tests {
         buffers.begin(epoch(24));
         buffers.record(a, text("second"));
         buffers.commit(a);
-        let (cmds, _) = buffers.applicable();
+        let cmds = buffers.applicable();
         assert_eq!(cmds, vec![text("second")]);
     }
 
@@ -183,9 +161,7 @@ mod tests {
     fn nothing_recorded_means_nothing_applicable() {
         let buffers = Buffers::new();
         buffers.begin(epoch(24));
-        let (cmds, status) = buffers.applicable();
-        assert!(cmds.is_empty());
-        assert!(status.is_empty());
+        assert!(buffers.applicable().is_empty());
     }
 
     #[test]
@@ -199,7 +175,7 @@ mod tests {
         buffers.record(a, text("first"));
         buffers.commit(b);
         buffers.commit(a);
-        let (cmds, _) = buffers.applicable();
+        let cmds = buffers.applicable();
         assert_eq!(cmds, vec![text("first"), text("second")]);
     }
 
@@ -212,7 +188,7 @@ mod tests {
         buffers.record(a, text("hi"));
         buffers.commit(a);
         buffers.forget(a);
-        let (cmds, _) = buffers.applicable();
+        let cmds = buffers.applicable();
         assert!(cmds.is_empty());
     }
 
@@ -227,9 +203,7 @@ mod tests {
         buffers.forget(a);
         buffers.commit(a);
 
-        let (cmds, status) = buffers.applicable();
-        assert!(cmds.is_empty());
-        assert!(status.is_empty());
+        assert!(buffers.applicable().is_empty());
     }
 
     #[test]
@@ -245,7 +219,7 @@ mod tests {
         buffers.begin(epoch(24));
         buffers.commit(a);
 
-        let (cmds, _) = buffers.applicable();
+        let cmds = buffers.applicable();
         assert!(cmds.is_empty());
     }
 
@@ -262,7 +236,7 @@ mod tests {
         buffers.begin(epoch(24));
         buffers.discard(a);
 
-        let (cmds, _) = buffers.applicable();
+        let cmds = buffers.applicable();
         assert_eq!(cmds, vec![text("first")]);
     }
 
@@ -276,7 +250,7 @@ mod tests {
         buffers.begin(epoch(24));
         buffers.record(a, text("fresh"));
         buffers.commit(a);
-        let (cmds, _) = buffers.applicable();
+        let cmds = buffers.applicable();
         assert_eq!(cmds, vec![text("fresh")]);
     }
 }

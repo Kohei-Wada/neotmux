@@ -1,8 +1,13 @@
--- A status provider that reports the surface it was given: without ctx:size() a status
--- plugin cannot know its own width (§4.5).
+-- A band plugin that reports the surface the panes were left with: without ctx:size() a
+-- plugin drawing along an edge cannot know its own width (§4.5).
+neotmux.reserve("bottom", 1)
+
 neotmux.on_tick(function(ctx)
+  local band = ctx:reserved()
   local size = ctx:size()
-  ctx:status("CLOCK " .. size.cols .. "x" .. size.rows)
+  if band then
+    ctx:text(nil, band.x, band.y, "CLOCK " .. size.cols .. "x" .. size.rows)
+  end
 end)
 
 return {}

@@ -5,6 +5,7 @@ mod geometry;
 pub mod ops;
 pub mod overrun;
 pub mod registry;
+pub mod reserve;
 pub mod runtime;
 pub mod source;
 pub mod vm;
@@ -18,7 +19,7 @@ use std::time::Duration;
 use mlua::chunk::ChunkMode;
 use mlua::{Function, Lua, Value};
 
-use neotmux_core::proto::{DrawCmd, Epoch, PaneId, Rect, Size, StatusFragment};
+use neotmux_core::proto::{DrawCmd, Epoch, PaneId, Rect, Reserved, Size};
 
 pub use api::Opts;
 pub use api::event::Event;
@@ -31,6 +32,7 @@ use geometry::Geometry;
 use ops::{Level, Op, OpBuffer};
 use overrun::Overrun;
 use registry::{Kind, KindTag, RegistrationId, Registry};
+use reserve::Reservations;
 use runtime::Layers;
 use source::{SourceId, Sources};
 
@@ -59,6 +61,7 @@ pub struct LuaSubsystem {
     geometry: Rc<RefCell<Geometry>>,
     budget: Rc<Budget>,
     overrun: Rc<Overrun>,
+    reservations: Rc<Reservations>,
 }
 
 impl LuaSubsystem {
@@ -74,6 +77,7 @@ impl LuaSubsystem {
         let opts = Rc::new(RefCell::new(Opts::default()));
         let load_failures = Rc::new(RefCell::new(Vec::new()));
         let geometry = Rc::new(RefCell::new(Geometry::default()));
+        let reservations = Rc::new(Reservations::new());
         let buffers = Rc::new(Buffers::new());
 
         let overrun = Rc::new(Overrun::new());
@@ -90,6 +94,7 @@ impl LuaSubsystem {
                 load_failures: load_failures.clone(),
                 geometry: geometry.clone(),
                 overrun: overrun.clone(),
+                reservations: reservations.clone(),
             },
         )
         .map_err(|err| anyhow::anyhow!("{err:#}"))?;
@@ -107,6 +112,7 @@ impl LuaSubsystem {
             geometry,
             budget,
             overrun,
+            reservations,
         })
     }
 
@@ -242,6 +248,7 @@ impl LuaSubsystem {
                         self.buffers.clone(),
                         geometry.size,
                         geometry.panes.clone(),
+                        self.reservations.band(owner),
                     )
                 };
 
@@ -444,8 +451,25 @@ impl LuaSubsystem {
         }
     }
 
-    pub fn frame_output(&self) -> (Vec<DrawCmd>, Vec<StatusFragment>) {
+    pub fn frame_output(&self) -> Vec<DrawCmd> {
         self.buffers.applicable()
+    }
+
+    /// The rows every source has been granted, per edge. Whether the terminal can afford
+    /// them is the host's judgement, not this layer's.
+    pub fn reserved(&self) -> Reserved {
+        self.reservations.totals()
+    }
+
+    /// The host has settled the surface: hand every granted reservation its band, or none at
+    /// all when the surface could not afford them.
+    ///
+    /// Called at a frame boundary only. A `neotmux.reserve` or `handle:remove()` from inside
+    /// a tick changes what `reserved()` reports, but not the bands this frame is being drawn
+    /// against — the same discipline `pane.split` follows, and what keeps a reservation from
+    /// invalidating the epoch of a frame already being composed.
+    pub fn lay_out_reservations(&self, surface: Size, applied: bool) {
+        self.reservations.lay_out(surface, applied);
     }
 
     pub fn drain_ops(&self) -> Vec<(SourceId, Op)> {

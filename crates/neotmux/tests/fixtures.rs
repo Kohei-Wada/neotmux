@@ -651,6 +651,12 @@ fn the_shipped_status_line_shows_with_no_user_config() {
     nt.wait_for_screen("panes 2 focus 2", PATIENCE);
     nt.send("\x0f"); // C-o: focus the other one
     nt.wait_for_screen("panes 2 focus 1", PATIENCE);
+    assert_eq!(
+        nt.cell(23, 0),
+        "p",
+        "the status line is not in the row it reserved:\n{}",
+        nt.screen_after(Duration::ZERO)
+    );
 }
 
 /// The defect the gutter exists for, measured the way it was found: on the screen, over a
@@ -726,6 +732,139 @@ fn switching_the_borders_off_gives_the_panes_their_cells_back() {
         nt.cell(0, DIVIDER_COL as u16),
         "R",
         "the right pane does not start where a tiling layout puts it:\n{screen}"
+    );
+}
+
+/// A reservation is the whole of what the status row used to be: the panes lose exactly the
+/// rows asked for, and get them back when the band goes. Asserted on screen, because the
+/// fixture reports the surface it was handed — `CLOCK 80x23` is one row reserved, `80x22` is
+/// two — and because that surface is the thing a shell is actually given.
+#[test]
+fn reserving_a_row_shrinks_the_panes_and_releasing_it_gives_it_back() {
+    let (mut nt, _init) = start("require('plugin.clock') require('plugin.bander')", "cat");
+    nt.wait_for_screen("CLOCK 80x23", PATIENCE);
+
+    nt.send("\x12"); // C-r: bander reserves a second bottom row
+    nt.wait_for_screen("CLOCK 80x22", PATIENCE);
+
+    nt.send("\x14"); // C-t: bander gives it back
+    nt.wait_for_screen("CLOCK 80x23", PATIENCE);
+    let screen = nt.screen_after(Duration::from_millis(300));
+    assert!(
+        !screen.contains("BAND"),
+        "a released band was still drawn in:\n{screen}"
+    );
+}
+
+/// Two sources on one edge, each with its own rows: the one that asked first keeps the
+/// outermost row and the second sits inside it. With one plugin loaded this is invisible,
+/// which is why it is asserted by column and row rather than by "it is on screen".
+#[test]
+fn two_sources_reserving_the_bottom_get_a_row_each() {
+    let (mut nt, _init) = start("require('plugin.clock') require('plugin.bander')", "cat");
+    nt.wait_for_screen("CLOCK 80x23", PATIENCE);
+    nt.send("\x12"); // C-r
+    nt.wait_for_screen("BAND", PATIENCE);
+
+    let screen = nt.screen_after(Duration::from_millis(300));
+    let rows: Vec<&str> = screen.lines().collect();
+    assert!(
+        rows[23].starts_with("CLOCK 80x22"),
+        "the first to reserve lost the outermost row:\n{screen}"
+    );
+    assert!(
+        rows[22].starts_with("BAND"),
+        "the second band did not get a row of its own:\n{screen}"
+    );
+}
+
+/// The other half of the bargain: a band is outside every pane's rect, so a shell that
+/// floods its pane can neither reach it nor be drawn over by it.
+#[test]
+fn a_flooding_shell_cannot_reach_a_reserved_band() {
+    let (mut nt, _init) = start_shipped("", "cat");
+    nt.wait_for_screen("panes 1 focus 1", PATIENCE);
+    for _ in 0..30 {
+        nt.send("ZZZZZZZZ\r");
+    }
+    nt.settle(Duration::from_millis(500));
+
+    let screen = nt.screen_after(Duration::from_millis(300));
+    let rows: Vec<&str> = screen.lines().collect();
+    assert!(
+        rows[0].contains('Z'),
+        "the shell never filled its pane:\n{screen}"
+    );
+    assert!(
+        !rows[23].contains('Z'),
+        "the shell wrote into the reserved band:\n{screen}"
+    );
+    assert!(
+        rows[23].starts_with("panes 1 focus 1"),
+        "the band's content did not survive the flood:\n{screen}"
+    );
+}
+
+/// A reservation the edge cannot hold is refused as a value, the caller is told why, and
+/// nothing about the surface changes.
+#[test]
+fn a_reservation_the_edge_cannot_hold_is_refused_and_changes_nothing() {
+    let (mut nt, _init) = start("require('plugin.clock') require('plugin.greedy')", "cat");
+    let log = nt.wait_for_log("greedy refused", PATIENCE);
+    let refusal = line_with(&log, "greedy refused");
+    assert!(
+        refusal.contains("plugin/greedy") && refusal.contains("will not fit"),
+        "the refusal did not say who asked or why: {refusal}"
+    );
+
+    nt.wait_for_screen("CLOCK 80x23", PATIENCE);
+    let screen = nt.screen_after(Duration::from_millis(300));
+    assert!(
+        screen.contains("CLOCK 80x23"),
+        "the refused reservation took a row from the panes anyway:\n{screen}"
+    );
+    assert!(
+        !nt.log_text().contains("drew in a band it was refused"),
+        "the refused source was handed a band:\n{}",
+        nt.log_text()
+    );
+}
+
+/// The epoch hazard, in the shape it took the first time. A frame's draw buffers are
+/// committed against the content size the frame opened with, so a reservation appearing
+/// mid-frame must not change that size until the frame is over. Get it wrong and the band
+/// blanks for a frame, the host reads the blank as "gone", takes the row back and gives it
+/// straight back: two recomputes and two SIGWINCHes for one reservation.
+#[test]
+fn reserving_a_band_costs_one_layout_recompute() {
+    let init = harness::runtime(&[(
+        "init.lua",
+        "require('plugin.resizes') require('plugin.bander')",
+    )]);
+    let mut nt = Neotmux::start_layered(
+        &[init.path(), &harness::fixture_layer(), &shipped_layer()],
+        "cat",
+    );
+    nt.wait_for_screen("panes 1 focus 1", PATIENCE);
+    nt.settle(Duration::from_millis(500));
+    let before = resizes(&nt.log_text()).len();
+
+    nt.send("\x12"); // C-r: reserve a second bottom row
+    nt.wait_for_screen("BAND", PATIENCE);
+    nt.settle(Duration::from_millis(500));
+
+    let log = nt.log_text();
+    let after = resizes(&log);
+    assert_eq!(
+        after.len(),
+        before + 1,
+        "one reservation did not cost exactly one recompute. Unexpected: {:?}",
+        &after[before.min(after.len())..]
+    );
+    let screen = nt.screen_after(Duration::from_millis(300));
+    assert!(
+        screen.contains("panes 1 focus 1"),
+        "the shipped band did not survive another source reserving one:\n{screen}"
     );
 }
 

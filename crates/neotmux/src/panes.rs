@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use neotmux_core::layout::{SplitRefused, Tree, assign};
-use neotmux_core::proto::{Epoch, PaneId, Rect as PRect, Size, SplitDir};
+use neotmux_core::proto::{Epoch, PaneId, Rect as PRect, Reserved, Size, SplitDir};
 use neotmux_term::state::MIN_GRID;
 
 /// Where each pane currently sits, in surface-local coordinates (the same
@@ -12,26 +12,34 @@ pub type PaneRects = HashMap<PaneId, PRect>;
 /// assigned onto, and which pane has focus. Nothing outside this file decides how many panes
 /// there are, how much of the surface each gets, or whether one is too small to show.
 pub struct PaneLayout {
-    /// The surface the panes share: the terminal minus the status row.
+    /// The surface the panes share: the terminal minus whatever bands are reserved at its
+    /// edges.
     pub content: Size,
     pub rects: PaneRects,
+    /// The rows the reserved bands are actually taking this frame, which is either every
+    /// granted row or none of them.
+    applied: Reserved,
     /// How many cells to leave between panes. The host reserves them and has no idea what
-    /// anyone puts there — the same deal as the status row.
+    /// anyone puts there — the same deal as a band at the edge.
     gutter: u16,
     tree: Tree,
     order: Vec<(PaneId, PRect)>,
     focus: Option<PaneId>,
 }
 
-/// A terminal at the minimum grid cannot spare a row for the status line.
-fn content_size(full: Size, has_status: bool) -> Size {
-    if has_status && full.rows > MIN_GRID.rows {
-        Size {
-            rows: full.rows - 1,
-            cols: full.cols,
-        }
+/// The one place a reserved band costs the panes anything, and the one place it is decided
+/// whether the terminal can afford it at all.
+///
+/// A surface that cannot spare the reserved rows and still leave the panes a grid `vt100`
+/// survives applies **none** of them, rather than part of one: a half-honoured band is a band
+/// its owner would draw outside. That is the §6 hidden-pane case one level up — the bands are
+/// not shown for the frame, nothing is refused and nothing is torn down, and growing the
+/// terminal back brings them straight back.
+fn applied(full: Size, reserved: Reserved) -> Reserved {
+    if full.rows >= reserved.rows().saturating_add(MIN_GRID.rows) {
+        reserved
     } else {
-        full
+        Reserved::default()
     }
 }
 
@@ -43,40 +51,53 @@ fn showable(rect: PRect) -> bool {
 }
 
 impl PaneLayout {
-    pub fn new(full: Size, has_status: bool, gutter: u16, first: PaneId) -> Self {
+    pub fn new(full: Size, reserved: Reserved, gutter: u16, first: PaneId) -> Self {
         let mut layout = Self {
             content: Size::default(),
             rects: PaneRects::new(),
+            applied: Reserved::default(),
             gutter: 0,
             tree: Tree::new(first),
             order: Vec::new(),
             focus: Some(first),
         };
-        layout.resurface(full, has_status, gutter);
+        layout.resurface(full, reserved, gutter);
         layout
     }
 
-    /// The surface changed, whether from a terminal resize, the status row appearing, or the
-    /// gutter between panes changing.
-    pub fn resurface(&mut self, full: Size, has_status: bool, gutter: u16) {
-        self.content = content_size(full, has_status);
+    /// The surface changed, whether from a terminal resize, a band being reserved or
+    /// released, or the gutter between panes changing.
+    pub fn resurface(&mut self, full: Size, reserved: Reserved, gutter: u16) {
+        self.applied = applied(full, reserved);
+        self.content = Size {
+            rows: full.rows - self.applied.rows(),
+            cols: full.cols,
+        };
         self.gutter = gutter;
         self.reassign();
     }
 
+    /// Whether the bands the sources were granted are the ones being drawn this frame. False
+    /// means the terminal could not afford them and every band is hidden.
+    pub fn bands_applied(&self, reserved: Reserved) -> bool {
+        self.applied == reserved
+    }
+
+    /// The pane area, in the surface's own coordinates: a top band pushes the panes down, so
+    /// a pane rect is never relative to anything but the terminal itself.
+    fn surface(&self) -> PRect {
+        PRect::new(0, self.applied.top, self.content.cols, self.content.rows)
+    }
+
     fn reassign(&mut self) {
-        self.order = assign(
-            &self.tree,
-            PRect::new(0, 0, self.content.cols, self.content.rows),
-            self.gutter,
-        );
+        self.order = assign(&self.tree, self.surface(), self.gutter);
         self.rects = self.order.iter().copied().collect();
     }
 
     /// Splits the focused pane, and focuses the new one — a split is made to be typed into.
     pub fn split(&mut self, dir: SplitDir, new: PaneId) -> Result<(), SplitRefused> {
         let target = self.focus.ok_or(SplitRefused::UnknownPane)?;
-        let surface = PRect::new(0, 0, self.content.cols, self.content.rows);
+        let surface = self.surface();
         self.tree
             .split(target, dir, new, surface, MIN_GRID, self.gutter)?;
         self.reassign();
@@ -140,28 +161,90 @@ mod tests {
     }
 
     fn layout(rows: u16, cols: u16) -> PaneLayout {
-        PaneLayout::new(Size { rows, cols }, false, 0, pane(1))
+        PaneLayout::new(Size { rows, cols }, Reserved::default(), 0, pane(1))
+    }
+
+    fn bottom(rows: u16) -> Reserved {
+        Reserved::new(0, rows)
     }
 
     #[test]
-    fn without_a_status_row_the_pane_gets_the_whole_surface() {
+    fn with_nothing_reserved_the_pane_gets_the_whole_surface() {
         let full = Size { rows: 24, cols: 80 };
-        let layout = PaneLayout::new(full, false, 0, pane(1));
+        let layout = PaneLayout::new(full, Reserved::default(), 0, pane(1));
         assert_eq!(layout.content, full);
         assert_eq!(layout.panes(), vec![(pane(1), PRect::new(0, 0, 80, 24))]);
     }
 
     #[test]
-    fn a_status_row_costs_the_panes_one_row() {
-        let layout = PaneLayout::new(Size { rows: 24, cols: 80 }, true, 0, pane(1));
+    fn a_reserved_bottom_band_costs_the_panes_exactly_its_rows() {
+        let layout = PaneLayout::new(Size { rows: 24, cols: 80 }, bottom(2), 0, pane(1));
+        assert_eq!(layout.content, Size { rows: 22, cols: 80 });
+        assert_eq!(layout.panes(), vec![(pane(1), PRect::new(0, 0, 80, 22))]);
+    }
+
+    /// A band at the top is the one that moves the panes rather than only shortening them,
+    /// which is why pane rects are in the surface's coordinates and not the pane area's.
+    #[test]
+    fn a_reserved_top_band_moves_the_panes_down_by_its_rows() {
+        let layout = PaneLayout::new(Size { rows: 24, cols: 80 }, Reserved::new(1, 0), 0, pane(1));
         assert_eq!(layout.content, Size { rows: 23, cols: 80 });
-        assert_eq!(layout.panes(), vec![(pane(1), PRect::new(0, 0, 80, 23))]);
+        assert_eq!(layout.panes(), vec![(pane(1), PRect::new(0, 1, 80, 23))]);
     }
 
     #[test]
-    fn a_terminal_at_the_minimum_grid_cannot_spare_a_status_row() {
-        let layout = PaneLayout::new(MIN_GRID, true, 0, pane(1));
+    fn both_edges_are_subtracted_from_the_same_surface() {
+        let layout = PaneLayout::new(Size { rows: 24, cols: 80 }, Reserved::new(1, 2), 0, pane(1));
+        assert_eq!(layout.content, Size { rows: 21, cols: 80 });
+        assert_eq!(layout.panes(), vec![(pane(1), PRect::new(0, 1, 80, 21))]);
+    }
+
+    /// The reservation is all or nothing: a surface that cannot leave the panes a grid
+    /// `vt100` holds applies none of it, rather than honouring part of a band its owner
+    /// would then draw outside.
+    #[test]
+    fn a_terminal_too_small_for_the_bands_applies_none_of_them() {
+        let reserved = bottom(1);
+        let mut layout = PaneLayout::new(MIN_GRID, reserved, 0, pane(1));
         assert_eq!(layout.content, MIN_GRID);
+        assert!(!layout.bands_applied(reserved));
+
+        layout.resurface(
+            Size {
+                rows: MIN_GRID.rows + 1,
+                cols: MIN_GRID.cols,
+            },
+            reserved,
+            0,
+        );
+        assert_eq!(
+            layout.content, MIN_GRID,
+            "growing back brings the band back"
+        );
+        assert!(layout.bands_applied(reserved));
+    }
+
+    #[test]
+    fn releasing_a_reservation_gives_the_panes_their_rows_back() {
+        let mut layout = PaneLayout::new(Size { rows: 24, cols: 80 }, bottom(1), 0, pane(1));
+        assert_eq!(layout.panes(), vec![(pane(1), PRect::new(0, 0, 80, 23))]);
+        layout.resurface(Size { rows: 24, cols: 80 }, Reserved::default(), 0);
+        assert_eq!(layout.panes(), vec![(pane(1), PRect::new(0, 0, 80, 24))]);
+    }
+
+    /// A band is outside every pane's rect, so nothing a pane's child writes can land in it.
+    #[test]
+    fn no_pane_rect_overlaps_a_reserved_band() {
+        let mut layout =
+            PaneLayout::new(Size { rows: 24, cols: 80 }, Reserved::new(1, 1), 0, pane(1));
+        layout.split(SplitDir::Horizontal, pane(2)).expect("fits");
+        for (id, rect) in layout.panes() {
+            assert!(rect.y >= 1, "{id} starts inside the top band: {rect:?}");
+            assert!(
+                rect.y + rect.h <= 23,
+                "{id} runs into the bottom band: {rect:?}"
+            );
+        }
     }
 
     #[test]
@@ -226,7 +309,7 @@ mod tests {
     fn a_pane_below_the_minimum_is_hidden_rather_than_shown_at_that_size() {
         let mut layout = layout(24, 80);
         layout.split(SplitDir::Vertical, pane(2)).expect("fits");
-        layout.resurface(Size { rows: 24, cols: 3 }, false, 0);
+        layout.resurface(Size { rows: 24, cols: 3 }, Reserved::default(), 0);
 
         assert_eq!(
             layout.panes(),
@@ -242,15 +325,16 @@ mod tests {
             "the one-column pane is hidden for this frame"
         );
 
-        layout.resurface(Size { rows: 24, cols: 80 }, false, 0);
+        layout.resurface(Size { rows: 24, cols: 80 }, Reserved::default(), 0);
         assert_eq!(layout.showable().count(), 2, "growing back brings it back");
     }
 
-    /// The gutter is the host reserving space on a plugin's behalf, exactly as the status
-    /// row is: the panes lose the cells and never learn what goes in them.
+    /// The gutter is the host reserving space on a plugin's behalf, exactly as a band at the
+    /// edge is: the panes lose the cells and never learn what goes in them.
     #[test]
     fn a_gutter_costs_the_panes_the_cells_between_them() {
-        let mut layout = PaneLayout::new(Size { rows: 24, cols: 80 }, false, 1, pane(1));
+        let mut layout =
+            PaneLayout::new(Size { rows: 24, cols: 80 }, Reserved::default(), 1, pane(1));
         layout.split(SplitDir::Vertical, pane(2)).expect("fits");
         assert_eq!(
             layout.panes(),
@@ -260,7 +344,7 @@ mod tests {
             ]
         );
 
-        layout.resurface(Size { rows: 24, cols: 80 }, false, 0);
+        layout.resurface(Size { rows: 24, cols: 80 }, Reserved::default(), 0);
         assert_eq!(
             layout.panes(),
             vec![
@@ -273,7 +357,8 @@ mod tests {
 
     #[test]
     fn a_split_the_gutter_leaves_no_room_for_is_refused() {
-        let mut layout = PaneLayout::new(Size { rows: 24, cols: 4 }, false, 1, pane(1));
+        let mut layout =
+            PaneLayout::new(Size { rows: 24, cols: 4 }, Reserved::default(), 1, pane(1));
         assert_eq!(
             layout.split(SplitDir::Vertical, pane(2)),
             Err(SplitRefused::TooSmall),
@@ -284,7 +369,7 @@ mod tests {
 
     #[test]
     fn the_epoch_names_the_content_size_the_panes_and_the_focus() {
-        let mut layout = PaneLayout::new(Size { rows: 24, cols: 80 }, true, 0, pane(1));
+        let mut layout = PaneLayout::new(Size { rows: 24, cols: 80 }, bottom(1), 0, pane(1));
         layout.split(SplitDir::Vertical, pane(2)).expect("fits");
         assert!(layout.epoch().matches(&Epoch::new(
             Size { rows: 23, cols: 80 },

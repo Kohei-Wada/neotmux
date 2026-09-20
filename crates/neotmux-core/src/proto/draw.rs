@@ -48,24 +48,6 @@ pub enum DrawCmd {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 #[non_exhaustive]
-pub struct StatusFragment {
-    pub text: String,
-    pub fg: Color,
-    pub bg: Color,
-}
-
-impl StatusFragment {
-    pub fn new(text: impl Into<String>, fg: Color, bg: Color) -> Self {
-        Self {
-            text: text.into(),
-            fg,
-            bg,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-#[non_exhaustive]
 pub struct Epoch {
     size: Size,
     panes: Vec<PaneId>,

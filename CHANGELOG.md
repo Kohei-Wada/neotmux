@@ -19,11 +19,26 @@ inside it: the frame waits for its reason, draws, and spends the rest of its tim
 input rather than asleep, so a key still reaches its pane the moment it arrives and a pane's
 output waits for the next frame rather than drawing this one twice.
 
+### The status line is a plugin now
+
+`neotmux.reserve('bottom', 1)` takes a band of the surface and returns a handle; the panes get
+what is left, and the plugin draws into the rect `ctx:reserved()` hands it with the same
+`ctx:text` it would use anywhere else. `ctx:status` and the status row that came with it are
+gone — the host no longer knows what a status line is, only how to hand out rows along an
+edge. The shipped `status` plugin looks the same on screen and is 20 lines of ordinary API
+calls.
+
+`top` works as well as `bottom`, two sources on one edge get a row each — outermost to
+whoever asked first — and a band is outside every pane's rect, so nothing a shell writes can
+reach one. An edge holds at most four rows; a terminal too small for the bands it granted
+hides them for the frame and gives them back when it grows, the same way it hides a pane too
+small to show.
+
 ### Panes you can see
 
 `borders`, a third shipped plugin, rules every gap between two panes with `│` and `─`.
 
-The host reserves the gap and the plugin draws in it, the same bargain as the status row:
+The host reserves the gap and the plugin draws in it, the same bargain as a reserved band:
 `neotmux.opt.pane_gutter` says how many cells to leave between panes, and the host never
 learns what anyone puts there. Without it a divider had nowhere to go but on top of a cell a
 shell was using — a vertical split of an 80-column terminal silently ate the 40th character

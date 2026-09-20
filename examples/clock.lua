@@ -1,4 +1,7 @@
--- A clock in the status line.
+-- A clock along the bottom of the screen.
+--
+-- It asks the host for one row and draws in it. The host has no status-line concept: it
+-- reserves the band, takes it off what the panes get, and never learns what goes there.
 --
 -- The format is read from a table this file returns, so a user can change it without
 -- editing the plugin:
@@ -10,8 +13,14 @@
 
 local M = { format = '%H:%M:%S' }
 
+M.band = neotmux.reserve('bottom', 1)
+
 neotmux.on_tick(function(ctx)
-  ctx:status(os.date(M.format), { fg = 4 })
+  local band = ctx:reserved()
+  -- Nil on a terminal too small to spare the row: the panes keep it and the clock waits.
+  if band then
+    ctx:text(nil, band.x, band.y, os.date(M.format), { fg = 4 })
+  end
 end)
 
 return M

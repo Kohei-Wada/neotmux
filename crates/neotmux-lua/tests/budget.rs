@@ -32,7 +32,6 @@ fn frame(sub: &LuaSubsystem) {
 
 fn texts(sub: &LuaSubsystem) -> Vec<String> {
     sub.frame_output()
-        .0
         .into_iter()
         .filter_map(|cmd| match cmd {
             DrawCmd::Text { text, .. } => Some(text),

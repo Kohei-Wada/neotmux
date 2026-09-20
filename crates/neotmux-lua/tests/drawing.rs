@@ -44,7 +44,7 @@ fn a_tick_records_what_it_draws() {
         ),
     ]);
     frame(&sub, 24);
-    let (cmds, _) = sub.frame_output();
+    let cmds = sub.frame_output();
     assert_eq!(cmds.len(), 1);
     match &cmds[0] {
         DrawCmd::Text { x, y, text, .. } => {
@@ -65,7 +65,7 @@ fn ctx_size_reports_the_surface() {
         ),
     ]);
     frame(&sub, 24);
-    let (cmds, _) = sub.frame_output();
+    let cmds = sub.frame_output();
     match &cmds[0] {
         DrawCmd::Text { text, .. } => assert_eq!(text, "80x24"),
         other => panic!("unexpected command: {other:?}"),
@@ -89,7 +89,7 @@ fn pane_rect_answers_for_a_live_pane_and_nil_otherwise() {
         ),
     ]);
     frame(&sub, 24);
-    let (cmds, _) = sub.frame_output();
+    let cmds = sub.frame_output();
     let texts: Vec<String> = cmds
         .iter()
         .filter_map(|c| match c {
@@ -98,21 +98,6 @@ fn pane_rect_answers_for_a_live_pane_and_nil_otherwise() {
         })
         .collect();
     assert_eq!(texts, vec!["80x24".to_string(), "nil".to_string()]);
-}
-
-#[test]
-fn a_status_fragment_reaches_the_host() {
-    let (_dir, sub) = built(&[
-        ("init.lua", "require('plugin.clock')"),
-        (
-            "lua/plugin/clock.lua",
-            "neotmux.on_tick(function(ctx) ctx:status('12:34') end) return {}",
-        ),
-    ]);
-    frame(&sub, 24);
-    let (_, status) = sub.frame_output();
-    assert_eq!(status.len(), 1);
-    assert_eq!(status[0].text, "12:34");
 }
 
 #[test]
@@ -133,9 +118,9 @@ fn a_tick_that_raises_keeps_its_previous_frame() {
         ),
     ]);
     frame(&sub, 24);
-    let (first, _) = sub.frame_output();
+    let first = sub.frame_output();
     frame(&sub, 24);
-    let (second, _) = sub.frame_output();
+    let second = sub.frame_output();
     assert_eq!(first, second, "the failed tick replaced the good frame");
 }
 
@@ -173,10 +158,10 @@ fn a_resize_makes_the_previous_frame_inapplicable() {
         ),
     ]);
     frame(&sub, 24);
-    assert_eq!(sub.frame_output().0.len(), 1);
+    assert_eq!(sub.frame_output().len(), 1);
     frame(&sub, 25);
     assert!(
-        sub.frame_output().0.is_empty(),
+        sub.frame_output().is_empty(),
         "a stale frame was replayed after a resize"
     );
 }
@@ -203,7 +188,7 @@ fn a_stashed_ctx_cannot_draw_outside_its_tick() {
     ]);
     frame(&sub, 24);
     frame(&sub, 24);
-    let (cmds, _) = sub.frame_output();
+    let cmds = sub.frame_output();
     match &cmds[0] {
         DrawCmd::Text { text, .. } => assert_eq!(text, "refused"),
         other => panic!("unexpected command: {other:?}"),
@@ -245,7 +230,7 @@ fn same_frame_cross_source_isolation_survives_dispatch_tick() {
     frame(&sub, 24);
     frame(&sub, 24);
 
-    let (cmds, _) = sub.frame_output();
+    let cmds = sub.frame_output();
     let texts: Vec<(u16, u16, String)> = cmds
         .iter()
         .filter_map(|c| match c {
@@ -300,7 +285,7 @@ fn a_bg_on_line_is_refused_rather_than_discarded() {
     frame(&sub, 24);
     let ops = sub.drain_ops();
     assert_eq!(ops.len(), 1, "a bg on line should have raised");
-    assert!(sub.frame_output().0.is_empty(), "the line was still drawn");
+    assert!(sub.frame_output().is_empty(), "the line was still drawn");
 }
 
 #[test]
@@ -314,7 +299,7 @@ fn a_line_still_takes_an_fg() {
     ]);
     frame(&sub, 24);
     assert!(sub.drain_ops().is_empty());
-    match &sub.frame_output().0[..] {
+    match &sub.frame_output()[..] {
         [DrawCmd::Line { fg, .. }] => assert_eq!(*fg, Color::Idx(4)),
         other => panic!("unexpected commands: {other:?}"),
     }
@@ -331,7 +316,7 @@ fn a_line_drawn_with_no_glyph_keeps_the_one_it_always_had() {
     ]);
     frame(&sub, 24);
     assert!(sub.drain_ops().is_empty());
-    match &sub.frame_output().0[..] {
+    match &sub.frame_output()[..] {
         [DrawCmd::Line { glyph, .. }] => assert_eq!(*glyph, '#'),
         other => panic!("unexpected commands: {other:?}"),
     }
@@ -350,7 +335,7 @@ fn a_line_draws_with_the_glyph_it_was_given() {
     ]);
     frame(&sub, 24);
     assert!(sub.drain_ops().is_empty());
-    match &sub.frame_output().0[..] {
+    match &sub.frame_output()[..] {
         [DrawCmd::Line { glyph, .. }] => assert_eq!(*glyph, '\u{2502}'),
         other => panic!("unexpected commands: {other:?}"),
     }
@@ -372,7 +357,7 @@ fn a_glyph_of_more_than_one_character_is_refused_rather_than_truncated() {
         let ops = sub.drain_ops();
         assert_eq!(ops.len(), 1, "{glyph} should have raised");
         assert!(
-            sub.frame_output().0.is_empty(),
+            sub.frame_output().is_empty(),
             "{glyph} was still drawn with"
         );
     }
@@ -381,7 +366,6 @@ fn a_glyph_of_more_than_one_character_is_refused_rather_than_truncated() {
 /// Helper for the per-source commit tests: every `Text` command as (y, text).
 fn lines(sub: &LuaSubsystem) -> Vec<(u16, String)> {
     sub.frame_output()
-        .0
         .iter()
         .filter_map(|c| match c {
             DrawCmd::Text { y, text, .. } => Some((*y, text.clone())),
@@ -409,25 +393,6 @@ fn two_tick_callbacks_from_one_source_both_reach_the_frame() {
         vec![(0, "first".to_string()), (1, "second".to_string())],
         "the first callback's drawing was lost when the second one committed"
     );
-}
-
-#[test]
-fn two_status_fragments_from_one_source_both_reach_the_frame() {
-    let (_dir, sub) = built(&[
-        ("init.lua", "require('plugin.pair')"),
-        (
-            "lua/plugin/pair.lua",
-            r#"
-            neotmux.on_tick(function(ctx) ctx:status('left') end)
-            neotmux.on_tick(function(ctx) ctx:status('right') end)
-            return {}
-            "#,
-        ),
-    ]);
-    frame(&sub, 24);
-    let (_, status) = sub.frame_output();
-    let texts: Vec<&str> = status.iter().map(|f| f.text.as_str()).collect();
-    assert_eq!(texts, vec!["left", "right"]);
 }
 
 #[test]

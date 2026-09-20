@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use mlua::{Table, UserData, UserDataMethods, Value};
 
-use neotmux_core::proto::{Color, DrawCmd, PaneId, Rect, Size, StatusFragment};
+use neotmux_core::proto::{Color, DrawCmd, PaneId, Rect, Size};
 
 use crate::draw::Buffers;
 use crate::source::SourceId;
@@ -13,6 +13,9 @@ pub struct Ctx {
     buffers: Rc<Buffers>,
     size: Size,
     panes: Vec<(PaneId, Rect)>,
+    /// This source's own band, in surface coordinates. Per source: two sources reserving the
+    /// same edge get different bands, and a source that reserved nothing gets none.
+    band: Option<Rect>,
 }
 
 impl Ctx {
@@ -21,12 +24,14 @@ impl Ctx {
         buffers: Rc<Buffers>,
         size: Size,
         panes: Vec<(PaneId, Rect)>,
+        band: Option<Rect>,
     ) -> Self {
         Self {
             owner,
             buffers,
             size,
             panes,
+            band,
         }
     }
 
@@ -138,6 +143,18 @@ impl UserData for Ctx {
             }
         });
 
+        methods.add_method("reserved", |lua, this, ()| match this.band {
+            Some(band) => {
+                let table = lua.create_table()?;
+                table.set("x", band.x)?;
+                table.set("y", band.y)?;
+                table.set("w", band.w)?;
+                table.set("h", band.h)?;
+                Ok(Value::Table(table))
+            }
+            None => Ok(Value::Nil),
+        });
+
         methods.add_method(
             "text",
             |_,
@@ -216,16 +233,6 @@ impl UserData for Ctx {
                         fg,
                     },
                 );
-                Ok(())
-            },
-        );
-
-        methods.add_method(
-            "status",
-            |_, this, (text, colours): (String, Option<Table>)| {
-                let (fg, bg) = parse_colours(colours)?;
-                this.buffers
-                    .status(this.owner, StatusFragment::new(text, fg, bg));
                 Ok(())
             },
         );
