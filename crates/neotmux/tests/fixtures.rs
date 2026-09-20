@@ -2040,3 +2040,53 @@ fn the_shipped_watcher_is_off_by_default() {
         nt.log_text()
     );
 }
+
+/// The columns `plugin/sidebar.lua` reserves, and the marker it puts against the window
+/// being shown.
+const SIDEBAR_COLS: u16 = 24;
+const CURRENT_WINDOW_MARKER: &str = "\u{25b8}";
+
+/// The vertical edges end to end, on the screen a user sees: the sidebar is a shipped plugin
+/// that asks for a band of columns, lists what the session holds in it, and costs the panes
+/// exactly the columns it took.
+#[test]
+fn the_shipped_sidebar_lists_the_session_and_narrows_the_panes() {
+    let init = harness::runtime(&[("init.lua", "require('neotmux.defaults').sidebar = true")]);
+    let mut nt = Neotmux::start_layered(&[init.path(), &shipped_layer()], "cat");
+
+    nt.wait_for_status("cat", PATIENCE);
+    nt.wait_for_cell(PANE_TOP, 0, CURRENT_WINDOW_MARKER, PATIENCE);
+    nt.wait_for_screen("1.1 cat", PATIENCE);
+
+    // What the band costs: a pane starts where the sidebar ends, so the shell's own echo
+    // lands in the first column outside it and in none before it.
+    nt.send("X");
+    nt.wait_for_cell(PANE_TOP, SIDEBAR_COLS, "X", PATIENCE);
+    for col in 0..SIDEBAR_COLS {
+        assert_ne!(
+            nt.cell(PANE_TOP, col),
+            "X",
+            "the shell wrote into the band the sidebar reserved:\n{}",
+            nt.screen_after(Duration::ZERO)
+        );
+    }
+
+    nt.send("\x02c"); // C-b c: a second window, which the sidebar has to pick up
+    nt.wait_for_screen("2.1 cat", PATIENCE);
+    let screen = nt.screen_after(Duration::ZERO);
+    assert!(
+        screen.contains("1.1"),
+        "the window nobody is looking at left the sidebar:\n{screen}"
+    );
+}
+
+/// Off unless the user says otherwise, like the watcher: what the watcher spends is an
+/// opinion about what you run, what a sidebar spends is a third of the width.
+#[test]
+fn the_shipped_sidebar_is_off_by_default() {
+    let (mut nt, _init) = start_shipped("", "cat");
+
+    nt.wait_for_status("cat", PATIENCE);
+    nt.send("X");
+    nt.wait_for_cell(PANE_TOP, 0, "X", PATIENCE);
+}
