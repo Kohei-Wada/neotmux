@@ -119,6 +119,28 @@ fn opt_defaults_match_the_spec_before_any_init_lua_runs() {
     let opt = sub.opt();
     assert_eq!(opt.tick_budget_ms, 8);
     assert_eq!(opt.tick_overrun_limit, 5);
+    assert_eq!(opt.pane_gutter, 0);
+}
+
+/// The host reserves the cells between panes for whoever wants them; nobody wanting them is
+/// the default, and a number too big to be a divider is a mistake rather than a setting.
+#[test]
+fn opt_takes_a_pane_gutter_and_refuses_one_too_wide_to_be_a_divider() {
+    let dir = layer(&[("init.lua", "neotmux.opt.pane_gutter = 1")]);
+    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    assert!(sub.run_init().is_empty());
+    assert_eq!(sub.opt().pane_gutter, 1);
+
+    let dir = layer(&[("init.lua", "neotmux.opt.pane_gutter = 5")]);
+    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let failures = sub.run_init();
+    assert_eq!(failures.len(), 1);
+    assert!(
+        failures[0].message.contains("at most 4"),
+        "the refusal should name the bound: {}",
+        failures[0].message
+    );
+    assert_eq!(sub.opt().pane_gutter, 0);
 }
 
 #[test]

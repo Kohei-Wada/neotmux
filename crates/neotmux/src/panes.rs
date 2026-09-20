@@ -15,6 +15,9 @@ pub struct PaneLayout {
     /// The surface the panes share: the terminal minus the status row.
     pub content: Size,
     pub rects: PaneRects,
+    /// How many cells to leave between panes. The host reserves them and has no idea what
+    /// anyone puts there — the same deal as the status row.
+    gutter: u16,
     tree: Tree,
     order: Vec<(PaneId, PRect)>,
     focus: Option<PaneId>,
@@ -40,21 +43,24 @@ fn showable(rect: PRect) -> bool {
 }
 
 impl PaneLayout {
-    pub fn new(full: Size, has_status: bool, first: PaneId) -> Self {
+    pub fn new(full: Size, has_status: bool, gutter: u16, first: PaneId) -> Self {
         let mut layout = Self {
             content: Size::default(),
             rects: PaneRects::new(),
+            gutter: 0,
             tree: Tree::new(first),
             order: Vec::new(),
             focus: Some(first),
         };
-        layout.resurface(full, has_status);
+        layout.resurface(full, has_status, gutter);
         layout
     }
 
-    /// The surface changed, whether from a terminal resize or the status row appearing.
-    pub fn resurface(&mut self, full: Size, has_status: bool) {
+    /// The surface changed, whether from a terminal resize, the status row appearing, or the
+    /// gutter between panes changing.
+    pub fn resurface(&mut self, full: Size, has_status: bool, gutter: u16) {
         self.content = content_size(full, has_status);
+        self.gutter = gutter;
         self.reassign();
     }
 
@@ -62,6 +68,7 @@ impl PaneLayout {
         self.order = assign(
             &self.tree,
             PRect::new(0, 0, self.content.cols, self.content.rows),
+            self.gutter,
         );
         self.rects = self.order.iter().copied().collect();
     }
@@ -70,7 +77,8 @@ impl PaneLayout {
     pub fn split(&mut self, dir: SplitDir, new: PaneId) -> Result<(), SplitRefused> {
         let target = self.focus.ok_or(SplitRefused::UnknownPane)?;
         let surface = PRect::new(0, 0, self.content.cols, self.content.rows);
-        self.tree.split(target, dir, new, surface, MIN_GRID)?;
+        self.tree
+            .split(target, dir, new, surface, MIN_GRID, self.gutter)?;
         self.reassign();
         self.focus = Some(new);
         Ok(())
@@ -132,27 +140,27 @@ mod tests {
     }
 
     fn layout(rows: u16, cols: u16) -> PaneLayout {
-        PaneLayout::new(Size { rows, cols }, false, pane(1))
+        PaneLayout::new(Size { rows, cols }, false, 0, pane(1))
     }
 
     #[test]
     fn without_a_status_row_the_pane_gets_the_whole_surface() {
         let full = Size { rows: 24, cols: 80 };
-        let layout = PaneLayout::new(full, false, pane(1));
+        let layout = PaneLayout::new(full, false, 0, pane(1));
         assert_eq!(layout.content, full);
         assert_eq!(layout.panes(), vec![(pane(1), PRect::new(0, 0, 80, 24))]);
     }
 
     #[test]
     fn a_status_row_costs_the_panes_one_row() {
-        let layout = PaneLayout::new(Size { rows: 24, cols: 80 }, true, pane(1));
+        let layout = PaneLayout::new(Size { rows: 24, cols: 80 }, true, 0, pane(1));
         assert_eq!(layout.content, Size { rows: 23, cols: 80 });
         assert_eq!(layout.panes(), vec![(pane(1), PRect::new(0, 0, 80, 23))]);
     }
 
     #[test]
     fn a_terminal_at_the_minimum_grid_cannot_spare_a_status_row() {
-        let layout = PaneLayout::new(MIN_GRID, true, pane(1));
+        let layout = PaneLayout::new(MIN_GRID, true, 0, pane(1));
         assert_eq!(layout.content, MIN_GRID);
     }
 
@@ -218,7 +226,7 @@ mod tests {
     fn a_pane_below_the_minimum_is_hidden_rather_than_shown_at_that_size() {
         let mut layout = layout(24, 80);
         layout.split(SplitDir::Vertical, pane(2)).expect("fits");
-        layout.resurface(Size { rows: 24, cols: 3 }, false);
+        layout.resurface(Size { rows: 24, cols: 3 }, false, 0);
 
         assert_eq!(
             layout.panes(),
@@ -234,13 +242,49 @@ mod tests {
             "the one-column pane is hidden for this frame"
         );
 
-        layout.resurface(Size { rows: 24, cols: 80 }, false);
+        layout.resurface(Size { rows: 24, cols: 80 }, false, 0);
         assert_eq!(layout.showable().count(), 2, "growing back brings it back");
+    }
+
+    /// The gutter is the host reserving space on a plugin's behalf, exactly as the status
+    /// row is: the panes lose the cells and never learn what goes in them.
+    #[test]
+    fn a_gutter_costs_the_panes_the_cells_between_them() {
+        let mut layout = PaneLayout::new(Size { rows: 24, cols: 80 }, false, 1, pane(1));
+        layout.split(SplitDir::Vertical, pane(2)).expect("fits");
+        assert_eq!(
+            layout.panes(),
+            vec![
+                (pane(1), PRect::new(0, 0, 40, 24)),
+                (pane(2), PRect::new(41, 0, 39, 24)),
+            ]
+        );
+
+        layout.resurface(Size { rows: 24, cols: 80 }, false, 0);
+        assert_eq!(
+            layout.panes(),
+            vec![
+                (pane(1), PRect::new(0, 0, 40, 24)),
+                (pane(2), PRect::new(40, 0, 40, 24)),
+            ],
+            "with the gutter back to zero the panes tile again"
+        );
+    }
+
+    #[test]
+    fn a_split_the_gutter_leaves_no_room_for_is_refused() {
+        let mut layout = PaneLayout::new(Size { rows: 24, cols: 4 }, false, 1, pane(1));
+        assert_eq!(
+            layout.split(SplitDir::Vertical, pane(2)),
+            Err(SplitRefused::TooSmall),
+            "four columns hold two panes of two, but not with a gutter between them"
+        );
+        assert_eq!(layout.panes(), vec![(pane(1), PRect::new(0, 0, 4, 24))]);
     }
 
     #[test]
     fn the_epoch_names_the_content_size_the_panes_and_the_focus() {
-        let mut layout = PaneLayout::new(Size { rows: 24, cols: 80 }, true, pane(1));
+        let mut layout = PaneLayout::new(Size { rows: 24, cols: 80 }, true, 0, pane(1));
         layout.split(SplitDir::Vertical, pane(2)).expect("fits");
         assert!(layout.epoch().matches(&Epoch::new(
             Size { rows: 23, cols: 80 },
