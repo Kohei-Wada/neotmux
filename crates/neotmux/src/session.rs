@@ -230,6 +230,31 @@ impl Session {
         self.apply_geometry()
     }
 
+    /// A new client taking over a session that is already running. `Attach`'s fields are
+    /// values to apply here rather than arguments to build from: the terminal is this
+    /// client's, and so are the bands, the gutter and the subscriptions, because the Lua
+    /// layer that declared them is new.
+    ///
+    /// `first_window` is ignored — the windows already have ids.
+    pub fn adopt(&mut self, attach: &Attach) -> anyhow::Result<()> {
+        self.surface.size = clamp_to_min_grid(attach.size);
+        self.surface.reserved = attach.reserved;
+        self.surface.gutter = attach.gutter;
+        self.wants_pane_output = attach.wants_pane_output;
+        // What happened while nobody was looking is not news for a client that was not
+        // there: geometry is how a plugin learns what exists, events how it learns what
+        // changed, and everything here is the former.
+        self.steps.clear();
+        self.apply_geometry()?;
+        self.publish_geometry();
+        // Nothing this client has been shown is on its screen, so the first frame is not
+        // allowed to be "nothing changed".
+        self.last_overlay.clear();
+        self.last_notices.clear();
+        self.dirty = true;
+        Ok(())
+    }
+
     /// Every op the tick raised, applied in the order they were pushed (§4.6). Returns
     /// whether one of them asked to quit.
     ///

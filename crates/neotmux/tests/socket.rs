@@ -33,10 +33,14 @@ struct Client {
 
 impl Client {
     fn start(runtime: &Path, shell: &str) -> Self {
+        Self::start_sized(runtime, shell, 24, 80)
+    }
+
+    fn start_sized(runtime: &Path, shell: &str, rows: u16, cols: u16) -> Self {
         let pair = native_pty_system()
             .openpty(PtySize {
-                rows: 24,
-                cols: 80,
+                rows,
+                cols,
                 pixel_width: 0,
                 pixel_height: 0,
             })
@@ -218,6 +222,109 @@ fn a_second_client_is_refused_and_says_why() {
         !status.success(),
         "a refused client exited successfully: {said:?}"
     );
+}
+
+/// The shell is `/bin/cat`, so what was typed before the client went away is still on the
+/// pane's grid afterwards — and only a kept terminal state can show it again.
+#[test]
+fn a_second_client_is_shown_the_session_the_first_one_left() {
+    let runtime = tempfile::tempdir().expect("runtime dir");
+    let mut first = Client::start(runtime.path(), "/bin/cat");
+    wait_for_socket(&socket_in(runtime.path()));
+    first.send("still-here-after-the-detach\r");
+    first.wait_for_output("still-here-after-the-detach");
+    first.kill();
+    drop(first);
+
+    let second = Client::start(runtime.path(), "/bin/cat");
+    second.wait_for_output("still-here-after-the-detach");
+}
+
+/// A connection that greets and hangs up before saying anything must not cost the session
+/// that was sitting there waiting: this is not a client, so it is never `attached`, and
+/// the detached session's shell must still be there for the client that comes next.
+#[test]
+fn a_detached_session_survives_a_connection_that_never_attaches() {
+    let runtime = tempfile::tempdir().expect("runtime dir");
+    let mut first = Client::start(runtime.path(), "/bin/cat");
+    wait_for_socket(&socket_in(runtime.path()));
+    first.send("still-here-after-the-non-client\r");
+    first.wait_for_output("still-here-after-the-non-client");
+    first.kill();
+    drop(first);
+
+    // Greets and hangs up without ever sending an Attach — a health check, or a client
+    // that raced a detach.
+    let mut stream = UnixStream::connect(socket_in(runtime.path())).expect("connect");
+    stream.write_all(&wire::encode_hello()).expect("greet");
+    let mut hello = [0u8; HELLO_LEN];
+    stream.read_exact(&mut hello).expect("be greeted");
+    drop(stream);
+
+    let second = Client::start(runtime.path(), "/bin/cat");
+    second.wait_for_output("still-here-after-the-non-client");
+}
+
+/// Greets, then sends the given bytes as one framed message, then hangs up.
+fn greet_and_send_message(socket: &Path, payload: &[u8]) {
+    let mut stream = UnixStream::connect(socket).expect("connect");
+    stream.write_all(&wire::encode_hello()).expect("greet");
+    let mut hello = [0u8; HELLO_LEN];
+    stream.read_exact(&mut hello).expect("be greeted");
+    let mut framed = Vec::with_capacity(4 + payload.len());
+    framed.extend_from_slice(
+        &u32::try_from(payload.len())
+            .expect("small payload")
+            .to_le_bytes(),
+    );
+    framed.extend_from_slice(payload);
+    stream.write_all(&framed).expect("send the message");
+    stream.flush().expect("flush");
+}
+
+/// A connection whose first message is not an `Attach` — one meant for a live conversation,
+/// or bytes that do not decode as a message at all — must not end the detached session it
+/// found, and must not take the server itself down with it.
+#[test]
+fn a_detached_session_survives_a_connection_whose_first_message_is_not_an_attach() {
+    let runtime = tempfile::tempdir().expect("runtime dir");
+    let mut first = Client::start(runtime.path(), "/bin/cat");
+    wait_for_socket(&socket_in(runtime.path()));
+    first.send("still-here-after-the-bad-message\r");
+    first.wait_for_output("still-here-after-the-bad-message");
+    first.kill();
+    drop(first);
+
+    // A message that decodes fine, but is not an Attach.
+    let resize = wire::encode_to_server(&neotmux_proto::ToServer::Resize(neotmux_proto::Size {
+        rows: 10,
+        cols: 10,
+    }));
+    greet_and_send_message(&socket_in(runtime.path()), &resize);
+
+    // A discriminant no message uses: this does not decode at all.
+    greet_and_send_message(&socket_in(runtime.path()), &[0xff]);
+
+    // The server is still there, and still holding the same session, for a real client.
+    let second = Client::start(runtime.path(), "/bin/cat");
+    second.wait_for_output("still-here-after-the-bad-message");
+}
+
+/// The session is laid out against whichever terminal is looking at it now.
+///
+/// `stty size` rather than `tput cols`: it asks the pane's own PTY directly, needing no
+/// terminfo database. The surface reserves a row for the status bar, so only the column
+/// count — the second number `stty size` prints — is asserted.
+#[test]
+fn a_session_is_refitted_to_the_terminal_that_attaches_to_it() {
+    let runtime = tempfile::tempdir().expect("runtime dir");
+    let first = Client::start_sized(runtime.path(), "/bin/sh", 24, 80);
+    wait_for_socket(&socket_in(runtime.path()));
+    drop(first);
+
+    let mut second = Client::start_sized(runtime.path(), "/bin/sh", 30, 100);
+    second.send("stty size\r");
+    second.wait_for_output("100");
 }
 
 /// The file a killed server leaves behind. Nothing is listening on it, so it is replaced
