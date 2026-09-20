@@ -8,15 +8,15 @@ use neotmux_term::pty::PtyHandle;
 use neotmux_term::state::clamp_to_min_grid;
 use neotmux_term::wakeup::Waker;
 
-use crate::frame::{Frame, PaneFrame};
 use crate::input::{encode_key, key_spec};
-use crate::keys::Key;
 use crate::logging;
 use crate::notify::Notifications;
 use crate::paneinfo::PaneInfoCache;
 use crate::procinfo;
 use crate::shells::Shells;
 use crate::windows::{Shown, Surface, Windows};
+use neotmux_proto::frame::{Frame, PaneFrame};
+use neotmux_proto::keys::Key;
 
 const MAX_CHUNKS_PER_FRAME: usize = 32;
 

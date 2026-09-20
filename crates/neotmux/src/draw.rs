@@ -5,7 +5,7 @@ use ratatui::style::{Color, Modifier};
 use ratatui::{DefaultTerminal, Frame as TuiFrame};
 
 use crate::{notices, overlay};
-use neotmux::frame::Frame;
+use neotmux_proto::frame::Frame;
 
 /// Puts a frame on this process's terminal. The one place a produced frame meets a screen:
 /// everything above it is what to show, and everything here is the showing.

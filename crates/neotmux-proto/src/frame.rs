@@ -1,14 +1,16 @@
-use neotmux_proto::{DrawCmd, GridSnapshot, Level, PaneId, PaneRects, Rect as PRect, Size};
+use crate::{DrawCmd, GridSnapshot, Level, PaneId, PaneRects, Rect, Size};
 
 /// One pane's place in a frame, and the copy of its screen to put there.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaneFrame<'a> {
     pub pane: PaneId,
-    pub rect: PRect,
+    pub rect: Rect,
     pub grid: &'a GridSnapshot,
 }
 
 /// A notification as a frame carries it: what it says, not where it goes or what colour it
 /// is drawn in.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Notice {
     pub level: Level,
     pub tag: String,
@@ -19,6 +21,7 @@ pub struct Notice {
 /// whatever is looking at the session turns it into cells. Nothing here is a ratatui type,
 /// a terminal, or a handle to one — which is what lets a frame be produced for a screen
 /// that is somewhere else.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Frame<'a> {
     /// The surface the panes were laid out against: the whole screen, reserved bands
     /// included.
@@ -37,4 +40,46 @@ pub struct Frame<'a> {
     pub overlay: &'a [DrawCmd],
     /// The notifications still live this frame, newest first.
     pub notices: Vec<Notice>,
+}
+
+/// A [`PaneFrame`] that owns its grid.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnedPaneFrame {
+    pub pane: PaneId,
+    pub rect: Rect,
+    pub grid: GridSnapshot,
+}
+
+/// What a decoded frame is held in. [`Frame`] borrows so that encoding a grid can write
+/// straight through the borrow; the far end has nothing to borrow from until it has decoded,
+/// so it decodes into this and lends a [`Frame`] back out with [`OwnedFrame::frame`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OwnedFrame {
+    pub size: Size,
+    pub panes: Vec<OwnedPaneFrame>,
+    pub rects: PaneRects,
+    pub cursor: Option<PaneId>,
+    pub overlay: Vec<DrawCmd>,
+    pub notices: Vec<Notice>,
+}
+
+impl OwnedFrame {
+    pub fn frame(&self) -> Frame<'_> {
+        Frame {
+            size: self.size,
+            panes: self
+                .panes
+                .iter()
+                .map(|p| PaneFrame {
+                    pane: p.pane,
+                    rect: p.rect,
+                    grid: &p.grid,
+                })
+                .collect(),
+            rects: &self.rects,
+            cursor: self.cursor,
+            overlay: &self.overlay,
+            notices: self.notices.clone(),
+        }
+    }
 }

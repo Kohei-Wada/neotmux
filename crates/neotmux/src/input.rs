@@ -1,6 +1,6 @@
 //! Keys out: the spec a binding is looked up by, and the bytes a pane's child is typed.
 
-use crate::keys::{Key, KeyCode};
+use neotmux_proto::keys::{Key, KeyCode};
 
 fn cursor_key(final_byte: u8, modifier: u8) -> Vec<u8> {
     if modifier > 1 {
@@ -127,7 +127,7 @@ pub fn encode_key(key: Key) -> Option<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
-    use crate::keys::{Key, KeyCode, Modifiers};
+    use neotmux_proto::keys::{Key, KeyCode, Modifiers};
 
     use super::encode_key;
 

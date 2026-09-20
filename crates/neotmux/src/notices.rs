@@ -3,7 +3,7 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::Color;
 
-use neotmux::frame::Notice;
+use neotmux_proto::frame::Notice;
 
 fn fg(level: Level) -> Color {
     match level {

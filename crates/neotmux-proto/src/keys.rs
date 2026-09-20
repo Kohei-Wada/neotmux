@@ -39,13 +39,10 @@ impl Modifiers {
         alt: false,
         ctrl: false,
     };
-    // Named for the tests: real code builds a shift or alt modifier out of a parameter.
-    #[cfg(test)]
     pub const SHIFT: Self = Self {
         shift: true,
         ..Self::NONE
     };
-    #[cfg(test)]
     pub const ALT: Self = Self {
         alt: true,
         ..Self::NONE
