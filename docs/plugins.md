@@ -170,6 +170,8 @@ neotmux.pane.list()      -- { id, ... }
 neotmux.pane.current()   -- id, or nil
 neotmux.pane.rect(id)    -- { x = , y = , w = , h = }, or nil
 neotmux.pane.info(id)    -- { command = ..., cwd = ... }, or nil
+neotmux.pane.revision(id)     -- a number that moves when the pane is fed, or nil
+neotmux.pane.content(id, opts) -- { line, ... }, revision — or nil, nil
 neotmux.pane.split('horizontal' | 'vertical')
 neotmux.pane.focus(id)
 neotmux.pane.resize('left' | 'right' | 'up' | 'down', cells)
@@ -197,6 +199,55 @@ Ask as often as you like. The facts are sampled by the host on its own cadence, 
 
 This is read from `/proc` and is therefore Linux-only. On any other platform both facts are
 simply unknown.
+
+#### What a pane is showing
+
+`content` is the pane's visible screen as lines:
+
+```lua
+local lines = neotmux.pane.content(id)                 -- every visible row
+local tail  = neotmux.pane.content(id, { lines = 5 })  -- the last five rows
+```
+
+Lines, never bytes. The host has already reconstructed the terminal, so you are handed text
+with no escape sequences in it and can match a pattern against it directly. One string per
+row, top to bottom; a wide character appears once, at the column it starts in; a cell holding
+nothing reads as a space, and the trailing run of them is cut, so an untouched row is `''`. A
+cell that was never written and one that was erased are the same cell to the terminal, and
+nothing tells them apart.
+
+It is the **visible** screen. What has scrolled off the top is gone — scrollback is not in
+v0.1.
+
+A pane in a hidden window answers like any other. Its shell is running and its output is being
+read into its terminal whether or not you are looking at it, which is the whole point: the
+pane you are not watching is the one you want to be told about. `pane.list()` still answers
+about the current window only, so a plugin that wants to read a hidden pane learns the id from
+a `pane_output` event — every pane's output is dispatched, a hidden window's included — and
+forgets it on `pane_closed`.
+
+An id no pane has answers `nil`, and so does a pane that closed between one call and the next.
+Neither raises: a loop that reads every pane must not start erroring because a shell exited.
+
+`content` returns the lines and the revision they were read at. `revision` on its own is the
+cheap half:
+
+```lua
+local rev = neotmux.pane.revision(id)
+if rev ~= seen[id] then
+  seen[id] = rev
+  -- ... read the lines
+end
+```
+
+Nothing is built until you call `content`, and `revision` is a number out of a map. That is
+the arrangement that lets a plugin ask about every pane on every tick without putting every
+pane's screen on every frame's bill. The revision says the pane's terminal **has been fed**,
+not that the screen looks different — a chunk that only moved the cursor moves it too. A
+resize moves it as well, because reflowing changes what the pane reads as.
+
+`opts.lines` bounds the work as well as the answer: the rows above it are never built. Ask for
+the few at the bottom if a prompt is what you are after.
 
 `resize` **moves the boundary between the focused pane and its neighbour in that direction**,
 by exactly that many cells — so the pane grows by them and the neighbour loses them. There is
@@ -252,7 +303,9 @@ when a session does arrive it goes *above* windows, and nothing here changes mea
 `pane.list()`, `pane.current()` and `pane.info()` all answer about the **current** window. A
 pane in another window is not in the list and has no info, even though its shell is running
 and its output is being read into its own terminal: switching to it shows everything that
-happened while you were away. What a hidden window's panes do not get is a size — they keep
+happened while you were away. `pane.content()` is the exception — it answers about any live
+pane, hidden or not, because what a pane you are not looking at is showing is exactly the
+question worth asking. What a hidden window's panes do not get is a size — they keep
 the one they last had, and are resized to the surface on the way back in, so a terminal resize
 costs one relayout rather than one per window.
 
@@ -436,6 +489,7 @@ neotmux ships three plugins in the runtime layer an install puts on the search p
 | `status` | the default status line, on one reserved bottom row |
 | `prefix` | a `C-b` prefix over `v`, `-`, `o`, `h/j/k/l`, `r`, `c` and `n` |
 | `borders` | a rule along every boundary between two panes |
+| `watch` | says which pane looks like it is waiting for you — **off by default** |
 
 None of them is a host feature — all three are ordinary files making ordinary API calls, and
 the prefix is the only reason a fresh install can make a second pane at all. `C-b v` splits
@@ -464,6 +518,13 @@ own `init.lua` can decide what the shipped ones do:
 require('neotmux.defaults').status = false
 require('neotmux.defaults').prefix = false
 require('neotmux.defaults').borders = false
+```
+
+`watch` goes the other way: it is off until you turn it on, because what counts as a pane
+waiting for you is an opinion about what you run, and a status line is not.
+
+```lua
+require('neotmux.defaults').watch = true
 ```
 
 That is a Lua module the runtime layer ships, not a host feature: neotmux has no idea the
