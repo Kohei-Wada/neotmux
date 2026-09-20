@@ -218,6 +218,11 @@ two calls could answer about two different ones. An id no pane has answers `nil`
 between the sample and the question — is a table with that field absent. Neither raises. A
 status line must not start erroring because a shell went away.
 
+`info` answers for **every** pane the session holds, hidden windows included, so a pane you
+find through `window.panes()` describes itself the same way one in front of you does. The
+facts are sampled on the host's own cadence rather than when you ask, and that cadence is what
+bounds the cost — asking about ten panes costs no more `/proc` than asking about one.
+
 Ask as often as you like. The facts are sampled by the host on its own cadence, at most every
 250 ms, and a call reads the last sample rather than the operating system.
 
@@ -331,12 +336,12 @@ for, and it is the only level of grouping above a pane there is: tmux's session,
 detach from, is not built. That is why this level is called a window and not something else —
 when a session does arrive it goes *above* windows, and nothing here changes meaning.
 
-`pane.list()`, `pane.current()` and `pane.info()` all answer about the **current** window. A
-pane in another window is not in the list and has no info, even though its shell is running
-and its output is being read into its own terminal: switching to it shows everything that
-happened while you were away. `pane.content()` is the exception — it answers about any live
-pane, hidden or not, because what a pane you are not looking at is showing is exactly the
-question worth asking.
+`pane.list()` and `pane.current()` answer about the **current** window: a pane in another
+window is not in the list, even though its shell is running and its output is being read into
+its own terminal, and switching to it shows everything that happened while you were away.
+`pane.content()` and `pane.info()` are the exceptions — they answer about any live pane,
+hidden or not, because what a pane you are not looking at is showing, and what it is running,
+are exactly the questions worth asking.
 
 `window.panes(id)` is how you find those panes in the first place. It answers for any window,
 hidden or not, in layout order — left to right, top to bottom, the order `pane.list()` gives
@@ -659,11 +664,6 @@ columns would push every name on its row across by one.
 The **width** is not in that table. It is a `local` at the top of the file, because the
 reservation is made once while the file is being required and the host is never told a band
 changed width. Edit it there, or leave the sidebar off.
-
-A pane in a window nobody is looking at shows — instead of a command. `pane.info`
-answers about the shown window's panes and no others — reading `/proc` for panes nobody
-can see is a syscall bill that grows with the windows — and an em dash is the honest
-thing to write for a fact the host has not got.
 
 ### Changing what the borders look like
 

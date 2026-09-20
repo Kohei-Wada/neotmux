@@ -67,9 +67,9 @@ local function number(window_at, pane_at)
 end
 
 -- tmux caps its active window and leaves the rest flat, and a window's name sits beside its
--- number. The only name neotmux has for a window is what its focused pane is running, and
--- `pane.info` answers about the current window alone — so the one being shown is the one
--- that gets a name.
+-- number. The only name neotmux has for a window is what its focused pane is running, and a
+-- row that named every window would not hold many — so the one being shown is the one that
+-- gets a name.
 local function window_runs(name, pane_at)
   local runs = {}
   local current = neotmux.window.current()
