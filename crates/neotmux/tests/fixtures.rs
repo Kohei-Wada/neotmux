@@ -2267,6 +2267,30 @@ fn copy_mode_leaves_the_pane_alone_and_gives_the_keys_back() {
     assert!(log.is_empty(), "copy mode reported a failure:\n{log}");
 }
 
+/// The same exit criterion for the one shipped default whose opt-out nothing else covers.
+/// Off, `C-b [` opens nothing: the prefix is still loaded and still swallows both keys, but
+/// no mode claims the keyboard afterwards, so what is typed next reaches the shell — which
+/// is exactly what copy mode, when it is on, does not allow.
+#[test]
+fn a_user_config_can_switch_off_copy_mode() {
+    let init = harness::runtime(&[("init.lua", "require('neotmux.defaults').copy = false")]);
+    let shipped = shipped_layer();
+    let mut nt = Neotmux::start_layered(&[init.path(), &shipped], "cat");
+
+    nt.send("ABCDEFGH\r");
+    nt.wait_for_screen("ABCDEFGH", PATIENCE);
+
+    nt.send("\x02["); // C-b [: nothing left to claim the bracket
+    // Reaching the shell at all is the assertion: in copy mode these keys are motions.
+    nt.send("TYPED\r");
+    nt.wait_for_screen("TYPED", PATIENCE);
+    assert!(
+        nt.log_text().is_empty(),
+        "switching copy mode off was reported as a failure:\n{}",
+        nt.log_text()
+    );
+}
+
 /// The cursor is a cell you can see, and the motion keys move it. Seen as a colour, because
 /// a tint leaves the glyph exactly as it was.
 #[test]
