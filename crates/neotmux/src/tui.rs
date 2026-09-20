@@ -8,9 +8,9 @@ use neotmux_term::wakeup::{Wakeup, wakeup};
 use ratatui::DefaultTerminal;
 
 use neotmux::decode::Decoder;
-use neotmux::keys::Key;
 use neotmux::notify::Notifications;
 use neotmux::session::{End, Session};
+use neotmux_proto::keys::Key;
 
 use crate::draw;
 use crate::signals::{self, ShutdownSignal};

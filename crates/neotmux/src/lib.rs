@@ -14,7 +14,6 @@ pub mod panes;
 pub mod session;
 
 // Both moved into `neotmux-proto`: a frame and a key are what the wire carries.
-pub use neotmux_proto::{frame, keys};
 
 mod paneinfo;
 mod procinfo;

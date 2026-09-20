@@ -6,12 +6,12 @@
 use std::fs;
 use std::time::{Duration, Instant};
 
-use neotmux::frame::Frame;
-use neotmux::keys::{Key, KeyCode};
 use neotmux::notify::Notifications;
 use neotmux::session::{End, Session};
 use neotmux_lua::LuaSubsystem;
 use neotmux_lua::runtime::Layers;
+use neotmux_proto::frame::Frame;
+use neotmux_proto::keys::{Key, KeyCode};
 use neotmux_proto::{DrawCmd, Size};
 use neotmux_term::wakeup::{Wakeup, wakeup};
 
