@@ -166,7 +166,7 @@ key: you wrote a legal call and lost a race.
 ### Panes
 
 ```lua
-neotmux.pane.list()      -- { id, ... }
+neotmux.pane.list()      -- { id, ... }, in layout order
 neotmux.pane.current()   -- id, or nil
 neotmux.pane.rect(id)    -- { x = , y = , w = , h = }, or nil
 neotmux.pane.info(id)    -- { command = ..., cwd = ... }, or nil
@@ -176,6 +176,18 @@ neotmux.pane.split('horizontal' | 'vertical')
 neotmux.pane.focus(id)
 neotmux.pane.resize('left' | 'right' | 'up' | 'down', cells)
 ```
+
+**An id is an identity, not a number to show anybody.** A `PaneId` is handed out once and
+never reused, so the id of a pane outlives the pane and the next one gets a fresh one: open
+and close a second pane three times and the third of them is id 4, with only two panes on
+screen. That is deliberate — a plugin holding id 2 must never find that it now means a
+different pane — and it is why nothing renumbers.
+
+What a person reads off a bar is a **position**: where the pane sits among the ones that exist
+now, which closes the gap when a neighbour goes. `list()` is in layout order, so the position
+is the index in it, and finding it is a loop over the list you already have. The shipped bar
+does exactly that in `status/position.lua`. Use an id for anything you look a pane up by, and
+a position for anything you print.
 
 `rect` answers out of the same published geometry `ctx:pane_rect` reads, in the same surface
 coordinates and with the same table — so geometry is a question you can ask from a key
@@ -295,6 +307,10 @@ neotmux.window.create()   -- the new window's id
 neotmux.window.focus(id)  -- show that one
 ```
 
+A `WindowId` is stable and never reused, exactly as a `PaneId` is, and the same rule follows:
+show the position in `list()`, not the id, or your window numbers climb for ever as windows
+are opened and closed.
+
 A window is an independent pane tree. Switching between them is what a multiplexer is mostly
 for, and it is the only level of grouping above a pane there is: tmux's session, the thing you
 detach from, is not built. That is why this level is called a window and not something else —
@@ -337,7 +353,14 @@ neotmux.opt.tick_budget_ms = 8     -- per source per frame; 0 turns the budget o
 neotmux.opt.tick_overrun_limit = 5 -- consecutive overruns before the tick is dropped; >= 1
 neotmux.opt.pane_gutter = 0        -- cells left between panes, for whoever draws there; <= 4
 neotmux.resubscribe(name)          -- give a dropped source its tick back; returns handles
+neotmux.home                       -- `$HOME` as the host read it, or nil; read-only
 ```
+
+`neotmux.home` is a fact, not an option: it sits beside `pane.info`'s facts rather than under
+`opt`, because nothing sets it. The VM has no `os.getenv` — reading the process environment is
+the host's alone — so this is the one value out of it a plugin ever sees, and it is the same
+read the `~/.config/neotmux` layer is resolved from. It is `nil`, not `''`, where the process
+had no `HOME`.
 
 Logs go to `$XDG_STATE_HOME/neotmux/neotmux.log`, or wherever `--log` says. Notifications also
 replay on stderr when neotmux exits, so a message from a frame you never saw is not lost.
@@ -486,7 +509,7 @@ neotmux ships three plugins in the runtime layer an install puts on the search p
 
 | plugin | what it does |
 |---|---|
-| `status` | the default status line, on one reserved bottom row |
+| `status` | the default status bar, on one reserved top row |
 | `prefix` | a `C-b` prefix over `v`, `-`, `o`, `h/j/k/l`, `r`, `c` and `n` |
 | `borders` | a rule along every boundary between two panes |
 | `watch` | says which pane looks like it is waiting for you — **off by default** |
@@ -557,6 +580,39 @@ entry for it, so a mistyped command never leaks a character into the shell.
 shipped layer's `require` finds it already loaded. Do not do it *and* set
 `defaults.prefix = false` — the module is loaded either way, and the flag then only looks
 like it turned something off.
+
+### Changing what the status bar looks like
+
+`plugin.status` reserves the top row and draws the windows on the left, then the focused
+pane's command and its working directory on the right. A window's block is numbered with its
+position, and the one being shown carries the focused pane's position after a dot — tmux's
+`window.pane`. Positions and not ids, for the reason the pane API gives. It returns four
+tables, all read every tick:
+
+```lua
+local status = require('plugin.status')
+status.colors.current = '#f5c2e7'   -- the cap on the window being shown
+status.caps = { left = '', right = '' }              -- no Nerd Font: no caps
+status.icons = { command = '', directory = '' }      -- and no icons
+status.home = '/home/you'           -- the prefix written `~`
+```
+
+The glyphs default to Nerd Font ones — a rounded cap either side (`U+E0B6`, `U+E0B4`), and
+one in front of each module (`U+F1AE`, `U+F07B`). Without such a font they come out as boxes,
+and the two lines above are the whole escape: empty strings leave the coloured blocks and take
+the glyphs off.
+
+`colors` is Catppuccin Mocha, keyed by what each colour is for rather than by its name:
+`bar`, `current`, `inactive`, `on_current`, `on_inactive`, `body`, `body_text`, `module`,
+`module_text`, `icon`, `command`, `directory`.
+
+`home` is what gets written `~`, the way a shell prompt writes it. It defaults to
+`neotmux.home`: the VM has no `os.getenv`, so the host reads `$HOME` once — the same read the
+config layer is resolved from — and publishes it. It is `nil` where the process had no `HOME`,
+which costs you the `~` and nothing else; assign to it if you want a different prefix.
+
+A directory too long for the space left loses its leading components — `.../src/neotmux` —
+and is dropped along with its icon if not even its last component fits.
 
 ### Changing what the borders look like
 

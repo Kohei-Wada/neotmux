@@ -4,19 +4,41 @@ use std::path::{Path, PathBuf};
 use mlua::{Lua, Table};
 
 #[derive(Debug, Clone, Default)]
-pub struct Layers(Vec<PathBuf>);
+pub struct Layers {
+    paths: Vec<PathBuf>,
+    home: Option<PathBuf>,
+}
 
 impl Layers {
     pub fn from_paths(paths: Vec<PathBuf>) -> Self {
-        Self(paths)
+        Self { paths, home: None }
+    }
+
+    /// The home directory these layers were resolved under, for an embedder building them by
+    /// hand. `resolve` fills it from the environment.
+    pub fn with_home(mut self, home: PathBuf) -> Self {
+        self.home = Some(home);
+        self
     }
 
     pub fn paths(&self) -> &[PathBuf] {
-        &self.0
+        &self.paths
+    }
+
+    /// What the host read out of `HOME`, published to Lua as `neotmux.home`. `None` where the
+    /// process had none — a daemon, a stripped environment — or where it was not absolute.
+    pub fn home(&self) -> Option<&Path> {
+        self.home.as_deref()
     }
 
     pub fn resolve(env: &dyn Fn(&str) -> Option<OsString>, exe_dir: Option<&Path>) -> Self {
         let non_empty = |key: &str| env(key).filter(|v| !v.is_empty());
+
+        // The one read of `HOME`: the config layer below is built from it and `home()` hands
+        // it to Lua, so the path a plugin abbreviates cannot drift from the one searched.
+        let home = non_empty("HOME")
+            .map(PathBuf::from)
+            .filter(|path| path.is_absolute());
 
         let mut paths = Vec::new();
 
@@ -32,8 +54,8 @@ impl Layers {
 
         if let Some(xdg) = non_empty("XDG_CONFIG_HOME") {
             paths.push(PathBuf::from(xdg).join("neotmux"));
-        } else if let Some(home) = non_empty("HOME") {
-            paths.push(PathBuf::from(home).join(".config/neotmux"));
+        } else if let Some(home) = &home {
+            paths.push(home.join(".config/neotmux"));
         }
 
         if let Some(dir) = exe_dir {
@@ -44,7 +66,7 @@ impl Layers {
 
         paths.retain(|p| p.is_absolute());
 
-        Self(paths)
+        Self { paths, home }
     }
 }
 
@@ -126,6 +148,35 @@ mod tests {
                 .paths()
                 .contains(&PathBuf::from("/home/someone/.config/neotmux"))
         );
+    }
+
+    /// The published home and the config layer come from one lookup, so a plugin abbreviating
+    /// a path and the host searching for one can never disagree about where home is.
+    #[test]
+    fn the_published_home_is_the_one_the_config_layer_was_built_from() {
+        let env = env_from(&[("HOME", "/home/someone")]);
+        let layers = Layers::resolve(&env, None);
+        let home = layers.home().expect("a home");
+        assert!(layers.paths().contains(&home.join(".config/neotmux")));
+    }
+
+    /// `XDG_CONFIG_HOME` moves the config layer off `$HOME`; it does not move `$HOME`.
+    #[test]
+    fn the_home_is_published_even_when_xdg_supplies_the_config_layer() {
+        let env = env_from(&[("XDG_CONFIG_HOME", "/cfg"), ("HOME", "/home/someone")]);
+        let layers = Layers::resolve(&env, None);
+        assert_eq!(layers.home(), Some(Path::new("/home/someone")));
+    }
+
+    #[test]
+    fn no_home_in_the_environment_publishes_none() {
+        for env in [
+            env_from(&[]),
+            env_from(&[("HOME", "")]),
+            env_from(&[("HOME", "rel")]),
+        ] {
+            assert_eq!(Layers::resolve(&env, None).home(), None);
+        }
     }
 
     #[test]

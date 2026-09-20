@@ -79,6 +79,9 @@ impl LuaSubsystem {
     pub fn build(layers: Layers) -> anyhow::Result<Self> {
         let lua = vm::new_vm().map_err(|err| anyhow::anyhow!("{err:#}"))?;
         runtime::install(&lua, &layers).map_err(|err| anyhow::anyhow!("{err:#}"))?;
+        let home = layers
+            .home()
+            .map(|path| path.to_string_lossy().into_owned());
 
         let sources = Rc::new(Sources::new());
         source::install_loader(&lua, sources.clone()).map_err(|err| anyhow::anyhow!("{err:#}"))?;
@@ -112,6 +115,7 @@ impl LuaSubsystem {
                 overrun: overrun.clone(),
                 reservations: reservations.clone(),
                 window_ids: window_ids.clone(),
+                home,
             },
         )
         .map_err(|err| anyhow::anyhow!("{err:#}"))?;
