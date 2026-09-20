@@ -17,7 +17,7 @@
 --   o           the next pane in layout order
 --   h j k l     the pane to the left, below, above, to the right
 --   r           resize mode: arrows or h/j/k/l move the boundary, anything else leaves
---   c  n        a new window, and the next one
+--   c  n  p     a new window, the next one, the one before
 local nav = require("neotmux.nav")
 
 local armed = false
@@ -38,17 +38,23 @@ local function focus_next()
   end
 end
 
--- The same index step over `window.list()`, which is in creation order.
-local function next_window()
-  local ids = neotmux.window.list()
-  local current = neotmux.window.current()
-  for index, id in ipairs(ids) do
-    if id == current then
-      neotmux.window.focus(ids[index % #ids + 1])
-      return
+-- The same index step over `window.list()`, which is in creation order. One step either way,
+-- wrapping at both ends, so `n` and `p` are each other's undo with one window or with ten.
+local function step_window(step)
+  return function()
+    local ids = neotmux.window.list()
+    local current = neotmux.window.current()
+    for index, id in ipairs(ids) do
+      if id == current then
+        neotmux.window.focus(ids[(index - 1 + step) % #ids + 1])
+        return
+      end
     end
   end
 end
+
+local next_window = step_window(1)
+local prev_window = step_window(-1)
 
 -- A direction key, in both spellings a hand reaches for. `h/j/k/l` move the focus; the same
 -- four, and the arrows, move a boundary once `r` has been pressed.
@@ -103,6 +109,7 @@ local M = {
       neotmux.window.focus(neotmux.window.create())
     end,
     ["n"] = next_window,
+    ["p"] = prev_window,
   },
 }
 

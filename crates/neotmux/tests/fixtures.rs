@@ -518,6 +518,7 @@ fn the_prefix_splits_horizontally() {
 const CAP_LEFT: &str = "\u{e0b6}";
 const FIRST_WINDOW: &str = "1.1  cat";
 const SECOND_WINDOW: &str = "2.1  cat";
+const THIRD_WINDOW: &str = "3.1  cat";
 /// The same once a split has landed and left the new pane focused. The bar now says both of
 /// the things a test has to wait for after a split, so it is what they wait on.
 const SECOND_PANE: &str = "1.2  cat";
@@ -1899,6 +1900,34 @@ fn the_shipped_status_band_survives_a_switch() {
         CAP_LEFT,
         "the status bar lost its band on the way back:\n{}",
         nt.screen_after(Duration::ZERO)
+    );
+}
+
+/// `C-b p` is the step `C-b n` undoes. Three windows is the smallest number that tells them
+/// apart: from the third, `n` wraps to the first and `p` goes back to the second.
+#[test]
+fn the_prefix_walks_back_to_the_window_before() {
+    let (mut nt, _init) = start_shipped("", "cat");
+    nt.wait_for_status(FIRST_WINDOW, PATIENCE);
+    nt.send("\x02c"); // C-b c
+    nt.wait_for_status(SECOND_WINDOW, PATIENCE);
+    nt.send("\x02c"); // C-b c
+    nt.wait_for_status(THIRD_WINDOW, PATIENCE);
+    nt.settle(Duration::from_millis(500));
+
+    nt.send("\x02p"); // C-b p
+    nt.wait_for_status(SECOND_WINDOW, PATIENCE);
+
+    // And it wraps at the near end the way `n` wraps at the far one.
+    nt.send("\x02p"); // C-b p
+    nt.wait_for_status(FIRST_WINDOW, PATIENCE);
+    nt.send("\x02p"); // C-b p
+    nt.wait_for_status(THIRD_WINDOW, PATIENCE);
+
+    let screen = nt.screen_after(Duration::from_millis(300));
+    assert!(
+        !pane_area(&screen).contains("^B"),
+        "a prefix keystroke reached a shell:\n{screen}"
     );
 }
 

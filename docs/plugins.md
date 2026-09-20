@@ -772,7 +772,7 @@ neotmux ships six plugins in the runtime layer an install puts on the search pat
 | plugin | what it does |
 |---|---|
 | `status` | the default status bar, on one reserved top row |
-| `prefix` | a `C-b` prefix over `v`, `-`, `o`, `h/j/k/l`, `r`, `c`, `n` and `[` |
+| `prefix` | a `C-b` prefix over `v`, `-`, `o`, `h/j/k/l`, `r`, `c`, `n`, `p` and `[` |
 | `copy` | copy mode: read back over a pane's scrollback, select a region, yank it |
 | `borders` | a rule along every boundary between two panes |
 | `watch` | says which pane looks like it is waiting for you — **off by default** |
@@ -783,8 +783,8 @@ the prefix is the only reason a fresh install can make a second pane at all. `C-
 vertically (the panes end up side by side, because `pane.split('vertical')` divides the
 width), `C-b -` splits horizontally (one above the other), `C-b o` focuses the next pane,
 `C-b h/j/k/l` focuses the pane to the left, below, above or to the right, `C-b r` enters
-resize mode, `C-b [` enters copy mode, `C-b c` opens a window and switches to it, and `C-b n`
-walks to the next window.
+resize mode, `C-b [` enters copy mode, `C-b c` opens a window and switches to it, and `C-b n` and `C-b p`
+walk to the next window and the one before, each wrapping around.
 With the sidebar on, `C-b b` folds it — the sidebar adds that one itself, since it is the
 optional plugin and the prefix is the standard one.
 
