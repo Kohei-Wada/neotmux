@@ -1,6 +1,6 @@
 use mlua::{Lua, LuaString, Table};
 
-use neotmux_core::proto::{PaneId, Size};
+use neotmux_core::proto::{PaneId, Size, WindowId};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
@@ -9,6 +9,9 @@ pub enum Event {
     PaneOpened { pane: PaneId },
     PaneClosed { pane: PaneId },
     FocusChanged { pane: PaneId },
+    WindowOpened { window: WindowId },
+    WindowClosed { window: WindowId },
+    WindowChanged { window: WindowId },
 }
 
 impl Event {
@@ -19,6 +22,9 @@ impl Event {
             Event::PaneOpened { .. } => "pane_opened",
             Event::PaneClosed { .. } => "pane_closed",
             Event::FocusChanged { .. } => "focus_changed",
+            Event::WindowOpened { .. } => "window_opened",
+            Event::WindowClosed { .. } => "window_closed",
+            Event::WindowChanged { .. } => "window_changed",
         }
     }
 
@@ -50,6 +56,11 @@ impl Event {
             | Event::PaneClosed { pane }
             | Event::FocusChanged { pane } => {
                 table.set("pane", pane.get())?;
+            }
+            Event::WindowOpened { window }
+            | Event::WindowClosed { window }
+            | Event::WindowChanged { window } => {
+                table.set("window", window.get())?;
             }
         }
         Ok(table)

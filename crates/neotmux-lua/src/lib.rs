@@ -1,7 +1,7 @@
 pub mod api;
 pub mod budget;
 pub mod draw;
-mod geometry;
+pub mod geometry;
 pub mod ops;
 pub mod overrun;
 mod paneinfo;
@@ -10,6 +10,7 @@ pub mod reserve;
 pub mod runtime;
 pub mod source;
 pub mod vm;
+pub mod window;
 
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
@@ -20,7 +21,7 @@ use std::time::Duration;
 use mlua::chunk::ChunkMode;
 use mlua::{Function, Lua, Value};
 
-use neotmux_core::proto::{DrawCmd, Epoch, PaneId, PaneInfo, Rect, Reserved, Size};
+use neotmux_core::proto::{DrawCmd, Epoch, PaneId, PaneInfo, Reserved, Size, WindowId};
 
 pub use api::Opts;
 pub use api::event::Event;
@@ -29,7 +30,7 @@ pub use api::keymap;
 use api::ctx::Ctx;
 use budget::{Budget, Outcome};
 use draw::Buffers;
-use geometry::Geometry;
+pub use geometry::Geometry;
 use ops::{Level, Op, OpBuffer};
 use overrun::Overrun;
 use paneinfo::PaneInfos;
@@ -37,6 +38,7 @@ use registry::{Kind, KindTag, RegistrationId, Registry};
 use reserve::Reservations;
 use runtime::Layers;
 use source::{SourceId, Sources};
+use window::WindowIds;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyOutcome {
@@ -65,6 +67,7 @@ pub struct LuaSubsystem {
     budget: Rc<Budget>,
     overrun: Rc<Overrun>,
     reservations: Rc<Reservations>,
+    window_ids: Rc<WindowIds>,
 }
 
 impl LuaSubsystem {
@@ -82,6 +85,7 @@ impl LuaSubsystem {
         let geometry = Rc::new(RefCell::new(Geometry::default()));
         let pane_info = Rc::new(RefCell::new(PaneInfos::new()));
         let reservations = Rc::new(Reservations::new());
+        let window_ids = Rc::new(WindowIds::new());
         let buffers = Rc::new(Buffers::new());
 
         let overrun = Rc::new(Overrun::new());
@@ -100,6 +104,7 @@ impl LuaSubsystem {
                 pane_info: pane_info.clone(),
                 overrun: overrun.clone(),
                 reservations: reservations.clone(),
+                window_ids: window_ids.clone(),
             },
         )
         .map_err(|err| anyhow::anyhow!("{err:#}"))?;
@@ -119,6 +124,7 @@ impl LuaSubsystem {
             budget,
             overrun,
             reservations,
+            window_ids,
         })
     }
 
@@ -188,28 +194,23 @@ impl LuaSubsystem {
         );
     }
 
-    pub fn begin_frame(
-        &self,
-        epoch: Epoch,
-        size: Size,
-        panes: Vec<(PaneId, Rect)>,
-        focus: Option<PaneId>,
-    ) {
+    /// The id the host gives the window it opens itself, before any Lua has run. Taken
+    /// from the same counter `window.create()` draws on, so the two can never collide.
+    pub fn reserve_window_id(&self) -> WindowId {
+        self.window_ids.take()
+    }
+
+    pub fn begin_frame(&self, epoch: Epoch, geometry: Geometry) {
         self.buffers.begin(epoch);
-        self.republish_geometry(size, panes, focus);
+        self.republish_geometry(geometry);
     }
 
     /// The layout changed part-way through a frame. What Lua sees catches up at once, so an
     /// event dispatched after it describes the tree as it is. The frame's epoch is the
     /// buffers' own and is not touched here: the tick has already committed under it, and
     /// moving it mid-frame would throw that commit away.
-    pub fn republish_geometry(
-        &self,
-        size: Size,
-        panes: Vec<(PaneId, Rect)>,
-        focus: Option<PaneId>,
-    ) {
-        *self.geometry.borrow_mut() = Geometry { size, panes, focus };
+    pub fn republish_geometry(&self, geometry: Geometry) {
+        *self.geometry.borrow_mut() = geometry;
     }
 
     /// What every pane is running, as the host last sampled it. Published on the host's own

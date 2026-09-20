@@ -27,6 +27,18 @@ local function focus_next()
   end
 end
 
+-- The same index step over `window.list()`, which is in creation order.
+local function next_window()
+  local ids = neotmux.window.list()
+  local current = neotmux.window.current()
+  for index, id in ipairs(ids) do
+    if id == current then
+      neotmux.window.focus(ids[index % #ids + 1])
+      return
+    end
+  end
+end
+
 -- `split('vertical')` divides the width, so `v` puts the two panes side by side; `-` divides
 -- the height, which is what the glyph looks like.
 local M = {
@@ -39,6 +51,12 @@ local M = {
       neotmux.pane.split("horizontal")
     end,
     ["o"] = focus_next,
+    -- `create()` answers with the id before the window exists, so the two ops go out in one
+    -- tick and are applied in that order: opened, then shown.
+    ["c"] = function()
+      neotmux.window.focus(neotmux.window.create())
+    end,
+    ["n"] = next_window,
   },
 }
 

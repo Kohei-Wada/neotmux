@@ -195,10 +195,11 @@ applied after the tick, so `list()` returns the same thing immediately after a `
 immediately before. This is deliberate: a callback that could reshape the world underneath the
 callbacks running after it would make frame composition depend on dispatch order.
 
-A frame applies at most three splits. Each one costs the host a fork, an exec and a terminal,
-none of it inside the tick your budget was measured against, so the number of them one frame
-can be asked for is bounded; the fourth and beyond are refused and logged against you. There is
-no way to close or resize a pane from Lua in v0.1.
+A frame forks at most three new shells, counting `pane.split` and `window.create` together.
+Each one costs the host a fork, an exec and a terminal, none of it inside the tick your budget
+was measured against, so the number of them one frame can be asked for is bounded; the fourth
+and beyond are refused and logged against you. There is no way to close or resize a pane from
+Lua in v0.1.
 
 `pane_opened`, `pane_closed` and `focus_changed` are dispatched against the layout as it is
 after the change, so a handler's `pane.list()` and `pane.current()` describe the event it is
@@ -210,6 +211,45 @@ typing blind until the terminal grows back. The terminal cursor is hidden for as
 lasts. It has nowhere honest to sit — every other visible cell belongs to a pane that is not
 getting the keys, or to no pane at all — and no cursor is a better answer than one pointing at
 the wrong pane.
+
+### Windows
+
+```lua
+neotmux.window.list()     -- { id, ... }, in creation order
+neotmux.window.current()  -- id
+neotmux.window.create()   -- the new window's id
+neotmux.window.focus(id)  -- show that one
+```
+
+A window is an independent pane tree. Switching between them is what a multiplexer is mostly
+for, and it is the only level of grouping above a pane there is: tmux's session, the thing you
+detach from, is not built. That is why this level is called a window and not something else —
+when a session does arrive it goes *above* windows, and nothing here changes meaning.
+
+`pane.list()`, `pane.current()` and `pane.info()` all answer about the **current** window. A
+pane in another window is not in the list and has no info, even though its shell is running
+and its output is being read into its own terminal: switching to it shows everything that
+happened while you were away. What a hidden window's panes do not get is a size — they keep
+the one they last had, and are resized to the surface on the way back in, so a terminal resize
+costs one relayout rather than one per window.
+
+`create` and `focus` are queued and applied after the tick, the same as `pane.split`. `create`
+is the one call that answers with something anyway: it hands back the id the new window *will*
+have, so
+
+```lua
+neotmux.window.focus(neotmux.window.create())
+```
+
+opens one and switches to it — two ops, applied in that order. `create()` on its own leaves a
+window running out of sight.
+
+`window_opened`, `window_closed` and `window_changed` carry `event.window` and are dispatched
+against the session as it is after the change. Closing the last pane of a window closes the
+window and moves you to another; closing the last window exits neotmux.
+
+A reserved band belongs to the surface, not to a window: a status line reserves its row once
+and keeps it across every switch.
 
 ### Everything else
 
@@ -371,13 +411,14 @@ neotmux ships three plugins in the runtime layer an install puts on the search p
 | plugin | what it does |
 |---|---|
 | `status` | the default status line, on one reserved bottom row |
-| `prefix` | a `C-b` prefix over `v`, `-` and `o` |
+| `prefix` | a `C-b` prefix over `v`, `-`, `o`, `c` and `n` |
 | `borders` | a rule along every boundary between two panes |
 
 None of them is a host feature — all three are ordinary files making ordinary API calls, and
 the prefix is the only reason a fresh install can make a second pane at all. `C-b v` splits
 vertically (the panes end up side by side, because `pane.split('vertical')` divides the
-width), `C-b -` splits horizontally (one above the other), and `C-b o` focuses the next pane.
+width), `C-b -` splits horizontally (one above the other), `C-b o` focuses the next pane,
+`C-b c` opens a window and switches to it, and `C-b n` walks to the next window.
 
 ### Turning one off
 

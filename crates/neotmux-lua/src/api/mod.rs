@@ -5,6 +5,7 @@ pub mod log;
 pub mod opt;
 pub mod pane;
 pub mod reserve;
+pub mod window;
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -20,6 +21,7 @@ use crate::paneinfo::PaneInfos;
 use crate::registry::{Kind, KindTag, RegistrationId, Registry};
 use crate::reserve::Reservations;
 use crate::source::{self, SourceId, Sources};
+use crate::window::WindowIds;
 
 pub use opt::Opts;
 
@@ -36,6 +38,7 @@ pub(crate) struct Shared {
     pub(crate) pane_info: Rc<RefCell<PaneInfos>>,
     pub(crate) overrun: Rc<Overrun>,
     pub(crate) reservations: Rc<Reservations>,
+    pub(crate) window_ids: Rc<WindowIds>,
 }
 
 pub(crate) fn make_handle(
@@ -170,6 +173,7 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
         pane_info,
         overrun,
         reservations,
+        window_ids,
     } = shared;
     let neotmux = lua.create_table()?;
 
@@ -228,9 +232,21 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
     }
 
     {
-        let pane = pane::install(lua, sources.clone(), ops.clone(), geometry, pane_info)?;
+        let pane = pane::install(
+            lua,
+            sources.clone(),
+            ops.clone(),
+            geometry.clone(),
+            pane_info,
+        )?;
         let pane = seal(lua, pane, "neotmux.pane")?;
         neotmux.set("pane", pane)?;
+    }
+
+    {
+        let window = window::install(lua, sources.clone(), ops.clone(), geometry, window_ids)?;
+        let window = seal(lua, window, "neotmux.window")?;
+        neotmux.set("window", window)?;
     }
 
     let log = log::install(lua, sources.clone(), ops.clone())?;

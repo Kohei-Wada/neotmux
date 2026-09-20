@@ -11,6 +11,7 @@ mod render;
 mod shells;
 mod signals;
 mod tty;
+mod windows;
 
 use std::env;
 use std::path::{Path, PathBuf};
@@ -91,6 +92,29 @@ fn main() -> anyhow::Result<()> {
                     Level::Error,
                     &tag,
                     &format!("pane.focus({pane}) refused: no panes exist until the session starts"),
+                );
+            }
+            // Same at load time: the session's own first window is not there yet.
+            Op::WindowCreate { window } => {
+                let tag = lua.sources().name(id).unwrap_or_else(|| id.to_string());
+                logging::log(
+                    Level::Error,
+                    &tag,
+                    &format!(
+                        "window.create() refused: {window} cannot be opened until the \
+                         session starts"
+                    ),
+                );
+            }
+            Op::WindowFocus { window } => {
+                let tag = lua.sources().name(id).unwrap_or_else(|| id.to_string());
+                logging::log(
+                    Level::Error,
+                    &tag,
+                    &format!(
+                        "window.focus({window}) refused: no windows exist until the \
+                         session starts"
+                    ),
                 );
             }
         }
