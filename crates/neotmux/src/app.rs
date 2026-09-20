@@ -51,6 +51,8 @@ struct Session {
     size: Size,
     layout: PaneLayout,
     has_status: bool,
+    /// The cells left between panes, from `neotmux.opt.pane_gutter`.
+    gutter: u16,
     shells: Shells,
     /// Pane ids are never reused: a stale `pane.focus(id)` must not land on a new pane.
     next_pane: u32,
@@ -67,10 +69,10 @@ enum Drained {
 }
 
 impl Session {
-    fn new(size: Size) -> anyhow::Result<Self> {
+    fn new(size: Size, gutter: u16) -> anyhow::Result<Self> {
         let has_status = false;
         let first = PaneId::from(FIRST_PANE);
-        let layout = PaneLayout::new(size, has_status, first);
+        let layout = PaneLayout::new(size, has_status, gutter, first);
         let mut shells = Shells::default();
         shells.open(
             first,
@@ -81,6 +83,7 @@ impl Session {
             size,
             layout,
             has_status,
+            gutter,
             shells,
             next_pane: FIRST_PANE + 1,
             dirty: true,
@@ -94,11 +97,12 @@ impl Session {
         shells.fit(layout.showable())
     }
 
-    /// A geometry change, whether from a real terminal resize or the status row
-    /// appearing/disappearing: recompute the layout, resize the panes to match, and tell the
+    /// A geometry change, whether from a real terminal resize, the status row
+    /// appearing/disappearing or the gutter changing: recompute the layout, resize the panes to match, and tell the
     /// Lua layer about it (§4.8).
     fn apply_geometry(&mut self, lua: &LuaSubsystem) -> anyhow::Result<()> {
-        self.layout.resurface(self.size, self.has_status);
+        self.layout
+            .resurface(self.size, self.has_status, self.gutter);
         self.fit()?;
         lua.dispatch_event(&LuaEvent::Resized {
             size: self.layout.content,
@@ -312,6 +316,16 @@ impl Session {
         true
     }
 
+    /// Whether the gutter between panes just changed, which changes the panes' size. It is an
+    /// option like any other, so a plugin can set it after the frame it was first read on.
+    fn gutter_changed(&mut self, gutter: u16) -> bool {
+        if gutter == self.gutter {
+            return false;
+        }
+        self.gutter = gutter;
+        true
+    }
+
     fn render(
         &mut self,
         terminal: &mut DefaultTerminal,
@@ -384,7 +398,7 @@ pub fn run(
     lua: &LuaSubsystem,
     notifications: &mut Notifications,
 ) -> anyhow::Result<Option<i32>> {
-    let mut session = Session::new(terminal_size(terminal)?)?;
+    let mut session = Session::new(terminal_size(terminal)?, lua.opt().pane_gutter)?;
     session.publish_geometry(lua);
 
     #[cfg(debug_assertions)]
@@ -414,7 +428,9 @@ pub fn run(
         }
 
         let frame_output = lua.frame_output();
-        if session.status_row_changed(&frame_output.1) {
+        let status_changed = session.status_row_changed(&frame_output.1);
+        let gutter_changed = session.gutter_changed(lua.opt().pane_gutter);
+        if status_changed || gutter_changed {
             session.apply_geometry(lua)?;
         }
 
@@ -485,7 +501,7 @@ mod tests {
     #[test]
     fn the_first_pane_is_the_whole_surface() {
         let size = Size { rows: 24, cols: 80 };
-        let layout = PaneLayout::new(size, false, PaneId::from(FIRST_PANE));
+        let layout = PaneLayout::new(size, false, 0, PaneId::from(FIRST_PANE));
         assert_eq!(
             pane_size(&layout, PaneId::from(FIRST_PANE)).expect("the first pane has a rect"),
             size
@@ -496,7 +512,12 @@ mod tests {
     /// has to be an error rather than a 0x0 PTY nobody can see is wrong.
     #[test]
     fn a_pane_with_no_rect_is_an_error_not_a_zero_sized_terminal() {
-        let layout = PaneLayout::new(Size { rows: 24, cols: 80 }, false, PaneId::from(FIRST_PANE));
+        let layout = PaneLayout::new(
+            Size { rows: 24, cols: 80 },
+            false,
+            0,
+            PaneId::from(FIRST_PANE),
+        );
         assert!(pane_size(&layout, PaneId::from(99)).is_err());
     }
 }
