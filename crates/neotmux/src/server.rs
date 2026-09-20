@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
 use neotmux_proto::Level;
-use neotmux_proto::msg::{Done, ToClient, ToServer};
+use neotmux_proto::msg::{Done, End, ToClient, ToServer};
 use neotmux_proto::wire;
 use std::os::fd::AsFd as _;
 
@@ -248,10 +248,13 @@ fn converse(
         drop(done);
         drop(pass);
         let delivered = link.send(&encoded).is_ok();
-        // Quit and Eof are both the session ending, and the session is all this process is
-        // for.
-        if end.is_some() {
-            return Ok(true);
+        // Quit and Eof are the session ending, and the session is all this process is for.
+        // A detach is the client ending: the session stays, and the loop goes back to
+        // waiting for somebody to look at it.
+        match end {
+            Some(End::Quit) | Some(End::Eof) => return Ok(true),
+            Some(End::Detach) => return Ok(false),
+            None => {}
         }
         if !delivered {
             return Ok(false);

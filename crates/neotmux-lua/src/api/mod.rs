@@ -303,6 +303,16 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
     {
         let sources = sources.clone();
         let ops = ops.clone();
+        let detach = lua.create_function(move |lua, ()| {
+            ops.push(source::caller(lua, &sources), Op::Detach);
+            Ok(())
+        })?;
+        neotmux.set("detach", detach)?;
+    }
+
+    {
+        let sources = sources.clone();
+        let ops = ops.clone();
         let notify = lua.create_function(move |lua, (level, text): (String, String)| {
             let level = match level.as_str() {
                 "info" => Level::Info,

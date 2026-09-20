@@ -72,11 +72,24 @@ pub struct Tick {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionOp {
     Quit,
-    PaneSplit { dir: SplitDir },
-    PaneFocus { pane: PaneId },
-    PaneResize { dir: Dir, cells: u16 },
-    WindowCreate { window: WindowId },
-    WindowFocus { window: WindowId },
+    /// The session is kept; only the client leaves.
+    Detach,
+    PaneSplit {
+        dir: SplitDir,
+    },
+    PaneFocus {
+        pane: PaneId,
+    },
+    PaneResize {
+        dir: Dir,
+        cells: u16,
+    },
+    WindowCreate {
+        window: WindowId,
+    },
+    WindowFocus {
+        window: WindowId,
+    },
 }
 
 /// The client's half of a frame: what the tick asked for, and what it drew.
@@ -115,11 +128,15 @@ pub struct OwnedDone {
     pub end: Option<End>,
 }
 
-/// Why the session is over. A signal is neither: it ends a process, not the session.
+/// Why the client's conversation with the server is over. `Quit` and `Eof` are the session
+/// ending too; `Detach` is the client alone leaving. A signal is none of these: it ends a
+/// process, not the session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum End {
     Quit,
     Eof,
+    /// The session is kept; only the client leaves.
+    Detach,
 }
 
 /// A question the Lua layer asks about a pane's text. The panes are the server's, so these

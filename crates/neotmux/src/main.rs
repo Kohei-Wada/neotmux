@@ -348,4 +348,11 @@ mod tests {
             "{said}"
         );
     }
+
+    /// Keys belong to plugins that can rebind or drop them; `docs/plugins.md` is where they
+    /// are written down, not here. `C-b d` is the one a person will reach to add next.
+    #[test]
+    fn the_usage_text_names_no_keybinding() {
+        assert!(!usage().contains("C-b"), "{}", usage());
+    }
 }

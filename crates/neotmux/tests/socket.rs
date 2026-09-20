@@ -43,6 +43,12 @@ fn socket_in(runtime: &Path) -> PathBuf {
     runtime.join("neotmux/default.sock")
 }
 
+/// The runtime layer neotmux ships: the one an install puts on the default search path,
+/// read here straight out of the source tree.
+fn shipped_layer() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime")
+}
+
 /// A neotmux client on its own PTY, with `$XDG_RUNTIME_DIR` pointed wherever the test wants
 /// so that the session it starts is the test's own and nobody else's.
 struct Client {
@@ -59,7 +65,24 @@ impl Client {
         Self::start_sized(runtime, shell, 24, 80)
     }
 
+    /// A client with the shipped plugins loaded, `plugin/prefix` among them — the only way
+    /// for a test to reach `C-b` for real, since [`Client::start`] runs with no runtime
+    /// layer at all and so binds no keys.
+    fn start_with_prefix(runtime: &Path, shell: &str) -> Self {
+        Self::start_with(runtime, shell, 24, 80, Some(&shipped_layer()))
+    }
+
     fn start_sized(runtime: &Path, shell: &str, rows: u16, cols: u16) -> Self {
+        Self::start_with(runtime, shell, rows, cols, None)
+    }
+
+    fn start_with(
+        runtime: &Path,
+        shell: &str,
+        rows: u16,
+        cols: u16,
+        runtime_layer: Option<&Path>,
+    ) -> Self {
         let pair = native_pty_system()
             .openpty(PtySize {
                 rows,
@@ -75,6 +98,9 @@ impl Client {
         cmd.env("HOME", runtime);
         cmd.env("XDG_CONFIG_HOME", runtime);
         cmd.env("XDG_RUNTIME_DIR", runtime);
+        if let Some(layer) = runtime_layer {
+            cmd.env("NEOTMUX_RUNTIME", layer);
+        }
         cmd.arg("--log");
         cmd.arg(runtime.join("neotmux.log"));
         let child = pair.slave.spawn_command(cmd).expect("spawn");
@@ -466,6 +492,25 @@ fn kill_ends_a_session_nobody_is_attached_to() {
         assert!(Instant::now() < deadline, "the session outlived --kill");
         std::thread::sleep(Duration::from_millis(20));
     }
+}
+
+/// `C-b d`: the client exits cleanly, the session does not, and what was in the pane is
+/// still there when something attaches to it again.
+#[test]
+fn a_detach_leaves_the_client_and_keeps_the_session() {
+    let runtime = TestRuntime::new();
+    let mut first = Client::start_with_prefix(runtime.path(), "/bin/cat");
+    wait_for_socket(&socket_in(runtime.path()));
+    first.send("survives-a-detach\r");
+    first.wait_for_output("survives-a-detach");
+    first.send("\x02d");
+    assert!(
+        first.wait_for_exit().success(),
+        "a detached client did not exit cleanly"
+    );
+
+    let second = Client::start_with_prefix(runtime.path(), "/bin/cat");
+    second.wait_for_output("survives-a-detach");
 }
 
 #[test]

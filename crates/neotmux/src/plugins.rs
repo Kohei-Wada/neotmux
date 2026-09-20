@@ -101,6 +101,7 @@ impl Plugins {
                     continue;
                 }
                 Op::Quit => SessionOp::Quit,
+                Op::Detach => SessionOp::Detach,
                 Op::PaneSplit { dir } => SessionOp::PaneSplit { dir },
                 Op::PaneFocus { pane } => SessionOp::PaneFocus { pane },
                 Op::PaneResize { dir, cells } => SessionOp::PaneResize { dir, cells },
@@ -120,6 +121,11 @@ impl Plugins {
         for (tag, op) in self.drain_ops() {
             match op {
                 SessionOp::Quit => quit = true,
+                SessionOp::Detach => refuse(
+                    &tag,
+                    "neotmux.detach()",
+                    "there is no session to detach from until it starts",
+                ),
                 SessionOp::PaneSplit { dir } => refuse(
                     &tag,
                     &format!("pane.split('{dir}')"),

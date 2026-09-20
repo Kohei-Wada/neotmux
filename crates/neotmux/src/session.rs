@@ -255,18 +255,20 @@ impl Session {
         Ok(())
     }
 
-    /// Every op the tick raised, applied in the order they were pushed (§4.6). Returns
-    /// whether one of them asked to quit.
+    /// Every op the tick raised, applied in the order they were pushed (§4.6). Returns which
+    /// end, if any, one of them asked for — the first one asked, since once the conversation
+    /// is over there is nothing left for a later op to change.
     ///
     /// `log` and `notify` are not here: they never leave the client, which is where the
     /// source that raised them is. A refusal does come back here, and is logged against
     /// whoever asked — the op is applied after the tick, so there is nobody left to answer.
-    fn apply_ops(&mut self, ops: &[(String, SessionOp)]) -> anyhow::Result<bool> {
-        let mut quit = false;
+    fn apply_ops(&mut self, ops: &[(String, SessionOp)]) -> anyhow::Result<Option<End>> {
+        let mut ended = None;
         let mut spawned = 0usize;
         for (tag, op) in ops {
             match op {
-                SessionOp::Quit => quit = true,
+                SessionOp::Quit => ended = ended.or(Some(End::Quit)),
+                SessionOp::Detach => ended = ended.or(Some(End::Detach)),
                 SessionOp::PaneSplit { dir } if spawned >= MAX_NEW_SHELLS_PER_FRAME => {
                     logging::log(
                         Level::Error,
@@ -300,7 +302,7 @@ impl Session {
                 SessionOp::WindowFocus { window } => self.apply_window_focus(tag, *window)?,
             }
         }
-        Ok(quit)
+        Ok(ended)
     }
 
     fn apply_split(&mut self, tag: &str, dir: neotmux_proto::SplitDir) -> anyhow::Result<()> {
@@ -588,11 +590,11 @@ impl Session {
     /// The frame is `None` when nothing changed and the last one still stands.
     pub fn advance(&mut self, tock: &Tock) -> anyhow::Result<Pass<'_>> {
         self.wants_pane_output = tock.wants_pane_output;
-        if self.apply_ops(&tock.ops)? {
+        if let Some(end) = self.apply_ops(&tock.ops)? {
             return Ok(Pass {
                 steps: std::mem::take(&mut self.steps),
                 frame: None,
-                end: Some(End::Quit),
+                end: Some(end),
             });
         }
 

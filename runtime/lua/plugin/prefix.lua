@@ -18,6 +18,7 @@
 --   h j k l     the pane to the left, below, above, to the right
 --   r           resize mode: arrows or h/j/k/l move the boundary, anything else leaves
 --   c  n  p     a new window, the next one, the one before
+--   d           leave the session running and let go of this terminal
 local nav = require("neotmux.nav")
 local modes = require("neotmux.mode")
 
@@ -113,6 +114,9 @@ local M = {
     end,
     ["n"] = next_window,
     ["p"] = prev_window,
+    ["d"] = function()
+      neotmux.detach()
+    end,
   },
 }
 
