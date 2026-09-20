@@ -4,6 +4,7 @@ pub mod keymap;
 pub mod log;
 pub mod opt;
 pub mod pane;
+pub mod reserve;
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -16,6 +17,7 @@ use crate::geometry::Geometry;
 use crate::ops::{Level, Op, OpBuffer};
 use crate::overrun::Overrun;
 use crate::registry::{Kind, KindTag, RegistrationId, Registry};
+use crate::reserve::Reservations;
 use crate::source::{self, SourceId, Sources};
 
 pub use opt::Opts;
@@ -31,6 +33,7 @@ pub(crate) struct Shared {
     pub(crate) load_failures: Rc<RefCell<Vec<LoadFailure>>>,
     pub(crate) geometry: Rc<RefCell<Geometry>>,
     pub(crate) overrun: Rc<Overrun>,
+    pub(crate) reservations: Rc<Reservations>,
 }
 
 pub(crate) fn make_handle(
@@ -107,6 +110,7 @@ fn install_require_wrapper(
     sources: Rc<Sources>,
     registry: Rc<Registry>,
     buffers: Rc<Buffers>,
+    reservations: Rc<Reservations>,
     load_failures: Rc<RefCell<Vec<LoadFailure>>>,
 ) -> mlua::Result<Rc<Cell<bool>>> {
     let loading = Rc::new(Cell::new(false));
@@ -135,6 +139,7 @@ fn install_require_wrapper(
             .map(|chunk_name| sources.intern(&chunk_name));
         if let Some(id) = failed {
             registry.remove_all_of(id);
+            reservations.remove_all_of(id);
             forget_if_no_longer_drawing(&registry, &buffers, id);
         }
         load_failures.borrow_mut().push(LoadFailure {
@@ -161,6 +166,7 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
         load_failures,
         geometry,
         overrun,
+        reservations,
     } = shared;
     let neotmux = lua.create_table()?;
 
@@ -302,10 +308,15 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
         neotmux.set("resubscribe", resubscribe)?;
     }
 
+    {
+        let reserve = reserve::install(lua, sources.clone(), reservations.clone())?;
+        neotmux.set("reserve", reserve)?;
+    }
+
     let neotmux = seal(lua, neotmux, "neotmux")?;
     lua.globals().set("neotmux", neotmux)?;
 
-    install_require_wrapper(lua, sources, registry, buffers, load_failures)
+    install_require_wrapper(lua, sources, registry, buffers, reservations, load_failures)
 }
 
 /// A chunk assigning `neotmux.on_tick = ...` or replacing `neotmux.log` wholesale would make
