@@ -41,7 +41,7 @@ M.colors = {
 -- Written as escapes rather than as the characters themselves so the file stays readable in
 -- an editor that has no such font.
 M.caps = { left = "\u{e0b6}", right = "\u{e0b4}" }
-M.icons = { command = "\u{f1ae}", directory = "\u{e795}" }
+M.icons = { command = "\u{f1ae}", directory = "\u{f07b}" }
 
 -- `$HOME`, for the `~` a shell prompt writes: what the host read out of the environment, and
 -- nil where it had no `HOME`. Assign to it from your own init.lua to write a different prefix.

@@ -485,7 +485,7 @@ status.home = '/home/you'           -- the prefix written `~`
 ```
 
 The glyphs default to Nerd Font ones — a rounded cap either side (`U+E0B6`, `U+E0B4`), and
-one in front of each module (`U+F1AE`, `U+E795`). Without such a font they come out as boxes,
+one in front of each module (`U+F1AE`, `U+F07B`). Without such a font they come out as boxes,
 and the two lines above are the whole escape: empty strings leave the coloured blocks and take
 the glyphs off.
 

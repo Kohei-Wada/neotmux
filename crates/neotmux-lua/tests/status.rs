@@ -29,7 +29,7 @@ const GREEN: Color = rgb("#a6e3a1");
 const CAP_LEFT: &str = "\u{e0b6}";
 const CAP_RIGHT: &str = "\u{e0b4}";
 const COMMAND_ICON: &str = "\u{f1ae}";
-const DIRECTORY_ICON: &str = "\u{e795}";
+const DIRECTORY_ICON: &str = "\u{f07b}";
 
 const fn hex(byte: u8) -> u8 {
     match byte {
