@@ -1196,3 +1196,279 @@ fn a_plugin_asking_every_tick_does_not_make_an_idle_session_redraw() {
     let bytes = nt.bytes_in(Duration::from_secs(1));
     assert_eq!(bytes, 0, "an idle session redrew {bytes} bytes");
 }
+
+/// M2b: windows. A window is an independent pane tree, and switching shows a different one
+/// while the panes of the others go on running.
+///
+/// Both fixture plugins are loaded together where a test needs a split as well as a switch:
+/// `plugin.splitter` owns `C-b`/`C-o`/`C-g`, `plugin.windows` owns `C-w`/`C-t`/`C-n`/`C-r`.
+const WINDOW_FIXTURES: &str = "require('plugin.splitter') require('plugin.windows')";
+
+/// Switching shows a different pane, and switching back shows the first one's content
+/// exactly as it was left.
+#[test]
+fn a_second_window_shows_its_own_pane_and_the_first_keeps_its_content() {
+    let (mut nt, _init) = start("require('plugin.windows')", "cat");
+    nt.send("FIRST\r");
+    nt.wait_for_screen("FIRST", PATIENCE);
+
+    nt.send("\x17"); // C-w: open a window and show it
+    nt.wait_for_log("windows window_changed 2", PATIENCE);
+    nt.settle(Duration::from_millis(500));
+    let screen = nt.screen_after(Duration::from_millis(300));
+    assert!(
+        !screen.contains("FIRST"),
+        "the new window is showing the old window's pane:\n{screen}"
+    );
+
+    nt.send("SECOND");
+    nt.wait_for_screen("SECOND", PATIENCE);
+
+    nt.send("\x0e"); // C-n: back to the first window
+    nt.wait_for_log("windows window_changed 1", PATIENCE);
+    nt.wait_for_screen("FIRST", PATIENCE);
+    let screen = nt.screen_after(Duration::from_millis(300));
+    assert!(
+        !screen.contains("SECOND"),
+        "the first window is showing the second window's pane:\n{screen}"
+    );
+}
+
+/// The whole point of a window nobody is looking at: its shell goes on working. Its output
+/// has to be read — or the reader's channel fills and blocks the child — and it has to be
+/// kept, or switching back shows a hole where it was.
+///
+/// The marker is computed by the shell rather than typed, so the echo of the command line
+/// cannot be mistaken for the output of running it.
+#[test]
+fn a_command_run_in_a_hidden_window_has_produced_its_output_by_the_time_you_switch_back() {
+    let (mut nt, _init) = start("require('plugin.windows')", "/bin/sh");
+    nt.send("echo UP\r");
+    nt.wait_for_screen("UP", PATIENCE);
+    nt.send("\x17"); // C-w: a second window, shown
+    nt.wait_for_log("windows window_changed 2", PATIENCE);
+    nt.settle(Duration::from_millis(500));
+
+    nt.send("sleep 1; echo LATE$((6*7))\r");
+    nt.send("\x0e"); // C-n: away before the sleep is over
+    nt.wait_for_log("windows window_changed 1", PATIENCE);
+
+    let screen = nt.screen_after(Duration::from_secs(2));
+    assert!(
+        !screen.contains("LATE42"),
+        "the hidden window's output landed in the window being shown:\n{screen}"
+    );
+
+    nt.send("\x0e"); // C-n: back to it, well after the output was produced
+    nt.wait_for_log("windows window_changed 2", PATIENCE);
+    nt.wait_for_screen("LATE42", PATIENCE);
+}
+
+/// A pane in a hidden window is still a pane: two trees numbering their panes apart would
+/// make `pane.focus(id)` name two of them.
+#[test]
+fn pane_ids_do_not_collide_across_windows() {
+    let (mut nt, _init) = start(WINDOW_FIXTURES, "cat");
+    nt.send("UP\r");
+    nt.wait_for_screen("UP", PATIENCE);
+    nt.send("\x02"); // C-b: split the first window
+    nt.wait_for_log("splitter pane_opened 2", PATIENCE);
+
+    nt.send("\x17"); // C-w: a second window
+    nt.wait_for_log("windows window_changed 2", PATIENCE);
+    nt.send("\x02"); // C-b: split it too
+    nt.wait_for_log("splitter pane_opened 4", PATIENCE);
+
+    nt.send("\x12"); // C-r: report
+    let log = nt.wait_for_log("windows report", PATIENCE);
+    let report = line_with(&log, "windows report");
+    assert!(
+        report.contains("windows=1,2 current=2 panes=3,4"),
+        "the second window reused the first window's pane ids: {report}"
+    );
+
+    nt.send("\x0e"); // C-n: back to the first
+    nt.wait_for_log("windows window_changed 1", PATIENCE);
+    nt.send("\x12");
+    nt.settle(Duration::from_millis(500));
+    let log = nt.log_text();
+    let reports: Vec<&str> = log
+        .lines()
+        .filter(|l| l.contains("windows report"))
+        .collect();
+    assert!(
+        reports.last().expect("a report").contains("panes=1,2"),
+        "the first window's panes are not its own: {log}"
+    );
+}
+
+/// `pane.list` answers about the window being shown, so a hidden window's pane is not in it
+/// — and `pane.info` must not start describing panes nobody can see either.
+#[test]
+fn a_hidden_windows_pane_is_in_no_list_and_has_no_info() {
+    let (mut nt, _init) = start(
+        "require('plugin.windows') require('plugin.paneinfo')",
+        "/bin/cat",
+    );
+    nt.wait_for_log("paneinfo 1 command=cat", PATIENCE);
+    nt.send("UP\r");
+    nt.wait_for_screen("UP", PATIENCE);
+    nt.send("\x17"); // C-w: a second window, shown; the first window's pane is now hidden
+    nt.wait_for_log("windows window_changed 2", PATIENCE);
+    nt.settle(Duration::from_millis(700));
+
+    let log = nt.log_text();
+    let after: Vec<&str> = log
+        .lines()
+        .skip_while(|line| !line.contains("window_changed 2"))
+        .filter(|line| line.contains("paneinfo "))
+        .collect();
+    assert!(
+        after.iter().any(|line| line.contains("paneinfo 2")),
+        "the shown window's pane stopped being described:\n{log}"
+    );
+    assert!(
+        !after.iter().any(|line| line.contains("paneinfo 1")),
+        "a hidden pane is still being described:\n{after:?}"
+    );
+}
+
+/// The last pane of a window closing closes the window, and what is shown moves to another.
+#[test]
+fn closing_the_last_pane_of_a_window_closes_it_and_shows_another() {
+    let (mut nt, _init) = start("require('plugin.windows')", "cat");
+    nt.send("UP\r");
+    nt.wait_for_screen("UP", PATIENCE);
+    nt.send("\x17"); // C-w
+    nt.wait_for_log("windows window_changed 2", PATIENCE);
+    nt.settle(Duration::from_millis(500));
+
+    nt.send("\x04"); // C-d: EOF for the shown pane's cat
+    let log = nt.wait_for_log("windows window_closed 2", PATIENCE);
+    assert!(
+        line_with(&log, "window_closed 2").contains("windows=1"),
+        "a window_closed handler still saw the dead window:\n{log}"
+    );
+    nt.wait_for_log("windows window_changed 1", PATIENCE);
+
+    nt.send("SURVIVOR");
+    nt.wait_for_screen("SURVIVOR", PATIENCE);
+}
+
+/// M0a's guarantee, with windows in the way: the last window's last pane ends the session,
+/// and it ends cleanly.
+#[test]
+fn closing_the_last_window_exits_cleanly() {
+    let (mut nt, _init) = start("require('plugin.windows')", "cat");
+    nt.send("UP\r");
+    nt.wait_for_screen("UP", PATIENCE);
+    nt.send("\x17");
+    nt.wait_for_log("windows window_changed 2", PATIENCE);
+    nt.settle(Duration::from_millis(500));
+
+    nt.send("\x04"); // the second window's only pane
+    nt.wait_for_log("windows window_closed 2", PATIENCE);
+    nt.settle(Duration::from_millis(500));
+
+    nt.send("\x04"); // and the first window's, which is the last pane there is
+    assert!(nt.exited_cleanly(PATIENCE));
+}
+
+/// Focusing a window that does not exist is reported, and the session lives on.
+#[test]
+fn focusing_an_unknown_window_is_reported_and_does_not_stop_the_session() {
+    let (mut nt, _init) = start("require('plugin.windows')", "cat");
+    nt.send("UP\r");
+    nt.wait_for_screen("UP", PATIENCE);
+
+    nt.send("\x19"); // C-y: focus a window id nobody owns
+    let log = nt.wait_for_log("window.focus", PATIENCE);
+    let refusal = line_with(&log, "window.focus");
+    assert!(refusal.contains("plugin/windows"), "{refusal}");
+    assert!(refusal.contains("no such window"), "{refusal}");
+
+    nt.send("ALIVE");
+    nt.wait_for_screen("ALIVE", PATIENCE);
+}
+
+/// A band belongs to the surface, not to a window: the status plugin reserved it once and
+/// keeps it across a switch.
+#[test]
+fn the_shipped_status_band_survives_a_switch() {
+    let (mut nt, _init) = start_shipped("", "cat");
+    nt.wait_for_screen("panes 1 focus 1", PATIENCE);
+    nt.settle(Duration::from_millis(300));
+
+    nt.send("\x02c"); // C-b c: a window, shown
+    nt.wait_for_screen("panes 1 focus 2", PATIENCE);
+    assert_eq!(
+        nt.cell(23, 0),
+        "p",
+        "the status line left the row it reserved:\n{}",
+        nt.screen_after(Duration::ZERO)
+    );
+
+    nt.send("\x02n"); // C-b n: back
+    nt.wait_for_screen("panes 1 focus 1", PATIENCE);
+    assert_eq!(
+        nt.cell(23, 0),
+        "p",
+        "the status line lost its band on the way back:\n{}",
+        nt.screen_after(Duration::ZERO)
+    );
+}
+
+/// `C-b c` and `C-b n` do what they say, expressed with nothing but `neotmux.window`.
+#[test]
+fn the_prefix_opens_a_window_and_walks_to_the_next_one() {
+    let (mut nt, _init) = start_shipped("", "cat");
+    nt.wait_for_screen("panes 1 focus 1", PATIENCE);
+    nt.send("ONE");
+    nt.wait_for_screen("ONE", PATIENCE);
+
+    nt.send("\x02c"); // C-b c
+    nt.wait_for_screen("panes 1 focus 2", PATIENCE);
+    nt.settle(Duration::from_millis(500));
+    nt.send("TWO");
+    nt.wait_for_screen("TWO", PATIENCE);
+    let screen = nt.screen_after(Duration::from_millis(300));
+    assert!(
+        !screen.contains("ONE"),
+        "`C-b c` did not open a window of its own:\n{screen}"
+    );
+
+    nt.send("\x02n"); // C-b n
+    nt.wait_for_screen("panes 1 focus 1", PATIENCE);
+    nt.wait_for_screen("ONE", PATIENCE);
+    let screen = nt.screen_after(Duration::from_millis(300));
+    assert!(
+        !screen.contains("TWO"),
+        "`C-b n` did not walk to the other window:\n{screen}"
+    );
+    assert!(
+        !screen.contains("^B"),
+        "a prefix keystroke reached a shell:\n{screen}"
+    );
+}
+
+/// A window opened without being shown is a window running out of sight: `create()` alone
+/// does not switch, which is what makes `focus(create())` the thing that does.
+#[test]
+fn creating_a_window_without_focusing_it_leaves_it_hidden() {
+    let (mut nt, _init) = start("require('plugin.windows')", "cat");
+    nt.send("FIRST\r");
+    nt.wait_for_screen("FIRST", PATIENCE);
+
+    nt.send("\x14"); // C-t: create only
+    let log = nt.wait_for_log("windows window_opened 2", PATIENCE);
+    assert!(
+        line_with(&log, "window_opened 2").contains("windows=1,2 current=1 panes=1"),
+        "creating a window changed what is shown:\n{log}"
+    );
+
+    let screen = nt.screen_after(Duration::from_millis(500));
+    assert!(
+        screen.contains("FIRST"),
+        "the shown window's pane was replaced by one nobody asked to see:\n{screen}"
+    );
+}
