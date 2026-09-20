@@ -762,6 +762,7 @@ dependencies = [
  "ratatui",
  "signal-hook",
  "tempfile",
+ "unicode-width",
  "vt100",
 ]
 

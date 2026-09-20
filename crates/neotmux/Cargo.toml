@@ -20,6 +20,7 @@ anyhow.workspace = true
 nix.workspace = true
 ratatui.workspace = true
 signal-hook.workspace = true
+unicode-width.workspace = true
 
 [dev-dependencies]
 nix.workspace = true

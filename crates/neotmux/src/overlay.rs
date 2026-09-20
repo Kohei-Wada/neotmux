@@ -2,6 +2,7 @@ use neotmux_proto::{Color as PColor, DrawCmd, PaneId, PaneRects, Rect as PRect};
 use ratatui::Frame;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
+use unicode_width::UnicodeWidthChar;
 
 use crate::draw::color;
 
@@ -76,6 +77,9 @@ fn tint_cell(buf: &mut Buffer, area: Rect, bound: PRect, pos: (u16, u16), colors
     }
 }
 
+/// A run advances by what each character is worth on a terminal, not by one per `char`: a
+/// label with a wide character in it would otherwise put every glyph after it one column
+/// early and overrun its bound by the difference.
 fn draw_text(
     buf: &mut Buffer,
     area: Rect,
@@ -85,11 +89,27 @@ fn draw_text(
     colors: Colors,
 ) {
     let (x, y) = pos;
-    for (cx, ch) in (x..).zip(text.chars()) {
-        if cx >= bound.w {
+    let mut cx = x;
+    for ch in text.chars() {
+        let width = UnicodeWidthChar::width(ch).unwrap_or(0) as u16;
+        // A combining mark belongs to the cell before it and claims none of its own. Nothing
+        // here can attach it, so it is dropped rather than given a cell it would corrupt.
+        if width == 0 {
+            continue;
+        }
+        if cx.saturating_add(width) > bound.w {
             break;
         }
         draw_char(buf, area, bound, (cx, y), ch, colors);
+        // ratatui reads a wide glyph as owning the cells after it, which have to be empty.
+        for tail in 1..width {
+            if let Some(cell) = cell_at(buf, area, bound, (cx + tail, y)) {
+                cell.set_symbol("");
+                cell.set_fg(color(colors.fg));
+                cell.set_bg(color(colors.bg));
+            }
+        }
+        cx += width;
     }
 }
 
@@ -294,6 +314,50 @@ mod tests {
         let buf = render((10, 2), |frame, area| apply(frame, area, &cmds, &panes));
         assert_eq!(buf[(2, 0)].symbol(), "L");
         assert_eq!(buf[(3, 0)].symbol(), " ");
+    }
+
+    /// A wide character is worth two columns, so what follows it lands two columns along.
+    /// The cell it covers is marked empty, which is ratatui's signal to write nothing there —
+    /// so at the backend that column is simply never written.
+    #[test]
+    fn a_wide_character_takes_two_columns() {
+        let cmds = vec![DrawCmd::Text {
+            pane: None,
+            x: 0,
+            y: 0,
+            text: "\u{5e45}X".to_string(),
+            fg: Color::Default,
+            bg: Color::Default,
+        }];
+        let panes = PaneRects::new();
+        let buf = render((10, 2), |frame, area| apply(frame, area, &cmds, &panes));
+        assert_eq!(buf[(0, 0)].symbol(), "\u{5e45}");
+        assert_eq!(buf[(2, 0)].symbol(), "X");
+        assert_ne!(
+            buf[(1, 0)].symbol(),
+            "X",
+            "the run advanced one column per char"
+        );
+    }
+
+    /// Half a wide character is not a character. One that would straddle the edge of its
+    /// bound is dropped rather than drawn into a single cell.
+    #[test]
+    fn a_wide_character_that_does_not_fit_is_not_drawn() {
+        let pane = PaneId::from(1);
+        let cmds = vec![DrawCmd::Text {
+            pane: Some(pane),
+            x: 0,
+            y: 0,
+            text: "A\u{5e45}".to_string(),
+            fg: Color::Default,
+            bg: Color::Default,
+        }];
+        let mut panes = PaneRects::new();
+        panes.insert(pane, PRect::new(0, 0, 2, 1));
+        let buf = render((10, 2), |frame, area| apply(frame, area, &cmds, &panes));
+        assert_eq!(buf[(0, 0)].symbol(), "A");
+        assert_eq!(buf[(1, 0)].symbol(), " ");
     }
 
     fn line(from: (u16, u16), to: (u16, u16)) -> Vec<DrawCmd> {
