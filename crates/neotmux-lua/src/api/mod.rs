@@ -4,6 +4,7 @@ pub mod keymap;
 pub mod log;
 pub mod opt;
 pub mod pane;
+pub(crate) mod rect;
 pub mod reserve;
 pub mod window;
 

@@ -591,6 +591,113 @@ fn a_horizontal_split_draws_a_divider_row_between_the_panes() {
     );
 }
 
+/// `C-b r` and five presses of the left arrow: the divider is five columns further left
+/// than it was, which is the only place a resize can be seen. The mode is the plugin's own
+/// state, so the keys in it never reach a shell, and the key that leaves it gives them back.
+#[test]
+fn resize_mode_moves_the_divider_five_columns_and_gives_the_keys_back() {
+    let (mut nt, _init) = start_shipped("", "cat");
+    nt.send("\x02v"); // C-b v: the new pane on the right is the focused one
+    nt.wait_for_screen("panes 2 focus 2", PATIENCE);
+    nt.settle(Duration::from_millis(500));
+    assert_eq!(
+        nt.cell(0, DIVIDER_COL as u16),
+        VERTICAL_DIVIDER.to_string(),
+        "the split did not draw its divider in the first place"
+    );
+
+    nt.send("\x02r"); // C-b r: into resize mode
+    for _ in 0..5 {
+        nt.send("\x1b[D"); // the left arrow, one cell each
+    }
+    nt.settle(Duration::from_millis(500));
+
+    let moved = DIVIDER_COL - 5;
+    let screen = nt.screen_after(Duration::from_millis(200));
+    assert_eq!(
+        nt.cell(0, moved as u16),
+        VERTICAL_DIVIDER.to_string(),
+        "the divider did not move five columns left:\n{screen}"
+    );
+    assert_ne!(
+        nt.cell(0, DIVIDER_COL as u16),
+        VERTICAL_DIVIDER.to_string(),
+        "the divider is still where it was:\n{screen}"
+    );
+    assert!(
+        !screen.contains("^B") && !screen.contains('r'),
+        "a key of the mode reached a shell:\n{screen}"
+    );
+
+    nt.send("\r"); // anything that is not an adjustment leaves the mode
+    nt.send("TYPED");
+    nt.wait_for_screen("TYPED", PATIENCE);
+    let screen = nt.screen_after(Duration::from_millis(300));
+    let at = screen
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .find("TYPED")
+        .unwrap_or_else(|| panic!("the focused pane stopped taking keys:\n{screen}"));
+    assert!(
+        at > moved,
+        "what was typed after the mode landed left of the divider:\n{screen}"
+    );
+}
+
+/// `h/j/k/l` over a nested layout: a tall pane on the left and two stacked on the right.
+/// From the bottom-right pane `k` is the one above it and `h` is the tall one beside it —
+/// asserted by typing into whatever ends up focused and seeing where the text lands.
+#[test]
+fn directional_focus_lands_on_the_pane_a_person_would_point_at() {
+    let (mut nt, _init) = start_shipped("", "cat");
+    nt.send("\x02v"); // C-b v: pane 2, the right-hand column, is focused
+    nt.wait_for_screen("panes 2 focus 2", PATIENCE);
+    nt.settle(Duration::from_millis(500));
+    nt.send("\x02-"); // C-b -: pane 3, the bottom of that column, is focused
+    nt.wait_for_screen("panes 3 focus 3", PATIENCE);
+    nt.settle(Duration::from_millis(500));
+
+    nt.send("CCC");
+    nt.settle(Duration::from_millis(500));
+    nt.send("\x02k"); // C-b k: up, to the top of the right-hand column
+    nt.settle(Duration::from_millis(500));
+    nt.send("BBB");
+    nt.settle(Duration::from_millis(500));
+    nt.send("\x02h"); // C-b h: left, to the tall pane beside it
+    nt.settle(Duration::from_millis(500));
+    nt.send("AAA");
+    nt.wait_for_screen("AAA", PATIENCE);
+
+    let screen = nt.screen_after(Duration::from_millis(500));
+    let at = |needle: &str| {
+        screen
+            .lines()
+            .enumerate()
+            .find_map(|(row, line)| line.find(needle).map(|col| (row, col)))
+            .unwrap_or_else(|| panic!("{needle} never reached a pane:\n{screen}"))
+    };
+    let (a_row, a_col) = at("AAA");
+    let (b_row, b_col) = at("BBB");
+    let (c_row, c_col) = at("CCC");
+    assert!(
+        a_col < DIVIDER_COL,
+        "`h` did not land in the left-hand pane:\n{screen}"
+    );
+    assert!(
+        b_col > DIVIDER_COL && b_row < DIVIDER_ROW,
+        "`k` did not land in the pane above:\n{screen}"
+    );
+    assert!(
+        c_col > DIVIDER_COL && c_row > DIVIDER_ROW,
+        "the split did not leave the bottom-right pane focused:\n{screen}"
+    );
+    assert!(
+        a_row < DIVIDER_ROW,
+        "the left-hand pane is the whole column, so its shell starts at the top:\n{screen}"
+    );
+}
+
 /// Task 4 step 5: the prefix is a plugin, not a feature. Switched off from a user config —
 /// the same one line that switches the status line off — `C-b` is an ordinary keystroke and
 /// the multiplexer is otherwise unchanged. That the defaults table works for a second entry

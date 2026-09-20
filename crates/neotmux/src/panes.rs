@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use neotmux_core::layout::{SplitRefused, Tree, assign};
-use neotmux_core::proto::{Epoch, PaneId, Rect as PRect, Reserved, Size, SplitDir};
+use neotmux_core::layout::{ResizeRefused, SplitRefused, Tree, assign};
+use neotmux_core::proto::{Dir, Epoch, PaneId, Rect as PRect, Reserved, Size, SplitDir};
 use neotmux_term::state::MIN_GRID;
 
 /// Where each pane currently sits, in surface-local coordinates (the same
@@ -102,6 +102,16 @@ impl PaneLayout {
             .split(target, dir, new, surface, MIN_GRID, self.gutter)?;
         self.reassign();
         self.focus = Some(new);
+        Ok(())
+    }
+
+    /// Moves the boundary between the focused pane and its neighbour in `dir` by `cells`.
+    pub fn resize(&mut self, dir: Dir, cells: u16) -> Result<(), ResizeRefused> {
+        let target = self.focus.ok_or(ResizeRefused::UnknownPane)?;
+        let surface = self.surface();
+        self.tree
+            .resize(target, dir, cells, surface, MIN_GRID, self.gutter)?;
+        self.reassign();
         Ok(())
     }
 
@@ -270,6 +280,44 @@ mod tests {
         );
         assert_eq!(layout.panes(), vec![(pane(1), PRect::new(0, 0, 2, 24))]);
         assert_eq!(layout.focus(), Some(pane(1)));
+    }
+
+    /// The op is about the focused pane, so the layout is where "which pane" is decided.
+    #[test]
+    fn a_resize_moves_the_focused_panes_boundary_and_leaves_the_focus_alone() {
+        let mut layout = layout(24, 80);
+        layout.split(SplitDir::Vertical, pane(2)).expect("fits");
+        layout.resize(Dir::Left, 6).expect("there is room");
+        assert_eq!(
+            layout.panes(),
+            vec![
+                (pane(1), PRect::new(0, 0, 34, 24)),
+                (pane(2), PRect::new(34, 0, 46, 24)),
+            ]
+        );
+        assert_eq!(layout.focus(), Some(pane(2)));
+    }
+
+    #[test]
+    fn a_resize_with_no_neighbour_that_way_is_refused_and_changes_nothing() {
+        let mut layout = layout(24, 80);
+        layout.split(SplitDir::Vertical, pane(2)).expect("fits");
+        assert_eq!(
+            layout.resize(Dir::Right, 1),
+            Err(ResizeRefused::NoNeighbour)
+        );
+        assert_eq!(
+            layout.resize(Dir::Left, 80),
+            Err(ResizeRefused::TooSmall),
+            "a move that leaves the other side below the minimum grid"
+        );
+        assert_eq!(
+            layout.panes(),
+            vec![
+                (pane(1), PRect::new(0, 0, 40, 24)),
+                (pane(2), PRect::new(40, 0, 40, 24)),
+            ]
+        );
     }
 
     #[test]
