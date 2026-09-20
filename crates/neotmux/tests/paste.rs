@@ -8,6 +8,8 @@ use std::time::{Duration, Instant};
 
 use portable_pty::{Child, CommandBuilder, PtySize, native_pty_system};
 
+mod session;
+
 /// Four kibibytes: four times the bufferful one readable edge used to hand over.
 const PASTE: usize = 4096;
 
@@ -115,6 +117,7 @@ fn a_four_kibibyte_paste_arrives_whole_without_a_second_keystroke() {
 
     let complete = shows("PASTE-COMPLETE");
     drop(guard.0.kill());
+    session::end_session(isolation.path());
 
     assert!(
         complete,

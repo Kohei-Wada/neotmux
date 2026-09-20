@@ -6,6 +6,8 @@ use std::time::{Duration, Instant};
 
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 
+use crate::session;
+
 /// The env/args every neotmux test invocation needs: an isolated HOME,
 /// XDG_CONFIG_HOME and XDG_RUNTIME_DIR (so the binary never touches the
 /// developer's own config, and never shares a session with the test running
@@ -72,7 +74,7 @@ pub struct Neotmux {
     master: Box<dyn MasterPty + Send>,
     parser: Arc<Mutex<vt100::Parser>>,
     byte_rx: mpsc::Receiver<usize>,
-    _isolation: tempfile::TempDir,
+    isolation: tempfile::TempDir,
 }
 
 impl Neotmux {
@@ -164,7 +166,7 @@ impl Neotmux {
             master: pair.master,
             parser,
             byte_rx,
-            _isolation: isolation,
+            isolation,
         };
         nt.wait_until_raw();
         nt
@@ -425,5 +427,6 @@ impl Drop for Neotmux {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+        session::end_session(self.isolation.path());
     }
 }

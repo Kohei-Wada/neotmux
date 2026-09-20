@@ -6,6 +6,8 @@ use nix::sys::termios::{LocalFlags, Termios};
 use nix::unistd::Pid;
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 
+mod session;
+
 fn run_in_pty(env: &[(&str, &str)], input: &[u8]) -> (String, bool, Termios) {
     run_in_pty_sized(24, 80, env, input)
 }
@@ -73,6 +75,7 @@ fn run_in_pty_sized(
     let termios = pair.master.get_termios().expect("termios after exit");
     drop(pair.master);
     let out = collector.join().expect("collector");
+    session::end_session(isolation.path());
     (
         String::from_utf8_lossy(&out).into_owned(),
         status.success(),
@@ -172,6 +175,7 @@ fn send_signal_and_capture(sig: Signal) -> (bool, Option<String>, Termios) {
     let termios = pair.master.get_termios().expect("termios after exit");
     drop(pair.master);
     collector.join().ok();
+    session::end_session(isolation.path());
     (
         status.success(),
         status.signal().map(str::to_owned),
@@ -354,6 +358,7 @@ struct AbandonedTerminal {
     master: Option<Box<dyn portable_pty::MasterPty + Send>>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
     pid: i32,
+    isolation: tempfile::TempDir,
 }
 
 impl AbandonedTerminal {
@@ -385,6 +390,7 @@ impl AbandonedTerminal {
             master: Some(pair.master),
             child,
             pid,
+            isolation,
         }
     }
 
@@ -398,6 +404,7 @@ impl Drop for AbandonedTerminal {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+        session::end_session(self.isolation.path());
     }
 }
 

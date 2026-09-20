@@ -3,6 +3,8 @@ use std::time::{Duration, Instant};
 
 use portable_pty::{Child, CommandBuilder, PtySize, native_pty_system};
 
+mod session;
+
 struct ChildGuard(Box<dyn Child + Send + Sync>);
 
 impl Drop for ChildGuard {
@@ -91,6 +93,7 @@ fn a_flooding_child_does_not_starve_ctrl_c() {
     drop(guard);
     drop(pair.master);
     drainer.join().ok();
+    session::end_session(isolation.path());
 
     match result {
         Ok(status) => assert!(status.success(), "expected neotmux to exit cleanly"),

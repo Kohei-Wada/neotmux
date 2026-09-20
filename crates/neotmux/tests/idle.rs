@@ -5,6 +5,8 @@ use std::time::{Duration, Instant};
 
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 
+mod session;
+
 const IDLE_BYTE_BOUND: usize = 64;
 
 #[test]
@@ -66,6 +68,7 @@ fn produces_no_output_while_idle() {
 
     child.kill().ok();
     child.wait().ok();
+    session::end_session(isolation.path());
 
     assert!(
         idle_bytes <= IDLE_BYTE_BOUND,
@@ -213,6 +216,7 @@ fn idle_cpu(plugins: &[(&str, &str)], window: Duration) -> f64 {
 
     child.kill().ok();
     child.wait().ok();
+    session::end_session(isolation.path());
     after - before
 }
 
