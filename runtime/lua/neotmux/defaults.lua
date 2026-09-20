@@ -12,4 +12,7 @@ return {
   -- Off, unlike the rest: which output means a pane is waiting for a human is an opinion
   -- about what you run, and the other three are not.
   watch = false,
+  -- Off for the same kind of reason, about space rather than output: a status line spends a
+  -- row, a sidebar spends a third of the width.
+  sidebar = false,
 }

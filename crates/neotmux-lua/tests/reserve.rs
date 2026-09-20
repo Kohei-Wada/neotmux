@@ -24,14 +24,18 @@ fn built(files: &[(&str, &str)]) -> (tempfile::TempDir, LuaSubsystem) {
 /// What the host does at a frame boundary: settle the surface, hand out the bands, publish
 /// the geometry the panes were left with, and tick.
 fn frame(sub: &LuaSubsystem, applied: bool) {
-    let reserved = sub.reserved();
-    sub.lay_out_reservations(SURFACE, applied);
+    let reserved = if applied {
+        sub.reserved()
+    } else {
+        Reserved::default()
+    };
+    sub.lay_out_reservations(SURFACE, reserved);
     let content = Size {
-        rows: SURFACE.rows - if applied { reserved.rows() } else { 0 },
-        cols: SURFACE.cols,
+        rows: SURFACE.rows - reserved.rows(),
+        cols: SURFACE.cols - reserved.cols(),
     };
     let pane = PaneId::from(1);
-    let rect = Rect::new(0, if applied { reserved.top } else { 0 }, 80, content.rows);
+    let rect = Rect::new(reserved.left, reserved.top, content.cols, content.rows);
     sub.begin_frame(
         Epoch::new(content, vec![pane], Some(pane)),
         Geometry {
@@ -56,12 +60,23 @@ fn texts(sub: &LuaSubsystem) -> Vec<String> {
 }
 
 fn reporter(name: &str) -> String {
+    band_reporter(name, "bottom", 1)
+}
+
+/// A plugin that takes a band of `edge` and reports where it landed. `y+h` for a horizontal
+/// band, `x+w` for a vertical one — each axis reported in the coordinate it moves along.
+fn band_reporter(name: &str, edge: &str, cells: u16) -> String {
+    let along = match edge {
+        "left" | "right" => ("x", "w"),
+        _ => ("y", "h"),
+    };
+    let (pos, size) = along;
     format!(
         r#"
-        neotmux.reserve('bottom', 1)
+        neotmux.reserve('{edge}', {cells})
         neotmux.on_tick(function(ctx)
           local band = ctx:reserved()
-          ctx:text(nil, 0, 0, '{name}=' .. (band and (band.y .. '+' .. band.h) or 'nil'))
+          ctx:text(nil, 0, 0, '{name}=' .. (band and (band.{pos} .. '+' .. band.{size}) or 'nil'))
         end)
         return {{}}
         "#
@@ -77,7 +92,7 @@ fn two_sources_reserving_one_edge_get_separate_bands() {
         ("lua/plugin/a.lua", &reporter("a")),
         ("lua/plugin/b.lua", &reporter("b")),
     ]);
-    assert_eq!(sub.reserved(), Reserved::new(0, 2));
+    assert_eq!(sub.reserved(), Reserved::horizontal(0, 2));
     frame(&sub, true);
     assert_eq!(
         texts(&sub),
@@ -154,7 +169,7 @@ fn a_band_reserved_during_a_tick_does_not_move_that_frames_bands() {
     );
     assert_eq!(
         sub.reserved(),
-        Reserved::new(0, 2),
+        Reserved::horizontal(0, 2),
         "the host is told about it for the next frame"
     );
 
@@ -194,7 +209,7 @@ fn losing_the_rows_to_whoever_asked_first_is_a_value_not_an_error() {
     );
     assert_eq!(
         sub.reserved(),
-        Reserved::new(0, 4),
+        Reserved::horizontal(0, 4),
         "the refused reservation changed the grant"
     );
 }
@@ -221,7 +236,7 @@ fn releasing_a_band_gives_the_rows_back_and_moves_the_survivor_out() {
     assert_eq!(texts(&sub), vec!["b=22+1".to_string()]);
 
     sub.dispatch_key("C-r");
-    assert_eq!(sub.reserved(), Reserved::new(0, 1));
+    assert_eq!(sub.reserved(), Reserved::horizontal(0, 1));
     frame(&sub, true);
     assert_eq!(
         texts(&sub),
@@ -230,16 +245,15 @@ fn releasing_a_band_gives_the_rows_back_and_moves_the_survivor_out() {
     );
 }
 
-/// A malformed argument raises, like every other one in the ABI. `left` and `right` are not
-/// edges: a band is measured in rows.
+/// A malformed argument raises, like every other one in the ABI.
 #[test]
-fn a_vertical_edge_raises() {
+fn an_edge_that_does_not_exist_raises() {
     let (_dir, sub) = built(&[
         ("init.lua", "require('plugin.sideways')"),
         (
             "lua/plugin/sideways.lua",
             r#"
-            local ok, err = pcall(neotmux.reserve, 'left', 1)
+            local ok, err = pcall(neotmux.reserve, 'middle', 1)
             neotmux.on_tick(function(ctx)
               ctx:text(nil, 0, 0, tostring(ok) .. ': ' .. tostring(err))
             end)
@@ -250,10 +264,115 @@ fn a_vertical_edge_raises() {
     frame(&sub, true);
     let reported = texts(&sub);
     assert!(
-        reported[0].starts_with("false: ") && reported[0].contains("unknown edge 'left'"),
+        reported[0].starts_with("false: ") && reported[0].contains("unknown edge 'middle'"),
         "{reported:?}"
     );
     assert_eq!(sub.reserved(), Reserved::default());
+}
+
+/// The vertical edges, across the ABI: a band measured in columns, answered in the same
+/// surface coordinates a horizontal one is.
+#[test]
+fn a_left_band_is_columns_off_the_left_of_the_surface() {
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.side')"),
+        ("lua/plugin/side.lua", &band_reporter("side", "left", 20)),
+    ]);
+    assert_eq!(sub.reserved(), Reserved::vertical(20, 0));
+    frame(&sub, true);
+    assert_eq!(texts(&sub), vec!["side=0+20".to_string()]);
+}
+
+#[test]
+fn a_right_band_sits_against_the_right_of_the_surface() {
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.side')"),
+        ("lua/plugin/side.lua", &band_reporter("side", "right", 20)),
+    ]);
+    assert_eq!(sub.reserved(), Reserved::vertical(0, 20));
+    frame(&sub, true);
+    assert_eq!(texts(&sub), vec!["side=60+20".to_string()]);
+}
+
+/// The same outside-in rule the horizontal edges follow, in the other unit.
+#[test]
+fn two_sources_reserving_one_vertical_edge_get_separate_bands() {
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.a') require('plugin.b')"),
+        ("lua/plugin/a.lua", &band_reporter("a", "left", 10)),
+        ("lua/plugin/b.lua", &band_reporter("b", "left", 6)),
+    ]);
+    assert_eq!(sub.reserved(), Reserved::vertical(16, 0));
+    frame(&sub, true);
+    assert_eq!(
+        texts(&sub),
+        vec!["a=0+10".to_string(), "b=10+6".to_string()],
+        "the second to ask sits inside the first"
+    );
+}
+
+/// A band on each axis: the vertical one takes what the horizontal one left, so the two
+/// never share a cell.
+#[test]
+fn a_vertical_band_and_a_horizontal_one_do_not_overlap() {
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.bar') require('plugin.side')"),
+        (
+            "lua/plugin/bar.lua",
+            r#"
+            neotmux.reserve('top', 1)
+            neotmux.on_tick(function(ctx)
+              local b = ctx:reserved()
+              ctx:text(nil, 0, 0, 'bar=' .. b.x .. ',' .. b.y .. ' ' .. b.w .. 'x' .. b.h)
+            end)
+            return {}
+            "#,
+        ),
+        (
+            "lua/plugin/side.lua",
+            r#"
+            neotmux.reserve('left', 20)
+            neotmux.on_tick(function(ctx)
+              local b = ctx:reserved()
+              ctx:text(nil, 0, 0, 'side=' .. b.x .. ',' .. b.y .. ' ' .. b.w .. 'x' .. b.h)
+            end)
+            return {}
+            "#,
+        ),
+    ]);
+    frame(&sub, true);
+    assert_eq!(
+        texts(&sub),
+        vec!["bar=0,0 80x1".to_string(), "side=0,1 20x23".to_string()]
+    );
+}
+
+/// A count past the edge's own bound raises, and the two bounds are different numbers: four
+/// columns is a legal sidebar where forty rows would be a mistake.
+#[test]
+fn the_column_bound_is_not_the_row_bound() {
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.probe')"),
+        (
+            "lua/plugin/probe.lua",
+            r#"
+            local wide_ok = pcall(neotmux.reserve, 'left', 40)
+            local tall_ok, tall_err = pcall(neotmux.reserve, 'top', 40)
+            neotmux.on_tick(function(ctx)
+              ctx:text(nil, 0, 0, tostring(wide_ok) .. '/' .. tostring(tall_ok)
+                .. ': ' .. tostring(tall_err))
+            end)
+            return {}
+            "#,
+        ),
+    ]);
+    frame(&sub, true);
+    let reported = texts(&sub);
+    assert!(
+        reported[0].starts_with("true/false: ") && reported[0].contains("at most 4 rows"),
+        "{reported:?}"
+    );
+    assert_eq!(sub.reserved(), Reserved::vertical(40, 0));
 }
 
 #[test]

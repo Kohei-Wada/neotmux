@@ -66,7 +66,7 @@ Each of these returns a handle with one method, `handle:remove()`, which is idem
 | `neotmux.on_event(name, fn)` | when that event fires, with a table of fields |
 | `neotmux.on_key(fn)` | for every key, before any binding; return `true` to consume it |
 | `neotmux.keymap.set(spec, fn)` | for that one key; return `true` to consume it |
-| `neotmux.reserve(edge, rows)` | nothing runs; it takes a band of the surface (below) |
+| `neotmux.reserve(edge, cells)` | nothing runs; it takes a band of the surface (below) |
 
 Every event that fires, and the fields it carries:
 
@@ -134,8 +134,8 @@ colour like any other, and painting it is how you erase.
 ### Reserving a band
 
 ```lua
-local handle, message = neotmux.reserve('bottom', 1)   -- or 'top'
-handle:remove()                                        -- give the rows back
+local handle, message = neotmux.reserve('bottom', 1)   -- 'top', 'bottom', 'left' or 'right'
+handle:remove()                                        -- give the cells back
 ```
 
 The panes get what is left. A band is outside every pane's rect, so nothing a shell writes can
@@ -143,25 +143,37 @@ land in it and nothing in it is overwritten by a pane. That is the whole of what
 row used to be, and it is why there is no `ctx:status`: a status line is a plugin that wants
 one row at the bottom.
 
-There is no `'left'` and no `'right'`. The consumers are a status line and a window list, both
-horizontal; a vertical band is a different axis with a different unit and nobody asking for it.
+**The unit is the edge's own.** `top` and `bottom` are counted in rows, `left` and `right` in
+columns. Nothing else about the two axes differs, which is why there is one call and not two.
+
+A horizontal band spans the full width; a vertical one spans only what the horizontal bands
+left. No two bands ever share a cell, and the corner goes to the status line, because that is
+what a line across the terminal means.
 
 `ctx:reserved()` answers **your own** band, as `{ x, y, w, h }` in surface coordinates, or
 `nil`. It is per source: two plugins reserving the bottom get a row each, and the one that
 asked first gets the outermost. Draw in it with a `nil` pane, at the coordinates it gives you.
 
 It is `nil` in three cases, and all three mean *draw nothing this tick*: you reserved nothing,
-your reservation was refused, or the terminal is too small to spare the rows. That last one is
+your reservation was refused, or the terminal is too small to spare the cells. That last one is
 the same rule that hides a pane too small to show — the bands come straight back when the
 terminal grows.
+
+The terminal is judged **per axis**. A terminal too short for the rows still affords the
+columns: the horizontal bands go and the vertical ones stay, because rows and columns are
+spent out of different room and hiding a sidebar over a shortage of rows would give the panes
+nothing back for it.
 
 `reserve` takes effect on the **next** frame, like `pane.split`: the frame you call it in was
 already composed against the surface it had. Your first band arrives a frame later.
 
-An edge holds at most **4** rows in total. Asking for more than that, for zero rows, or for an
-edge that is not `top` or `bottom` *raises* — those are typos. Losing the rows to a plugin that
-asked first returns `nil` plus a message instead, exactly as `keymap.set` does when it loses a
-key: you wrote a legal call and lost a race.
+A horizontal edge holds at most **4 rows** in total, a vertical one at most **40 columns**.
+The two numbers are decided separately: four is where a line or two of text stops being a
+line of text, while forty is half of the eighty columns a terminal is still written against —
+past that a band is not a margin on the panes but the layout. Asking for more than the edge's
+own bound, for zero, or for a name no edge has *raises* — those are typos. Losing the cells to
+a plugin that asked first returns `nil` plus a message instead, exactly as `keymap.set` does
+when it loses a key: you wrote a legal call and lost a race.
 
 ### Panes
 
@@ -516,7 +528,7 @@ costs one plugin one frame instead of costing you the program.
 
 ## The shipped defaults
 
-neotmux ships three plugins in the runtime layer an install puts on the search path:
+neotmux ships five plugins in the runtime layer an install puts on the search path:
 
 | plugin | what it does |
 |---|---|
@@ -524,8 +536,9 @@ neotmux ships three plugins in the runtime layer an install puts on the search p
 | `prefix` | a `C-b` prefix over `v`, `-`, `o`, `h/j/k/l`, `r`, `c` and `n` |
 | `borders` | a rule along every boundary between two panes |
 | `watch` | says which pane looks like it is waiting for you — **off by default** |
+| `sidebar` | the windows and their panes, down a reserved left band — **off by default** |
 
-None of them is a host feature — all three are ordinary files making ordinary API calls, and
+None of them is a host feature — all five are ordinary files making ordinary API calls, and
 the prefix is the only reason a fresh install can make a second pane at all. `C-b v` splits
 vertically (the panes end up side by side, because `pane.split('vertical')` divides the
 width), `C-b -` splits horizontally (one above the other), `C-b o` focuses the next pane,
@@ -554,11 +567,13 @@ require('neotmux.defaults').prefix = false
 require('neotmux.defaults').borders = false
 ```
 
-`watch` goes the other way: it is off until you turn it on, because what counts as a pane
-waiting for you is an opinion about what you run, and a status line is not.
+`watch` and `sidebar` go the other way: they are off until you turn them on. What counts as a
+pane waiting for you is an opinion about what you run, and twenty-four columns of sidebar is
+an opinion about screen real estate; a status line is neither.
 
 ```lua
 require('neotmux.defaults').watch = true
+require('neotmux.defaults').sidebar = true
 ```
 
 That is a Lua module the runtime layer ships, not a host feature: neotmux has no idea the
@@ -624,6 +639,31 @@ which costs you the `~` and nothing else; assign to it if you want a different p
 
 A directory too long for the space left loses its leading components — `.../src/neotmux` —
 and is dropped along with its icon if not even its last component fits.
+
+### Changing what the sidebar looks like
+
+`plugin.sidebar` takes twenty-four columns off the left and lists the session down them: a row
+per window, then a row per pane of that window with what it is running. A ▸ marks the
+window being shown and a • the focused pane. Numbers are positions, the same way the
+status bar writes them, so a pane reads `2.1`.
+
+```lua
+local sidebar = require('plugin.sidebar')
+sidebar.colors.focused_pane = '#f9e2af'
+sidebar.markers = { current_window = '>', window = ' ', focused_pane = '*', pane = ' ' }
+```
+
+`colors` and `markers` are read every tick. A marker is one cell: one that measured two
+columns would push every name on its row across by one.
+
+The **width** is not in that table. It is a `local` at the top of the file, because the
+reservation is made once while the file is being required and the host is never told a band
+changed width. Edit it there, or leave the sidebar off.
+
+A pane in a window nobody is looking at shows — instead of a command. `pane.info`
+answers about the shown window's panes and no others — reading `/proc` for panes nobody
+can see is a syscall bill that grows with the windows — and an em dash is the honest
+thing to write for a fact the host has not got.
 
 ### Changing what the borders look like
 

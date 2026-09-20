@@ -92,7 +92,7 @@ fn frame(
     current: u32,
 ) -> Vec<DrawCmd> {
     let reserved = sub.reserved();
-    sub.lay_out_reservations(SURFACE, true);
+    sub.lay_out_reservations(SURFACE, reserved);
     let content = Size {
         rows: SURFACE.rows - reserved.rows(),
         cols: COLS,

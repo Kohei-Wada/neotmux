@@ -1,21 +1,35 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
-use neotmux_core::proto::{Edge, Rect, Reserved, Size};
+use neotmux_core::proto::{Axis, Edge, Rect, Reserved, Size};
 
 use crate::source::SourceId;
 
-/// The most rows one edge can be reserved for, whoever asks. A band is a line or two of text
-/// along an edge — a status line, a window list — and past four the number is not a band but
-/// a mistake (a pixel count, a colour), refused for the same reason `neotmux.opt.pane_gutter`
-/// is bounded.
-///
-/// This is the bound a reservation is *refused* against, and it is a constant rather than a
-/// measurement of the terminal because `init.lua` runs before there is a session: at the
-/// moment a plugin asks, there is no surface to measure. The terminal's own limit is a
-/// separate judgement made every frame by whoever owns the layout, because a terminal can
-/// shrink long after the reservation was granted (§6).
+/// The most rows one horizontal edge can be reserved for, whoever asks. A band there is a
+/// line or two of text along an edge — a status line, a window list — and past four the
+/// number is not a band but a mistake (a pixel count, a colour), refused for the same reason
+/// `neotmux.opt.pane_gutter` is bounded.
 pub const MAX_RESERVED_ROWS: u16 = 4;
+
+/// The most columns one vertical edge can be reserved for. Not four: the bound is not a
+/// number of lines of text but a share of the surface, and a terminal has far more columns
+/// than rows. Half of the 80 columns everything in a terminal is still written against is
+/// the line — a sidebar wide enough for a window name and a command, and past it the band
+/// is not a margin on the panes but the layout.
+pub const MAX_RESERVED_COLS: u16 = 40;
+
+/// The bound one edge is refused against, in the edge's own unit.
+///
+/// It is a constant rather than a measurement of the terminal because `init.lua` runs before
+/// there is a session: at the moment a plugin asks, there is no surface to measure. The
+/// terminal's own limit is a separate judgement made every frame by whoever owns the layout,
+/// because a terminal can shrink long after the reservation was granted (§6).
+pub fn max_reserved(axis: Axis) -> u16 {
+    match axis {
+        Axis::Rows => MAX_RESERVED_ROWS,
+        Axis::Columns => MAX_RESERVED_COLS,
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ReservationId(u64);
@@ -24,7 +38,8 @@ struct Entry {
     id: ReservationId,
     owner: SourceId,
     edge: Edge,
-    rows: u16,
+    /// In the edge's own unit: rows for a horizontal band, columns for a vertical one.
+    cells: u16,
 }
 
 #[derive(Default)]
@@ -49,23 +64,25 @@ impl Reservations {
     }
 
     /// `Err` carries the message handed back to the caller; nothing is changed in that case.
-    pub fn add(&self, owner: SourceId, edge: Edge, rows: u16) -> Result<ReservationId, String> {
+    pub fn add(&self, owner: SourceId, edge: Edge, cells: u16) -> Result<ReservationId, String> {
         let mut inner = self.inner.borrow_mut();
         if inner.entries.iter().any(|entry| entry.owner == owner) {
             return Err(
                 "already holds a reservation; remove it before asking for another".to_string(),
             );
         }
+        let axis = edge.axis();
+        let cap = max_reserved(axis);
         let taken: u16 = inner
             .entries
             .iter()
             .filter(|entry| entry.edge == edge)
-            .map(|entry| entry.rows)
+            .map(|entry| entry.cells)
             .sum();
-        if taken + rows > MAX_RESERVED_ROWS {
+        if taken + cells > cap {
             return Err(format!(
-                "the {edge} edge has {taken} of its {MAX_RESERVED_ROWS} rows reserved, \
-                 so {rows} more will not fit"
+                "the {edge} edge has {taken} of its {cap} {axis} reserved, \
+                 so {cells} more will not fit"
             ));
         }
         inner.next += 1;
@@ -74,7 +91,7 @@ impl Reservations {
             id,
             owner,
             edge,
-            rows,
+            cells,
         });
         Ok(id)
     }
@@ -93,47 +110,69 @@ impl Reservations {
         before - inner.entries.len()
     }
 
-    /// The rows granted so far, per edge. Whether the surface can afford them is not this
+    /// What has been granted so far, per edge. Whether the surface can afford it is not this
     /// module's judgement.
     pub fn totals(&self) -> Reserved {
         let inner = self.inner.borrow();
         let mut reserved = Reserved::default();
         for entry in &inner.entries {
-            reserved.add(entry.edge, entry.rows);
+            reserved.add(entry.edge, entry.cells);
         }
         reserved
     }
 
     /// The host has settled this frame's surface: give every granted reservation its band in
-    /// surface coordinates, or — when `applied` is false, because the surface could not
-    /// afford them — no band at all.
+    /// surface coordinates, or — for an axis the surface could not afford, which `applied`
+    /// reports as nothing reserved on its edges — no band at all.
+    ///
+    /// A horizontal band spans the full width and a vertical one only what the horizontal
+    /// bands left, so no two bands ever share a cell. The corner goes to the status line
+    /// because that is what a line across the terminal means; a sidebar is the column
+    /// between the lines.
     ///
     /// Called at a frame boundary and nowhere else, so the bands a tick reads are the ones
     /// the layout it is drawing against was computed from.
-    pub fn lay_out(&self, surface: Size, applied: bool) {
+    pub fn lay_out(&self, surface: Size, applied: Reserved) {
         let mut inner = self.inner.borrow_mut();
         let mut bands = BTreeMap::new();
-        if applied {
-            let (mut top, mut bottom) = (0u16, 0u16);
-            for entry in &inner.entries {
-                let rect = match entry.edge {
-                    Edge::Top => {
-                        let rect = Rect::new(0, top, surface.cols, entry.rows);
-                        top += entry.rows;
-                        rect
-                    }
-                    Edge::Bottom => {
-                        bottom += entry.rows;
-                        Rect::new(
-                            0,
-                            surface.rows.saturating_sub(bottom),
-                            surface.cols,
-                            entry.rows,
-                        )
-                    }
-                };
-                bands.insert(entry.owner, rect);
+        let middle_y = applied.top;
+        let middle_h = surface.rows.saturating_sub(applied.rows());
+        let (mut top, mut bottom, mut left, mut right) = (0u16, 0u16, 0u16, 0u16);
+        for entry in &inner.entries {
+            if applied.of(entry.edge) == 0 {
+                continue;
             }
+            let rect = match entry.edge {
+                Edge::Top => {
+                    let rect = Rect::new(0, top, surface.cols, entry.cells);
+                    top += entry.cells;
+                    rect
+                }
+                Edge::Bottom => {
+                    bottom += entry.cells;
+                    Rect::new(
+                        0,
+                        surface.rows.saturating_sub(bottom),
+                        surface.cols,
+                        entry.cells,
+                    )
+                }
+                Edge::Left => {
+                    let rect = Rect::new(left, middle_y, entry.cells, middle_h);
+                    left += entry.cells;
+                    rect
+                }
+                Edge::Right => {
+                    right += entry.cells;
+                    Rect::new(
+                        surface.cols.saturating_sub(right),
+                        middle_y,
+                        entry.cells,
+                        middle_h,
+                    )
+                }
+            };
+            bands.insert(entry.owner, rect);
         }
         inner.bands = bands;
     }
@@ -159,13 +198,18 @@ mod tests {
         Size { rows: 24, cols: 80 }
     }
 
+    /// The ordinary case: the surface affords everything that was granted.
+    fn lay_out(reservations: &Reservations) {
+        reservations.lay_out(surface(), reservations.totals());
+    }
+
     #[test]
     fn a_reservation_takes_rows_from_its_own_edge() {
         let (_s, a, b) = sources();
         let reservations = Reservations::new();
         reservations.add(a, Edge::Bottom, 1).expect("granted");
         reservations.add(b, Edge::Top, 2).expect("granted");
-        assert_eq!(reservations.totals(), Reserved::new(2, 1));
+        assert_eq!(reservations.totals(), Reserved::horizontal(2, 1));
     }
 
     #[test]
@@ -174,7 +218,7 @@ mod tests {
         let reservations = Reservations::new();
         reservations.add(a, Edge::Bottom, 1).expect("granted");
         reservations.add(b, Edge::Bottom, 1).expect("granted");
-        reservations.lay_out(surface(), true);
+        lay_out(&reservations);
         assert_eq!(reservations.band(a), Some(Rect::new(0, 23, 80, 1)));
         assert_eq!(
             reservations.band(b),
@@ -189,9 +233,82 @@ mod tests {
         let reservations = Reservations::new();
         reservations.add(a, Edge::Top, 2).expect("granted");
         reservations.add(b, Edge::Top, 1).expect("granted");
-        reservations.lay_out(surface(), true);
+        lay_out(&reservations);
         assert_eq!(reservations.band(a), Some(Rect::new(0, 0, 80, 2)));
         assert_eq!(reservations.band(b), Some(Rect::new(0, 2, 80, 1)));
+    }
+
+    #[test]
+    fn a_vertical_band_is_columns_off_its_own_edge() {
+        let (_s, a, b) = sources();
+        let reservations = Reservations::new();
+        reservations.add(a, Edge::Left, 20).expect("granted");
+        reservations.add(b, Edge::Right, 10).expect("granted");
+        assert_eq!(reservations.totals(), Reserved::vertical(20, 10));
+        lay_out(&reservations);
+        assert_eq!(reservations.band(a), Some(Rect::new(0, 0, 20, 24)));
+        assert_eq!(reservations.band(b), Some(Rect::new(70, 0, 10, 24)));
+    }
+
+    #[test]
+    fn two_sources_on_one_vertical_edge_get_separate_bands_from_the_outside_in() {
+        let (_s, a, b) = sources();
+        let reservations = Reservations::new();
+        reservations.add(a, Edge::Left, 10).expect("granted");
+        reservations.add(b, Edge::Left, 6).expect("granted");
+        lay_out(&reservations);
+        assert_eq!(reservations.band(a), Some(Rect::new(0, 0, 10, 24)));
+        assert_eq!(
+            reservations.band(b),
+            Some(Rect::new(10, 0, 6, 24)),
+            "the second to ask sits inside the first"
+        );
+    }
+
+    /// A vertical band takes only what the horizontal ones left, so the corner belongs to
+    /// exactly one source.
+    #[test]
+    fn a_vertical_band_stops_where_a_horizontal_one_starts() {
+        let (_s, a, b) = sources();
+        let reservations = Reservations::new();
+        reservations.add(a, Edge::Top, 1).expect("granted");
+        reservations.add(b, Edge::Left, 20).expect("granted");
+        lay_out(&reservations);
+        assert_eq!(reservations.band(a), Some(Rect::new(0, 0, 80, 1)));
+        assert_eq!(reservations.band(b), Some(Rect::new(0, 1, 20, 23)));
+    }
+
+    /// The host refuses the axes separately, and so does the hand-out: the bands of the axis
+    /// that fits are still placed, against the surface the other axis was not taken from.
+    #[test]
+    fn an_axis_the_surface_refused_loses_its_bands_and_the_other_keeps_its_own() {
+        let (_s, a, b) = sources();
+        let reservations = Reservations::new();
+        reservations.add(a, Edge::Top, 1).expect("granted");
+        reservations.add(b, Edge::Left, 20).expect("granted");
+        reservations.lay_out(surface(), Reserved::vertical(20, 0));
+        assert_eq!(reservations.band(a), None);
+        assert_eq!(reservations.band(b), Some(Rect::new(0, 0, 20, 24)));
+    }
+
+    /// Forty columns is a sidebar; forty rows is a mistake. The two bounds are decided
+    /// separately, and neither edge spends the other's.
+    #[test]
+    fn the_vertical_edges_are_bounded_in_columns_not_rows() {
+        let (_s, a, b) = sources();
+        let reservations = Reservations::new();
+        reservations
+            .add(a, Edge::Left, MAX_RESERVED_COLS)
+            .expect("granted");
+        let refused = reservations.add(b, Edge::Left, 1).expect_err("refused");
+        assert!(refused.contains("columns reserved"), "{refused}");
+        reservations
+            .add(b, Edge::Right, MAX_RESERVED_ROWS)
+            .expect("a count that fills a horizontal edge is nothing much on a vertical one");
+        assert_eq!(
+            reservations.totals(),
+            Reserved::vertical(MAX_RESERVED_COLS, MAX_RESERVED_ROWS)
+        );
     }
 
     #[test]
@@ -199,7 +316,7 @@ mod tests {
         let (_s, a, b) = sources();
         let reservations = Reservations::new();
         reservations.add(a, Edge::Bottom, 1).expect("granted");
-        reservations.lay_out(surface(), true);
+        lay_out(&reservations);
         assert_eq!(reservations.band(b), None);
     }
 
@@ -208,9 +325,9 @@ mod tests {
         let (_s, a, _b) = sources();
         let reservations = Reservations::new();
         reservations.add(a, Edge::Bottom, 1).expect("granted");
-        reservations.lay_out(surface(), false);
+        reservations.lay_out(surface(), Reserved::default());
         assert_eq!(reservations.band(a), None);
-        reservations.lay_out(surface(), true);
+        lay_out(&reservations);
         assert!(
             reservations.band(a).is_some(),
             "growing back brings it back"
@@ -226,8 +343,11 @@ mod tests {
             .expect("granted");
         let refused = reservations.add(b, Edge::Bottom, 1).expect_err("refused");
         assert!(refused.contains("will not fit"), "{refused}");
-        assert_eq!(reservations.totals(), Reserved::new(0, MAX_RESERVED_ROWS));
-        reservations.lay_out(surface(), true);
+        assert_eq!(
+            reservations.totals(),
+            Reserved::horizontal(0, MAX_RESERVED_ROWS)
+        );
+        lay_out(&reservations);
         assert_eq!(reservations.band(b), None);
     }
 
@@ -239,7 +359,10 @@ mod tests {
             .add(a, Edge::Bottom, MAX_RESERVED_ROWS)
             .expect("granted");
         reservations.add(b, Edge::Top, 1).expect("granted");
-        assert_eq!(reservations.totals(), Reserved::new(1, MAX_RESERVED_ROWS));
+        assert_eq!(
+            reservations.totals(),
+            Reserved::horizontal(1, MAX_RESERVED_ROWS)
+        );
     }
 
     #[test]
@@ -249,7 +372,7 @@ mod tests {
         reservations.add(a, Edge::Bottom, 1).expect("granted");
         let refused = reservations.add(a, Edge::Top, 1).expect_err("refused");
         assert!(refused.contains("already holds a reservation"), "{refused}");
-        assert_eq!(reservations.totals(), Reserved::new(0, 1));
+        assert_eq!(reservations.totals(), Reserved::horizontal(0, 1));
     }
 
     #[test]
@@ -260,9 +383,9 @@ mod tests {
         reservations.add(b, Edge::Bottom, 1).expect("granted");
         assert!(reservations.remove(id));
         assert!(!reservations.remove(id), "remove is idempotent");
-        assert_eq!(reservations.totals(), Reserved::new(0, 1));
+        assert_eq!(reservations.totals(), Reserved::horizontal(0, 1));
 
-        reservations.lay_out(surface(), true);
+        lay_out(&reservations);
         assert_eq!(reservations.band(a), None);
         assert_eq!(
             reservations.band(b),
@@ -278,7 +401,7 @@ mod tests {
         let id = reservations.add(a, Edge::Bottom, 1).expect("granted");
         reservations.remove(id);
         reservations.add(a, Edge::Top, 1).expect("granted again");
-        assert_eq!(reservations.totals(), Reserved::new(1, 0));
+        assert_eq!(reservations.totals(), Reserved::horizontal(1, 0));
     }
 
     #[test]

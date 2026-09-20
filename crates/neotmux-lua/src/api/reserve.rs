@@ -4,7 +4,7 @@ use mlua::{Function, Lua, Table, Value};
 
 use neotmux_core::proto::Edge;
 
-use crate::reserve::{MAX_RESERVED_ROWS, ReservationId, Reservations};
+use crate::reserve::{ReservationId, Reservations, max_reserved};
 use crate::source::{self, Sources};
 
 fn handle(lua: &Lua, reservations: Rc<Reservations>, id: ReservationId) -> mlua::Result<Table> {
@@ -17,11 +17,15 @@ fn handle(lua: &Lua, reservations: Rc<Reservations>, id: ReservationId) -> mlua:
     Ok(handle)
 }
 
-/// `neotmux.reserve(edge, rows)`: a band of the surface the panes no longer get.
+/// `neotmux.reserve(edge, cells)`: a band of the surface the panes no longer get.
 ///
-/// The failures are the two §4.4 already distinguishes. An unparseable edge, a row count of
+/// `cells` is counted in the edge's own unit: rows at the top and the bottom, columns at the
+/// left and the right. That is the only difference between the two axes, and the reason
+/// there is one call rather than two.
+///
+/// The failures are the two §4.4 already distinguishes. An unparseable edge, a count of
 /// zero, and a request no edge could ever grant are programming errors and raise, like every
-/// other malformed argument in the ABI. Losing the rows to someone who asked first is not:
+/// other malformed argument in the ABI. Losing the band to someone who asked first is not:
 /// the caller wrote a legal call, so it gets `nil` plus a message, exactly as `keymap.set`
 /// does when it loses a key.
 pub(crate) fn install(
@@ -29,26 +33,28 @@ pub(crate) fn install(
     sources: Rc<Sources>,
     reservations: Rc<Reservations>,
 ) -> mlua::Result<Function> {
-    lua.create_function(move |lua, (edge, rows): (String, u16)| {
+    lua.create_function(move |lua, (edge, cells): (String, u16)| {
         let Some(parsed) = Edge::parse(&edge) else {
             return Err(mlua::Error::RuntimeError(format!(
-                "unknown edge '{edge}': neotmux.reserve takes 'top' or 'bottom'. There is no \
-                 'left' or 'right' — a band is measured in rows"
+                "unknown edge '{edge}': neotmux.reserve takes 'top', 'bottom', 'left' or \
+                 'right'"
             )));
         };
-        if rows == 0 {
-            return Err(mlua::Error::RuntimeError(
-                "neotmux.reserve takes at least one row".to_string(),
-            ));
-        }
-        if rows > MAX_RESERVED_ROWS {
+        let axis = parsed.axis();
+        if cells == 0 {
             return Err(mlua::Error::RuntimeError(format!(
-                "neotmux.reserve takes at most {MAX_RESERVED_ROWS} rows; a band is a line or \
-                 two along an edge, not a pane"
+                "neotmux.reserve takes at least one of the {axis} it measures a {parsed} band in"
+            )));
+        }
+        let cap = max_reserved(axis);
+        if cells > cap {
+            return Err(mlua::Error::RuntimeError(format!(
+                "neotmux.reserve takes at most {cap} {axis} on the {parsed} edge; a band is a \
+                 margin on the panes, not a pane"
             )));
         }
         let owner = source::caller(lua, &sources);
-        match reservations.add(owner, parsed, rows) {
+        match reservations.add(owner, parsed, cells) {
             Ok(id) => Ok((
                 Value::Table(handle(lua, reservations.clone(), id)?),
                 Value::Nil,

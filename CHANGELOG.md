@@ -2,6 +2,42 @@
 
 ## Unreleased
 
+### A band can be taken off the left or the right
+
+`neotmux.reserve` now takes `'left'` and `'right'` as well, measured in **columns** rather
+than rows. Everything else about a reservation is unchanged: a handle back, one reservation
+per source, `ctx:reserved()` answering that source's own band in surface coordinates, and
+bands allocated in load order from the outside in.
+
+`left` and `right` were deliberately absent until now, on the grounds that the consumers were
+a status line and a window list and nobody wanted a vertical band. A sidebar is that consumer,
+so the omission stopped being right.
+
+The two axes are bounded separately: four rows on a horizontal edge as before, forty columns
+on a vertical one. Four is where a line or two of text stops being a line of text; forty is
+half of the eighty columns a terminal is still written against, past which a band is not a
+margin on the panes but the layout.
+
+They are also *refused* separately. A terminal that cannot spare the rows and still leave the
+panes a grid `vt100` survives applies none of the horizontal bands — and keeps the
+vertical ones, because rows and columns are spent out of different room and hiding a sidebar
+over a shortage of rows would give the panes nothing back for it.
+
+A horizontal band spans the full width and a vertical one only what the horizontal bands
+left, so no two bands ever share a cell.
+
+### A sidebar, shipped and off by default
+
+`plugin/sidebar.lua` lists every window, every window's panes and what each pane is running,
+down a reserved left band. It marks the window being shown and the focused pane. It is off
+until you turn it on — `require('neotmux.defaults').sidebar = true` — like the
+watcher and unlike the status bar: a status line spends a row, a sidebar spends a third of the
+width.
+
+It is an ordinary file making ordinary API calls, and it needed no new ones. A pane in a
+window nobody is looking at shows an em dash instead of a command, because `pane.info` answers
+about the shown window's panes and no others.
+
 ### A plugin can ask which panes a window has
 
 `neotmux.window.panes(id)` answers with a window's panes in layout order, for any window the

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use neotmux_core::layout::{ResizeRefused, SplitRefused, Tree, assign};
-use neotmux_core::proto::{Dir, Epoch, PaneId, Rect as PRect, Reserved, Size, SplitDir};
+use neotmux_core::proto::{Dir, Edge, Epoch, PaneId, Rect as PRect, Reserved, Size, SplitDir};
 use neotmux_term::state::MIN_GRID;
 
 /// Where each pane currently sits, in surface-local coordinates (the same
@@ -16,8 +16,8 @@ pub struct PaneLayout {
     /// edges.
     pub content: Size,
     pub rects: PaneRects,
-    /// The rows the reserved bands are actually taking this frame, which is either every
-    /// granted row or none of them.
+    /// What the reserved bands are actually taking this frame, which on each axis is either
+    /// every granted cell of it or none.
     applied: Reserved,
     /// How many cells to leave between panes. The host reserves them and has no idea what
     /// anyone puts there — the same deal as a band at the edge.
@@ -30,17 +30,26 @@ pub struct PaneLayout {
 /// The one place a reserved band costs the panes anything, and the one place it is decided
 /// whether the terminal can afford it at all.
 ///
-/// A surface that cannot spare the reserved rows and still leave the panes a grid `vt100`
+/// A surface that cannot spare the reserved cells and still leave the panes a grid `vt100`
 /// survives applies **none** of them, rather than part of one: a half-honoured band is a band
 /// its owner would draw outside. That is the §6 hidden-pane case one level up — the bands are
 /// not shown for the frame, nothing is refused and nothing is torn down, and growing the
 /// terminal back brings them straight back.
+///
+/// All-or-nothing holds per axis, not across both: rows and columns are spent out of
+/// different room, so a terminal too short for the status line can still be wide enough for
+/// the sidebar, and dropping the sidebar too would give the panes nothing back for it.
 fn applied(full: Size, reserved: Reserved) -> Reserved {
+    let mut applied = Reserved::default();
     if full.rows >= reserved.rows().saturating_add(MIN_GRID.rows) {
-        reserved
-    } else {
-        Reserved::default()
+        applied.add(Edge::Top, reserved.top);
+        applied.add(Edge::Bottom, reserved.bottom);
     }
+    if full.cols >= reserved.cols().saturating_add(MIN_GRID.cols) {
+        applied.add(Edge::Left, reserved.left);
+        applied.add(Edge::Right, reserved.right);
+    }
+    applied
 }
 
 /// The one place "can this pane be shown at all" is decided. A rect below the minimum grid
@@ -71,22 +80,28 @@ impl PaneLayout {
         self.applied = applied(full, reserved);
         self.content = Size {
             rows: full.rows - self.applied.rows(),
-            cols: full.cols,
+            cols: full.cols - self.applied.cols(),
         };
         self.gutter = gutter;
         self.reassign();
     }
 
-    /// Whether the bands the sources were granted are the ones being drawn this frame. False
-    /// means the terminal could not afford them and every band is hidden.
-    pub fn bands_applied(&self, reserved: Reserved) -> bool {
-        self.applied == reserved
+    /// The bands being drawn this frame, which is what the sources were granted minus any
+    /// axis the terminal could not afford.
+    pub fn applied_bands(&self) -> Reserved {
+        self.applied
     }
 
-    /// The pane area, in the surface's own coordinates: a top band pushes the panes down, so
-    /// a pane rect is never relative to anything but the terminal itself.
+    /// The pane area, in the surface's own coordinates: a top band pushes the panes down and
+    /// a left band pushes them across, so a pane rect is never relative to anything but the
+    /// terminal itself.
     fn surface(&self) -> PRect {
-        PRect::new(0, self.applied.top, self.content.cols, self.content.rows)
+        PRect::new(
+            self.applied.left,
+            self.applied.top,
+            self.content.cols,
+            self.content.rows,
+        )
     }
 
     fn reassign(&mut self) {
@@ -175,7 +190,7 @@ mod tests {
     }
 
     fn bottom(rows: u16) -> Reserved {
-        Reserved::new(0, rows)
+        Reserved::horizontal(0, rows)
     }
 
     #[test]
@@ -197,16 +212,122 @@ mod tests {
     /// which is why pane rects are in the surface's coordinates and not the pane area's.
     #[test]
     fn a_reserved_top_band_moves_the_panes_down_by_its_rows() {
-        let layout = PaneLayout::new(Size { rows: 24, cols: 80 }, Reserved::new(1, 0), 0, pane(1));
+        let layout = PaneLayout::new(
+            Size { rows: 24, cols: 80 },
+            Reserved::horizontal(1, 0),
+            0,
+            pane(1),
+        );
         assert_eq!(layout.content, Size { rows: 23, cols: 80 });
         assert_eq!(layout.panes(), vec![(pane(1), PRect::new(0, 1, 80, 23))]);
     }
 
     #[test]
     fn both_edges_are_subtracted_from_the_same_surface() {
-        let layout = PaneLayout::new(Size { rows: 24, cols: 80 }, Reserved::new(1, 2), 0, pane(1));
+        let layout = PaneLayout::new(
+            Size { rows: 24, cols: 80 },
+            Reserved::horizontal(1, 2),
+            0,
+            pane(1),
+        );
         assert_eq!(layout.content, Size { rows: 21, cols: 80 });
         assert_eq!(layout.panes(), vec![(pane(1), PRect::new(0, 1, 80, 21))]);
+    }
+
+    #[test]
+    fn a_reserved_left_band_costs_the_panes_exactly_its_columns() {
+        let layout = PaneLayout::new(
+            Size { rows: 24, cols: 80 },
+            Reserved::vertical(20, 0),
+            0,
+            pane(1),
+        );
+        assert_eq!(layout.content, Size { rows: 24, cols: 60 });
+        assert_eq!(layout.panes(), vec![(pane(1), PRect::new(20, 0, 60, 24))]);
+    }
+
+    #[test]
+    fn a_reserved_right_band_shortens_the_panes_without_moving_them() {
+        let layout = PaneLayout::new(
+            Size { rows: 24, cols: 80 },
+            Reserved::vertical(0, 20),
+            0,
+            pane(1),
+        );
+        assert_eq!(layout.content, Size { rows: 24, cols: 60 });
+        assert_eq!(layout.panes(), vec![(pane(1), PRect::new(0, 0, 60, 24))]);
+    }
+
+    #[test]
+    fn both_vertical_edges_are_subtracted_from_the_same_surface() {
+        let layout = PaneLayout::new(
+            Size { rows: 24, cols: 80 },
+            Reserved::vertical(20, 10),
+            0,
+            pane(1),
+        );
+        assert_eq!(layout.content, Size { rows: 24, cols: 50 });
+        assert_eq!(layout.panes(), vec![(pane(1), PRect::new(20, 0, 50, 24))]);
+    }
+
+    /// The two axes are spent out of different room, so the pane area is the surface minus
+    /// both of them.
+    #[test]
+    fn a_band_on_each_axis_costs_the_panes_both() {
+        let mut reserved = Reserved::horizontal(1, 1);
+        reserved.add(Edge::Left, 20);
+        let layout = PaneLayout::new(Size { rows: 24, cols: 80 }, reserved, 0, pane(1));
+        assert_eq!(layout.content, Size { rows: 22, cols: 60 });
+        assert_eq!(layout.panes(), vec![(pane(1), PRect::new(20, 1, 60, 22))]);
+    }
+
+    #[test]
+    fn releasing_a_vertical_reservation_gives_the_panes_their_columns_back() {
+        let mut layout = PaneLayout::new(
+            Size { rows: 24, cols: 80 },
+            Reserved::vertical(20, 0),
+            0,
+            pane(1),
+        );
+        assert_eq!(layout.panes(), vec![(pane(1), PRect::new(20, 0, 60, 24))]);
+        layout.resurface(Size { rows: 24, cols: 80 }, Reserved::default(), 0);
+        assert_eq!(layout.panes(), vec![(pane(1), PRect::new(0, 0, 80, 24))]);
+    }
+
+    /// The column case of the rule below, against `MIN_GRID.cols` rather than its rows.
+    #[test]
+    fn a_terminal_too_narrow_for_a_vertical_band_applies_none_of_it() {
+        let reserved = Reserved::vertical(20, 0);
+        let mut layout = PaneLayout::new(Size { rows: 24, cols: 21 }, reserved, 0, pane(1));
+        assert_eq!(layout.applied_bands(), Reserved::default());
+        assert_eq!(layout.content, Size { rows: 24, cols: 21 });
+
+        layout.resurface(Size { rows: 24, cols: 22 }, reserved, 0);
+        assert_eq!(layout.applied_bands(), reserved);
+        assert_eq!(layout.content, Size { rows: 24, cols: 2 });
+    }
+
+    /// All-or-nothing is per axis. A terminal short of rows still affords the columns, and
+    /// hiding the sidebar over a shortage of rows would give the panes nothing back for it.
+    #[test]
+    fn an_axis_that_fits_keeps_its_bands_when_the_other_does_not() {
+        let mut reserved = Reserved::horizontal(0, 4);
+        reserved.add(Edge::Left, 20);
+        let layout = PaneLayout::new(Size { rows: 5, cols: 80 }, reserved, 0, pane(1));
+        assert_eq!(
+            layout.applied_bands(),
+            Reserved::vertical(20, 0),
+            "the columns fit, so they were taken; the rows did not, so they were not"
+        );
+        assert_eq!(layout.content, Size { rows: 5, cols: 60 });
+
+        let layout = PaneLayout::new(Size { rows: 24, cols: 21 }, reserved, 0, pane(1));
+        assert_eq!(
+            layout.applied_bands(),
+            Reserved::horizontal(0, 4),
+            "and the other way round"
+        );
+        assert_eq!(layout.content, Size { rows: 20, cols: 21 });
     }
 
     /// The reservation is all or nothing: a surface that cannot leave the panes a grid
@@ -217,7 +338,7 @@ mod tests {
         let reserved = bottom(1);
         let mut layout = PaneLayout::new(MIN_GRID, reserved, 0, pane(1));
         assert_eq!(layout.content, MIN_GRID);
-        assert!(!layout.bands_applied(reserved));
+        assert_eq!(layout.applied_bands(), Reserved::default());
 
         layout.resurface(
             Size {
@@ -231,7 +352,7 @@ mod tests {
             layout.content, MIN_GRID,
             "growing back brings the band back"
         );
-        assert!(layout.bands_applied(reserved));
+        assert_eq!(layout.applied_bands(), reserved);
     }
 
     #[test]
@@ -245,8 +366,12 @@ mod tests {
     /// A band is outside every pane's rect, so nothing a pane's child writes can land in it.
     #[test]
     fn no_pane_rect_overlaps_a_reserved_band() {
-        let mut layout =
-            PaneLayout::new(Size { rows: 24, cols: 80 }, Reserved::new(1, 1), 0, pane(1));
+        let mut layout = PaneLayout::new(
+            Size { rows: 24, cols: 80 },
+            Reserved::horizontal(1, 1),
+            0,
+            pane(1),
+        );
         layout.split(SplitDir::Horizontal, pane(2)).expect("fits");
         for (id, rect) in layout.panes() {
             assert!(rect.y >= 1, "{id} starts inside the top band: {rect:?}");

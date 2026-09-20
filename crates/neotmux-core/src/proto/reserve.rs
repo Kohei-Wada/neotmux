@@ -1,18 +1,38 @@
 use std::fmt;
 
+/// The axis a band is measured along, and so the unit it is counted in.
+///
+/// Two axes is the whole of why there are four edges: a band at the top or the bottom is a
+/// number of rows, one at the left or the right a number of columns. Nothing else about a
+/// reservation differs between them, so everything that has to say "rows" or "columns" —
+/// a bound, a message, a total — asks the edge for its axis instead of matching on it again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Axis {
+    Rows,
+    Columns,
+}
+
+impl fmt::Display for Axis {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Rows => "rows",
+            Self::Columns => "columns",
+        })
+    }
+}
+
 /// Which edge of the surface a band is taken from.
 ///
-/// `left` and `right` are deliberately absent. The consumers are a status line at the bottom
-/// and a window list at the top, both horizontal bands measured in rows; a vertical band is a
-/// different axis with a different unit and no consumer today. The omission is a decision,
-/// not an oversight.
-///
-/// Not `#[non_exhaustive]`: two edges is the decision above, not a list waiting to grow, and
-/// every match on it should stop compiling if that ever changes.
+/// Not `#[non_exhaustive]`: the set of edges is a decision, not a list waiting to grow, and
+/// every match on it should stop compiling if that ever changes. It did change once — `left`
+/// and `right` were absent until a sidebar wanted them — and walking the broken matches is
+/// what made the column case explicit everywhere the row case already was.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Edge {
     Top,
     Bottom,
+    Left,
+    Right,
 }
 
 impl Edge {
@@ -20,7 +40,16 @@ impl Edge {
         match name {
             "top" => Some(Self::Top),
             "bottom" => Some(Self::Bottom),
+            "left" => Some(Self::Left),
+            "right" => Some(Self::Right),
             _ => None,
+        }
+    }
+
+    pub fn axis(self) -> Axis {
+        match self {
+            Self::Top | Self::Bottom => Axis::Rows,
+            Self::Left | Self::Right => Axis::Columns,
         }
     }
 }
@@ -30,40 +59,86 @@ impl fmt::Display for Edge {
         f.write_str(match self {
             Self::Top => "top",
             Self::Bottom => "bottom",
+            Self::Left => "left",
+            Self::Right => "right",
         })
     }
 }
 
-/// How many rows of the surface each edge is reserved for. The host subtracts them from what
-/// the panes get and never learns what goes in them.
+/// How much of the surface each edge is reserved for. The host subtracts it from what the
+/// panes get and never learns what goes in it.
+///
+/// One type and not two, although the two axes have different units: what the host holds is
+/// one surface with one set of bands, and splitting it would make every signature that
+/// carries a reservation carry a pair of them. The units are kept honest by the totals
+/// instead — [`rows`] adds up the horizontal edges and [`cols`] the vertical ones, and
+/// neither can be read as the other.
+///
+/// [`rows`]: Reserved::rows
+/// [`cols`]: Reserved::cols
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub struct Reserved {
     pub top: u16,
     pub bottom: u16,
+    pub left: u16,
+    pub right: u16,
 }
 
 impl Reserved {
-    pub fn new(top: u16, bottom: u16) -> Self {
-        Self { top, bottom }
+    pub fn horizontal(top: u16, bottom: u16) -> Self {
+        Self {
+            top,
+            bottom,
+            left: 0,
+            right: 0,
+        }
     }
 
+    pub fn vertical(left: u16, right: u16) -> Self {
+        Self {
+            top: 0,
+            bottom: 0,
+            left,
+            right,
+        }
+    }
+
+    /// The rows the horizontal bands cost the panes.
     pub fn rows(self) -> u16 {
         self.top.saturating_add(self.bottom)
+    }
+
+    /// The columns the vertical bands cost the panes.
+    pub fn cols(self) -> u16 {
+        self.left.saturating_add(self.right)
+    }
+
+    /// The total along one axis, which is the one an edge's own band is measured against.
+    pub fn along(self, axis: Axis) -> u16 {
+        match axis {
+            Axis::Rows => self.rows(),
+            Axis::Columns => self.cols(),
+        }
     }
 
     pub fn of(self, edge: Edge) -> u16 {
         match edge {
             Edge::Top => self.top,
             Edge::Bottom => self.bottom,
+            Edge::Left => self.left,
+            Edge::Right => self.right,
         }
     }
 
-    pub fn add(&mut self, edge: Edge, rows: u16) {
-        match edge {
-            Edge::Top => self.top = self.top.saturating_add(rows),
-            Edge::Bottom => self.bottom = self.bottom.saturating_add(rows),
-        }
+    pub fn add(&mut self, edge: Edge, cells: u16) {
+        let slot = match edge {
+            Edge::Top => &mut self.top,
+            Edge::Bottom => &mut self.bottom,
+            Edge::Left => &mut self.left,
+            Edge::Right => &mut self.right,
+        };
+        *slot = slot.saturating_add(cells);
     }
 }
 
@@ -71,27 +146,53 @@ impl Reserved {
 mod tests {
     use super::*;
 
+    const EDGES: [Edge; 4] = [Edge::Top, Edge::Bottom, Edge::Left, Edge::Right];
+
     #[test]
     fn an_edge_round_trips_through_its_spelling() {
-        for edge in [Edge::Top, Edge::Bottom] {
+        for edge in EDGES {
             assert_eq!(Edge::parse(&edge.to_string()), Some(edge));
         }
     }
 
     #[test]
-    fn a_vertical_edge_is_not_an_edge() {
-        assert_eq!(Edge::parse("left"), None);
-        assert_eq!(Edge::parse("right"), None);
+    fn a_name_no_edge_has_is_not_an_edge() {
+        assert_eq!(Edge::parse("middle"), None);
         assert_eq!(Edge::parse("Top"), None);
     }
 
     #[test]
-    fn a_reservation_counts_the_rows_of_both_edges() {
+    fn a_horizontal_edge_is_rows_and_a_vertical_one_is_columns() {
+        assert_eq!(Edge::Top.axis(), Axis::Rows);
+        assert_eq!(Edge::Bottom.axis(), Axis::Rows);
+        assert_eq!(Edge::Left.axis(), Axis::Columns);
+        assert_eq!(Edge::Right.axis(), Axis::Columns);
+    }
+
+    #[test]
+    fn each_edge_keeps_its_own_band() {
         let mut reserved = Reserved::default();
-        reserved.add(Edge::Top, 2);
-        reserved.add(Edge::Bottom, 1);
-        assert_eq!(reserved.of(Edge::Top), 2);
-        assert_eq!(reserved.of(Edge::Bottom), 1);
+        for (n, edge) in EDGES.iter().enumerate() {
+            reserved.add(*edge, n as u16 + 1);
+        }
+        for (n, edge) in EDGES.iter().enumerate() {
+            assert_eq!(reserved.of(*edge), n as u16 + 1);
+        }
+    }
+
+    #[test]
+    fn the_two_totals_count_their_own_axis_and_nothing_else() {
+        let mut reserved = Reserved::horizontal(2, 1);
+        reserved.add(Edge::Left, 20);
         assert_eq!(reserved.rows(), 3);
+        assert_eq!(reserved.cols(), 20);
+        assert_eq!(reserved.along(Axis::Rows), 3);
+        assert_eq!(reserved.along(Axis::Columns), 20);
+    }
+
+    #[test]
+    fn a_band_on_one_axis_leaves_the_other_at_zero() {
+        assert_eq!(Reserved::vertical(20, 0).rows(), 0);
+        assert_eq!(Reserved::horizontal(1, 0).cols(), 0);
     }
 }
