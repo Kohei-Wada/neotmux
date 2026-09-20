@@ -457,18 +457,20 @@ fn the_prefix_splits_horizontally() {
     );
 }
 
-/// The shipped surface is 80 columns and, with the status row, 23 usable rows. Two panes
-/// split down the middle get 40 columns each, so the left one's last column — where the
-/// divider goes, there being no gap between panes to put it in — is 39; split across, the
-/// top one gets 12 rows and its last is 11.
+/// The shipped surface is 80 columns and, with the status row, 23 usable rows. A gutter of
+/// one goes between the panes, so a vertical split leaves the left pane columns 0..39, the
+/// divider column 40 and the right pane the rest; a horizontal one leaves the top pane rows
+/// 0..10, the divider row 11 and the bottom pane the rest.
 const PANE_ROWS: usize = 23;
 const PANE_COLS: usize = 80;
-const DIVIDER_COL: usize = 39;
+const DIVIDER_COL: usize = 40;
 const DIVIDER_ROW: usize = 11;
+const VERTICAL_DIVIDER: char = '\u{2502}';
+const HORIZONTAL_DIVIDER: char = '\u{2500}';
 
 /// The UI a split had no way to show: with the panes tiling the surface exactly, nothing on
-/// screen said where one ended. `C-b v` now rules the boundary column, and a shell is still
-/// live on each side of it.
+/// screen said where one ended. `C-b v` now rules the reserved column between them, and a
+/// shell is still live on each side of it.
 #[test]
 fn a_vertical_split_draws_a_divider_column_between_the_panes() {
     let (mut nt, _init) = start_shipped("", "cat");
@@ -488,7 +490,7 @@ fn a_vertical_split_draws_a_divider_column_between_the_panes() {
     let ruled = rows
         .iter()
         .take(PANE_ROWS)
-        .filter(|row| row.chars().nth(DIVIDER_COL) == Some('#'))
+        .filter(|row| row.chars().nth(DIVIDER_COL) == Some(VERTICAL_DIVIDER))
         .count();
     assert_eq!(
         ruled, PANE_ROWS,
@@ -527,7 +529,7 @@ fn a_horizontal_split_draws_a_divider_row_between_the_panes() {
     let rows: Vec<&str> = screen.lines().collect();
     let rule = rows.get(DIVIDER_ROW).copied().unwrap_or_default();
     assert_eq!(
-        rule.chars().filter(|c| *c == '#').count(),
+        rule.chars().filter(|c| *c == HORIZONTAL_DIVIDER).count(),
         PANE_COLS,
         "no divider row across the boundary between the panes:\n{screen}"
     );
@@ -603,6 +605,51 @@ fn the_shipped_status_line_shows_with_no_user_config() {
     nt.wait_for_screen("panes 2 focus 2", PATIENCE);
     nt.send("\x0f"); // C-o: focus the other one
     nt.wait_for_screen("panes 2 focus 1", PATIENCE);
+}
+
+/// The defect the gutter exists for, measured the way it was found: on the screen, over a
+/// PTY. A vertical split of an 80-column terminal gives the left pane 40 columns, and the
+/// border used to be drawn on the last of them — so the 40th character a shell printed was
+/// replaced by it. With the host reserving the divider's column, all 40 are still there, the
+/// divider is beside them, and the right pane's first column is its own too.
+#[test]
+fn a_border_takes_no_column_from_either_pane_it_divides() {
+    const FILL: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcd";
+    let init = harness::runtime(&[("init.lua", "require('plugin.splitter')")]);
+    let mut nt = Neotmux::start_layered(
+        &[init.path(), &harness::fixture_layer(), &shipped_layer()],
+        "cat",
+    );
+
+    nt.wait_for_screen("panes 1 focus 1", PATIENCE);
+    nt.send("\x02"); // C-b: splitter splits the width, so the new pane is the right one
+    nt.wait_for_screen("panes 2 focus 2", PATIENCE);
+    nt.send("R"); // into the right pane's first column, which the divider must not take
+    nt.send("\x0f"); // C-o: back to the left pane
+    // The focus op is applied at the end of the frame the key was read in, so keys sent
+    // before the status catches up would still land in the pane on the right.
+    nt.wait_for_screen("panes 2 focus 1", PATIENCE);
+    nt.send(FILL);
+
+    nt.wait_for_screen(FILL, PATIENCE);
+    assert_eq!(
+        nt.cell(0, 39),
+        "d",
+        "the border ate the last column of the left pane:\n{}",
+        nt.screen_after(Duration::ZERO)
+    );
+    assert_eq!(
+        nt.cell(0, 40),
+        "\u{2502}",
+        "the divider is not in the reserved column:\n{}",
+        nt.screen_after(Duration::ZERO)
+    );
+    assert_eq!(
+        nt.cell(0, 41),
+        "R",
+        "the border ate the first column of the right pane:\n{}",
+        nt.screen_after(Duration::ZERO)
+    );
 }
 
 /// §1's fourth exit criterion for the *shipped* defaults: a user who does not want one
