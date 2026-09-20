@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use neotmux_core::proto::{Color, DrawCmd, Epoch, PaneId, PaneInfo, Rect, Size, WindowId};
 use neotmux_lua::runtime::Layers;
-use neotmux_lua::{Geometry, LuaSubsystem};
+use neotmux_lua::{Geometry, LuaSubsystem, Window};
 
 const COLS: u16 = 80;
 const SURFACE: Size = Size {
@@ -113,7 +113,20 @@ fn frame(
                 .map(|id| (*id, Rect::new(0, reserved.top, COLS, content.rows)))
                 .collect(),
             focus: Some(PaneId::from(focus)),
-            windows: windows.iter().copied().map(WindowId::from).collect(),
+            windows: windows
+                .iter()
+                .copied()
+                .map(|id| Window {
+                    id: WindowId::from(id),
+                    // A status bar asks for the window ids; only the shown window's panes
+                    // are ever read out of this fixture.
+                    panes: if id == current {
+                        ids.clone()
+                    } else {
+                        Vec::new()
+                    },
+                })
+                .collect(),
             window: Some(WindowId::from(current)),
         },
     );

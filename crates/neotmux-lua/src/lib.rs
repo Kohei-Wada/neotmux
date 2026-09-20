@@ -31,7 +31,7 @@ pub use api::keymap;
 use api::ctx::Ctx;
 use budget::{Budget, Outcome};
 use draw::Buffers;
-pub use geometry::Geometry;
+pub use geometry::{Geometry, Window};
 use ops::{Level, Op, OpBuffer};
 use overrun::Overrun;
 use paneinfo::PaneInfos;

@@ -6,8 +6,8 @@
 --
 --   require('neotmux.defaults').watch = true
 --
--- Nothing here is a host feature. It is `neotmux.pane.content` read from a tick, a set of
--- patterns, and `neotmux.notify`.
+-- Nothing here is a host feature. It is `neotmux.window.panes` and `neotmux.pane.content`
+-- read from a tick, a set of patterns, and `neotmux.notify`.
 local M = {}
 
 -- Lua patterns, matched against the last `M.lines` lines of a pane. Replace the table to
@@ -39,9 +39,9 @@ M.lines = 5
 -- The pane you are looking at is the one you can already see is waiting.
 M.ignore_focused = true
 
--- The panes worth asking about, and the revision each was last read at. A pane's id gets here
--- from its own output, which is how a pane in a window nobody is looking at is watched: every
--- pane's output is dispatched, hidden or not.
+-- The panes worth asking about, and the revision each was last read at. Every pane the host
+-- owns is in here, hidden windows included: an agent you started in a window you are not
+-- looking at has said nothing yet, and that is exactly the pane worth watching.
 local revisions = {}
 
 -- Which panes were waiting last time they were read, so the notification is sent on the
@@ -83,18 +83,29 @@ local function forget(pane)
   waiting[pane] = nil
 end
 
-neotmux.on_event('pane_output', function(event)
-  if revisions[event.pane] == nil then
-    -- Never a real revision, so the first tick after this reads the pane.
-    revisions[event.pane] = false
+-- Enumeration, not output: a pane is watched from the moment it exists rather than from the
+-- moment it first prints something. It changes which panes are read, never how often — the
+-- revision gate below still decides that.
+local function discover()
+  for _, window in ipairs(neotmux.window.list()) do
+    local panes = neotmux.window.panes(window)
+    if panes then
+      for _, pane in ipairs(panes) do
+        if revisions[pane] == nil then
+          -- Never a real revision, so the pane is read the first time round.
+          revisions[pane] = false
+        end
+      end
+    end
   end
-end)
+end
 
 neotmux.on_event('pane_closed', function(event)
   forget(event.pane)
 end)
 
 neotmux.on_tick(function()
+  discover()
   local focused = M.ignore_focused and neotmux.pane.current() or nil
   for pane in pairs(revisions) do
     local revision = neotmux.pane.revision(pane)
