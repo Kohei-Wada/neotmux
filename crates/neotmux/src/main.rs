@@ -41,6 +41,35 @@ fn parse_log_flag(mut args: impl Iterator<Item = String>) -> LogFlag {
     LogFlag { path, warnings }
 }
 
+/// Raw mode, taken before anything slow and given back however `main` leaves — a panic
+/// included, because unwinding runs this drop.
+///
+/// Until it is taken the line discipline is the one reading the keyboard, and it does not
+/// hand over what it understands as editing: `0x17` (`C-w`) is WERASE and is eaten rather
+/// than delivered, `0x03` raises SIGINT, and `\r` arrives as `\n`. Loading the Lua layer
+/// takes long enough on a loaded machine for a key typed at the prompt to land inside that
+/// window, so the terminal is claimed first and the layer is built under it.
+struct RawMode;
+
+impl RawMode {
+    fn enter() -> Self {
+        if let Err(err) = ratatui::crossterm::terminal::enable_raw_mode() {
+            logging::log(
+                Level::Warn,
+                "neotmux",
+                &format!("could not put the terminal in raw mode: {err}"),
+            );
+        }
+        Self
+    }
+}
+
+impl Drop for RawMode {
+    fn drop(&mut self) {
+        let _ = ratatui::crossterm::terminal::disable_raw_mode();
+    }
+}
+
 fn main() -> anyhow::Result<()> {
     let flag = parse_log_flag(env::args().skip(1));
     for warning in &flag.warnings {
@@ -49,6 +78,8 @@ fn main() -> anyhow::Result<()> {
     if let Err(err) = logging::init(flag.path.as_deref()) {
         eprintln!("neotmux: failed to initialise logging: {err:#}");
     }
+
+    let _raw = RawMode::enter();
 
     let exe_dir = env::current_exe()
         .ok()
