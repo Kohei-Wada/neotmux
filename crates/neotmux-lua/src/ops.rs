@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 
-use neotmux_core::proto::{PaneId, SplitDir, WorkspaceId};
+use neotmux_core::proto::{PaneId, SplitDir, WindowId};
 
 use crate::source::SourceId;
 
@@ -18,8 +18,8 @@ pub enum Op {
     Log { level: Level, text: String },
     PaneSplit { dir: SplitDir },
     PaneFocus { pane: PaneId },
-    WorkspaceCreate { workspace: WorkspaceId },
-    WorkspaceFocus { workspace: WorkspaceId },
+    WindowCreate { window: WindowId },
+    WindowFocus { window: WindowId },
 }
 
 /// Where the buffer ended before a source's tick group ran, so that group's own ops can be

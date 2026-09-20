@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
 use crossterm::event::{self, Event};
-use neotmux_core::proto::{DrawCmd, PaneId, Rect as PRect, Reserved, Size, WorkspaceId};
+use neotmux_core::proto::{DrawCmd, PaneId, Rect as PRect, Reserved, Size, WindowId};
 use neotmux_lua::ops::{Level, Op};
 use neotmux_lua::{Event as LuaEvent, Geometry, KeyOutcome, LuaSubsystem};
 use neotmux_term::pty::PtyHandle;
@@ -22,11 +22,11 @@ use crate::render::{cursor_position, draw_grid};
 use crate::shells::Shells;
 use crate::signals::{self, ShutdownSignal};
 use crate::tty::{Ready, Terminal};
-use crate::workspaces::{Shown, Surface, Workspaces};
+use crate::windows::{Shown, Surface, Windows};
 
 const MAX_CHUNKS_PER_FRAME: usize = 32;
 
-/// How many new shells one frame will fork — a `pane.split` or a `workspace.create`, counted
+/// How many new shells one frame will fork — a `pane.split` or a `window.create`, counted
 /// together because the cost is the same one. It is host work a plugin buys from outside its
 /// measured tick — an op pushed in the tick, a shell fork/exec'd after it — so M1b's promise
 /// only holds if the number of them a frame can be made to do is bounded.
@@ -51,12 +51,12 @@ fn terminal_size(terminal: &DefaultTerminal) -> anyhow::Result<Size> {
 /// The state one frame carries into the next. Every step of a frame is a method on it, so
 /// the loop in `run` reads as the order of the steps and nothing else.
 struct Session {
-    /// What every workspace is laid out against: the whole terminal, the bands reserved at
+    /// What every window is laid out against: the whole terminal, the bands reserved at
     /// its edges, and the gutter between panes.
     surface: Surface,
     /// Every pane tree, and which one is being shown.
-    workspaces: Workspaces,
-    /// Every pane's child, the hidden workspaces' included: a shell nobody is looking at
+    windows: Windows,
+    /// Every pane's child, the hidden windows' included: a shell nobody is looking at
     /// goes on running, and its output goes on being read.
     shells: Shells,
     /// What each pane is running, sampled on its own cadence rather than per frame.
@@ -80,17 +80,17 @@ impl Session {
             reserved: lua.reserved(),
             gutter: lua.opt().pane_gutter,
         };
-        let (workspaces, first) = Workspaces::new(lua.reserve_workspace_id(), surface);
-        lua.lay_out_reservations(size, workspaces.current().bands_applied(surface.reserved));
+        let (windows, first) = Windows::new(lua.reserve_window_id(), surface);
+        lua.lay_out_reservations(size, windows.current().bands_applied(surface.reserved));
         let mut shells = Shells::new(waker);
         shells.open(
             first,
             PtyHandle::default_shell_command(),
-            pane_size(workspaces.rect(first), first)?,
+            pane_size(windows.rect(first), first)?,
         )?;
         Ok(Self {
             surface,
-            workspaces,
+            windows,
             shells,
             pane_info: PaneInfoCache::new(),
             dirty: true,
@@ -98,11 +98,11 @@ impl Session {
         })
     }
 
-    /// Resizes every pane of the shown workspace that is big enough to be shown; the rest
-    /// keep their last size (§6). A hidden workspace's panes are not here: they keep the
+    /// Resizes every pane of the shown window that is big enough to be shown; the rest
+    /// keep their last size (§6). A hidden window's panes are not here: they keep the
     /// size they had, and are refitted on the way back in.
     fn fit(&mut self) -> anyhow::Result<()> {
-        let showable: Vec<(PaneId, PRect)> = self.workspaces.current().showable().collect();
+        let showable: Vec<(PaneId, PRect)> = self.windows.current().showable().collect();
         self.shells.fit(showable.into_iter())
     }
 
@@ -110,16 +110,14 @@ impl Session {
     /// released, or the gutter changing: recompute the layout, hand the bands their place in
     /// it, resize the panes to match, and tell the Lua layer about it (§4.8).
     fn apply_geometry(&mut self, lua: &LuaSubsystem) -> anyhow::Result<()> {
-        self.workspaces.resurface(self.surface);
+        self.windows.resurface(self.surface);
         lua.lay_out_reservations(
             self.surface.size,
-            self.workspaces
-                .current()
-                .bands_applied(self.surface.reserved),
+            self.windows.current().bands_applied(self.surface.reserved),
         );
         self.fit()?;
         lua.dispatch_event(&LuaEvent::Resized {
-            size: self.workspaces.current().content,
+            size: self.windows.current().content,
         });
         self.dirty = true;
         Ok(())
@@ -147,33 +145,33 @@ impl Session {
     }
 
     /// A pane's child ended: reap it, give its space to its sibling, and move focus if it
-    /// was the focused one. The other panes keep running. The pane may belong to a workspace
-    /// nobody is looking at, and closing the last pane of one closes the workspace too.
+    /// was the focused one. The other panes keep running. The pane may belong to a window
+    /// nobody is looking at, and closing the last pane of one closes the window too.
     fn close_pane(&mut self, pane: PaneId, lua: &LuaSubsystem) -> anyhow::Result<()> {
         self.shells.close(pane);
         self.pane_info.invalidate();
-        let was_shown = self.workspaces.current().rects.contains_key(&pane);
-        let before = self.workspaces.current().focus();
-        let Some(closed) = self.workspaces.close_pane(pane, self.surface) else {
+        let was_shown = self.windows.current().rects.contains_key(&pane);
+        let before = self.windows.current().focus();
+        let Some(closed) = self.windows.close_pane(pane, self.surface) else {
             return Ok(());
         };
         // The last pane anywhere never reaches here: it is `Drained::Eof`, which ends the
         // session after one more frame so that pane's final output is drawn.
-        if self.workspaces.is_empty() {
+        if self.windows.is_empty() {
             return Ok(());
         }
         self.fit()?;
         self.republish_geometry(lua);
         lua.dispatch_event(&LuaEvent::PaneClosed { pane });
-        if closed.workspace_closed {
-            lua.dispatch_event(&LuaEvent::WorkspaceClosed {
-                workspace: closed.workspace,
+        if closed.window_closed {
+            lua.dispatch_event(&LuaEvent::WindowClosed {
+                window: closed.window,
             });
         }
-        if let Some(workspace) = closed.switched_to {
-            lua.dispatch_event(&LuaEvent::WorkspaceChanged { workspace });
+        if let Some(window) = closed.switched_to {
+            lua.dispatch_event(&LuaEvent::WindowChanged { window });
         }
-        let after = self.workspaces.current().focus();
+        let after = self.windows.current().focus();
         if was_shown
             && after != before
             && let Some(focus) = after
@@ -234,7 +232,7 @@ impl Session {
                 // A key nobody consumed belongs to the focused pane and to no other. With no
                 // pane focused there is no shell left to type into.
                 if outcome == KeyOutcome::Fallthrough
-                    && let Some(focus) = self.workspaces.current().focus()
+                    && let Some(focus) = self.windows.current().focus()
                     && let Some(bytes) = encode_key(key)
                 {
                     self.shells.write(focus, &bytes)?;
@@ -280,21 +278,19 @@ impl Session {
                     self.apply_split(lua, &tag, dir)?;
                 }
                 Op::PaneFocus { pane } => self.apply_focus(lua, &tag, pane),
-                Op::WorkspaceCreate { .. } if spawned >= MAX_NEW_SHELLS_PER_FRAME => logging::log(
+                Op::WindowCreate { .. } if spawned >= MAX_NEW_SHELLS_PER_FRAME => logging::log(
                     Level::Error,
                     &tag,
                     &format!(
-                        "workspace.create() refused: at most {MAX_NEW_SHELLS_PER_FRAME} new \
+                        "window.create() refused: at most {MAX_NEW_SHELLS_PER_FRAME} new \
                              shells per frame"
                     ),
                 ),
-                Op::WorkspaceCreate { workspace } => {
+                Op::WindowCreate { window } => {
                     spawned += 1;
-                    self.apply_workspace_create(lua, &tag, workspace)?;
+                    self.apply_window_create(lua, &tag, window)?;
                 }
-                Op::WorkspaceFocus { workspace } => {
-                    self.apply_workspace_focus(lua, &tag, workspace)?
-                }
+                Op::WindowFocus { window } => self.apply_window_focus(lua, &tag, window)?,
             }
         }
         Ok(quit)
@@ -306,8 +302,8 @@ impl Session {
         tag: &str,
         dir: neotmux_core::proto::SplitDir,
     ) -> anyhow::Result<()> {
-        let new = self.workspaces.take_pane_id();
-        if let Err(refused) = self.workspaces.current_mut().split(dir, new) {
+        let new = self.windows.take_pane_id();
+        if let Err(refused) = self.windows.current_mut().split(dir, new) {
             logging::log(
                 Level::Error,
                 tag,
@@ -316,14 +312,14 @@ impl Session {
             return Ok(());
         }
 
-        let started = pane_size(self.workspaces.rect(new), new).and_then(|size| {
+        let started = pane_size(self.windows.rect(new), new).and_then(|size| {
             self.shells
                 .open(new, PtyHandle::default_shell_command(), size)
         });
         if let Err(err) = started {
             // The tree already holds a pane with nothing running in it; undo it rather than
             // leave a pane that can never draw or be typed into.
-            self.workspaces.current_mut().close(new);
+            self.windows.current_mut().close(new);
             logging::log(
                 Level::Error,
                 tag,
@@ -341,53 +337,53 @@ impl Session {
         Ok(())
     }
 
-    /// A new workspace, with one pane and one shell in it. It is not shown: `workspace.focus`
+    /// A new window, with one pane and one shell in it. It is not shown: `window.focus`
     /// is a separate op, so `focus(create())` in one tick opens it and switches to it in that
     /// order while `create()` alone leaves it running out of sight.
-    fn apply_workspace_create(
+    fn apply_window_create(
         &mut self,
         lua: &LuaSubsystem,
         tag: &str,
-        workspace: WorkspaceId,
+        window: WindowId,
     ) -> anyhow::Result<()> {
-        let first = self.workspaces.create(workspace, self.surface);
-        let started = pane_size(self.workspaces.rect(first), first).and_then(|size| {
+        let first = self.windows.create(window, self.surface);
+        let started = pane_size(self.windows.rect(first), first).and_then(|size| {
             self.shells
                 .open(first, PtyHandle::default_shell_command(), size)
         });
         if let Err(err) = started {
-            // A workspace whose only pane can never draw is worse than no workspace: undo it
+            // A window whose only pane can never draw is worse than no window: undo it
             // the same way a split that could not start a shell is undone.
-            self.workspaces.close_pane(first, self.surface);
+            self.windows.close_pane(first, self.surface);
             logging::log(
                 Level::Error,
                 tag,
-                &format!("workspace.create() could not start a shell: {err:#}"),
+                &format!("window.create() could not start a shell: {err:#}"),
             );
             return Ok(());
         }
-        // The pane list is unchanged — the new pane is not in the shown workspace — but the
-        // workspace list is, and a `workspace_opened` handler must see what it is told about.
+        // The pane list is unchanged — the new pane is not in the shown window — but the
+        // window list is, and a `window_opened` handler must see what it is told about.
         self.republish_geometry(lua);
-        lua.dispatch_event(&LuaEvent::WorkspaceOpened { workspace });
+        lua.dispatch_event(&LuaEvent::WindowOpened { window });
         self.dirty = true;
         Ok(())
     }
 
-    /// Shows another workspace: its panes are caught up with a surface that may have changed
+    /// Shows another window: its panes are caught up with a surface that may have changed
     /// while they were hidden, then resized to it.
-    fn apply_workspace_focus(
+    fn apply_window_focus(
         &mut self,
         lua: &LuaSubsystem,
         tag: &str,
-        workspace: WorkspaceId,
+        window: WindowId,
     ) -> anyhow::Result<()> {
-        match self.workspaces.show(workspace, self.surface) {
-            Shown::NoSuchWorkspace => {
+        match self.windows.show(window, self.surface) {
+            Shown::NoSuchWindow => {
                 logging::log(
                     Level::Error,
                     tag,
-                    &format!("workspace.focus({workspace}) refused: no such workspace"),
+                    &format!("window.focus({window}) refused: no such window"),
                 );
                 return Ok(());
             }
@@ -397,8 +393,8 @@ impl Session {
         self.pane_info.invalidate();
         self.fit()?;
         self.republish_geometry(lua);
-        lua.dispatch_event(&LuaEvent::WorkspaceChanged { workspace });
-        if let Some(focus) = self.workspaces.current().focus() {
+        lua.dispatch_event(&LuaEvent::WindowChanged { window });
+        if let Some(focus) = self.windows.current().focus() {
             lua.dispatch_event(&LuaEvent::FocusChanged { pane: focus });
         }
         self.dirty = true;
@@ -406,7 +402,7 @@ impl Session {
     }
 
     fn apply_focus(&mut self, lua: &LuaSubsystem, tag: &str, pane: PaneId) {
-        if !self.workspaces.current_mut().set_focus(pane) {
+        if !self.windows.current_mut().set_focus(pane) {
             logging::log(
                 Level::Error,
                 tag,
@@ -422,12 +418,12 @@ impl Session {
     /// Samples what each pane is running, if the cadence says it is time, and hands the
     /// result to Lua. Reading `/proc` for every pane on every frame is the syscall storm this
     /// exists to avoid, so most frames do nothing here.
-    /// The shown workspace's panes and no others: `pane.info` answers about the panes
+    /// The shown window's panes and no others: `pane.info` answers about the panes
     /// `pane.list` reports, so a hidden pane is absent rather than described — and reading
     /// `/proc` for panes nobody can see would be a syscall bill that grows with the
-    /// workspaces.
+    /// windows.
     fn refresh_pane_info(&mut self, lua: &LuaSubsystem) {
-        let shown: Vec<PaneId> = self.workspaces.current().rects.keys().copied().collect();
+        let shown: Vec<PaneId> = self.windows.current().rects.keys().copied().collect();
         let shells = &self.shells;
         let refreshed = self
             .pane_info
@@ -446,7 +442,7 @@ impl Session {
     /// are pumped before the tick and a plugin asking `pane.list()` from `on_key` must not
     /// see an empty session on the very first key.
     fn publish_geometry(&self, lua: &LuaSubsystem) {
-        lua.begin_frame(self.workspaces.current().epoch(), self.geometry());
+        lua.begin_frame(self.windows.current().epoch(), self.geometry());
     }
 
     /// The tree changed mid-frame. A `pane_opened` handler calling `pane.list()` must see the
@@ -456,15 +452,15 @@ impl Session {
         lua.republish_geometry(self.geometry());
     }
 
-    /// The session as Lua reads it: the shown workspace's panes, and every workspace's id.
+    /// The session as Lua reads it: the shown window's panes, and every window's id.
     fn geometry(&self) -> Geometry {
-        let layout = self.workspaces.current();
+        let layout = self.windows.current();
         Geometry {
             size: layout.content,
             panes: layout.panes(),
             focus: layout.focus(),
-            workspaces: self.workspaces.ids(),
-            workspace: Some(self.workspaces.current_id()),
+            windows: self.windows.ids(),
+            window: Some(self.windows.current_id()),
         }
     }
 
@@ -496,15 +492,15 @@ impl Session {
         notifications: &mut Notifications,
         cmds: &[DrawCmd],
     ) -> anyhow::Result<()> {
-        // The shown workspace's panes only: a hidden pane's terminal goes on taking its
+        // The shown window's panes only: a hidden pane's terminal goes on taking its
         // child's output, but copying its grid out for a frame nobody draws it in would put
-        // every workspace on every frame's bill.
-        let shown: Vec<PaneId> = self.workspaces.current().rects.keys().copied().collect();
+        // every window on every frame's bill.
+        let shown: Vec<PaneId> = self.windows.current().rects.keys().copied().collect();
         self.shells.snapshot(shown.into_iter());
         notifications.expire(Instant::now());
 
         let shells = &self.shells;
-        let pane_layout = self.workspaces.current();
+        let pane_layout = self.windows.current();
         terminal
             .draw(|frame| {
                 let area = frame.area();
@@ -681,9 +677,9 @@ mod tests {
             reserved: Reserved::default(),
             gutter: 0,
         };
-        let (workspaces, first) = Workspaces::new(WorkspaceId::from(1), surface);
+        let (windows, first) = Windows::new(WindowId::from(1), surface);
         assert_eq!(
-            pane_size(workspaces.rect(first), first).expect("the first pane has a rect"),
+            pane_size(windows.rect(first), first).expect("the first pane has a rect"),
             size
         );
     }

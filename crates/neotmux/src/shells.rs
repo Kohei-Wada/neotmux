@@ -160,8 +160,8 @@ impl Shells {
     }
 
     /// Copies out the grid of each named pane. The panes being drawn, not every pane: a
-    /// hidden workspace's terminal goes on taking its child's output either way, and
-    /// snapshotting it would put every workspace on every frame's bill.
+    /// hidden window's terminal goes on taking its child's output either way, and
+    /// snapshotting it would put every window on every frame's bill.
     pub fn snapshot(&mut self, panes: impl Iterator<Item = PaneId>) {
         for pane in panes {
             if let Some(shell) = self.shells.get_mut(&pane) {

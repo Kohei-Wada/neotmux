@@ -10,7 +10,7 @@ pub mod reserve;
 pub mod runtime;
 pub mod source;
 pub mod vm;
-pub mod workspace;
+pub mod window;
 
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
@@ -21,7 +21,7 @@ use std::time::Duration;
 use mlua::chunk::ChunkMode;
 use mlua::{Function, Lua, Value};
 
-use neotmux_core::proto::{DrawCmd, Epoch, PaneId, PaneInfo, Reserved, Size, WorkspaceId};
+use neotmux_core::proto::{DrawCmd, Epoch, PaneId, PaneInfo, Reserved, Size, WindowId};
 
 pub use api::Opts;
 pub use api::event::Event;
@@ -38,7 +38,7 @@ use registry::{Kind, KindTag, RegistrationId, Registry};
 use reserve::Reservations;
 use runtime::Layers;
 use source::{SourceId, Sources};
-use workspace::WorkspaceIds;
+use window::WindowIds;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyOutcome {
@@ -67,7 +67,7 @@ pub struct LuaSubsystem {
     budget: Rc<Budget>,
     overrun: Rc<Overrun>,
     reservations: Rc<Reservations>,
-    workspace_ids: Rc<WorkspaceIds>,
+    window_ids: Rc<WindowIds>,
 }
 
 impl LuaSubsystem {
@@ -85,7 +85,7 @@ impl LuaSubsystem {
         let geometry = Rc::new(RefCell::new(Geometry::default()));
         let pane_info = Rc::new(RefCell::new(PaneInfos::new()));
         let reservations = Rc::new(Reservations::new());
-        let workspace_ids = Rc::new(WorkspaceIds::new());
+        let window_ids = Rc::new(WindowIds::new());
         let buffers = Rc::new(Buffers::new());
 
         let overrun = Rc::new(Overrun::new());
@@ -104,7 +104,7 @@ impl LuaSubsystem {
                 pane_info: pane_info.clone(),
                 overrun: overrun.clone(),
                 reservations: reservations.clone(),
-                workspace_ids: workspace_ids.clone(),
+                window_ids: window_ids.clone(),
             },
         )
         .map_err(|err| anyhow::anyhow!("{err:#}"))?;
@@ -124,7 +124,7 @@ impl LuaSubsystem {
             budget,
             overrun,
             reservations,
-            workspace_ids,
+            window_ids,
         })
     }
 
@@ -194,10 +194,10 @@ impl LuaSubsystem {
         );
     }
 
-    /// The id the host gives the workspace it opens itself, before any Lua has run. Taken
-    /// from the same counter `workspace.create()` draws on, so the two can never collide.
-    pub fn reserve_workspace_id(&self) -> WorkspaceId {
-        self.workspace_ids.take()
+    /// The id the host gives the window it opens itself, before any Lua has run. Taken
+    /// from the same counter `window.create()` draws on, so the two can never collide.
+    pub fn reserve_window_id(&self) -> WindowId {
+        self.window_ids.take()
     }
 
     pub fn begin_frame(&self, epoch: Epoch, geometry: Geometry) {
