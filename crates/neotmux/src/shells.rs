@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use anyhow::Context as _;
 use neotmux_core::proto::{GridSnapshot, PaneId, Rect as PRect, Size};
 use neotmux_term::pty::{CommandBuilder, PtyEvent, PtyHandle};
+use neotmux_term::query::Queries;
 use neotmux_term::state::TermState;
 
 const SCROLLBACK: usize = 10_000;
@@ -12,6 +13,8 @@ struct Shell {
     pty: PtyHandle,
     state: TermState,
     grid: GridSnapshot,
+    /// The terminal's reply path: what this pane's child asked, and what it is owed back.
+    queries: Queries,
 }
 
 /// Every pane's child process, keyed by pane. The tree says where a pane is; this says what
@@ -45,6 +48,7 @@ impl Shells {
                 pty,
                 state: TermState::new(size, SCROLLBACK),
                 grid: GridSnapshot::default(),
+                queries: Queries::default(),
             },
         );
         Ok(())
@@ -123,7 +127,12 @@ impl Shells {
             for _ in 0..max_chunks {
                 match shell.pty.output().try_recv() {
                     Ok(PtyEvent::Output(bytes)) => {
-                        shell.state.feed(&bytes);
+                        // The pane's own terminal answers here, because this is where its
+                        // output and its PTY are both in hand.
+                        let reply = shell.queries.feed(&bytes, &mut shell.state);
+                        if !reply.is_empty() {
+                            shell.pty.write(&reply).context("answer a terminal query")?;
+                        }
                         on_output(*pane, bytes);
                         drained.output = true;
                     }

@@ -42,6 +42,11 @@ impl TermState {
         self.parser.screen_mut().set_size(size.rows, size.cols);
     }
 
+    /// Where the cursor is, zero-based, which is what a cursor report is asked for.
+    pub fn cursor(&self) -> (u16, u16) {
+        self.parser.screen().cursor_position()
+    }
+
     pub fn size(&self) -> Size {
         let (rows, cols) = self.parser.screen().size();
         Size { rows, cols }
