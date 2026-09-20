@@ -2203,3 +2203,151 @@ fn the_shipped_sidebar_is_off_by_default() {
     nt.send("X");
     nt.wait_for_cell(PANE_TOP, 0, "X", PATIENCE);
 }
+
+/// Copy mode's own colours, as `plugin/copy.lua` sets them. A tint changes nothing a
+/// `contents()` can see, so these are what the assertions below are made of.
+const COPY_CURSOR: (u8, u8, u8) = (0xf9, 0xe2, 0xaf);
+const COPY_SELECTION: (u8, u8, u8) = (0x45, 0x47, 0x5a);
+
+/// The mode is entered on the pane you are in and changes nothing about it: the screen after
+/// `C-b [` is the screen before it, its keys never reach the shell, and `q` hands the
+/// keyboard back.
+#[test]
+fn copy_mode_leaves_the_pane_alone_and_gives_the_keys_back() {
+    let (mut nt, _init) = start_shipped("", "cat");
+    nt.send("ABCDEFGH\r");
+    nt.wait_for_screen("ABCDEFGH", PATIENCE);
+    // The pane has to be quiet before the comparison: the mode snapshots the lines on the way
+    // in, so a byte still in flight would legitimately make the two frames differ.
+    nt.settle(Duration::from_millis(600));
+    let before = nt.screen_after(Duration::from_millis(200));
+
+    nt.send("\x02["); // C-b [
+    nt.send("jjllkh"); // every one of them a motion, and none of them a character
+    let inside = nt.screen_after(Duration::from_millis(600));
+    assert_eq!(
+        pane_area(&before),
+        pane_area(&inside),
+        "entering copy mode disturbed the pane"
+    );
+
+    nt.send("q");
+    nt.send("TYPED\r");
+    nt.wait_for_screen("TYPED", PATIENCE);
+    let log = nt.log_text();
+    assert!(log.is_empty(), "copy mode reported a failure:\n{log}");
+}
+
+/// The cursor is a cell you can see, and the motion keys move it. Seen as a colour, because
+/// a tint leaves the glyph exactly as it was.
+#[test]
+fn the_copy_cursor_is_visible_and_moves() {
+    let (mut nt, _init) = start_shipped("", "cat");
+    nt.send("ABCDEFGH\r");
+    nt.wait_for_screen("ABCDEFGH", PATIENCE);
+
+    nt.send("\x02["); // C-b [
+    nt.settle(Duration::from_millis(400));
+    assert_eq!(
+        nt.cell_bg(PANE_TOP, 0),
+        Some(COPY_CURSOR),
+        "the cursor is not on the pane's top left cell:\n{}",
+        nt.screen_after(Duration::ZERO)
+    );
+
+    nt.send("lll");
+    nt.send("j");
+    nt.settle(Duration::from_millis(400));
+    assert_eq!(
+        nt.cell_bg(PANE_TOP + 1, 3),
+        Some(COPY_CURSOR),
+        "the cursor did not move three right and one down:\n{}",
+        nt.screen_after(Duration::ZERO)
+    );
+    assert_ne!(
+        nt.cell_bg(PANE_TOP, 0),
+        Some(COPY_CURSOR),
+        "the cursor is in two places at once"
+    );
+}
+
+/// The reason the mode exists: `g` goes to the oldest line the pane still holds, and the
+/// lines the shell scrolled off the top come back — drawn by the plugin over a pane whose own
+/// grid never moved.
+#[test]
+fn copy_mode_shows_a_line_the_shell_has_already_scrolled_away() {
+    let (mut nt, _init) = start_shipped("", "bash");
+    nt.send("printf 'LINE-%03d\\n' $(seq 1 90)\r");
+    nt.wait_for_screen("LINE-090", PATIENCE);
+    let scrolled_away = nt.screen_after(Duration::from_millis(400));
+    assert!(
+        !scrolled_away.contains("LINE-001"),
+        "the first line never left the screen, so there is nothing to scroll back to:\n{scrolled_away}"
+    );
+
+    nt.send("\x02["); // C-b [
+    nt.send("g"); // the oldest line the pane holds
+    nt.wait_for_screen("LINE-001", PATIENCE);
+
+    nt.send("q");
+    nt.send("echo BACK\r");
+    nt.wait_for_screen("BACK", PATIENCE);
+    let after = nt.screen_after(Duration::from_millis(400));
+    assert!(
+        after.contains("LINE-090"),
+        "the pane's own view moved while the plugin was drawing over it:\n{after}"
+    );
+}
+
+/// A selection is visible over the pane's real content, and the content is still readable
+/// through it: the cells carry the selection's background and the shell's own characters at
+/// the same time.
+#[test]
+fn a_selection_is_visible_over_text_that_is_still_readable() {
+    let (mut nt, _init) = start_shipped("", "cat");
+    nt.send("ABCDEFGH\r");
+    nt.wait_for_screen("ABCDEFGH", PATIENCE);
+    assert_eq!(nt.cell(PANE_TOP, 1), "B", "the pane is not where expected");
+
+    nt.send("\x02["); // C-b [
+    nt.send(" "); // start the selection under the cursor
+    nt.send("lll");
+    nt.settle(Duration::from_millis(400));
+
+    let screen = nt.screen_after(Duration::ZERO);
+    for col in 0..3 {
+        assert_eq!(
+            nt.cell_bg(PANE_TOP, col),
+            Some(COPY_SELECTION),
+            "column {col} is not selected:\n{screen}"
+        );
+    }
+    assert_eq!(
+        (
+            nt.cell(PANE_TOP, 0),
+            nt.cell(PANE_TOP, 1),
+            nt.cell(PANE_TOP, 2)
+        ),
+        ("A".to_string(), "B".to_string(), "C".to_string()),
+        "the selection painted the text out:\n{screen}"
+    );
+    assert_eq!(
+        nt.cell_bg(PANE_TOP, 4),
+        None,
+        "the selection ran past the cursor:\n{screen}"
+    );
+}
+
+/// Yanking says where the text went, which is all it can say: there is no clipboard in this
+/// ABI and no way for a plugin to reach one, so the text lands in the plugin's own register.
+#[test]
+fn yanking_reports_the_register_it_put_the_text_in() {
+    let (mut nt, _init) = start_shipped("", "cat");
+    nt.send("ABCDEFGH\r");
+    nt.wait_for_screen("ABCDEFGH", PATIENCE);
+
+    nt.send("\x02["); // C-b [
+    nt.send(" lll");
+    nt.send("y");
+    nt.wait_for_screen("copied 1 line into plugin.copy.register", PATIENCE);
+}
