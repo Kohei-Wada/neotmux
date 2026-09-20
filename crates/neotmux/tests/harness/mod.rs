@@ -155,7 +155,7 @@ impl Neotmux {
             }
         });
 
-        Self {
+        let nt = Self {
             log,
             child,
             writer,
@@ -163,7 +163,37 @@ impl Neotmux {
             parser,
             byte_rx,
             _isolation: isolation,
+        };
+        nt.wait_until_raw();
+        nt
+    }
+
+    /// Blocks until neotmux has taken the terminal, and panics rather than let a test run
+    /// against a terminal it does not own yet.
+    ///
+    /// Until then the line discipline answers the keyboard: it eats `C-w` as WERASE, turns
+    /// `C-c` into SIGINT, rewrites `\r` as `\n`, and echoes whatever is written — so a test
+    /// that waits for its own input to appear on screen is watching the kernel, not neotmux,
+    /// and the next key it sends can still be swallowed. Only neotmux can clear `ICANON`, so
+    /// that is the barrier. It also strengthens every `wait_for_screen`: raw mode turns the
+    /// echo off, so afterwards a byte on screen got there by neotmux reading it.
+    fn wait_until_raw(&self) {
+        let Some(fd) = self.master.as_raw_fd() else {
+            panic!("no pty fd to read the line discipline from");
+        };
+        let fd = unsafe { std::os::fd::BorrowedFd::borrow_raw(fd) };
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
+            if let Ok(termios) = nix::sys::termios::tcgetattr(fd)
+                && !termios
+                    .local_flags
+                    .contains(nix::sys::termios::LocalFlags::ICANON)
+            {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(2));
         }
+        panic!("neotmux never took the terminal out of canonical mode");
     }
 
     /// Resizes the outer terminal. The kernel announces this to neotmux as `SIGWINCH` and in

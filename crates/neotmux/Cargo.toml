@@ -22,6 +22,7 @@ ratatui.workspace = true
 signal-hook.workspace = true
 
 [dev-dependencies]
+nix.workspace = true
 portable-pty.workspace = true
 tempfile.workspace = true
 vt100.workspace = true
