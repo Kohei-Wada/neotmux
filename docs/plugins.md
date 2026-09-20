@@ -570,6 +570,7 @@ neotmux.opt.tick_overrun_limit = 5 -- consecutive overruns before the tick is dr
 neotmux.opt.pane_gutter = 0        -- cells left between panes, for whoever draws there; <= 4
 neotmux.resubscribe(name)          -- give a dropped source its tick back; returns handles
 neotmux.width(text)                -- how many columns `text` takes on a pane's grid
+neotmux.clipboard.set(text)        -- written? — true, or false and why not
 neotmux.home                       -- `$HOME` as the host read it, or nil; read-only
 ```
 
@@ -588,6 +589,34 @@ It is the renderer's own rule, read out of the same code the grid is built with,
 cannot disagree. A combining mark adds nothing, because it is drawn into the cell before it.
 A control character adds nothing either, because it is never drawn — a tab moves the cursor
 rather than filling cells, and no tab ever reaches a `pane.content` line for that reason.
+
+`neotmux.clipboard.set` writes an OSC 52 sequence carrying `text` to the client's terminal.
+
+```lua
+local ok, err = neotmux.clipboard.set(selected)
+if not ok then
+  neotmux.notify('warn', 'could not reach the terminal: ' .. err)
+end
+```
+
+**`true` means the sequence was written and flushed, and nothing more.** It does not mean the
+clipboard holds the text, and neotmux cannot find out whether it does. OSC 52 has no reply; a
+terminal that does not implement it discards it in silence, as it would any escape sequence it
+does not know; and a terminal that does implement it may have it turned off, or there may be
+an ssh session or another multiplexer in between that dropped it. `false` comes with the
+reason, and it is always about the write — there was no terminal to write to, or writing to it
+failed.
+
+So do not put "Copied to clipboard" on the screen on a `true`. That is the bug this return
+value exists to let you avoid: tmux checks terminfo's `Ms` capability and writes nothing at all
+when it is absent, and a plugin that reported success on top of that says "copied" over
+nothing having been copied. neotmux does not read terminfo, because `Ms` describes what the
+entry for `$TERM` claims rather than what the terminal on the other end did, and because
+sending an OSC a terminal does not know costs nothing. Say what you know — "sent to the
+terminal" — or say nothing, and tell the person about the paste buffer you keep yourself,
+which you can actually check.
+
+There is no paste buffer in the host. Yanked text goes wherever your plugin puts it.
 
 `neotmux.home` is a fact, not an option: it sits beside `pane.info`'s facts rather than under
 `opt`, because nothing sets it. The VM has no `os.getenv` — reading the process environment is

@@ -1,5 +1,6 @@
 pub mod evictions;
 pub mod lines;
+pub mod osc52;
 pub mod pty;
 pub mod query;
 pub mod read;

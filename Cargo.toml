@@ -19,6 +19,7 @@ neotmux-core = { path = "crates/neotmux-core", version = "0.1.0" }
 neotmux-lua = { path = "crates/neotmux-lua", version = "0.1.0" }
 neotmux-term = { path = "crates/neotmux-term", version = "0.1.0" }
 anyhow = "1"
+base64 = "0.22"
 crossterm = "0.29"
 mlua = { version = "0.12", features = ["lua54", "vendored"] }
 nix = { version = "0.28", features = ["term", "signal", "poll"] }

@@ -1,3 +1,4 @@
+pub mod clipboard;
 pub mod ctx;
 pub mod event;
 pub mod keymap;
@@ -256,6 +257,12 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
         let window = window::install(lua, sources.clone(), ops.clone(), geometry, window_ids)?;
         let window = seal(lua, window, "neotmux.window")?;
         neotmux.set("window", window)?;
+    }
+
+    {
+        let clipboard = clipboard::install(lua)?;
+        let clipboard = seal(lua, clipboard, "neotmux.clipboard")?;
+        neotmux.set("clipboard", clipboard)?;
     }
 
     let log = log::install(lua, sources.clone(), ops.clone())?;
