@@ -27,6 +27,21 @@ watched from the moment it exists rather than from the moment it first prints so
 revision gate is untouched: a pane's lines are still built only when its terminal has been fed
 since it was last read, so an idle session still reads nothing.
 
+### The dividers meet where they cross
+
+Four panes in a grid used to leave a hole at the crossing. Each pane draws the divider down
+its own right-hand gutter and across its own bottom one, so the cell where the two gutters
+meet is inside neither pane's extent and nobody drew it.
+
+It is filled now, with the glyph the arms deserve rather than a `┼` everywhere: a cell has an
+arm in a direction when a divider covers the neighbouring cell that way, so a full-height pane
+beside a split column gets `├` and a wide pane above two gets `┬`, and no arm is ever drawn
+into a pane that is not divided there. Working that out is `neotmux.junctions`, a pure
+geometry module beside `neotmux.nav`; `plugin.borders` decides what to put in the cell, and
+its five new fields — `cross`, `tee_up`, `tee_down`, `tee_left`, `tee_right` — are read every
+tick like `vertical` and `horizontal`. The host learned nothing: a junction is one more cell
+of `ctx:line`.
+
 ### The bar counts panes and windows the way a person does
 
 Split, end the shell in the new pane, split again: the number on the bar used to climb — 2,
