@@ -630,10 +630,9 @@ const TO_SERVER_READ: u8 = 3;
 const TO_SERVER_TOCK: u8 = 4;
 
 const TO_CLIENT_TICK: u8 = 0;
-const TO_CLIENT_FRAME: u8 = 1;
+const TO_CLIENT_DONE: u8 = 1;
 const TO_CLIENT_READING: u8 = 2;
-const TO_CLIENT_END: u8 = 3;
-const TO_CLIENT_REFUSED: u8 = 4;
+const TO_CLIENT_REFUSED: u8 = 3;
 
 const STEP_GEOMETRY: u8 = 0;
 const STEP_BANDS: u8 = 1;
@@ -738,20 +737,13 @@ pub fn encode_to_client(msg: &ToClient<'_>) -> Vec<u8> {
             w.u8(TO_CLIENT_TICK);
             w.tick(tick);
         }
-        ToClient::Frame(frame) => {
-            w.u8(TO_CLIENT_FRAME);
-            w.frame(frame);
+        ToClient::Done(done) => {
+            w.u8(TO_CLIENT_DONE);
+            w.done(done);
         }
         ToClient::Reading(reading) => {
             w.u8(TO_CLIENT_READING);
             w.reading(reading);
-        }
-        ToClient::End(end) => {
-            w.u8(TO_CLIENT_END);
-            w.u8(match end {
-                End::Quit => END_QUIT,
-                End::Eof => END_EOF,
-            });
         }
         ToClient::Refused(why) => {
             w.u8(TO_CLIENT_REFUSED);
@@ -765,13 +757,8 @@ pub fn decode_to_client(bytes: &[u8]) -> Result<OwnedToClient, WireError> {
     let mut r = Reader::new(bytes);
     let msg = match r.u8()? {
         TO_CLIENT_TICK => OwnedToClient::Tick(r.tick()?),
-        TO_CLIENT_FRAME => OwnedToClient::Frame(r.frame()?),
+        TO_CLIENT_DONE => OwnedToClient::Done(r.done()?),
         TO_CLIENT_READING => OwnedToClient::Reading(r.reading()?),
-        TO_CLIENT_END => OwnedToClient::End(match r.u8()? {
-            END_QUIT => End::Quit,
-            END_EOF => End::Eof,
-            _ => return Err(WireError::Malformed("end discriminant")),
-        }),
         TO_CLIENT_REFUSED => OwnedToClient::Refused(r.string()?),
         _ => return Err(WireError::Malformed("server message discriminant")),
     };
@@ -945,6 +932,11 @@ impl Writer {
                 self.pane_info(info);
             }
         }
+        self.len(v.revisions.len());
+        for (pane, revision) in &v.revisions {
+            self.u32(pane.get());
+            self.u64(*revision);
+        }
     }
 
     fn op(&mut self, v: &SessionOp) {
@@ -1102,6 +1094,30 @@ impl Writer {
                         self.bool(*frozen);
                     }
                 }
+            }
+        }
+    }
+
+    fn done(&mut self, v: &crate::msg::Done<'_>) {
+        self.len(v.steps.len());
+        for step in &v.steps {
+            self.step(step);
+        }
+        match v.frame {
+            None => self.bool(false),
+            Some(frame) => {
+                self.bool(true);
+                self.frame(frame);
+            }
+        }
+        match v.end {
+            None => self.bool(false),
+            Some(end) => {
+                self.bool(true);
+                self.u8(match end {
+                    End::Quit => END_QUIT,
+                    End::Eof => END_EOF,
+                });
             }
         }
     }
@@ -1289,11 +1305,16 @@ impl Reader<'_> {
         } else {
             None
         };
+        let mut revisions = BTreeMap::new();
+        for _ in 0..self.len()? {
+            revisions.insert(self.pane()?, self.u64()?);
+        }
         Ok(Tick {
             steps,
             epoch,
             geometry,
             pane_info,
+            revisions,
         })
     }
 
@@ -1410,6 +1431,28 @@ impl Reader<'_> {
             }),
             _ => return Err(WireError::Malformed("reading discriminant")),
         })
+    }
+
+    fn done(&mut self) -> Result<crate::msg::OwnedDone, WireError> {
+        let mut steps = Vec::new();
+        for _ in 0..self.len()? {
+            steps.push(self.step()?);
+        }
+        let frame = if self.bool()? {
+            Some(self.frame()?)
+        } else {
+            None
+        };
+        let end = if self.bool()? {
+            Some(match self.u8()? {
+                END_QUIT => End::Quit,
+                END_EOF => End::Eof,
+                _ => return Err(WireError::Malformed("end discriminant")),
+            })
+        } else {
+            None
+        };
+        Ok(crate::msg::OwnedDone { steps, frame, end })
     }
 
     fn frame(&mut self) -> Result<OwnedFrame, WireError> {
@@ -1991,6 +2034,7 @@ mod tests {
                 Some(PaneId::from(1)),
             ),
             geometry: geometry_of(),
+            revisions: BTreeMap::from([(PaneId::from(1), 7), (PaneId::from(2), 0)]),
             pane_info: Some(BTreeMap::from([
                 (
                     PaneId::from(1),
@@ -2013,6 +2057,7 @@ mod tests {
             epoch: Epoch::default(),
             geometry: Geometry::default(),
             pane_info: None,
+            revisions: BTreeMap::new(),
         };
         let bytes = encode_to_client(&ToClient::Tick(&tick));
         assert_eq!(decode_to_client(&bytes), Ok(OwnedToClient::Tick(tick)));
@@ -2076,14 +2121,50 @@ mod tests {
     }
 
     #[test]
-    fn a_frame_a_reading_an_end_and_a_refusal_round_trip() {
+    fn a_finished_frame_a_reading_and_a_refusal_round_trip() {
         let frame = frame_of(vec![OwnedPaneFrame {
             pane: PaneId::from(1),
             rect: Rect::new(0, 0, 2, 2),
             grid: grid_of(2, 2, &["a", "b", "c", "d"]),
         }]);
-        let bytes = encode_to_client(&ToClient::Frame(frame.frame()));
-        assert_eq!(decode_to_client(&bytes), Ok(OwnedToClient::Frame(frame)));
+        let steps = vec![
+            Step::Geometry(geometry_of()),
+            Step::Event(Event::PaneOpened {
+                pane: PaneId::from(2),
+            }),
+        ];
+        let borrowed = frame.frame();
+        let done = crate::msg::Done {
+            steps: steps.clone(),
+            frame: Some(&borrowed),
+            end: Some(End::Quit),
+        };
+        let bytes = encode_to_client(&ToClient::Done(&done));
+        assert_eq!(
+            decode_to_client(&bytes),
+            Ok(OwnedToClient::Done(crate::msg::OwnedDone {
+                steps,
+                frame: Some(frame),
+                end: Some(End::Quit),
+            }))
+        );
+
+        for end in [None, Some(End::Quit), Some(End::Eof)] {
+            let done = crate::msg::Done {
+                steps: Vec::new(),
+                frame: None,
+                end,
+            };
+            let bytes = encode_to_client(&ToClient::Done(&done));
+            assert_eq!(
+                decode_to_client(&bytes),
+                Ok(OwnedToClient::Done(crate::msg::OwnedDone {
+                    steps: Vec::new(),
+                    frame: None,
+                    end,
+                }))
+            );
+        }
 
         for reading in [
             Reading::Revision(Some(12)),
@@ -2105,11 +2186,6 @@ mod tests {
                 decode_to_client(&bytes),
                 Ok(OwnedToClient::Reading(reading))
             );
-        }
-
-        for end in [End::Quit, End::Eof] {
-            let bytes = encode_to_client(&ToClient::End(end));
-            assert_eq!(decode_to_client(&bytes), Ok(OwnedToClient::End(end)));
         }
 
         let bytes = encode_to_client(&ToClient::Refused("already attached"));

@@ -51,6 +51,7 @@ fn a_flooding_child_does_not_starve_ctrl_c() {
     cmd.env("SHELL", &shell_path);
     cmd.env("HOME", isolation.path());
     cmd.env("XDG_CONFIG_HOME", isolation.path());
+    cmd.env("XDG_RUNTIME_DIR", isolation.path());
     cmd.arg("--log");
     cmd.arg(&log);
     let child = pair.slave.spawn_command(cmd).expect("spawn neotmux");

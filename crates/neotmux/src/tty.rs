@@ -1,25 +1,26 @@
 use std::fs::File;
 use std::io::{self, IsTerminal};
-use std::os::fd::{AsFd, AsRawFd, OwnedFd};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
 use std::time::{Duration, Instant};
 
-use neotmux_term::wakeup::Wakeup;
 use nix::errno::Errno;
 use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
 
-/// What one wait on the terminal found.
+/// What one wait found.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Ready {
-    /// Bytes are waiting to be read.
+    /// The first descriptor has something to read: the terminal, for the client, and the
+    /// socket, for the server.
     Input,
-    /// A pane's reader thread has enqueued output. The frame that draws it is worth starting
-    /// now rather than at the next deadline, which is the whole of why the wait watches
-    /// anything but the terminal.
+    /// The second one has. For the client that is the socket; for the server it is a pane's
+    /// reader thread, whose output is worth starting a frame for rather than waiting out the
+    /// deadline. It is the whole of why the wait watches two things at all.
     Output,
     /// The deadline passed with nothing to read.
     Idle,
-    /// The terminal is gone. `POLLHUP` is the kernel saying the other end of the PTY has been
-    /// closed, which is what a terminal emulator exiting, or an ssh session dropping, does.
+    /// The first descriptor is gone. `POLLHUP` is the kernel saying the other end of the PTY
+    /// — or of the socket — has been closed, which is what a terminal emulator exiting, an
+    /// ssh session dropping, or a peer process dying does.
     HangUp,
 }
 
@@ -42,53 +43,10 @@ impl Terminal {
         Ok(Self { fd })
     }
 
-    /// Waits until the terminal has something to read, a pane produces output, the terminal
-    /// goes away, or `deadline` passes. A wait cut short by a signal is retried, so the
-    /// deadline is the only thing that ends it early — the caller checks for a raised signal
-    /// on its own terms.
-    ///
-    /// `panes` is a parameter rather than a field because half of every frame is spent
-    /// deliberately not listening to it: once the frame has drawn, a pane's output is a
-    /// reason for the *next* frame, and passing `None` is how the caller says so.
-    pub fn wait(&self, panes: Option<&Wakeup>, deadline: Instant) -> io::Result<Ready> {
-        loop {
-            let tty = PollFd::new(self.fd.as_fd(), PollFlags::POLLIN);
-            let mut watched = [tty; 2];
-            let watched = match panes {
-                Some(panes) => {
-                    watched[1] = PollFd::new(panes.as_fd(), PollFlags::POLLIN);
-                    &mut watched[..2]
-                }
-                None => &mut watched[..1],
-            };
-            match poll(
-                watched,
-                timeout(deadline.saturating_duration_since(Instant::now())),
-            ) {
-                Ok(0) => return Ok(Ready::Idle),
-                Ok(_) => {
-                    let revents = watched[0].revents().unwrap_or_else(PollFlags::empty);
-                    // A hangup is reported alongside `POLLIN`, so it has to be looked at first.
-                    let gone = PollFlags::POLLHUP | PollFlags::POLLERR | PollFlags::POLLNVAL;
-                    if revents.intersects(gone) {
-                        return Ok(Ready::HangUp);
-                    }
-                    if revents.contains(PollFlags::POLLIN) {
-                        return Ok(Ready::Input);
-                    }
-                    if let Some(panes) = panes {
-                        panes.clear();
-                    }
-                    return Ok(Ready::Output);
-                }
-                Err(Errno::EINTR) => {
-                    if Instant::now() >= deadline {
-                        return Ok(Ready::Idle);
-                    }
-                }
-                Err(err) => return Err(err.into()),
-            }
-        }
+    /// Waits on the terminal and on the one other descriptor this side cares about: the
+    /// socket, for the client, which has no panes of its own to listen to.
+    pub fn wait_beside(&self, peer: BorrowedFd<'_>, deadline: Instant) -> io::Result<Ready> {
+        wait_on(self.fd.as_fd(), Some(peer), deadline)
     }
 
     /// Appends everything the terminal has to give right now to `out` and returns how much
@@ -138,6 +96,53 @@ impl Terminal {
     }
 }
 
+/// Waits until `first` or `second` has something to read, `first` goes away, or `deadline`
+/// passes. A wait cut short by a signal is retried, so the deadline is the only thing that
+/// ends it early — the caller checks for a raised signal on its own terms.
+///
+/// Two descriptors and no more, because both halves of neotmux wait on exactly two things:
+/// the client on its terminal and the socket, the server on the socket and the panes.
+pub fn wait_on(
+    first: BorrowedFd<'_>,
+    second: Option<BorrowedFd<'_>>,
+    deadline: Instant,
+) -> io::Result<Ready> {
+    loop {
+        let mut watched = [PollFd::new(first, PollFlags::POLLIN); 2];
+        let watched = match second {
+            Some(second) => {
+                watched[1] = PollFd::new(second, PollFlags::POLLIN);
+                &mut watched[..2]
+            }
+            None => &mut watched[..1],
+        };
+        match poll(
+            watched,
+            timeout(deadline.saturating_duration_since(Instant::now())),
+        ) {
+            Ok(0) => return Ok(Ready::Idle),
+            Ok(_) => {
+                let revents = watched[0].revents().unwrap_or_else(PollFlags::empty);
+                // A hangup is reported alongside `POLLIN`, so it has to be looked at first.
+                let gone = PollFlags::POLLHUP | PollFlags::POLLERR | PollFlags::POLLNVAL;
+                if revents.intersects(gone) {
+                    return Ok(Ready::HangUp);
+                }
+                if revents.contains(PollFlags::POLLIN) {
+                    return Ok(Ready::Input);
+                }
+                return Ok(Ready::Output);
+            }
+            Err(Errno::EINTR) => {
+                if Instant::now() >= deadline {
+                    return Ok(Ready::Idle);
+                }
+            }
+            Err(err) => return Err(err.into()),
+        }
+    }
+}
+
 /// `poll(2)` counts in whole milliseconds; rounding up is what keeps a sub-millisecond
 /// remainder from turning the wait into a spin.
 fn timeout(remaining: Duration) -> PollTimeout {
@@ -167,9 +172,8 @@ mod tests {
         let tty = slave_terminal(&slave);
 
         let started = Instant::now();
-        let ready = tty
-            .wait(None, started + Duration::from_millis(30))
-            .expect("wait");
+        let ready =
+            wait_on(tty.fd.as_fd(), None, started + Duration::from_millis(30)).expect("wait");
 
         assert_eq!(ready, Ready::Idle);
         assert!(
@@ -187,8 +191,12 @@ mod tests {
         nix::unistd::write(master.as_fd(), b"x\n").expect("write");
 
         assert_eq!(
-            tty.wait(None, Instant::now() + Duration::from_secs(5))
-                .expect("wait"),
+            wait_on(
+                tty.fd.as_fd(),
+                None,
+                Instant::now() + Duration::from_secs(5)
+            )
+            .expect("wait"),
             Ready::Input
         );
     }
@@ -203,8 +211,7 @@ mod tests {
 
         let started = Instant::now();
         assert_eq!(
-            tty.wait(None, started + Duration::from_secs(5))
-                .expect("wait"),
+            wait_on(tty.fd.as_fd(), None, started + Duration::from_secs(5)).expect("wait"),
             Ready::HangUp
         );
         assert!(
@@ -221,8 +228,12 @@ mod tests {
 
         for _ in 0..3 {
             assert_eq!(
-                tty.wait(None, Instant::now() + Duration::from_secs(5))
-                    .expect("wait"),
+                wait_on(
+                    tty.fd.as_fd(),
+                    None,
+                    Instant::now() + Duration::from_secs(5)
+                )
+                .expect("wait"),
                 Ready::HangUp
             );
         }
@@ -238,9 +249,12 @@ mod tests {
         waker.wake();
 
         let started = Instant::now();
-        let ready = tty
-            .wait(Some(&wakeup), started + Duration::from_secs(5))
-            .expect("wait");
+        let ready = wait_on(
+            tty.fd.as_fd(),
+            Some(wakeup.as_fd()),
+            started + Duration::from_secs(5),
+        )
+        .expect("wait");
 
         assert_eq!(ready, Ready::Output);
         assert!(
@@ -261,14 +275,21 @@ mod tests {
 
         let deadline = Instant::now() + Duration::from_secs(5);
         assert_eq!(
-            tty.wait(Some(&wakeup), deadline).expect("wait"),
+            wait_on(tty.fd.as_fd(), Some(wakeup.as_fd()), deadline).expect("wait"),
             Ready::Output
         );
+        // What the loop does the moment it is told, and the whole of why one chunk of output
+        // is one frame rather than a frame per wait.
+        wakeup.clear();
 
         let started = Instant::now();
         assert_eq!(
-            tty.wait(Some(&wakeup), started + Duration::from_millis(30))
-                .expect("wait"),
+            wait_on(
+                tty.fd.as_fd(),
+                Some(wakeup.as_fd()),
+                started + Duration::from_millis(30)
+            )
+            .expect("wait"),
             Ready::Idle
         );
         assert!(started.elapsed() >= Duration::from_millis(25));
@@ -285,8 +306,7 @@ mod tests {
 
         let started = Instant::now();
         assert_eq!(
-            tty.wait(None, started + Duration::from_millis(30))
-                .expect("wait"),
+            wait_on(tty.fd.as_fd(), None, started + Duration::from_millis(30)).expect("wait"),
             Ready::Idle
         );
         assert!(started.elapsed() >= Duration::from_millis(25));
@@ -304,14 +324,14 @@ mod tests {
 
         let deadline = Instant::now() + Duration::from_secs(5);
         assert_eq!(
-            tty.wait(Some(&wakeup), deadline).expect("wait"),
+            wait_on(tty.fd.as_fd(), Some(wakeup.as_fd()), deadline).expect("wait"),
             Ready::Input
         );
 
         let mut buf = [0u8; 8];
         nix::unistd::read(std::os::fd::AsRawFd::as_raw_fd(&slave), &mut buf).expect("read");
         assert_eq!(
-            tty.wait(Some(&wakeup), deadline).expect("wait"),
+            wait_on(tty.fd.as_fd(), Some(wakeup.as_fd()), deadline).expect("wait"),
             Ready::Output
         );
     }
@@ -335,8 +355,12 @@ mod tests {
         );
 
         assert_eq!(
-            tty.wait(None, Instant::now() + Duration::from_secs(5))
-                .expect("wait"),
+            wait_on(
+                tty.fd.as_fd(),
+                None,
+                Instant::now() + Duration::from_secs(5)
+            )
+            .expect("wait"),
             Ready::Input
         );
         let mut out = Vec::new();
@@ -355,8 +379,12 @@ mod tests {
         nix::unistd::write(master.as_fd(), b"hello\n").expect("write");
 
         assert_eq!(
-            tty.wait(None, Instant::now() + Duration::from_secs(5))
-                .expect("wait"),
+            wait_on(
+                tty.fd.as_fd(),
+                None,
+                Instant::now() + Duration::from_secs(5)
+            )
+            .expect("wait"),
             Ready::Input
         );
         let mut out = Vec::new();

@@ -1,4 +1,5 @@
 use std::io::Read;
+use std::path::Path;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -25,6 +26,7 @@ fn produces_no_output_while_idle() {
     cmd.env("SHELL", "/bin/sh");
     cmd.env("HOME", isolation.path());
     cmd.env("XDG_CONFIG_HOME", isolation.path());
+    cmd.env("XDG_RUNTIME_DIR", isolation.path());
     cmd.arg("--log");
     cmd.arg(&log);
     let mut child = pair.slave.spawn_command(cmd).expect("spawn");
@@ -110,11 +112,13 @@ neotmux.on_tick(function()
 end)
 "#;
 
-/// The process's own user + system time so far, in seconds. Fields 14 and 15 of
+/// One process's own user + system time so far, in seconds. Fields 14 and 15 of
 /// `/proc/<pid>/stat`, read after the command name so a shell called `a b c` cannot shift
 /// them.
 fn cpu_seconds(pid: u32) -> f64 {
-    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).expect("read /proc stat");
+    let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+        return 0.0;
+    };
     // Everything after the last ')' — a command name can hold spaces and parentheses, and
     // splitting before it would shift every field.
     let after_comm = stat.rsplit_once(')').expect("a comm field").1;
@@ -124,6 +128,35 @@ fn cpu_seconds(pid: u32) -> f64 {
     // `sysconf(_SC_CLK_TCK)`, which is 100 on every Linux that matters and is what
     // `/proc/<pid>/stat` is denominated in.
     ticks as f64 / 100.0
+}
+
+/// The server this client started, found by the log file the two of them share. A session
+/// is two processes now, and what it costs is what both of them spend: the plugins tick in
+/// the client and the panes are read in the server, so measuring one of them would credit a
+/// plugin for work that simply moved.
+fn server_pid(log: &Path) -> Option<u32> {
+    let marker = log.to_string_lossy().into_owned();
+    for entry in std::fs::read_dir("/proc").ok()?.flatten() {
+        let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() else {
+            continue;
+        };
+        let Ok(cmdline) = std::fs::read(format!("/proc/{pid}/cmdline")) else {
+            continue;
+        };
+        let args: Vec<String> = cmdline
+            .split(|b| *b == 0)
+            .map(|arg| String::from_utf8_lossy(arg).into_owned())
+            .collect();
+        if args.iter().any(|arg| arg == "--server") && args.contains(&marker) {
+            return Some(pid);
+        }
+    }
+    None
+}
+
+/// What the whole session is spending: the client and the server it started.
+fn session_cpu(client: u32, server: Option<u32>) -> f64 {
+    cpu_seconds(client) + server.map(cpu_seconds).unwrap_or(0.0)
 }
 
 /// Spawns neotmux over a PTY with `plugins` as its runtime layer and reports the CPU seconds
@@ -151,12 +184,14 @@ fn idle_cpu(plugins: &[(&str, &str)], window: Duration) -> f64 {
     cmd.env("SHELL", "/bin/cat");
     cmd.env("HOME", isolation.path());
     cmd.env("XDG_CONFIG_HOME", isolation.path());
+    cmd.env("XDG_RUNTIME_DIR", isolation.path());
     cmd.env("NEOTMUX_RUNTIME", runtime.path());
     cmd.arg("--log");
     cmd.arg(isolation.path().join("neotmux.log"));
     let mut child = pair.slave.spawn_command(cmd).expect("spawn");
     drop(pair.slave);
     let pid = child.process_id().expect("a pid");
+    let log = isolation.path().join("neotmux.log");
 
     // The output is drained so the multiplexer is never blocked on a full pipe.
     let mut reader = pair.master.try_clone_reader().expect("reader");
@@ -171,9 +206,10 @@ fn idle_cpu(plugins: &[(&str, &str)], window: Duration) -> f64 {
 
     // The splits, the shells and the first frames are startup, not idle.
     std::thread::sleep(Duration::from_millis(1500));
-    let before = cpu_seconds(pid);
+    let server = server_pid(&log);
+    let before = session_cpu(pid, server);
     std::thread::sleep(window);
-    let after = cpu_seconds(pid);
+    let after = session_cpu(pid, server);
 
     child.kill().ok();
     child.wait().ok();

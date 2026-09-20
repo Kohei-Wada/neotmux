@@ -1,46 +1,55 @@
 mod draw;
 mod notices;
 mod overlay;
+mod server;
 mod signals;
+mod start;
 mod tty;
 mod tui;
 
 use std::env;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 
-use neotmux::{logging, notify};
+use neotmux::plugins::Plugins;
+use neotmux::{logging, reads};
 use neotmux_lua::LuaSubsystem;
-use neotmux_lua::ops::Op;
 use neotmux_lua::runtime::Layers;
 use neotmux_proto::Level;
-use neotmux_term::terminals::PaneTerminals;
 
-struct LogFlag {
-    path: Option<PathBuf>,
+/// What the command line asked for. One binary is both halves of neotmux: with no arguments
+/// it is a client, and `--server` is the copy of itself a client starts when nothing is
+/// listening on the session's socket.
+struct Cli {
+    log: Option<PathBuf>,
+    server: bool,
     warnings: Vec<String>,
 }
 
-fn parse_log_flag(mut args: impl Iterator<Item = String>) -> LogFlag {
-    let mut path = None;
+fn parse_args(mut args: impl Iterator<Item = String>) -> Cli {
+    let mut log = None;
+    let mut server = false;
     let mut warnings = Vec::new();
     while let Some(arg) = args.next() {
-        if arg == "--log" {
-            match args.next() {
+        match arg.as_str() {
+            "--server" => server = true,
+            "--log" => match args.next() {
                 Some(value) if !value.starts_with('-') => {
-                    path = Some(PathBuf::from(value));
+                    log = Some(PathBuf::from(value));
                 }
                 Some(value) => warnings.push(format!(
                     "--log requires a path argument, got '{value}'; using the default log path"
                 )),
                 None => warnings
                     .push("--log requires a path argument; using the default log path".to_string()),
-            }
-        } else {
-            warnings.push(format!("unrecognised argument '{arg}'; ignoring it"));
+            },
+            _ => warnings.push(format!("unrecognised argument '{arg}'; ignoring it")),
         }
     }
-    LogFlag { path, warnings }
+    Cli {
+        log,
+        server,
+        warnings,
+    }
 }
 
 /// Raw mode, taken before anything slow and given back however `main` leaves — a panic
@@ -48,9 +57,10 @@ fn parse_log_flag(mut args: impl Iterator<Item = String>) -> LogFlag {
 ///
 /// Until it is taken the line discipline is the one reading the keyboard, and it does not
 /// hand over what it understands as editing: `0x17` (`C-w`) is WERASE and is eaten rather
-/// than delivered, `0x03` raises SIGINT, and `\r` arrives as `\n`. Loading the Lua layer
-/// takes long enough on a loaded machine for a key typed at the prompt to land inside that
-/// window, so the terminal is claimed first and the layer is built under it.
+/// than delivered, `0x03` raises SIGINT, and `\r` arrives as `\n`. Starting a server and
+/// loading the Lua layer both take long enough on a loaded machine for a key typed at the
+/// prompt to land inside that window, so the terminal is claimed first and everything else
+/// is done under it.
 struct RawMode;
 
 impl RawMode {
@@ -73,105 +83,54 @@ impl Drop for RawMode {
 }
 
 fn main() -> anyhow::Result<()> {
-    let flag = parse_log_flag(env::args().skip(1));
-    for warning in &flag.warnings {
+    let cli = parse_args(env::args().skip(1));
+    for warning in &cli.warnings {
         eprintln!("neotmux: {warning}");
     }
-    if let Err(err) = logging::init(flag.path.as_deref()) {
+    if let Err(err) = logging::init(cli.log.as_deref()) {
         eprintln!("neotmux: failed to initialise logging: {err:#}");
     }
 
+    if cli.server {
+        return start::serve();
+    }
+    client()
+}
+
+fn client() -> anyhow::Result<()> {
+    // First, and before the socket: until the terminal is in raw mode the line discipline is
+    // answering the keyboard, and starting a server is not fast.
     let _raw = RawMode::enter();
+
+    let link = start::connect()?;
 
     let exe_dir = env::current_exe()
         .ok()
         .and_then(|path| path.parent().map(Path::to_path_buf));
     let layers = Layers::resolve(&|key| env::var_os(key), exe_dir.as_deref());
-    let terminals = Rc::new(PaneTerminals::new());
-    let lua = LuaSubsystem::build(layers, terminals.clone())?;
-    for failure in lua.run_init() {
+    let panes = std::rc::Rc::new(reads::RemotePanes::new(link.clone()));
+    let lua = LuaSubsystem::build(layers, panes.clone())?;
+    let mut plugins = Plugins::new(lua);
+    for failure in plugins.lua().run_init() {
         logging::log(Level::Warn, &failure.source, &failure.message);
     }
 
-    // Ops from run_init are drained here, before ratatui::init(), so an init-time
-    // neotmux.quit() exits before the alternate screen is entered or a shell is spawned.
-    let mut quit_at_init = false;
-    for (id, op) in lua.drain_ops() {
-        match op {
-            Op::Quit => quit_at_init = true,
-            Op::Log { level, text } | Op::Notify { level, text } => {
-                let tag = lua.sources().name(id).unwrap_or_else(|| id.to_string());
-                logging::log(level, &tag, &text);
-            }
-            // Nothing is running yet at load time, so there is no pane to split or focus.
-            Op::PaneSplit { dir } => {
-                let tag = lua.sources().name(id).unwrap_or_else(|| id.to_string());
-                logging::log(
-                    Level::Error,
-                    &tag,
-                    &format!(
-                        "pane.split('{dir}') refused: no panes exist until the session starts"
-                    ),
-                );
-            }
-            Op::PaneResize { dir, cells } => {
-                let tag = lua.sources().name(id).unwrap_or_else(|| id.to_string());
-                logging::log(
-                    Level::Error,
-                    &tag,
-                    &format!(
-                        "pane.resize('{dir}', {cells}) refused: no panes exist until the \
-                         session starts"
-                    ),
-                );
-            }
-            Op::PaneFocus { pane } => {
-                let tag = lua.sources().name(id).unwrap_or_else(|| id.to_string());
-                logging::log(
-                    Level::Error,
-                    &tag,
-                    &format!("pane.focus({pane}) refused: no panes exist until the session starts"),
-                );
-            }
-            // Same at load time: the session's own first window is not there yet.
-            Op::WindowCreate { window } => {
-                let tag = lua.sources().name(id).unwrap_or_else(|| id.to_string());
-                logging::log(
-                    Level::Error,
-                    &tag,
-                    &format!(
-                        "window.create() refused: {window} cannot be opened until the \
-                         session starts"
-                    ),
-                );
-            }
-            Op::WindowFocus { window } => {
-                let tag = lua.sources().name(id).unwrap_or_else(|| id.to_string());
-                logging::log(
-                    Level::Error,
-                    &tag,
-                    &format!(
-                        "window.focus({window}) refused: no windows exist until the \
-                         session starts"
-                    ),
-                );
-            }
-        }
-    }
-
-    if quit_at_init {
+    // Drained here, before `ratatui::init()`, so an init-time `neotmux.quit()` exits before
+    // the alternate screen is entered and before the server is asked to start a session.
+    if plugins.drain_load_ops() {
         return Ok(());
     }
 
     let shutdown = signals::ShutdownSignal::install()?;
-    let mut notifications = notify::Notifications::new();
     let mut terminal = ratatui::init();
+    let attach = tui::attach(&terminal, &plugins)?;
     let result = tui::run(
         &mut terminal,
         &shutdown,
-        &lua,
-        terminals,
-        &mut notifications,
+        &mut plugins,
+        &link,
+        &panes,
+        attach,
     );
     // Not `ratatui::restore`: it reports a failure with `eprintln!`, which panics when the
     // terminal it is trying to restore is the one that has gone away.
@@ -182,7 +141,7 @@ fn main() -> anyhow::Result<()> {
             &format!("could not restore the terminal: {err}"),
         );
     }
-    notifications.flush(&mut std::io::stderr());
+    plugins.notifications().flush(&mut std::io::stderr());
     match result? {
         Some(signal) => signals::die_of(signal),
         None => Ok(()),
@@ -203,15 +162,15 @@ mod tests {
 
     #[test]
     fn a_valid_log_flag_is_used_with_no_warnings() {
-        let flag = parse_log_flag(args(&["--log", "/tmp/x.log"]));
-        assert_eq!(flag.path, Some(PathBuf::from("/tmp/x.log")));
+        let flag = parse_args(args(&["--log", "/tmp/x.log"]));
+        assert_eq!(flag.log, Some(PathBuf::from("/tmp/x.log")));
         assert!(flag.warnings.is_empty());
     }
 
     #[test]
     fn a_trailing_log_flag_with_no_value_falls_back_to_the_default_and_warns() {
-        let flag = parse_log_flag(args(&["--log"]));
-        assert_eq!(flag.path, None);
+        let flag = parse_args(args(&["--log"]));
+        assert_eq!(flag.log, None);
         assert_eq!(
             flag.warnings,
             vec!["--log requires a path argument; using the default log path"]
@@ -220,8 +179,8 @@ mod tests {
 
     #[test]
     fn a_log_flag_followed_by_another_flag_is_treated_as_one_typo_not_two_mistakes() {
-        let flag = parse_log_flag(args(&["--log", "--foo"]));
-        assert_eq!(flag.path, None);
+        let flag = parse_args(args(&["--log", "--foo"]));
+        assert_eq!(flag.log, None);
         assert_eq!(
             flag.warnings,
             vec!["--log requires a path argument, got '--foo'; using the default log path"],
@@ -231,8 +190,8 @@ mod tests {
 
     #[test]
     fn an_unrecognised_argument_falls_back_to_the_default_and_warns() {
-        let flag = parse_log_flag(args(&["--bogus"]));
-        assert_eq!(flag.path, None);
+        let flag = parse_args(args(&["--bogus"]));
+        assert_eq!(flag.log, None);
         assert_eq!(
             flag.warnings,
             vec!["unrecognised argument '--bogus'; ignoring it"]
@@ -241,8 +200,17 @@ mod tests {
 
     #[test]
     fn no_arguments_at_all_falls_back_to_the_default_with_no_warnings() {
-        let flag = parse_log_flag(args(&[]));
-        assert_eq!(flag.path, None);
+        let flag = parse_args(args(&[]));
+        assert_eq!(flag.log, None);
+        assert!(flag.warnings.is_empty());
+        assert!(!flag.server, "no arguments is a client");
+    }
+
+    #[test]
+    fn the_server_flag_is_the_other_half_of_the_same_binary() {
+        let flag = parse_args(args(&["--server", "--log", "/tmp/x.log"]));
+        assert!(flag.server);
+        assert_eq!(flag.log, Some(PathBuf::from("/tmp/x.log")));
         assert!(flag.warnings.is_empty());
     }
 }

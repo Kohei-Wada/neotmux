@@ -71,6 +71,7 @@ fn a_four_kibibyte_paste_arrives_whole_without_a_second_keystroke() {
     cmd.env("SHELL", &shell);
     cmd.env("HOME", isolation.path());
     cmd.env("XDG_CONFIG_HOME", isolation.path());
+    cmd.env("XDG_RUNTIME_DIR", isolation.path());
     cmd.env("NEOTMUX_RUNTIME", runtime.path());
     cmd.arg("--log");
     cmd.arg(isolation.path().join("neotmux.log"));

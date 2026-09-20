@@ -57,6 +57,14 @@ pub struct Tick {
     /// What every pane is running, when the host's own cadence says it is time to resample.
     /// `None` on the frames in between, which is most of them.
     pub pane_info: Option<BTreeMap<PaneId, PaneInfo>>,
+    /// Every pane's read stamp, as of this frame.
+    ///
+    /// It travels with the frame rather than being asked for, because it is the cheap half
+    /// of reading a pane — a watcher asks it every tick for every pane and reads the lines
+    /// only when it moved — and a question asked that often must not be a round trip. The
+    /// price is that it describes the pane as of this frame rather than this instant, which
+    /// is what the stamp already promises: it says the screen *may* have changed.
+    pub revisions: BTreeMap<PaneId, u64>,
 }
 
 /// An op a plugin raised that the session has to apply. `log` and `notify` are not here:
@@ -82,6 +90,29 @@ pub struct Tock {
     pub reserved: Reserved,
     pub gutter: u16,
     pub wants_pane_output: bool,
+}
+
+/// The end of a frame: what applying the tick's reply did to the session, the picture that
+/// came of it, and whether that was the last one.
+///
+/// It is one message and not three because it is one moment. The client may not look at its
+/// keyboard between sending a [`Tock`] and reading this: what a key handler sees has to be
+/// the session as it is, and between those two points it is not — the ops have been applied
+/// at the far end and nothing here knows it yet.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Done<'a> {
+    pub steps: Vec<Step>,
+    /// `None` when nothing changed and the last frame still stands.
+    pub frame: Option<&'a crate::Frame<'a>>,
+    pub end: Option<End>,
+}
+
+/// What a decoded [`Done`] is held in.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OwnedDone {
+    pub steps: Vec<Step>,
+    pub frame: Option<crate::OwnedFrame>,
+    pub end: Option<End>,
 }
 
 /// Why the session is over. A signal is neither: it ends a process, not the session.
@@ -173,9 +204,8 @@ pub enum ToServer {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ToClient<'a> {
     Tick(&'a Tick),
-    Frame(crate::Frame<'a>),
+    Done(&'a Done<'a>),
     Reading(&'a Reading),
-    End(End),
     /// Why this connection is not getting a session: something else already has it.
     Refused(&'a str),
 }
@@ -185,8 +215,7 @@ pub enum ToClient<'a> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OwnedToClient {
     Tick(Tick),
-    Frame(crate::OwnedFrame),
+    Done(OwnedDone),
     Reading(Reading),
-    End(End),
     Refused(String),
 }

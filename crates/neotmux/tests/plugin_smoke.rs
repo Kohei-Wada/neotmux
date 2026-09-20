@@ -26,6 +26,7 @@ fn run_neotmux(runtime_dir: &Path, log: &Path) {
     cmd.env("TERM", "xterm-256color");
     cmd.env("HOME", home.path());
     cmd.env("XDG_CONFIG_HOME", home.path());
+    cmd.env("XDG_RUNTIME_DIR", home.path());
     let mut child = pair.slave.spawn_command(cmd).expect("spawn");
     drop(pair.slave);
 
@@ -161,6 +162,7 @@ fn an_init_time_quit_exits_before_entering_the_alternate_screen() {
     cmd.env("TERM", "xterm-256color");
     cmd.env("HOME", home.path());
     cmd.env("XDG_CONFIG_HOME", home.path());
+    cmd.env("XDG_RUNTIME_DIR", home.path());
     let mut child = pair.slave.spawn_command(cmd).expect("spawn");
     drop(pair.slave);
 

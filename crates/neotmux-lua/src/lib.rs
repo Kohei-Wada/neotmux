@@ -469,6 +469,15 @@ impl LuaSubsystem {
         }
     }
 
+    /// Whether anything is subscribed to an event. The host asks about `pane_output` before
+    /// it copies a pane's bytes across a socket for nobody.
+    pub fn has_subscriber(&self, event: &str) -> bool {
+        self.registry
+            .snapshot(KindTag::Event)
+            .into_iter()
+            .any(|id| matches!(self.registry.kind(id), Some(Kind::Event(name)) if name == event))
+    }
+
     pub fn frame_output(&self) -> Vec<DrawCmd> {
         self.buffers.applicable()
     }

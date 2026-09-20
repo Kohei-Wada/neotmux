@@ -22,7 +22,7 @@ pub use grid::{Color, GridSnapshot, SnapCell};
 pub use ids::{PaneId, WindowId};
 pub use keys::{Key, KeyCode, Modifiers};
 pub use level::Level;
-pub use msg::{ToClient, ToServer};
+pub use msg::{OwnedToClient, ToClient, ToServer};
 pub use paneinfo::PaneInfo;
 pub use panerects::PaneRects;
 pub use reserve::{Axis, Edge, Reserved};
