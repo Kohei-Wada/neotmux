@@ -19,6 +19,18 @@ inside it: the frame waits for its reason, draws, and spends the rest of its tim
 input rather than asleep, so a key still reaches its pane the moment it arrives and a pane's
 output waits for the next frame rather than drawing this one twice.
 
+### What a pane is doing
+
+`neotmux.pane.info(id)` answers with the pane's foreground command and that process's working
+directory — `{ command = 'nvim', cwd = '/home/you/src' }` — which is the content a status line
+was missing. It is the pane's foreground process group rather than the shell neotmux spawned,
+so a pane running `nvim` says `nvim` and the same pane back at its prompt says `bash`.
+
+An unknown id answers `nil`, and a fact that could not be read is an absent field; neither
+raises, because a shell exiting is not a plugin's error. The facts are sampled by the host at
+most every 250 ms and a call reads the last sample, so asking on every tick for every pane
+costs no syscalls. Read from `/proc`: Linux-only, and unknown everywhere else.
+
 ### The status line is a plugin now
 
 `neotmux.reserve('bottom', 1)` takes a band of the surface and returns a handle; the panes get

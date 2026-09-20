@@ -168,9 +168,27 @@ key: you wrote a legal call and lost a race.
 ```lua
 neotmux.pane.list()      -- { id, ... }
 neotmux.pane.current()   -- id, or nil
+neotmux.pane.info(id)    -- { command = ..., cwd = ... }, or nil
 neotmux.pane.split('horizontal' | 'vertical')
 neotmux.pane.focus(id)
 ```
+
+`info` is what a status line needs to say more than how many panes there are. `command` is the
+pane's **foreground** process, not the shell neotmux spawned for it: a pane sitting at its
+prompt reports `bash`, and the same pane running `nvim` reports `nvim`. `cwd` is that same
+process's working directory, so it follows a `cd` in the pane.
+
+One call rather than two, because both facts come from the one process the host looked at and
+two calls could answer about two different ones. An id no pane has answers `nil`, the way
+`pane.current()` answers nothing; a pane whose fact could not be read — a child that exited
+between the sample and the question — is a table with that field absent. Neither raises. A
+status line must not start erroring because a shell went away.
+
+Ask as often as you like. The facts are sampled by the host on its own cadence, at most every
+250 ms, and a call reads the last sample rather than the operating system.
+
+This is read from `/proc` and is therefore Linux-only. On any other platform both facts are
+simply unknown.
 
 `split` and `focus` do not take effect while your callback is running. They are queued and
 applied after the tick, so `list()` returns the same thing immediately after a `split` as
