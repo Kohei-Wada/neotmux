@@ -297,3 +297,114 @@ fn shutdown_does_not_wait_on_a_child_that_outlived_its_descriptors() {
     );
     assert_termios_restored(&termios);
 }
+
+/// A neotmux whose terminal can be taken away mid-session, which is what a terminal emulator
+/// being closed, or an ssh connection dropping, does to it. Nothing reads the master, so the
+/// session is kept small enough not to fill the PTY's buffer before the terminal goes.
+struct AbandonedTerminal {
+    master: Option<Box<dyn portable_pty::MasterPty + Send>>,
+    child: Box<dyn portable_pty::Child + Send + Sync>,
+    pid: i32,
+}
+
+impl AbandonedTerminal {
+    fn start() -> Self {
+        let pair = native_pty_system()
+            .openpty(PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .expect("openpty");
+
+        let isolation = tempfile::tempdir().expect("isolation dir");
+        let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_neotmux"));
+        cmd.env("TERM", "xterm-256color");
+        cmd.env("SHELL", "/bin/cat");
+        cmd.env("HOME", isolation.path());
+        cmd.env("XDG_CONFIG_HOME", isolation.path());
+        cmd.arg("--log");
+        cmd.arg(isolation.path().join("neotmux.log"));
+        let child = pair.slave.spawn_command(cmd).expect("spawn");
+        drop(pair.slave);
+
+        let pid = child.process_id().expect("pid") as i32;
+        std::thread::sleep(Duration::from_millis(700));
+        Self {
+            master: Some(pair.master),
+            child,
+            pid,
+        }
+    }
+
+    /// Closes the last descriptor on the master, which is the whole of "the terminal is gone".
+    fn abandon(&mut self) {
+        self.master = None;
+    }
+}
+
+impl Drop for AbandonedTerminal {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// The CPU time the process itself has spent, in clock ticks, read from its own `utime` and
+/// `stime`. A zombie still has both, so this can be sampled after it has exited and before
+/// it is reaped — and it says nothing about how busy the runner is, which wall-clock would.
+fn cpu_ticks(pid: i32) -> u64 {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).expect("read /proc stat");
+    // The command name is parenthesised and may itself contain spaces.
+    let rest = stat.rsplit_once(") ").expect("stat has a comm field").1;
+    let fields: Vec<&str> = rest.split_whitespace().collect();
+    let utime: u64 = fields[11].parse().expect("utime");
+    let stime: u64 = fields[12].parse().expect("stime");
+    utime + stime
+}
+
+/// The terminal going away is a hangup, and a hangup ends the session. Left undetected it is
+/// not a hang but a spin: `crossterm::event::poll` answers a hung-up PTY by reading zero
+/// bytes in a loop with no way out, so the process never returns to check its signal flags
+/// and not even SIGTERM gets it back.
+#[test]
+fn exits_when_the_terminal_goes_away() {
+    let mut session = AbandonedTerminal::start();
+    session.abandon();
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if session.child.try_wait().expect("try_wait").is_some() {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "neotmux was still running ten seconds after its terminal went away"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// Exiting is only half of it: the four hours of pegged core this came from were spent
+/// before anyone noticed. Measured on the process's own `utime + stime` rather than on how
+/// long the wait took, so a loaded runner cannot fail it.
+#[test]
+fn burns_no_cpu_once_the_terminal_is_gone() {
+    // A tenth of a core over the window. An idle session spends nothing; the spin spent all
+    // of it.
+    const TICK_BOUND: u64 = 20;
+
+    let mut session = AbandonedTerminal::start();
+    let before = cpu_ticks(session.pid);
+    session.abandon();
+    // Deliberately not reaped: the zombie keeps its /proc entry, and its CPU totals, alive.
+    std::thread::sleep(Duration::from_secs(2));
+    let after = cpu_ticks(session.pid);
+
+    assert!(
+        after - before <= TICK_BOUND,
+        "neotmux spent {} ticks of CPU in the two seconds after its terminal went away",
+        after - before
+    );
+}

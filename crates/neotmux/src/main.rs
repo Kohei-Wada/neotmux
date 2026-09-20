@@ -1,4 +1,5 @@
 mod app;
+mod frame;
 mod input;
 mod logging;
 mod notify;
@@ -7,6 +8,7 @@ mod panes;
 mod render;
 mod shells;
 mod signals;
+mod tty;
 
 use std::env;
 use std::path::{Path, PathBuf};
@@ -100,7 +102,15 @@ fn main() -> anyhow::Result<()> {
     let mut notifications = notify::Notifications::new();
     let mut terminal = ratatui::init();
     let result = app::run(&mut terminal, &shutdown, &lua, &mut notifications);
-    ratatui::restore();
+    // Not `ratatui::restore`: it reports a failure with `eprintln!`, which panics when the
+    // terminal it is trying to restore is the one that has gone away.
+    if let Err(err) = ratatui::try_restore() {
+        logging::log(
+            Level::Warn,
+            "neotmux",
+            &format!("could not restore the terminal: {err}"),
+        );
+    }
     notifications.flush(&mut std::io::stderr());
     match result? {
         Some(signal) => signals::die_of(signal),

@@ -17,11 +17,11 @@ neotmux-lua.workspace = true
 neotmux-term.workspace = true
 anyhow.workspace = true
 crossterm.workspace = true
+nix.workspace = true
 ratatui.workspace = true
 signal-hook.workspace = true
 
 [dev-dependencies]
 portable-pty.workspace = true
-nix.workspace = true
 tempfile.workspace = true
 vt100.workspace = true

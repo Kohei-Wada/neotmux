@@ -10,6 +10,7 @@ use neotmux_term::state::clamp_to_min_grid;
 use ratatui::DefaultTerminal;
 use ratatui::layout::Rect;
 
+use crate::frame::{FRAME, sleep_out};
 use crate::input::{encode_key, key_spec};
 use crate::logging;
 use crate::notify::Notifications;
@@ -17,9 +18,9 @@ use crate::overlay;
 use crate::panes::PaneLayout;
 use crate::render::{cursor_position, draw_grid, layout};
 use crate::shells::Shells;
-use crate::signals::ShutdownSignal;
+use crate::signals::{self, ShutdownSignal};
+use crate::tty::{Ready, Terminal};
 
-const FRAME: Duration = Duration::from_millis(16);
 const MAX_CHUNKS_PER_FRAME: usize = 32;
 const FIRST_PANE: u32 = 1;
 
@@ -147,41 +148,54 @@ impl Session {
     }
 
     /// Reads input until the frame's time is up. Returns the signal to exit on if one was
-    /// raised while waiting.
+    /// raised while waiting, or if the terminal itself went away.
     fn pump_input(
         &mut self,
         lua: &LuaSubsystem,
         shutdown: &ShutdownSignal,
+        tty: &Terminal,
         frame_end: Instant,
     ) -> anyhow::Result<Option<i32>> {
         loop {
             if let Some(signal) = shutdown.raised() {
                 return Ok(Some(signal));
             }
-            let remaining = frame_end.saturating_duration_since(Instant::now());
-            if !event::poll(remaining).context("poll input")? {
-                return Ok(None);
+            // The wait is ours rather than crossterm's because only ours can report a
+            // hangup: `event::poll` answers one by reading zero bytes forever. Past
+            // `frame_end` it returns at once, which is what still lets a frame that
+            // overran collect the input waiting on it.
+            match tty.wait(frame_end).context("wait for input")? {
+                Ready::HangUp => return Ok(Some(signals::HANGUP)),
+                // Neither outcome settles whether there is an event: crossterm can be
+                // holding one parsed out of an earlier read, and it hears about a resize on
+                // a signal rather than on this file.
+                Ready::Input | Ready::Idle => {}
             }
-            match event::read().context("read input")? {
-                Event::Key(key) => {
-                    let outcome = match key_spec(&key) {
-                        Some(spec) => lua.dispatch_key(&spec),
-                        None => KeyOutcome::Fallthrough,
-                    };
-                    // A key nobody consumed belongs to the focused pane and to no other.
-                    // With no pane focused there is no shell left to type into.
-                    if outcome == KeyOutcome::Fallthrough
-                        && let Some(focus) = self.layout.focus()
-                        && let Some(bytes) = encode_key(key)
-                    {
-                        self.shells.write(focus, &bytes)?;
+            while event::poll(Duration::ZERO).context("poll input")? {
+                match event::read().context("read input")? {
+                    Event::Key(key) => {
+                        let outcome = match key_spec(&key) {
+                            Some(spec) => lua.dispatch_key(&spec),
+                            None => KeyOutcome::Fallthrough,
+                        };
+                        // A key nobody consumed belongs to the focused pane and to no other.
+                        // With no pane focused there is no shell left to type into.
+                        if outcome == KeyOutcome::Fallthrough
+                            && let Some(focus) = self.layout.focus()
+                            && let Some(bytes) = encode_key(key)
+                        {
+                            self.shells.write(focus, &bytes)?;
+                        }
                     }
+                    Event::Resize(cols, rows) => {
+                        self.size = clamp_to_min_grid(Size { rows, cols });
+                        self.apply_geometry(lua)?;
+                    }
+                    _ => {}
                 }
-                Event::Resize(cols, rows) => {
-                    self.size = clamp_to_min_grid(Size { rows, cols });
-                    self.apply_geometry(lua)?;
+                if Instant::now() >= frame_end {
+                    return Ok(None);
                 }
-                _ => {}
             }
             if Instant::now() >= frame_end {
                 return Ok(None);
@@ -384,6 +398,7 @@ pub fn run(
     lua: &LuaSubsystem,
     notifications: &mut Notifications,
 ) -> anyhow::Result<Option<i32>> {
+    let tty = Terminal::open().context("open the terminal for input")?;
     let mut session = Session::new(terminal_size(terminal)?)?;
     session.publish_geometry(lua);
 
@@ -401,7 +416,7 @@ pub fn run(
         let drained = session.drain_panes(lua)?;
 
         if drained == Drained::More
-            && let Some(signal) = session.pump_input(lua, shutdown, frame_end)?
+            && let Some(signal) = session.pump_input(lua, shutdown, &tty, frame_end)?
         {
             return Ok(Some(signal));
         }
@@ -437,6 +452,8 @@ pub fn run(
         if eof {
             break;
         }
+
+        sleep_out(frame_end);
     }
 
     Ok(None)
