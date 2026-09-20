@@ -168,10 +168,18 @@ key: you wrote a legal call and lost a race.
 ```lua
 neotmux.pane.list()      -- { id, ... }
 neotmux.pane.current()   -- id, or nil
+neotmux.pane.rect(id)    -- { x = , y = , w = , h = }, or nil
 neotmux.pane.info(id)    -- { command = ..., cwd = ... }, or nil
 neotmux.pane.split('horizontal' | 'vertical')
 neotmux.pane.focus(id)
+neotmux.pane.resize('left' | 'right' | 'up' | 'down', cells)
 ```
+
+`rect` answers out of the same published geometry `ctx:pane_rect` reads, in the same surface
+coordinates and with the same table — so geometry is a question you can ask from a key
+handler, where there is no `ctx`. Which pane is to my left is that kind of question, and
+answering it should not oblige you to draw. Inside a tick `ctx:pane_rect` remains the natural
+call. An id no pane has answers `nil`, the way `pane.current()` answers nothing.
 
 `info` is what a status line needs to say more than how many panes there are. `command` is the
 pane's **foreground** process, not the shell neotmux spawned for it: a pane sitting at its
@@ -190,6 +198,22 @@ Ask as often as you like. The facts are sampled by the host on its own cadence, 
 This is read from `/proc` and is therefore Linux-only. On any other platform both facts are
 simply unknown.
 
+`resize` **moves the boundary between the focused pane and its neighbour in that direction**,
+by exactly that many cells — so the pane grows by them and the neighbour loses them. There is
+no second rule for a pane at the edge: with no neighbour that way there is no boundary, and
+the call is refused rather than quietly moving the pane's other edge. The boundary moved is
+the nearest one, so a pane nested three splits deep resizes against what it is actually
+touching.
+
+Cells, not a fraction and not a percentage: after a `resize('right', 3)` the pane's rect is
+three columns wider, and thirty of them in a row move thirty columns.
+
+A direction nobody can spell and a count that is not a positive number of cells *raise* —
+they are typos. A refusal — no neighbour, or a pane that would end up below the minimum grid,
+counting the gutter — is logged against you and changes nothing. It cannot be returned to you
+the way `keymap.set` returns a lost race: the op is applied after the tick, long after your
+call returned.
+
 `split` and `focus` do not take effect while your callback is running. They are queued and
 applied after the tick, so `list()` returns the same thing immediately after a `split` as
 immediately before. This is deliberate: a callback that could reshape the world underneath the
@@ -198,8 +222,7 @@ callbacks running after it would make frame composition depend on dispatch order
 A frame forks at most three new shells, counting `pane.split` and `window.create` together.
 Each one costs the host a fork, an exec and a terminal, none of it inside the tick your budget
 was measured against, so the number of them one frame can be asked for is bounded; the fourth
-and beyond are refused and logged against you. There is no way to close or resize a pane from
-Lua in v0.1.
+and beyond are refused and logged against you. There is no way to close a pane from Lua in v0.1.
 
 `pane_opened`, `pane_closed` and `focus_changed` are dispatched against the layout as it is
 after the change, so a handler's `pane.list()` and `pane.current()` describe the event it is
@@ -418,14 +441,25 @@ neotmux ships three plugins in the runtime layer an install puts on the search p
 | plugin | what it does |
 |---|---|
 | `status` | the default status bar, on one reserved top row |
-| `prefix` | a `C-b` prefix over `v`, `-`, `o`, `c` and `n` |
+| `prefix` | a `C-b` prefix over `v`, `-`, `o`, `h/j/k/l`, `r`, `c` and `n` |
 | `borders` | a rule along every boundary between two panes |
 
 None of them is a host feature — all three are ordinary files making ordinary API calls, and
 the prefix is the only reason a fresh install can make a second pane at all. `C-b v` splits
 vertically (the panes end up side by side, because `pane.split('vertical')` divides the
 width), `C-b -` splits horizontally (one above the other), `C-b o` focuses the next pane,
-`C-b c` opens a window and switches to it, and `C-b n` walks to the next window.
+`C-b h/j/k/l` focuses the pane to the left, below, above or to the right, `C-b r` enters
+resize mode, `C-b c` opens a window and switches to it, and `C-b n` walks to the next window.
+
+`h/j/k/l` are geometry, not list order: the pane you get is the one whose edge faces most of
+yours on that side, which is what you would point at however deeply the splits are nested.
+There is no wrapping — at the edge of the window the key does nothing, and `o` is still there
+for walking every pane in turn.
+
+Resize mode is a flag in the plugin and an `on_key`, like the prefix itself; the host has no
+idea it exists. In it, the arrows and `h/j/k/l` move the boundary one cell at a time
+(`require('plugin.prefix').resize_step` sets how far), and the first key that is not one of
+them leaves — `Esc` and `Enter` being the two that mean nothing else.
 
 ### Turning one off
 

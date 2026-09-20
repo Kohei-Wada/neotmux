@@ -86,6 +86,17 @@ fn main() -> anyhow::Result<()> {
                     ),
                 );
             }
+            Op::PaneResize { dir, cells } => {
+                let tag = lua.sources().name(id).unwrap_or_else(|| id.to_string());
+                logging::log(
+                    Level::Error,
+                    &tag,
+                    &format!(
+                        "pane.resize('{dir}', {cells}) refused: no panes exist until the \
+                         session starts"
+                    ),
+                );
+            }
             Op::PaneFocus { pane } => {
                 let tag = lua.sources().name(id).unwrap_or_else(|| id.to_string());
                 logging::log(

@@ -278,6 +278,7 @@ impl Session {
                     self.apply_split(lua, &tag, dir)?;
                 }
                 Op::PaneFocus { pane } => self.apply_focus(lua, &tag, pane),
+                Op::PaneResize { dir, cells } => self.apply_resize(lua, &tag, dir, cells)?,
                 Op::WindowCreate { .. } if spawned >= MAX_NEW_SHELLS_PER_FRAME => logging::log(
                     Level::Error,
                     &tag,
@@ -397,6 +398,29 @@ impl Session {
         if let Some(focus) = self.windows.current().focus() {
             lua.dispatch_event(&LuaEvent::FocusChanged { pane: focus });
         }
+        self.dirty = true;
+        Ok(())
+    }
+
+    /// A refusal is logged against whoever asked, as a refused split is: the op is applied
+    /// after the tick, so there is nobody left to answer.
+    fn apply_resize(
+        &mut self,
+        lua: &LuaSubsystem,
+        tag: &str,
+        dir: neotmux_core::proto::Dir,
+        cells: u16,
+    ) -> anyhow::Result<()> {
+        if let Err(refused) = self.windows.current_mut().resize(dir, cells) {
+            logging::log(
+                Level::Error,
+                tag,
+                &format!("pane.resize('{dir}', {cells}) refused: {refused}"),
+            );
+            return Ok(());
+        }
+        self.fit()?;
+        self.republish_geometry(lua);
         self.dirty = true;
         Ok(())
     }

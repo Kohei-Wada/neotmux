@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+### Panes you can move between and resize
+
+`neotmux.pane.resize('left' | 'right' | 'up' | 'down', cells)` moves the boundary between the
+focused pane and its neighbour that way, by exactly the cells asked for. One rule and no
+exception: tmux grows the pane unless it is at the edge, where it silently moves the other
+boundary instead, and nobody can predict that. With no neighbour that way there is no
+boundary and the call is refused. The boundary moved is the nearest one above the pane, so a
+pane three splits deep resizes against what it is actually touching.
+
+Cells, not a fraction: the tree still stores an `f32`, but a resize reads its current
+boundary back through the same rounding `assign` lays it down with, so ten moves of one cell
+move ten cells rather than nine.
+
+`neotmux.pane.rect(id)` answers the rect `ctx:pane_rect` answers, out of the same published
+geometry, from anywhere — geometry was readable only inside a tick, so a plugin that wanted
+to know which pane was to its left had to register a draw callback it did not want. `list()`
+was already readable anywhere and threw the rects away; that asymmetry is gone.
+
+The shipped prefix uses both: `C-b h/j/k/l` moves the focus to the pane whose edge faces most
+of yours on that side, and `C-b r` enters a resize mode where the arrows and `h/j/k/l` move
+the boundary. Both are ordinary Lua in `plugin/prefix.lua`, in the same command table the
+rest of the prefix is in, and the mode is a file-local flag — the host learns nothing about
+modes.
+
 ### Keystrokes that no longer wait for the frame
 
 A keystroke used to cost a whole frame. The loop waited on one of the two things that make a

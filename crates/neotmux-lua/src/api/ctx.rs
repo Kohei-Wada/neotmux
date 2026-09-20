@@ -4,6 +4,7 @@ use mlua::{Table, UserData, UserDataMethods, Value};
 
 use neotmux_core::proto::{Color, DrawCmd, PaneId, Rect, Size};
 
+use crate::api::rect;
 use crate::draw::Buffers;
 use crate::source::SourceId;
 
@@ -131,27 +132,13 @@ impl UserData for Ctx {
 
         methods.add_method("pane_rect", |lua, this, pane: u32| {
             match this.pane_rect(PaneId::from(pane)) {
-                Some(rect) => {
-                    let table = lua.create_table()?;
-                    table.set("x", rect.x)?;
-                    table.set("y", rect.y)?;
-                    table.set("w", rect.w)?;
-                    table.set("h", rect.h)?;
-                    Ok(Value::Table(table))
-                }
+                Some(found) => Ok(Value::Table(rect::to_table(lua, found)?)),
                 None => Ok(Value::Nil),
             }
         });
 
         methods.add_method("reserved", |lua, this, ()| match this.band {
-            Some(band) => {
-                let table = lua.create_table()?;
-                table.set("x", band.x)?;
-                table.set("y", band.y)?;
-                table.set("w", band.w)?;
-                table.set("h", band.h)?;
-                Ok(Value::Table(table))
-            }
+            Some(band) => Ok(Value::Table(rect::to_table(lua, band)?)),
             None => Ok(Value::Nil),
         });
 

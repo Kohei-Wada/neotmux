@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 
-use neotmux_core::proto::{PaneId, SplitDir, WindowId};
+use neotmux_core::proto::{Dir, PaneId, SplitDir, WindowId};
 
 use crate::source::SourceId;
 
@@ -18,6 +18,7 @@ pub enum Op {
     Log { level: Level, text: String },
     PaneSplit { dir: SplitDir },
     PaneFocus { pane: PaneId },
+    PaneResize { dir: Dir, cells: u16 },
     WindowCreate { window: WindowId },
     WindowFocus { window: WindowId },
 }

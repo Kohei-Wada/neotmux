@@ -3,16 +3,17 @@ use std::rc::Rc;
 
 use mlua::{Lua, Table, Value};
 
-use neotmux_core::proto::{PaneId, SplitDir};
+use neotmux_core::proto::{Dir, PaneId, SplitDir};
 
+use crate::api::rect;
 use crate::geometry::Geometry;
 use crate::ops::{Op, OpBuffer};
 use crate::paneinfo::PaneInfos;
 use crate::source::{self, Sources};
 
-/// The M2 pane API (§6), signatures frozen now. `list` and `current` read this frame's
-/// geometry; `split` and `focus` are ops on the buffer (§4.6), applied after the tick, so a
-/// callback never sees its own request take effect synchronously.
+/// The M2 pane API (§6), signatures frozen now. `list`, `current` and `rect` read this
+/// frame's geometry; `split`, `focus` and `resize` are ops on the buffer (§4.6), applied
+/// after the tick, so a callback never sees its own request take effect synchronously.
 pub(crate) fn install(
     lua: &Lua,
     sources: Rc<Sources>,
@@ -45,6 +46,27 @@ pub(crate) fn install(
             })
         })?;
         pane.set("current", current)?;
+    }
+
+    {
+        // The same rects `ctx:pane_rect` answers with, out of the same published geometry.
+        // Geometry is a question a plugin can have without drawing — which pane is to my
+        // left is asked from a key handler, where there is no `ctx`.
+        let geometry = geometry.clone();
+        let rect = lua.create_function(move |lua, pane: u32| {
+            let pane = PaneId::from(pane);
+            let found = geometry
+                .borrow()
+                .panes
+                .iter()
+                .find(|(id, _)| *id == pane)
+                .map(|(_, rect)| *rect);
+            match found {
+                Some(found) => Ok(Value::Table(rect::to_table(lua, found)?)),
+                None => Ok(Value::Nil),
+            }
+        })?;
+        pane.set("rect", rect)?;
     }
 
     {
@@ -82,6 +104,31 @@ pub(crate) fn install(
             Ok(())
         })?;
         pane.set("split", split)?;
+    }
+
+    {
+        let sources = sources.clone();
+        let ops = ops.clone();
+        let resize = lua.create_function(move |lua, (dir, cells): (String, i64)| {
+            let dir = Dir::parse(&dir).ok_or_else(|| {
+                mlua::Error::RuntimeError(format!(
+                    "unknown direction '{dir}', expected 'left', 'right', 'up' or 'down'"
+                ))
+            })?;
+            // A cell count that is not a positive number of cells is a typo, not a refusal:
+            // it raises, as an unparseable key spec does.
+            let cells = u16::try_from(cells)
+                .ok()
+                .filter(|cells| *cells > 0)
+                .ok_or_else(|| {
+                    mlua::Error::RuntimeError(format!(
+                        "pane.resize takes a positive number of cells, got {cells}"
+                    ))
+                })?;
+            ops.push(source::caller(lua, &sources), Op::PaneResize { dir, cells });
+            Ok(())
+        })?;
+        pane.set("resize", resize)?;
     }
 
     {
