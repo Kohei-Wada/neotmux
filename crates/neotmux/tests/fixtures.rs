@@ -2433,3 +2433,216 @@ fn yanking_reports_the_register_it_put_the_text_in() {
     nt.send("y");
     nt.wait_for_screen("yanked 1 line into plugin.copy.register", PATIENCE);
 }
+
+/// Off unless the user says otherwise, like the watcher and the sidebar. Proven by
+/// `plugin.clock`'s own size report rather than by content, because the footer draws nothing
+/// at all while no mode is raised — so the only observable difference between the plugin
+/// being absent and being loaded but silent is the row it took from the panes.
+#[test]
+fn the_shipped_footer_is_off_by_default() {
+    let init = harness::runtime(&[("init.lua", "require('plugin.clock')")]);
+    let mut nt = Neotmux::start_layered(
+        &[init.path(), &harness::fixture_layer(), &shipped_layer()],
+        "cat",
+    );
+    // The status bar's row and `plugin.clock`'s own row, and nothing the footer took.
+    nt.wait_for_screen("CLOCK 80x22", PATIENCE);
+}
+
+/// The other half: turning the default on costs the panes a second row, the same way any
+/// other reservation would.
+#[test]
+fn turning_the_footer_on_reserves_a_second_row() {
+    let init = harness::runtime(&[(
+        "init.lua",
+        "require('neotmux.defaults').footer = true\nrequire('plugin.clock')",
+    )]);
+    let mut nt = Neotmux::start_layered(
+        &[init.path(), &harness::fixture_layer(), &shipped_layer()],
+        "cat",
+    );
+    nt.wait_for_screen("CLOCK 80x21", PATIENCE);
+}
+
+/// The same mechanism the shipped defaults already rely on — a later assignment in the same
+/// `init.lua` wins because the shipped layer's loop reads the table only once, at the end of
+/// the whole init chain — turns the footer off again after a config turned it on.
+#[test]
+fn a_user_config_can_switch_the_footer_off_again() {
+    let init = harness::runtime(&[(
+        "init.lua",
+        "require('neotmux.defaults').footer = true\n\
+         require('neotmux.defaults').footer = false\n\
+         require('plugin.clock')",
+    )]);
+    let mut nt = Neotmux::start_layered(
+        &[init.path(), &harness::fixture_layer(), &shipped_layer()],
+        "cat",
+    );
+    nt.wait_for_screen("CLOCK 80x22", PATIENCE);
+}
+
+/// The armed prefix names itself in the footer, and stops the moment a command fires — `o`
+/// with one pane is a harmless one, focusing the only pane there is.
+#[test]
+fn the_footer_shows_the_armed_prefix_and_clears_when_it_fires() {
+    let (mut nt, _init) = start_shipped("require('neotmux.defaults').footer = true", "cat");
+    nt.wait_for_status("cat", PATIENCE);
+
+    nt.send("\x02"); // C-b: arm the prefix
+    nt.wait_for_screen(" prefix ", PATIENCE);
+
+    nt.send("o"); // any command fires and disarms
+    nt.settle(Duration::from_millis(300));
+    let screen = nt.screen_after(Duration::from_millis(200));
+    assert!(
+        !screen.contains(" prefix "),
+        "the footer kept showing the armed prefix after it fired:\n{screen}"
+    );
+}
+
+/// Resize mode names itself too, and differently from the armed prefix — the whole reason
+/// `plugin.prefix` was asked to raise two names rather than one.
+#[test]
+fn the_footer_shows_resize_mode_and_clears_when_it_leaves() {
+    let (mut nt, _init) = start_shipped("require('neotmux.defaults').footer = true", "cat");
+    nt.send("\x02v"); // C-b v: a second pane, so there is a boundary to resize
+    nt.wait_for_status(SECOND_PANE, PATIENCE);
+
+    nt.send("\x02r"); // C-b r: into resize mode
+    nt.wait_for_screen(" resize ", PATIENCE);
+
+    nt.send("\r"); // anything that is not an adjustment leaves the mode
+    nt.settle(Duration::from_millis(300));
+    let screen = nt.screen_after(Duration::from_millis(200));
+    assert!(
+        !screen.contains(" resize "),
+        "the footer kept showing resize mode after it was left:\n{screen}"
+    );
+}
+
+/// Copy mode raises its own name too, entirely independently of the prefix's two — proving
+/// the footer reads one shared convention rather than something specific to `plugin.prefix`.
+#[test]
+fn the_footer_shows_copy_mode_and_clears_when_it_leaves() {
+    let (mut nt, _init) = start_shipped("require('neotmux.defaults').footer = true", "cat");
+    nt.wait_for_status("cat", PATIENCE);
+
+    nt.send("\x02["); // C-b [: enter copy mode
+    nt.wait_for_screen(" copy ", PATIENCE);
+
+    nt.send("q"); // leave
+    nt.settle(Duration::from_millis(300));
+    let screen = nt.screen_after(Duration::from_millis(200));
+    assert!(
+        !screen.contains(" copy "),
+        "the footer kept showing copy mode after it was left:\n{screen}"
+    );
+}
+
+/// The convention, not just the footer: a plugin the footer has never heard of, defined here
+/// rather than in the checked-in fixture set, raises its own name and the footer shows it —
+/// and stops the moment that plugin lowers it, with no change to `plugin.footer` at all.
+#[test]
+fn a_third_party_plugin_raising_its_own_mode_shows_in_the_footer() {
+    let init = harness::runtime(&[
+        (
+            "init.lua",
+            "require('neotmux.defaults').footer = true\nrequire('plugin.thirdparty')",
+        ),
+        (
+            "lua/plugin/thirdparty.lua",
+            r#"
+local modes = require("neotmux.mode")
+local handle = nil
+
+neotmux.keymap.set("C-g", function()
+  if handle then
+    handle:lower()
+    handle = nil
+  else
+    handle = modes.raise("thirdparty")
+  end
+  return true
+end)
+"#,
+        ),
+    ]);
+    let mut nt = Neotmux::start_layered(&[init.path(), &shipped_layer()], "cat");
+    nt.wait_for_status("cat", PATIENCE);
+
+    nt.send("\x07"); // C-g: the fixture raises its own mode
+    nt.wait_for_screen(" thirdparty ", PATIENCE);
+
+    nt.send("\x07"); // C-g again: it lowers it
+    nt.settle(Duration::from_millis(300));
+    let screen = nt.screen_after(Duration::from_millis(200));
+    assert!(
+        !screen.contains(" thirdparty "),
+        "the footer kept showing a mode after the plugin that raised it lowered it:\n{screen}"
+    );
+    assert!(
+        nt.log_text().is_empty(),
+        "the third-party mode plugin was reported as a failure:\n{}",
+        nt.log_text()
+    );
+}
+
+/// The answer to what happens when a second mode is raised over a first: the reader sees the
+/// second, and when the second is lowered the first is showing again — its own lower call
+/// was never asked to touch anything but the entry it was handed.
+#[test]
+fn a_raised_mode_is_uncovered_when_the_one_over_it_is_lowered() {
+    let init = harness::runtime(&[
+        (
+            "init.lua",
+            "require('neotmux.defaults').footer = true\nrequire('plugin.thirdparty')",
+        ),
+        (
+            "lua/plugin/thirdparty.lua",
+            r#"
+local modes = require("neotmux.mode")
+local handle = nil
+
+neotmux.keymap.set("C-g", function()
+  if handle then
+    handle:lower()
+    handle = nil
+  else
+    handle = modes.raise("thirdparty")
+  end
+  return true
+end)
+"#,
+        ),
+    ]);
+    let mut nt = Neotmux::start_layered(&[init.path(), &shipped_layer()], "cat");
+    nt.wait_for_status("cat", PATIENCE);
+
+    nt.send("\x07"); // C-g: thirdparty raises first
+    nt.wait_for_screen(" thirdparty ", PATIENCE);
+
+    nt.send("\x02"); // C-b: the prefix arms over it
+    nt.wait_for_screen(" prefix ", PATIENCE);
+    let screen = nt.screen_after(Duration::from_millis(100));
+    assert!(
+        !screen.contains(" thirdparty "),
+        "both names were on screen at once, not just the one raised last:\n{screen}"
+    );
+
+    nt.send("o"); // any command fires and disarms the prefix alone
+    nt.wait_for_screen(" thirdparty ", PATIENCE);
+    let screen = nt.screen_after(Duration::from_millis(100));
+    assert!(
+        !screen.contains(" prefix "),
+        "the prefix's own name survived its own lower:\n{screen}"
+    );
+
+    nt.send("\x07"); // C-g: thirdparty lowers its own, nothing left to show
+    nt.settle(Duration::from_millis(300));
+    let screen = nt.screen_after(Duration::from_millis(200));
+    assert!(
+        !screen.contains(" thirdparty ") && !screen.contains(" prefix "),
+        "something was still raised after both sides lowered their own:\n{screen}"
+    );
+}

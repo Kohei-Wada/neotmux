@@ -767,7 +767,7 @@ costs one plugin one frame instead of costing you the program.
 
 ## The shipped defaults
 
-neotmux ships six plugins in the runtime layer an install puts on the search path:
+neotmux ships seven plugins in the runtime layer an install puts on the search path:
 
 | plugin | what it does |
 |---|---|
@@ -777,8 +777,9 @@ neotmux ships six plugins in the runtime layer an install puts on the search pat
 | `borders` | a rule along every boundary between two panes |
 | `watch` | says which pane looks like it is waiting for you — **off by default** |
 | `sidebar` | the windows and their panes, down a reserved left band, folded by `C-b b` — **off by default** |
+| `footer` | whichever mode is raised through `neotmux.mode`, on one reserved bottom row — **off by default** |
 
-None of them is a host feature — all six are ordinary files making ordinary API calls, and
+None of them is a host feature — all seven are ordinary files making ordinary API calls, and
 the prefix is the only reason a fresh install can make a second pane at all. `C-b v` splits
 vertically (the panes end up side by side, because `pane.split('vertical')` divides the
 width), `C-b -` splits horizontally (one above the other), `C-b o` focuses the next pane,
@@ -796,7 +797,10 @@ for walking every pane in turn.
 Resize mode is a flag in the plugin and an `on_key`, like the prefix itself; the host has no
 idea it exists. In it, the arrows and `h/j/k/l` move the boundary one cell at a time
 (`require('plugin.prefix').resize_step` sets how far), and the first key that is not one of
-them leaves — `Esc` and `Enter` being the two that mean nothing else.
+them leaves — `Esc` and `Enter` being the two that mean nothing else. Both the armed prefix and
+resize mode raise their own name in `neotmux.mode` for as long as they are up — see
+[The mode convention](#the-mode-convention) below — so `plugin.footer`, on, reads `prefix` or
+`resize` rather than nothing.
 
 ### Turning one off
 
@@ -811,11 +815,13 @@ require('neotmux.defaults').borders = false
 require('neotmux.defaults').copy = false
 ```
 
-`watch` and `sidebar` go the other way: they are off until you turn them on. What counts as a
-pane waiting for you is an opinion about what you run, and twenty-four columns of sidebar is
-an opinion about screen real estate; a status line is neither, and neither is copy mode — it
-takes no band, no gutter and no cell from any pane, and what it reads is a buffer the host is
-already keeping whether or not anything ever looks at it.
+`watch`, `sidebar` and `footer` go the other way: they are off until you turn them on. What
+counts as a pane waiting for you is an opinion about what you run, and twenty-four columns of
+sidebar is an opinion about screen real estate; a status line is neither, and neither is copy
+mode — it takes no band, no gutter and no cell from any pane, and what it reads is a buffer the
+host is already keeping whether or not anything ever looks at it. `footer` is off for the same
+reason `status` would be if it were optional: a row is a row whether or not a mode is ever
+raised into it.
 
 The sidebar has two widths rather than an on and an off — `require('plugin.sidebar').widths`
 is `{ open = 24, closed = 1 }`, and `C-b b` swaps them. Closed is the markers column: you can
@@ -825,6 +831,7 @@ their names. A band of nothing would be a band you have to remember is there.
 ```lua
 require('neotmux.defaults').watch = true
 require('neotmux.defaults').sidebar = true
+require('neotmux.defaults').footer = true
 ```
 
 That is a Lua module the runtime layer ships, not a host feature: neotmux has no idea the
@@ -1023,6 +1030,59 @@ columns would push every name on its row across by one.
 The **width** is not in that table. It is a `local` at the top of the file, because the
 reservation is made once while the file is being required and the host is never told a band
 changed width. Edit it there, or leave the sidebar off.
+
+### The mode convention
+
+The host has no concept of a mode. What makes a plugin modal is entirely on the plugin's side —
+returning `true` from `on_key` is the whole of it — so nothing outside that plugin's own file
+could previously tell a mode was up at all.
+
+`neotmux.mode` is a Lua module, not a host feature, that gives modal plugins somewhere to say
+so:
+
+```lua
+local modes = require('neotmux.mode')
+
+local handle = modes.raise('my-mode')   -- entering
+-- ...
+handle:lower()                          -- leaving
+
+modes.current()                         -- the most recently raised name, or nil
+```
+
+Raising returns a handle, the same shape `neotmux.reserve` and every `on_*` registration
+already return, and for the same reason: `handle:lower()` takes back exactly the entry it was
+handed, never anyone else's, even one raised under the same name. Raised names stack, so if a
+second mode is raised while a first is still up, `current()` reports the second one, and
+lowering the second uncovers the first again — lowering never reaches past your own entry.
+
+A reader never learns who raised what it sees. That is what lets `plugin.footer` show a
+third-party plugin's mode with no knowledge of that plugin at all — it only ever calls
+`modes.current()`.
+
+`plugin.prefix` raises `'prefix'` while armed and `'resize'` in resize mode, and lowers each on
+the way out; `plugin.copy` raises `'copy'` on entry and lowers it on every exit — the explicit
+`q`/`Esc`, the pane closing, and focus moving to another pane.
+
+Nothing catches a plugin that raises and forgets to lower. There is no host-side hook for it,
+because there is no host-side idea of a mode to hang one on — the same bargain a leaked
+`neotmux.reserve` band already makes. A plugin that never lowers leaves its name on top for
+good, and every reader, `plugin.footer` included, keeps showing it. That is a bug in the
+plugin, found the same way a leaked band is: by looking at the screen.
+
+### Changing what the footer shows
+
+`plugin.footer` reserves the bottom row and draws whichever name `neotmux.mode.current()`
+answers, or nothing at all when that is nil:
+
+```lua
+local footer = require('plugin.footer')
+footer.colors.bar = '#181825'
+footer.colors.text = '#f9e2af'
+```
+
+Both are Catppuccin Mocha, matching `plugin.status`, and both are read every tick. There are no
+keys — the footer only reads the convention above, it does not raise a mode of its own.
 
 ### Changing what the borders look like
 

@@ -27,6 +27,7 @@
 -- pane; this file is the mode. Changing what a key does touches one table in one of them.
 local snapshot = require("neotmux.snapshot")
 local selection = require("neotmux.selection")
+local modes = require("neotmux.mode")
 
 local M = {}
 
@@ -58,6 +59,18 @@ M.register = ""
 -- The mode, and everything in it. Nil when it is off, which is also what makes the tick below
 -- free while nobody is copying.
 local state = nil
+-- The handle `neotmux.mode.raise` returns while `state` is up, and nil the rest of the time.
+-- Kept apart from `state` rather than folded into it because every exit — cancel, the pane
+-- closing, focus moving away — has to lower it, and `leave` below is the one place that does.
+local mode_handle = nil
+
+local function leave()
+  if mode_handle then
+    mode_handle:lower()
+    mode_handle = nil
+  end
+  state = nil
+end
 
 local function clamp(value, low, high)
   return math.max(low, math.min(high, value))
@@ -160,7 +173,7 @@ M.commands = {
     )
   end,
   ["cancel"] = function()
-    state = nil
+    leave()
   end,
 }
 
@@ -193,6 +206,9 @@ function M.enter()
   if buffer == nil then
     return
   end
+  if mode_handle then
+    mode_handle:lower()
+  end
   state = {
     pane = pane,
     buffer = buffer,
@@ -200,6 +216,7 @@ function M.enter()
     cursor = { line = buffer.history, col = 0 },
     anchor = nil,
   }
+  mode_handle = modes.raise("copy")
 end
 
 neotmux.on_key(function(key)
@@ -209,7 +226,7 @@ neotmux.on_key(function(key)
   local rect = neotmux.pane.rect(state.pane)
   if rect == nil then
     -- The pane went out from under the mode. Leave, and hand the key on rather than eating it.
-    state = nil
+    leave()
     return false
   end
   local command = M.commands[M.keys[key]]
@@ -226,13 +243,13 @@ end)
 -- drawing a cursor over a pane nobody is looking at.
 neotmux.on_event("pane_closed", function(event)
   if state and state.pane == event.pane then
-    state = nil
+    leave()
   end
 end)
 
 neotmux.on_event("focus_changed", function(event)
   if state and state.pane ~= event.pane then
-    state = nil
+    leave()
   end
 end)
 
