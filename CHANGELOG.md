@@ -2,6 +2,78 @@
 
 ## Unreleased
 
+### A plugin can hold a pane still
+
+`neotmux.pane.freeze(id)` stops the pane moving; `neotmux.pane.unfreeze(id)` lets it catch up,
+and `neotmux.pane.frozen(id)` says which it is. While a pane is frozen the host draws the
+screen as it was at the moment of freezing, and `pane.content`, `pane.scrollback`,
+`pane.history` and `pane.revision` all answer about that same instant.
+
+That last part is the point. A selection highlight over a pane that is still printing is a
+highlight over different text a moment later, and a plugin handed the live text while the host
+draws a held one has computed the wrong selection. The pane's grid, its text, its history and
+its revision cannot come apart, because all four are read out of one held copy of the screen.
+
+Nothing is lost. The child's output goes on being read from its PTY, parsed into the live
+screen underneath, and dispatched as `pane_output`; unfreezing shows everything that arrived.
+A resize reaches the child and the live grid and not the held view, because a child must never
+be lied to about its terminal. A frozen pane whose child exits closes like any other: freezing
+is not a lifeline. A second `freeze` keeps the view it already has rather than re-anchoring a
+selection out from under whoever took one. The held copy costs what the pane costs — a full
+10 000-line history is tens of megabytes of it.
+
+### A plugin can ask the terminal to take something, and is told only what is true
+
+`neotmux.clipboard.set(text)` writes an OSC 52 sequence to the client's terminal and answers
+`true` when the sequence was written and flushed, or `false` and a reason when it was not.
+
+`true` does not mean the clipboard holds the text, and neotmux cannot find that out: OSC 52
+has no reply, a terminal that does not implement it discards it in silence, and one that does
+may have it turned off or be behind an ssh session that dropped it. So a plugin must not put
+"Copied to clipboard" on a `true` — that is the bug this return value exists to let it avoid.
+tmux checks terminfo's `Ms` and writes nothing at all when it is absent; neotmux does neither
+half of that, because `Ms` describes what the entry for `$TERM` claims rather than what the
+terminal did, and because writing an OSC a terminal does not know is harmless.
+
+There is still no paste buffer in the host. Yanked text goes wherever a plugin puts it.
+
+### A plugin can measure a string in columns
+
+`neotmux.width(text)` answers how many columns `text` takes on a pane's grid. `#text` is bytes
+and `utf8.len` is characters; a wide character is one entry in a `pane.content` line and two
+cells on the grid, so a tint whose width was counted either of the other two ways drifts right
+by a cell per wide character before it. The rule is read out of the same code the grid is
+built with, so the two cannot disagree. A combining mark adds nothing, because it is drawn
+into the cell before it, and a control character adds nothing because it is never drawn.
+
+### A read of a pane can keep its trailing blanks, and say which rows wrap
+
+`opts.pad` on `pane.content` and `pane.scrollback` pads every row to the pane's width in
+columns instead of cutting the blank rest of it. Cutting is right for reading text and wrong
+for a rectangle selection, which has to know that the columns past the end of a short line are
+spaces the pane is showing.
+
+`opts.wrapped` adds a third return value: one boolean per line, saying whether that line ran
+off the end of the pane and continues on the one below. It is the terminal's own flag, not a
+guess — a line exactly as wide as the pane looks identical either way — and it is what tmux's
+copy rule turns on: a wrapped line keeps its trailing blanks and gets no newline, an unwrapped
+one gets both. A resize clears the flags, because the old wrap points no longer describe the
+new width.
+
+### `pane.history` says how many lines have fallen out of the front
+
+It now answers two numbers: how many lines are above the screen, and how many have been
+dropped from the front since the pane opened. An absolute line is `dropped + index`, which is
+a number nothing renumbers — so a saved anchor keeps naming the line it was taken on, and a
+plugin can see when the line it named is gone. The revision would not have told it: that moves
+on any output at all, and stands still for none of the evictions.
+
+The terminal reports no evictions, so the host counts them, by watching the lines the terminal
+appends against the lines it still holds. The count is exact as long as no single read from a
+pane's PTY appends as many lines as the pane holds — a read is at most 8 KiB and a pane holds
+10 000 lines, so ordinary output cannot reach it. A child that sends thousands of scroll
+sequences in one chunk can, and then the count is low.
+
 ### A plugin can recolour a region without erasing it
 
 `ctx:tint(pane, x, y, w, h, colours)` sits next to `ctx:rect` and takes the same rectangle.
