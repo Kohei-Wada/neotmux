@@ -19,4 +19,7 @@ return {
   -- Off for the same kind of reason, about space rather than output: a status line spends a
   -- row, a sidebar spends a third of the width.
   sidebar = false,
+  -- Off for the same reason as the two above it: a row spent showing a mode is a row spent
+  -- whether or not a mode is ever raised.
+  footer = false,
 }

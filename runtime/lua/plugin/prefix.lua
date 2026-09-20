@@ -19,11 +19,14 @@
 --   r           resize mode: arrows or h/j/k/l move the boundary, anything else leaves
 --   c  n  p     a new window, the next one, the one before
 local nav = require("neotmux.nav")
+local modes = require("neotmux.mode")
 
-local armed = false
--- The second mode, kept the same way the first one is: a flag in this file. The host has no
--- idea either of them exists.
-local resizing = false
+-- Two modes, not one: the armed prefix and resize mode are different states, and a reader
+-- should be able to tell them apart. Each local holds the handle `neotmux.mode.raise` hands
+-- back while its mode is up, and nil while it is not — the handle doubles as the flag the
+-- flag used to be, so there is no state kept twice.
+local armed = nil
+local resizing = nil
 
 -- "The next pane" out of what the ABI offers: `list()` is in layout order and `current()`
 -- says where we are, so the successor is an index step with a wrap.
@@ -101,7 +104,7 @@ local M = {
     ["k"] = focus_toward("up"),
     ["l"] = focus_toward("right"),
     ["r"] = function()
-      resizing = true
+      resizing = modes.raise("resize")
     end,
     -- `create()` answers with the id before the window exists, so the two ops go out in one
     -- tick and are applied in that order: opened, then shown.
@@ -122,12 +125,14 @@ neotmux.on_key(function(key)
       -- One rule, so nothing can strand you in the mode: a key that is not an adjustment
       -- leaves it and does nothing else. Esc and Enter are simply the two that mean nothing
       -- else anywhere.
-      resizing = false
+      resizing:lower()
+      resizing = nil
     end
     return true
   end
   if armed then
-    armed = false
+    armed:lower()
+    armed = nil
     local command = M.commands[key]
     if command then
       command()
@@ -135,7 +140,7 @@ neotmux.on_key(function(key)
     return true
   end
   if key == M.key then
-    armed = true
+    armed = modes.raise("prefix")
     return true
   end
   return false
