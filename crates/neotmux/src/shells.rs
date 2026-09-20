@@ -1,21 +1,20 @@
 use std::collections::BTreeMap;
+use std::rc::Rc;
 
 use anyhow::Context as _;
 use neotmux_core::proto::{GridSnapshot, PaneId, Rect as PRect, Size};
 use neotmux_term::pty::{CommandBuilder, PtyEvent, PtyHandle};
-use neotmux_term::query::Queries;
-use neotmux_term::state::TermState;
+use neotmux_term::terminals::PaneTerminals;
 use neotmux_term::wakeup::Waker;
 
 const SCROLLBACK: usize = 10_000;
 
-/// What one pane is running: its child process and the terminal that child writes into.
+/// What one pane is running: its child process, and the copy of its screen the renderer
+/// draws from. The terminal itself lives in the shared `PaneTerminals`, because Lua reads it
+/// too.
 struct Shell {
     pty: PtyHandle,
-    state: TermState,
     grid: GridSnapshot,
-    /// The terminal's reply path: what this pane's child asked, and what it is owed back.
-    queries: Queries,
 }
 
 /// Every pane's child process, keyed by pane. The tree says where a pane is; this says what
@@ -25,6 +24,9 @@ struct Shell {
 /// the same order every frame rather than whatever order a hash map happens to be in.
 pub struct Shells {
     shells: BTreeMap<PaneId, Shell>,
+    /// Every pane's terminal, shared with the Lua layer. Opened and closed here alongside
+    /// the child, so a pane that is gone from one is gone from the other.
+    terminals: Rc<PaneTerminals>,
     /// Handed to every pane's reader thread, so output is something the frame loop can wait
     /// on rather than something it finds on its next pass.
     waker: Waker,
@@ -43,9 +45,10 @@ pub struct Drained {
 }
 
 impl Shells {
-    pub fn new(waker: Waker) -> Self {
+    pub fn new(waker: Waker, terminals: Rc<PaneTerminals>) -> Self {
         Self {
             shells: BTreeMap::new(),
+            terminals,
             reaping: Vec::new(),
             waker,
         }
@@ -53,13 +56,12 @@ impl Shells {
 
     pub fn open(&mut self, pane: PaneId, cmd: CommandBuilder, size: Size) -> anyhow::Result<()> {
         let pty = PtyHandle::spawn(cmd, size, self.waker.clone())?;
+        self.terminals.open(pane, size, SCROLLBACK);
         self.shells.insert(
             pane,
             Shell {
                 pty,
-                state: TermState::new(size, SCROLLBACK),
                 grid: GridSnapshot::default(),
-                queries: Queries::default(),
             },
         );
         Ok(())
@@ -76,6 +78,7 @@ impl Shells {
     /// what tmux does too. One that dies a moment after the signal is reaped by a later
     /// frame rather than left a zombie for the session.
     pub fn close(&mut self, pane: PaneId) {
+        self.terminals.close(pane);
         if let Some(mut shell) = self.shells.remove(&pane) {
             let _ = shell.pty.hangup();
             match shell.pty.try_wait() {
@@ -115,7 +118,7 @@ impl Shells {
                 rows: rect.h,
                 cols: rect.w,
             };
-            shell.state.resize(size);
+            self.terminals.resize(pane, size);
             shell.pty.resize(size)?;
         }
         Ok(())
@@ -134,13 +137,16 @@ impl Shells {
             output: false,
             closed: Vec::new(),
         };
+        // A local borrow of each field, so the terminals can be fed while the shells are
+        // walked.
+        let terminals = &self.terminals;
         for (pane, shell) in &mut self.shells {
             for _ in 0..max_chunks {
                 match shell.pty.output().try_recv() {
                     Ok(PtyEvent::Output(bytes)) => {
                         // The pane's own terminal answers here, because this is where its
                         // output and its PTY are both in hand.
-                        let reply = shell.queries.feed(&bytes, &mut shell.state);
+                        let reply = terminals.feed(*pane, &bytes);
                         if !reply.is_empty() {
                             shell.pty.write(&reply).context("answer a terminal query")?;
                         }
@@ -163,9 +169,10 @@ impl Shells {
     /// hidden window's terminal goes on taking its child's output either way, and
     /// snapshotting it would put every window on every frame's bill.
     pub fn snapshot(&mut self, panes: impl Iterator<Item = PaneId>) {
+        let terminals = &self.terminals;
         for pane in panes {
             if let Some(shell) = self.shells.get_mut(&pane) {
-                shell.state.snapshot_into(&mut shell.grid);
+                terminals.snapshot_into(pane, &mut shell.grid);
             }
         }
     }
@@ -182,7 +189,7 @@ impl Shells {
 
     #[cfg(test)]
     fn size(&self, pane: PaneId) -> Option<Size> {
-        self.shells.get(&pane).map(|shell| shell.state.size())
+        self.terminals.size(pane)
     }
 }
 
@@ -214,7 +221,7 @@ mod tests {
     /// nobody holds is not the arrangement these tests are about.
     fn shells() -> (Wakeup, Shells) {
         let (wakeup, waker) = wakeup().expect("wakeup");
-        (wakeup, Shells::new(waker))
+        (wakeup, Shells::new(waker, Rc::new(PaneTerminals::new())))
     }
 
     fn pane(id: u32) -> PaneId {

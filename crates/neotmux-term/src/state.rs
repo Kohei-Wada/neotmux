@@ -47,6 +47,12 @@ impl TermState {
         self.parser.screen().cursor_position()
     }
 
+    /// What the pane is showing, as plain-text lines (`crate::lines`). `last` bounds the work
+    /// to the bottom of the screen rather than trimming an answer that was built in full.
+    pub fn lines(&self, last: Option<usize>) -> Vec<String> {
+        crate::lines::visible(self.parser.screen(), last)
+    }
+
     pub fn size(&self) -> Size {
         let (rows, cols) = self.parser.screen().size();
         Size { rows, cols }
