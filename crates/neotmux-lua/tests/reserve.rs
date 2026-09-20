@@ -398,3 +398,158 @@ fn a_band_no_edge_could_ever_hold_raises() {
     );
     assert_eq!(sub.reserved(), Reserved::default());
 }
+
+/// A band changes width without being given back: the owner sees the new rect and the panes
+/// see the cells, both on the frame after the call.
+#[test]
+fn a_resize_changes_the_band_and_what_the_panes_get_on_the_next_frame() {
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.side')"),
+        (
+            "lua/plugin/side.lua",
+            r#"
+            local handle = neotmux.reserve('left', 20)
+            neotmux.on_key(function()
+              handle:resize_to(4)
+              return true
+            end)
+            neotmux.on_tick(function(ctx)
+              local band = ctx:reserved()
+              ctx:text(nil, 0, 0, 'side=' .. band.x .. '+' .. band.w
+                .. ' panes=' .. ctx:size().cols)
+            end)
+            return {}
+            "#,
+        ),
+    ]);
+    frame(&sub, true);
+    assert_eq!(texts(&sub), vec!["side=0+20 panes=60".to_string()]);
+
+    sub.dispatch_key("C-b");
+    assert_eq!(
+        sub.reserved(),
+        Reserved::vertical(4, 0),
+        "the host is told about it for the next frame"
+    );
+    frame(&sub, true);
+    assert_eq!(texts(&sub), vec!["side=0+4 panes=76".to_string()]);
+}
+
+/// Why a fold is a resize and not a remove: the band that folds keeps its place on the edge,
+/// so the one reserved after it stays inside it both ways.
+#[test]
+fn a_band_that_folds_and_unfolds_keeps_its_place_on_the_edge() {
+    let folder = r#"
+        local handle = neotmux.reserve('left', 10)
+        local wide = true
+        neotmux.on_key(function()
+          wide = not wide
+          handle:resize_to(wide and 10 or 1)
+          return true
+        end)
+        neotmux.on_tick(function(ctx)
+          local band = ctx:reserved()
+          ctx:text(nil, 0, 0, 'outer=' .. band.x .. '+' .. band.w)
+        end)
+        return {}
+    "#;
+    let (_dir, sub) = built(&[
+        (
+            "init.lua",
+            "require('plugin.outer') require('plugin.inner')",
+        ),
+        ("lua/plugin/outer.lua", folder),
+        ("lua/plugin/inner.lua", &band_reporter("inner", "left", 6)),
+    ]);
+    frame(&sub, true);
+    assert_eq!(
+        texts(&sub),
+        vec!["outer=0+10".to_string(), "inner=10+6".to_string()]
+    );
+
+    sub.dispatch_key("C-b");
+    frame(&sub, true);
+    assert_eq!(
+        texts(&sub),
+        vec!["outer=0+1".to_string(), "inner=1+6".to_string()],
+        "the folded band is still the outer one"
+    );
+
+    sub.dispatch_key("C-b");
+    frame(&sub, true);
+    assert_eq!(
+        texts(&sub),
+        vec!["outer=0+10".to_string(), "inner=10+6".to_string()],
+        "unfolding puts both back where they were"
+    );
+}
+
+/// The same distinction `reserve` draws. Growing into cells another plugin holds is a lost
+/// race: `nil` plus a message, and the band it already had.
+#[test]
+fn a_resize_past_the_edges_cap_is_refused_and_changes_nothing() {
+    let (_dir, sub) = built(&[
+        (
+            "init.lua",
+            "require('plugin.first') require('plugin.greedy')",
+        ),
+        (
+            "lua/plugin/first.lua",
+            "neotmux.reserve('left', 30) return {}",
+        ),
+        (
+            "lua/plugin/greedy.lua",
+            r#"
+            local handle = neotmux.reserve('left', 10)
+            neotmux.on_tick(function(ctx)
+              local band = ctx:reserved()
+              local ok, message = handle:resize_to(11)
+              ctx:text(nil, 0, 0, tostring(ok) .. ': ' .. tostring(message)
+                .. ' band=' .. band.x .. '+' .. band.w)
+            end)
+            return {}
+            "#,
+        ),
+    ]);
+    frame(&sub, true);
+    let reported = texts(&sub);
+    assert!(
+        reported[0].starts_with("nil: ") && reported[0].contains("will not fit"),
+        "{reported:?}"
+    );
+    assert!(reported[0].ends_with("band=30+10"), "{reported:?}");
+    assert_eq!(
+        sub.reserved(),
+        Reserved::vertical(40, 0),
+        "the refused resize changed the grant"
+    );
+}
+
+/// A count no edge could hold, and zero, are the typos they are on `reserve`: there is no
+/// band of nothing, and a plugin never gets a rect it must not draw in.
+#[test]
+fn resizing_to_zero_or_past_the_bound_raises() {
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.side')"),
+        (
+            "lua/plugin/side.lua",
+            r#"
+            local handle = neotmux.reserve('left', 10)
+            local shut_ok, shut_err = pcall(handle.resize_to, handle, 0)
+            local huge_ok = pcall(handle.resize_to, handle, 41)
+            neotmux.on_tick(function(ctx)
+              ctx:text(nil, 0, 0, tostring(shut_ok) .. '/' .. tostring(huge_ok)
+                .. ': ' .. tostring(shut_err))
+            end)
+            return {}
+            "#,
+        ),
+    ]);
+    frame(&sub, true);
+    let reported = texts(&sub);
+    assert!(
+        reported[0].starts_with("false/false: ") && reported[0].contains("at least one"),
+        "{reported:?}"
+    );
+    assert_eq!(sub.reserved(), Reserved::vertical(10, 0));
+}

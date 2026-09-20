@@ -52,6 +52,17 @@ struct Inner {
     bands: BTreeMap<SourceId, Rect>,
 }
 
+impl Inner {
+    /// What `edge` is already spending, counting every band there but `except`.
+    fn taken_on(&self, edge: Edge, except: Option<ReservationId>) -> u16 {
+        self.entries
+            .iter()
+            .filter(|entry| entry.edge == edge && Some(entry.id) != except)
+            .map(|entry| entry.cells)
+            .sum()
+    }
+}
+
 /// Who has asked for a band of the surface, and where each one sits this frame.
 #[derive(Default)]
 pub struct Reservations {
@@ -73,12 +84,7 @@ impl Reservations {
         }
         let axis = edge.axis();
         let cap = max_reserved(axis);
-        let taken: u16 = inner
-            .entries
-            .iter()
-            .filter(|entry| entry.edge == edge)
-            .map(|entry| entry.cells)
-            .sum();
+        let taken = inner.taken_on(edge, None);
         if taken + cells > cap {
             return Err(format!(
                 "the {edge} edge has {taken} of its {cap} {axis} reserved, \
@@ -94,6 +100,39 @@ impl Reservations {
             cells,
         });
         Ok(id)
+    }
+
+    /// A granted band takes a different number of cells of the same edge, from the next frame
+    /// on. Its place among the bands on that edge is its place in grant order, and that does
+    /// not move — so a band that shrinks and grows again comes back where it was, rather than
+    /// walking inside whoever reserved after it the way a remove-and-reserve would.
+    ///
+    /// `Err` carries the message handed back to the caller; nothing is changed in that case.
+    pub fn resize(&self, id: ReservationId, cells: u16) -> Result<(), String> {
+        let mut inner = self.inner.borrow_mut();
+        let Some(edge) = inner
+            .entries
+            .iter()
+            .find(|entry| entry.id == id)
+            .map(|entry| entry.edge)
+        else {
+            return Err("the reservation has already been removed".to_string());
+        };
+        let axis = edge.axis();
+        let cap = max_reserved(axis);
+        let taken = inner.taken_on(edge, Some(id));
+        if taken + cells > cap {
+            return Err(format!(
+                "the {edge} edge has {taken} of its {cap} {axis} reserved by others, \
+                 so {cells} will not fit"
+            ));
+        }
+        for entry in inner.entries.iter_mut() {
+            if entry.id == id {
+                entry.cells = cells;
+            }
+        }
+        Ok(())
     }
 
     pub fn remove(&self, id: ReservationId) -> bool {
@@ -402,6 +441,83 @@ mod tests {
         reservations.remove(id);
         reservations.add(a, Edge::Top, 1).expect("granted again");
         assert_eq!(reservations.totals(), Reserved::horizontal(1, 0));
+    }
+
+    /// The point of resizing rather than re-reserving: the outer band folds and unfolds, and
+    /// the one inside it neither moves out nor swallows it.
+    #[test]
+    fn a_band_that_resizes_keeps_its_place_on_the_edge() {
+        let (_s, a, b) = sources();
+        let reservations = Reservations::new();
+        let outer = reservations.add(a, Edge::Left, 10).expect("granted");
+        reservations.add(b, Edge::Left, 6).expect("granted");
+        lay_out(&reservations);
+        assert_eq!(reservations.band(a), Some(Rect::new(0, 0, 10, 24)));
+        assert_eq!(reservations.band(b), Some(Rect::new(10, 0, 6, 24)));
+
+        reservations.resize(outer, 1).expect("granted");
+        assert_eq!(reservations.totals(), Reserved::vertical(7, 0));
+        lay_out(&reservations);
+        assert_eq!(reservations.band(a), Some(Rect::new(0, 0, 1, 24)));
+        assert_eq!(
+            reservations.band(b),
+            Some(Rect::new(1, 0, 6, 24)),
+            "the inner band followed the outer one in, and is still inside it"
+        );
+
+        reservations.resize(outer, 10).expect("granted");
+        lay_out(&reservations);
+        assert_eq!(reservations.band(a), Some(Rect::new(0, 0, 10, 24)));
+        assert_eq!(
+            reservations.band(b),
+            Some(Rect::new(10, 0, 6, 24)),
+            "unfolding puts both back exactly where they were"
+        );
+    }
+
+    #[test]
+    fn a_resize_past_the_edges_cap_is_refused_and_changes_nothing() {
+        let (_s, a, b) = sources();
+        let reservations = Reservations::new();
+        let id = reservations.add(a, Edge::Left, 10).expect("granted");
+        reservations
+            .add(b, Edge::Left, MAX_RESERVED_COLS - 10)
+            .expect("granted");
+        let refused = reservations
+            .resize(id, 11)
+            .expect_err("one more than the edge can spare");
+        assert!(refused.contains("will not fit"), "{refused}");
+        assert_eq!(
+            reservations.totals(),
+            Reserved::vertical(MAX_RESERVED_COLS, 0)
+        );
+        lay_out(&reservations);
+        assert_eq!(reservations.band(a), Some(Rect::new(0, 0, 10, 24)));
+    }
+
+    /// The cap is counted against the other bands only, so a band already at the cap may be
+    /// resized to anything up to what it already holds.
+    #[test]
+    fn a_resize_does_not_pay_for_its_own_cells_twice() {
+        let (_s, a, _b) = sources();
+        let reservations = Reservations::new();
+        let id = reservations
+            .add(a, Edge::Left, MAX_RESERVED_COLS)
+            .expect("granted");
+        reservations
+            .resize(id, MAX_RESERVED_COLS)
+            .expect("the edge is full of nobody but this band");
+    }
+
+    #[test]
+    fn resizing_a_removed_reservation_is_refused() {
+        let (_s, a, _b) = sources();
+        let reservations = Reservations::new();
+        let id = reservations.add(a, Edge::Bottom, 1).expect("granted");
+        reservations.remove(id);
+        let refused = reservations.resize(id, 2).expect_err("refused");
+        assert!(refused.contains("already been removed"), "{refused}");
+        assert_eq!(reservations.totals(), Reserved::default());
     }
 
     #[test]
