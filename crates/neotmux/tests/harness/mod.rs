@@ -301,10 +301,46 @@ impl Neotmux {
             }
             assert!(
                 Instant::now() < deadline,
-                "marker {marker:?} never reached the log:\n{text}"
+                "marker {marker:?} never reached the log:\n{text}\n{}",
+                self.threads()
             );
             std::thread::sleep(Duration::from_millis(20));
         }
+    }
+
+    /// What every thread of the neotmux process is doing, as the kernel sees it: its state
+    /// letter and the function it is sleeping in. A `wait_for_log` that times out on a
+    /// runner nobody can reproduce on is otherwise a bare "it never said that" — this says
+    /// whether the loop is blocked in a read, spinning, or gone.
+    fn threads(&self) -> String {
+        let Some(pid) = self.child.process_id() else {
+            return "the process is already gone".to_string();
+        };
+        let Ok(tasks) = std::fs::read_dir(format!("/proc/{pid}/task")) else {
+            return format!("no /proc/{pid}/task to read");
+        };
+        let mut report = format!("threads of neotmux ({pid}):");
+        for task in tasks.flatten() {
+            let dir = task.path();
+            let read = |name: &str| {
+                std::fs::read_to_string(dir.join(name))
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string()
+            };
+            let stat = read("stat");
+            let state = stat
+                .rsplit_once(')')
+                .and_then(|(_, rest)| rest.split_whitespace().next().map(str::to_string))
+                .unwrap_or_default();
+            report.push_str(&format!(
+                "\n  {} {} state={state} wchan={}",
+                task.file_name().to_string_lossy(),
+                read("comm"),
+                read("wchan"),
+            ));
+        }
+        report
     }
 
     pub fn log_text(&self) -> String {
