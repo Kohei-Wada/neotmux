@@ -39,6 +39,8 @@ pub(crate) struct Shared {
     pub(crate) overrun: Rc<Overrun>,
     pub(crate) reservations: Rc<Reservations>,
     pub(crate) window_ids: Rc<WindowIds>,
+    /// `$HOME` as the host read it, absent where the process had none.
+    pub(crate) home: Option<String>,
 }
 
 pub(crate) fn make_handle(
@@ -174,6 +176,7 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
         overrun,
         reservations,
         window_ids,
+        home,
     } = shared;
     let neotmux = lua.create_table()?;
 
@@ -255,6 +258,13 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
 
     let opt = opt::install(lua, opts.clone())?;
     neotmux.set("opt", opt)?;
+
+    // A fact about the process, beside `pane.info`'s facts about a pane, rather than an
+    // `opt`: nothing sets it, and the VM has no `os.getenv` to read it any other way (§5.2).
+    // Absent, not "", where there was no `HOME` — the same answer the rest of the ABI gives.
+    if let Some(home) = home {
+        neotmux.set("home", home)?;
+    }
 
     {
         let sources = sources.clone();

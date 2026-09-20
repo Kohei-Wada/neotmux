@@ -42,6 +42,11 @@ It is composed from scratch every tick, so it follows the focus, a command start
 finishing and a `cd` with no keystroke to prompt it. The directory is written the way a shell
 prompt writes it — `$HOME` as `~` — and loses its leading components when the space runs out.
 
+`$HOME` reaches it as `neotmux.home`, the one value out of the process environment the host
+publishes: the VM has no `os.getenv`, and this is the same read the `~/.config/neotmux` layer
+is resolved from, so the two cannot disagree. It is `nil` where the process had no `HOME`, and
+the path is then written out in full.
+
 The colours (Catppuccin Mocha), the caps and the icons are fields on the module, read on the
 tick: `require('plugin.status').caps = { left = '', right = '' }` is the whole escape for a
 terminal without a Nerd Font.
