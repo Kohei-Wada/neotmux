@@ -183,3 +183,20 @@ fn the_pad_option_keeps_every_history_row_as_wide_as_the_pane() {
         "a padded history row was not the pane's eight columns: {line:?}"
     );
 }
+
+/// A wrapped command line usually straddles the top of the screen, so the flags have to be
+/// readable in the history on the same terms.
+#[test]
+fn the_wrapped_option_says_which_history_rows_run_on_into_the_next() {
+    let (_dir, sub) = built(
+        "local lines, _, wrapped = neotmux.pane.scrollback(1, { wrapped = true })\n\
+         local flags = {}\n\
+         for i = 1, #lines do flags[i] = tostring(wrapped[i]) end\n\
+         neotmux.log.info(table.concat(flags, ','))",
+    );
+    sub.terminals()
+        .open(pane(1), Size { rows: 2, cols: 4 }, 100);
+    sub.terminals().feed(pane(1), b"abcdef\r\n\r\nxy");
+
+    assert_eq!(ticked(&sub), vec!["true,false"]);
+}

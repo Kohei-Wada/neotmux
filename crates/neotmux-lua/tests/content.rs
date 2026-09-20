@@ -162,3 +162,30 @@ fn padding_is_off_unless_it_is_asked_for() {
     assert!(lines[0].starts_with("1 [ab|||] rev="), "{lines:?}");
     assert!(lines[1].starts_with("1 [ab|||] rev="), "{lines:?}");
 }
+
+/// Whether a line ran off the end of the pane is the one thing a plugin copying a wrapped
+/// command line cannot work out for itself: a line exactly as wide as the pane looks the
+/// same either way.
+#[test]
+fn the_wrapped_option_says_which_rows_run_on_into_the_next() {
+    let (_dir, sub) = built(
+        "local lines, _, wrapped = neotmux.pane.content(1, { wrapped = true })\n\
+         local flags = {}\n\
+         for i = 1, #lines do flags[i] = tostring(wrapped[i]) end\n\
+         neotmux.log.info(table.concat(flags, ','))",
+    );
+    sub.terminals().open(pane(1), Size { rows: 3, cols: 4 }, 0);
+    sub.terminals().feed(pane(1), b"abcdef");
+
+    assert_eq!(ticked(&sub), vec!["true,false,false"]);
+}
+
+#[test]
+fn the_flags_are_nil_unless_they_are_asked_for() {
+    let (_dir, sub) = built(
+        "local _, _, wrapped = neotmux.pane.content(1)\n\
+         neotmux.log.info(tostring(wrapped))",
+    );
+    sub.terminals().open(pane(1), SIZE, 0);
+    assert_eq!(ticked(&sub), vec!["nil"]);
+}

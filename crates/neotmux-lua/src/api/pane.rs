@@ -5,6 +5,7 @@ use mlua::{Lua, Table, Value};
 
 use neotmux_core::proto::{Dir, PaneId, SplitDir};
 use neotmux_term::lines::Trailing;
+use neotmux_term::read::{Text, Want};
 use neotmux_term::terminals::PaneTerminals;
 
 use crate::api::rect;
@@ -27,14 +28,40 @@ fn count(call: &str, field: &str, value: Option<i64>) -> mlua::Result<Option<usi
         .transpose()
 }
 
-/// What `opts.pad` asks for: the blank rest of every row kept, rather than cut. Default —
-/// and absent — is cut, which is what reading a line of text wants.
-fn trailing(opts: Option<&Table>) -> mlua::Result<Trailing> {
-    let pad = match opts {
-        Some(opts) => opts.get::<Option<bool>>("pad")?.unwrap_or(false),
-        None => false,
+/// A boolean a caller may have left out, which is the same as `false` everywhere here.
+fn flag(opts: Option<&Table>, name: &str) -> mlua::Result<bool> {
+    match opts {
+        Some(opts) => Ok(opts.get::<Option<bool>>(name)?.unwrap_or(false)),
+        None => Ok(false),
+    }
+}
+
+/// What a read of a pane's text was asked to include. `pad` keeps the blank rest of every
+/// row rather than cutting it, and `wrapped` asks for the per-row continuation flags;
+/// absent, both are off, which is what reading a line of text wants.
+fn want(opts: Option<&Table>) -> mlua::Result<Want> {
+    Ok(Want {
+        trailing: if flag(opts, "pad")? {
+            Trailing::Pad
+        } else {
+            Trailing::Trim
+        },
+        wrapped: flag(opts, "wrapped")?,
+    })
+}
+
+/// One read of a pane's text as Lua sees it: the lines, the revision they were read at, and
+/// the continuation flags where they were asked for — `nil` where they were not.
+fn answer(lua: &Lua, text: Text) -> mlua::Result<(Value, Value, Value)> {
+    let wrapped = match text.wrapped {
+        Some(wrapped) => Value::Table(lua.create_sequence_from(wrapped)?),
+        None => Value::Nil,
     };
-    Ok(if pad { Trailing::Pad } else { Trailing::Trim })
+    Ok((
+        Value::Table(lua.create_sequence_from(text.lines)?),
+        Value::Integer(text.revision as i64),
+        wrapped,
+    ))
 }
 
 /// The M2 pane API (§6), signatures frozen now. `list`, `current` and `rect` read this
@@ -150,15 +177,11 @@ pub(crate) fn install(
                 None => None,
             };
             let last = count("content", "lines count", last)?;
-            let trailing = trailing(opts.as_ref())?;
-            let Some((lines, revision)) = terminals.content(PaneId::from(pane), last, trailing)
-            else {
-                return Ok((Value::Nil, Value::Nil));
+            let want = want(opts.as_ref())?;
+            let Some(text) = terminals.content(PaneId::from(pane), last, want) else {
+                return Ok((Value::Nil, Value::Nil, Value::Nil));
             };
-            Ok((
-                Value::Table(lua.create_sequence_from(lines)?),
-                Value::Integer(revision as i64),
-            ))
+            answer(lua, text)
         })?;
         pane.set("content", content)?;
     }
@@ -192,16 +215,11 @@ pub(crate) fn install(
             let from = count("scrollback", "from", from)?.unwrap_or(0);
             // No count is the rest of the history, as no `lines` is the whole screen.
             let lines = count("scrollback", "lines count", lines)?.unwrap_or(usize::MAX);
-            let trailing = trailing(opts.as_ref())?;
-            let Some((lines, revision)) =
-                terminals.history(PaneId::from(pane), from, lines, trailing)
-            else {
-                return Ok((Value::Nil, Value::Nil));
+            let want = want(opts.as_ref())?;
+            let Some(text) = terminals.history(PaneId::from(pane), from, lines, want) else {
+                return Ok((Value::Nil, Value::Nil, Value::Nil));
             };
-            Ok((
-                Value::Table(lua.create_sequence_from(lines)?),
-                Value::Integer(revision as i64),
-            ))
+            answer(lua, text)
         })?;
         pane.set("scrollback", scrollback)?;
     }

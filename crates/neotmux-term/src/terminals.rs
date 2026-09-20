@@ -3,8 +3,8 @@ use std::collections::BTreeMap;
 
 use neotmux_core::proto::{GridSnapshot, PaneId, Size};
 
-use crate::lines::Trailing;
 use crate::query::Queries;
+use crate::read::{Text, Want};
 use crate::state::TermState;
 
 /// One pane's terminal: the screen its child writes into, the reply path that answers the
@@ -106,32 +106,28 @@ impl PaneTerminals {
     /// Lines from above the pane's visible screen, oldest first, with the revision they were
     /// read at. The read moves the screen's position in the scrollback and puts it back
     /// before returning, all inside this one borrow — see `crate::scrollback`.
-    pub fn history(
-        &self,
-        pane: PaneId,
-        from: usize,
-        count: usize,
-        trailing: Trailing,
-    ) -> Option<(Vec<String>, u64)> {
+    pub fn history(&self, pane: PaneId, from: usize, count: usize, want: Want) -> Option<Text> {
         let mut panes = self.panes.borrow_mut();
         let terminal = panes.get_mut(&pane)?;
-        Some((
-            terminal.state.history(from, count, trailing),
-            terminal.revision,
-        ))
+        Some(Text {
+            lines: terminal.state.history(from, count, want.trailing),
+            wrapped: want
+                .wrapped
+                .then(|| terminal.state.history_wrapped(from, count)),
+            revision: terminal.revision,
+        })
     }
 
     /// What the pane is showing, as lines, together with the revision they were read at.
     /// `None` for a pane that does not exist.
-    pub fn content(
-        &self,
-        pane: PaneId,
-        last: Option<usize>,
-        trailing: Trailing,
-    ) -> Option<(Vec<String>, u64)> {
+    pub fn content(&self, pane: PaneId, last: Option<usize>, want: Want) -> Option<Text> {
         let panes = self.panes.borrow();
         let terminal = panes.get(&pane)?;
-        Some((terminal.state.lines(last, trailing), terminal.revision))
+        Some(Text {
+            lines: terminal.state.lines(last, want.trailing),
+            wrapped: want.wrapped.then(|| terminal.state.wrapped(last)),
+            revision: terminal.revision,
+        })
     }
 }
 
@@ -151,9 +147,9 @@ mod tests {
 
     fn lines(terminals: &PaneTerminals, id: u32) -> Vec<String> {
         terminals
-            .content(pane(id), None, Trailing::Trim)
+            .content(pane(id), None, Want::default())
             .expect("a live pane")
-            .0
+            .lines
     }
 
     #[test]
@@ -194,18 +190,18 @@ mod tests {
     fn the_revision_content_reports_is_the_one_it_was_read_at() {
         let terminals = terminals();
         terminals.feed(pane(1), b"x");
-        let (_, revision) = terminals
-            .content(pane(1), None, Trailing::Trim)
+        let text = terminals
+            .content(pane(1), None, Want::default())
             .expect("a live pane");
-        assert_eq!(Some(revision), terminals.revision(pane(1)));
+        assert_eq!(Some(text.revision), terminals.revision(pane(1)));
     }
 
     #[test]
     fn a_pane_nobody_has_answers_nothing_rather_than_raising() {
         let terminals = terminals();
-        assert_eq!(terminals.content(pane(4242), None, Trailing::Trim), None);
+        assert_eq!(terminals.content(pane(4242), None, Want::default()), None);
         assert_eq!(terminals.history_len(pane(4242)), None);
-        assert_eq!(terminals.history(pane(4242), 0, 10, Trailing::Trim), None);
+        assert_eq!(terminals.history(pane(4242), 0, 10, Want::default()), None);
         assert_eq!(terminals.revision(pane(4242)), None);
         assert_eq!(terminals.size(pane(4242)), None);
         assert!(terminals.feed(pane(4242), b"\x1b[c").is_empty());
@@ -219,11 +215,11 @@ mod tests {
         terminals.open(pane(1), Size { rows: 2, cols: 8 }, 100);
         terminals.feed(pane(1), b"one\r\ntwo\r\nthree\r\nfour");
         assert_eq!(terminals.history_len(pane(1)), Some(2));
-        let (history, revision) = terminals
-            .history(pane(1), 0, 10, Trailing::Trim)
+        let history = terminals
+            .history(pane(1), 0, 10, Want::default())
             .expect("a live pane");
-        assert_eq!(history, vec!["one", "two"]);
-        assert_eq!(Some(revision), terminals.revision(pane(1)));
+        assert_eq!(history.lines, vec!["one", "two"]);
+        assert_eq!(Some(history.revision), terminals.revision(pane(1)));
         assert_eq!(lines(&terminals, 1), vec!["three", "four"]);
     }
 
@@ -232,9 +228,9 @@ mod tests {
     #[test]
     fn a_pane_that_closes_between_two_reads_answers_nothing_for_the_second() {
         let terminals = terminals();
-        assert!(terminals.content(pane(1), None, Trailing::Trim).is_some());
+        assert!(terminals.content(pane(1), None, Want::default()).is_some());
         terminals.close(pane(1));
-        assert_eq!(terminals.content(pane(1), None, Trailing::Trim), None);
+        assert_eq!(terminals.content(pane(1), None, Want::default()), None);
         assert_eq!(terminals.revision(pane(1)), None);
     }
 

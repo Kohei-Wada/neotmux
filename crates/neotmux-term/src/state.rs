@@ -55,6 +55,11 @@ impl TermState {
         crate::lines::visible(self.parser.screen(), last, trailing)
     }
 
+    /// Whether each of those lines runs on into the next (`crate::wrap`).
+    pub fn wrapped(&self, last: Option<usize>) -> Vec<bool> {
+        crate::wrap::visible(self.parser.screen(), last)
+    }
+
     /// How many lines the pane holds above its visible screen. `&mut` because reading it
     /// goes through the screen's own position in the scrollback — see [`crate::scrollback`].
     pub fn history_len(&mut self) -> usize {
@@ -65,6 +70,11 @@ impl TermState {
     /// [`crate::scrollback`] describes.
     pub fn history(&mut self, from: usize, count: usize, trailing: Trailing) -> Vec<String> {
         crate::scrollback::lines(self.parser.screen_mut(), from, count, trailing)
+    }
+
+    /// Whether each of those history lines runs on into the next (`crate::wrap`).
+    pub fn history_wrapped(&mut self, from: usize, count: usize) -> Vec<bool> {
+        crate::wrap::history(self.parser.screen_mut(), from, count)
     }
 
     pub fn size(&self) -> Size {

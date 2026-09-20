@@ -225,9 +225,9 @@ neotmux.pane.current()   -- id, or nil
 neotmux.pane.rect(id)    -- { x = , y = , w = , h = }, or nil
 neotmux.pane.info(id)    -- { command = ..., cwd = ... }, or nil
 neotmux.pane.revision(id)     -- a number that moves when the pane is fed, or nil
-neotmux.pane.content(id, opts) -- { line, ... }, revision — or nil, nil
+neotmux.pane.content(id, opts) -- { line, ... }, revision, wrapped — or nil, nil, nil
 neotmux.pane.history(id)      -- how many lines are above the screen, or nil
-neotmux.pane.scrollback(id, opts) -- { line, ... }, revision — or nil, nil
+neotmux.pane.scrollback(id, opts) -- { line, ... }, revision, wrapped — or nil, nil, nil
 neotmux.pane.split('horizontal' | 'vertical')
 neotmux.pane.focus(id)
 neotmux.pane.resize('left' | 'right' | 'up' | 'down', cells)
@@ -333,6 +333,23 @@ third column is a space the pane is showing. It is off unless you ask for it, an
 ```lua
 local rows = neotmux.pane.content(id, { pad = true })
 ```
+
+`opts.wrapped` adds a third return value: one boolean per line, saying whether that line ran
+off the end of the pane and continues on the one below. It is the terminal's own flag, not a
+guess — a line exactly as wide as the pane looks identical either way, so there is nothing to
+guess from. It is `nil` unless you ask, and `nil` means "not asked", never "none of them".
+
+```lua
+local lines, _, wrapped = neotmux.pane.content(id, { wrapped = true })
+```
+
+That is what a copy of a wrapped command line turns on: a wrapped line keeps its trailing
+blanks and gets no newline after it, an unwrapped one gets both. `pane.scrollback` answers
+the same way, which is where the top of a wrapped command line usually is.
+
+A resize clears the flags. The terminal drops them on every row when the column count
+changes, because the old wrap points no longer describe the new width, and neotmux does not
+invent replacements.
 
 #### What a pane has already said
 
