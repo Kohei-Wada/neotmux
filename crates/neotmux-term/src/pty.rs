@@ -6,6 +6,8 @@ use anyhow::Context as _;
 use neotmux_core::proto::Size;
 use portable_pty::{Child, ExitStatus, MasterPty, PtySize, native_pty_system};
 
+use crate::wakeup::Waker;
+
 // `spawn` takes one, so it is part of this crate's surface either way: re-exported so a
 // caller does not need its own dependency on portable-pty to name the type.
 pub use portable_pty::CommandBuilder;
@@ -25,21 +27,26 @@ pub struct PtyHandle {
     output: Receiver<PtyEvent>,
 }
 
-fn read_loop<R: Read>(mut reader: R, tx: SyncSender<PtyEvent>) {
+/// Every event is followed by a nudge, because a channel is not something the frame loop
+/// can wait on: the nudge is the only reason it looks at this pane before its next frame.
+fn read_loop<R: Read>(mut reader: R, tx: SyncSender<PtyEvent>, waker: Waker) {
     let mut buf = [0u8; 8192];
     loop {
         match reader.read(&mut buf) {
             Ok(0) => {
                 let _ = tx.send(PtyEvent::Eof);
+                waker.wake();
                 return;
             }
             Ok(n) => {
                 if tx.send(PtyEvent::Output(buf[..n].to_vec())).is_err() {
                     return;
                 }
+                waker.wake();
             }
             Err(e) => {
                 let _ = tx.send(PtyEvent::Error(e));
+                waker.wake();
                 return;
             }
         }
@@ -60,7 +67,7 @@ impl PtyHandle {
         CommandBuilder::new_default_prog()
     }
 
-    pub fn spawn(cmd: CommandBuilder, size: Size) -> anyhow::Result<Self> {
+    pub fn spawn(cmd: CommandBuilder, size: Size, waker: Waker) -> anyhow::Result<Self> {
         let pair = native_pty_system()
             .openpty(pty_size(size))
             .context("open pty")?;
@@ -72,7 +79,7 @@ impl PtyHandle {
         let (tx, output) = sync_channel(OUTPUT_CHANNEL_BOUND);
         thread::Builder::new()
             .name("neotmux-pty-reader".into())
-            .spawn(move || read_loop(reader, tx))
+            .spawn(move || read_loop(reader, tx, waker))
             .context("spawn reader thread")?;
 
         Ok(Self {
@@ -134,7 +141,8 @@ mod tests {
     fn output_channel_stays_bounded_under_a_flooding_child() {
         let mut cmd = CommandBuilder::new("sh");
         cmd.args(["-c", "yes"]);
-        let mut pty = PtyHandle::spawn(cmd, Size { rows: 24, cols: 80 }).expect("spawn pty");
+        let (_wakeup, waker) = crate::wakeup::wakeup().expect("wakeup");
+        let mut pty = PtyHandle::spawn(cmd, Size { rows: 24, cols: 80 }, waker).expect("spawn pty");
 
         std::thread::sleep(Duration::from_millis(500));
 
@@ -163,7 +171,8 @@ mod tests {
     #[test]
     fn a_read_error_is_reported_as_error_not_eof() {
         let (tx, rx) = sync_channel(1);
-        read_loop(FailingReader, tx);
+        let (_wakeup, waker) = crate::wakeup::wakeup().expect("wakeup");
+        read_loop(FailingReader, tx, waker);
 
         match rx.recv().expect("event") {
             PtyEvent::Error(e) => assert_eq!(e.kind(), io::ErrorKind::Other),

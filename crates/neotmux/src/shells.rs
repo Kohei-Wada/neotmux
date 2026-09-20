@@ -5,6 +5,7 @@ use neotmux_core::proto::{GridSnapshot, PaneId, Rect as PRect, Size};
 use neotmux_term::pty::{CommandBuilder, PtyEvent, PtyHandle};
 use neotmux_term::query::Queries;
 use neotmux_term::state::TermState;
+use neotmux_term::wakeup::Waker;
 
 const SCROLLBACK: usize = 10_000;
 
@@ -22,9 +23,11 @@ struct Shell {
 ///
 /// Ordered, not hashed: a pane's output becomes a `pane_output` event, and plugins are owed
 /// the same order every frame rather than whatever order a hash map happens to be in.
-#[derive(Default)]
 pub struct Shells {
     shells: BTreeMap<PaneId, Shell>,
+    /// Handed to every pane's reader thread, so output is something the frame loop can wait
+    /// on rather than something it finds on its next pass.
+    waker: Waker,
     /// Children that were hung up on but had not died yet. Nothing here is waited for; each
     /// frame asks once whether they are done. Without it a session that opens and closes
     /// panes accumulates one zombie per closed pane until it exits.
@@ -40,8 +43,16 @@ pub struct Drained {
 }
 
 impl Shells {
+    pub fn new(waker: Waker) -> Self {
+        Self {
+            shells: BTreeMap::new(),
+            reaping: Vec::new(),
+            waker,
+        }
+    }
+
     pub fn open(&mut self, pane: PaneId, cmd: CommandBuilder, size: Size) -> anyhow::Result<()> {
-        let pty = PtyHandle::spawn(cmd, size)?;
+        let pty = PtyHandle::spawn(cmd, size, self.waker.clone())?;
         self.shells.insert(
             pane,
             Shell {
@@ -183,8 +194,17 @@ mod tests {
     use nix::sys::wait::{WaitPidFlag, WaitStatus, waitpid};
     use nix::unistd::Pid;
 
+    use neotmux_term::wakeup::{Wakeup, wakeup};
+
     use super::*;
     use crate::panes::PaneLayout;
+
+    /// The wakeup is handed back rather than dropped: a `Shells` whose panes nudge an end
+    /// nobody holds is not the arrangement these tests are about.
+    fn shells() -> (Wakeup, Shells) {
+        let (wakeup, waker) = wakeup().expect("wakeup");
+        (wakeup, Shells::new(waker))
+    }
 
     fn pane(id: u32) -> PaneId {
         PaneId::from(id)
@@ -211,8 +231,8 @@ mod tests {
         cmd
     }
 
-    fn two_panes(layout: &PaneLayout) -> Shells {
-        let mut shells = Shells::default();
+    fn two_panes(layout: &PaneLayout) -> (Wakeup, Shells) {
+        let (wakeup, mut shells) = shells();
         for (id, rect) in layout.panes() {
             shells
                 .open(
@@ -225,14 +245,14 @@ mod tests {
                 )
                 .expect("spawn");
         }
-        shells
+        (wakeup, shells)
     }
 
     #[test]
     fn fitting_resizes_every_pane_to_its_own_rect() {
         let mut layout = PaneLayout::new(Size { rows: 24, cols: 80 }, false, 0, pane(1));
         layout.split(SplitDir::Vertical, pane(2)).expect("fits");
-        let mut shells = two_panes(&layout);
+        let (_wakeup, mut shells) = two_panes(&layout);
 
         shells.fit(layout.showable()).expect("fit");
 
@@ -247,7 +267,7 @@ mod tests {
     fn a_pane_below_the_minimum_keeps_its_last_valid_size() {
         let mut layout = PaneLayout::new(Size { rows: 24, cols: 80 }, false, 0, pane(1));
         layout.split(SplitDir::Vertical, pane(2)).expect("fits");
-        let mut shells = two_panes(&layout);
+        let (_wakeup, mut shells) = two_panes(&layout);
         shells.fit(layout.showable()).expect("fit");
 
         layout.resurface(Size { rows: 24, cols: 3 }, false, 0);
@@ -274,7 +294,7 @@ mod tests {
     /// without waiting.
     #[test]
     fn closing_a_pane_whose_child_outlived_its_descriptors_does_not_block() {
-        let mut shells = Shells::default();
+        let (_wakeup, mut shells) = shells();
         shells
             .open(pane(1), daemoniser(), Size { rows: 24, cols: 80 })
             .expect("spawn");
@@ -308,7 +328,7 @@ mod tests {
     /// not be whatever order a hash map happens to iterate in.
     #[test]
     fn output_is_dispatched_in_pane_order() {
-        let mut shells = Shells::default();
+        let (_wakeup, mut shells) = shells();
         let ids = [5u32, 2, 6, 1, 4, 3];
         for id in ids {
             let mut cmd = CommandBuilder::new("sh");
@@ -362,7 +382,7 @@ mod tests {
         let mut cmd = CommandBuilder::new("sh");
         cmd.args(["-c", &format!("echo $$ > {}; sleep 30", pidfile.display())]);
 
-        let mut shells = Shells::default();
+        let (_wakeup, mut shells) = shells();
         shells
             .open(pane(1), cmd, Size { rows: 24, cols: 80 })
             .expect("spawn");
@@ -396,7 +416,7 @@ mod tests {
 
     #[test]
     fn closing_the_last_shell_empties_the_collection() {
-        let mut shells = Shells::default();
+        let (_wakeup, mut shells) = shells();
         shells
             .open(pane(1), quick_exit(), Size { rows: 24, cols: 80 })
             .expect("spawn");
@@ -410,7 +430,7 @@ mod tests {
     /// is a race; a later frame is what reaps it.
     #[test]
     fn a_closed_panes_child_is_reaped_within_a_few_frames() {
-        let mut shells = Shells::default();
+        let (_wakeup, mut shells) = shells();
         let size = Size { rows: 4, cols: 20 };
         shells
             .open(pane(1), CommandBuilder::new("true"), size)
