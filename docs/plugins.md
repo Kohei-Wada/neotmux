@@ -292,12 +292,22 @@ a plugin that is a millisecond over on a loaded machine has not done anything wr
 None of this is a sandbox. Plugins are trusted (below); the budget is there so an *accident*
 costs one plugin one frame instead of costing you the program.
 
-## Turning a shipped default off
+## The shipped defaults
 
-neotmux ships two plugins in the runtime layer an install puts on the search path: `status`,
-the default status line, and `prefix`, a `C-a` prefix over `%`, `"` and `o`. Neither is a host
-feature — both are ordinary files making ordinary API calls, and the prefix is the only reason
-a fresh install can make a second pane at all.
+neotmux ships three plugins in the runtime layer an install puts on the search path:
+
+| plugin | what it does |
+|---|---|
+| `status` | the default status line |
+| `prefix` | a `C-b` prefix over `v`, `-` and `o` |
+| `borders` | a rule along every boundary between two panes |
+
+None of them is a host feature — all three are ordinary files making ordinary API calls, and
+the prefix is the only reason a fresh install can make a second pane at all. `C-b v` splits
+vertically (the panes end up side by side, because `pane.split('vertical')` divides the
+width), `C-b -` splits horizontally (one above the other), and `C-b o` focuses the next pane.
+
+### Turning one off
 
 Every layer's `init.lua` runs, earliest layer first, and the shipped layer is last — so your
 own `init.lua` can decide what the shipped ones do:
@@ -306,11 +316,50 @@ own `init.lua` can decide what the shipped ones do:
 -- ~/.config/neotmux/init.lua
 require('neotmux.defaults').status = false
 require('neotmux.defaults').prefix = false
+require('neotmux.defaults').borders = false
 ```
 
 That is a Lua module the runtime layer ships, not a host feature: neotmux has no idea the
 defaults table exists. Deleting the installed `lua/plugin/` directory works too, and leaves a
-multiplexer with no status line, no prefix and no error.
+multiplexer with no status line, no prefix, no borders and no error.
+
+### Changing what the prefix does
+
+`plugin.prefix` returns its key and its command table, and reads both when a key arrives, so
+assigning to either from your own `init.lua` takes effect:
+
+```lua
+-- ~/.config/neotmux/init.lua
+local prefix = require('plugin.prefix')
+prefix.key = 'C-a'                            -- rebind the prefix itself
+prefix.commands['%'] = prefix.commands['v']   -- tmux's muscle memory, alongside v and -
+prefix.commands['"'] = prefix.commands['-']
+prefix.commands['o'] = nil                    -- and one taken away
+prefix.commands['!'] = function()             -- and one of your own
+  neotmux.notify('info', 'panes: ' .. #neotmux.pane.list())
+end
+```
+
+A command is a function of no arguments, keyed by the key spec that runs it — the same specs
+`keymap.set` takes. The prefix swallows the key after itself whether or not the table has an
+entry for it, so a mistyped command never leaks a character into the shell.
+
+`require`ing it from your `init.lua` loads it there instead of later, which is fine: the
+shipped layer's `require` finds it already loaded. Do not do it *and* set
+`defaults.prefix = false` — the module is loaded either way, and the flag then only looks
+like it turned something off.
+
+### Changing what the borders look like
+
+`plugin.borders` returns `{ fg = 8 }`, read every tick:
+
+```lua
+require('plugin.borders').fg = '#404040'
+```
+
+There is nothing else to set. The glyph is `ctx:line`'s, and a border sits on the boundary
+itself — the last column or row of the pane above or to its left — because the panes tile the
+surface exactly and there is no gap between them to draw in. A border costs that pane a cell.
 
 ## Reloading
 

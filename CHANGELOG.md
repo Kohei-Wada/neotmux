@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Panes you can see
+
+`borders`, a third shipped plugin, rules every boundary between two panes. The panes tile the
+surface exactly, so a pane edge that is not an edge of the surface is shared with a neighbour
+and the divider goes on the boundary itself — no host change, no adjacency API, `pane_rect`
+and `line` and nothing else.
+
+### A prefix you can change
+
+The shipped prefix is now `C-b`, with `v` splitting vertically, `-` horizontally and `o`
+walking to the next pane. Its command table is a field of the module rather than a file-local,
+so a user's `init.lua` can add, replace or drop a binding — `prefix.commands['%']` back to
+tmux's is one line — instead of only being allowed to move the prefix key.
+
 ## v0.1.0 — 2026-09-20
 
 The line at which a plugin author can exercise the ABI. **Not** the line at which neotmux is
