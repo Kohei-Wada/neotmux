@@ -3,8 +3,8 @@ use ratatui::Frame;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 
-use crate::panes::PaneRects;
-use crate::render::color;
+use crate::draw::color;
+use neotmux::panes::PaneRects;
 
 #[derive(Clone, Copy)]
 struct Colors {

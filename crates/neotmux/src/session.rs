@@ -6,23 +6,16 @@ use neotmux_lua::ops::{Level, Op};
 use neotmux_lua::{Event as LuaEvent, Geometry, KeyOutcome, LuaSubsystem, Window as LuaWindow};
 use neotmux_term::pty::PtyHandle;
 use neotmux_term::state::clamp_to_min_grid;
-use neotmux_term::wakeup::{Waker, Wakeup, wakeup};
-use ratatui::DefaultTerminal;
-use ratatui::layout::Rect;
+use neotmux_term::wakeup::Waker;
 
-use crate::decode::Decoder;
-use crate::frame::FRAME;
+use crate::frame::{Frame, PaneFrame};
 use crate::input::{encode_key, key_spec};
 use crate::keys::Key;
 use crate::logging;
 use crate::notify::Notifications;
-use crate::overlay;
 use crate::paneinfo::PaneInfoCache;
 use crate::procinfo;
-use crate::render::{cursor_position, draw_grid};
 use crate::shells::Shells;
-use crate::signals::{self, ShutdownSignal};
-use crate::tty::{Ready, Terminal};
 use crate::windows::{Shown, Surface, Windows};
 
 const MAX_CHUNKS_PER_FRAME: usize = 32;
@@ -41,17 +34,9 @@ const MAX_CHUNKS_PER_FRAME: usize = 32;
 /// milliseconds of the frame on something a session asks for a handful of times.
 const MAX_NEW_SHELLS_PER_FRAME: usize = 3;
 
-fn terminal_size(terminal: &DefaultTerminal) -> anyhow::Result<Size> {
-    let area = terminal.size().context("terminal size")?;
-    Ok(clamp_to_min_grid(Size {
-        rows: area.height,
-        cols: area.width,
-    }))
-}
-
 /// The state one frame carries into the next. Every step of a frame is a method on it, so
-/// the loop in `run` reads as the order of the steps and nothing else.
-struct Session {
+/// the loop driving the session reads as the order of the steps and nothing else.
+pub struct Session {
     /// What every window is laid out against: the whole terminal, the bands reserved at
     /// its edges, and the gutter between panes.
     surface: Surface,
@@ -75,7 +60,7 @@ enum Drained {
 }
 
 impl Session {
-    fn new(size: Size, lua: &LuaSubsystem, waker: Waker) -> anyhow::Result<Self> {
+    pub fn new(size: Size, lua: &LuaSubsystem, waker: Waker) -> anyhow::Result<Self> {
         let surface = Surface {
             size,
             reserved: lua.reserved(),
@@ -89,14 +74,20 @@ impl Session {
             PtyHandle::default_shell_command(),
             pane_size(windows.rect(first), first)?,
         )?;
-        Ok(Self {
+        let mut session = Self {
             surface,
             windows,
             shells,
             pane_info: PaneInfoCache::new(),
             dirty: true,
             last_frame_output: Vec::new(),
-        })
+        };
+        session.refresh_pane_info(lua);
+        // Before the first key rather than at the first frame: keys are pumped before the
+        // tick, and a plugin asking `pane.list()` from `on_key` must not see an empty
+        // session on the very first one.
+        session.publish_geometry(lua);
+        Ok(session)
     }
 
     /// Resizes every pane of the shown window that is big enough to be shown; the rest
@@ -182,7 +173,7 @@ impl Session {
 
     /// A key the session was given. One nobody bound belongs to the focused pane and to no
     /// other; with no pane focused there is no shell left to type into.
-    fn key(&mut self, lua: &LuaSubsystem, key: Key) -> anyhow::Result<()> {
+    pub fn key(&mut self, lua: &LuaSubsystem, key: Key) -> anyhow::Result<()> {
         if lua.dispatch_key(&key_spec(&key)) == KeyOutcome::Fallthrough
             && let Some(focus) = self.windows.current().focus()
             && let Some(bytes) = encode_key(key)
@@ -194,7 +185,7 @@ impl Session {
 
     /// The terminal changed size. Nothing arrives on the terminal to say so — `SIGWINCH` is
     /// the whole of the announcement — so the new size is asked for rather than read.
-    fn resize(&mut self, size: Size, lua: &LuaSubsystem) -> anyhow::Result<()> {
+    pub fn resize(&mut self, size: Size, lua: &LuaSubsystem) -> anyhow::Result<()> {
         self.surface.size = clamp_to_min_grid(size);
         self.apply_geometry(lua)
     }
@@ -412,9 +403,7 @@ impl Session {
         }
     }
 
-    /// Hands Lua this frame's geometry. Called once before the loop as well, because keys
-    /// are pumped before the tick and a plugin asking `pane.list()` from `on_key` must not
-    /// see an empty session on the very first key.
+    /// Hands Lua this frame's geometry.
     fn publish_geometry(&self, lua: &LuaSubsystem) {
         lua.begin_frame(self.windows.current().epoch(), self.geometry());
     }
@@ -466,134 +455,106 @@ impl Session {
         true
     }
 
-    fn render(
-        &mut self,
-        terminal: &mut DefaultTerminal,
-        notifications: &mut Notifications,
-        cmds: &[DrawCmd],
-    ) -> anyhow::Result<()> {
+    /// What this frame shows. Producing it is the session's work; putting it on a screen is
+    /// not, and nothing below this line knows what kind of screen there is.
+    fn frame(&mut self, notifications: &mut Notifications) -> Frame<'_> {
         // The shown window's panes only: a hidden pane's terminal goes on taking its
         // child's output, but copying its grid out for a frame nobody draws it in would put
         // every window on every frame's bill.
         let shown: Vec<PaneId> = self.windows.current().rects.keys().copied().collect();
         self.shells.snapshot(shown.into_iter());
         notifications.expire(Instant::now());
+        self.dirty = false;
 
         let shells = &self.shells;
-        let pane_layout = self.windows.current();
-        terminal
-            .draw(|frame| {
-                let area = frame.area();
-                let focus = pane_layout.focus();
-                let mut focused_cell = None;
-                for (pane, rect) in pane_layout.showable() {
-                    let Some(grid) = shells.grid(pane) else {
-                        continue;
-                    };
-                    let cell = Rect {
-                        x: area.x + rect.x,
-                        y: area.y + rect.y,
-                        width: rect.w,
-                        height: rect.h,
-                    }
-                    .intersection(area);
-                    draw_grid(frame, cell, grid);
-                    if focus == Some(pane) {
-                        focused_cell = Some((cell, grid));
-                    }
-                }
-                if let Some(position) =
-                    focused_cell.and_then(|(cell, grid)| cursor_position(cell, grid))
-                {
-                    frame.set_cursor_position(position);
-                }
-                // The whole area, not the pane area: a `pane = nil` command is in surface
-                // coordinates, which is what lets a source draw in the band it reserved.
-                overlay::apply(frame, area, cmds, &pane_layout.rects);
-                notifications.render(frame, area);
-            })
-            .context("draw")?;
-        self.dirty = false;
-        Ok(())
+        let layout = self.windows.current();
+        Frame {
+            size: self.surface.size,
+            panes: layout
+                .showable()
+                .filter_map(|(pane, rect)| {
+                    Some(PaneFrame {
+                        pane,
+                        rect,
+                        grid: shells.grid(pane)?,
+                    })
+                })
+                .collect(),
+            rects: &layout.rects,
+            cursor: layout.focus(),
+            overlay: &self.last_frame_output,
+            notices: notifications.visible(),
+        }
     }
-}
 
-/// What one read of the terminal produced.
-enum Typed {
-    Keys(Vec<Key>),
-    /// End of file rather than bytes: the terminal is gone.
-    HangUp,
-}
+    /// One pass of the session's own work: the panes' output, the tick, the ops it raised,
+    /// and the frame that came of it. The frame is `None` when nothing changed and the last
+    /// one still stands.
+    pub fn advance(
+        &mut self,
+        lua: &LuaSubsystem,
+        notifications: &mut Notifications,
+    ) -> anyhow::Result<Step<'_>> {
+        let drained = self.drain_panes(lua)?;
 
-/// The terminal's bytes, decoded into keys. A session is handed these and never reaches for
-/// the process's terminal itself, which is what lets one be driven from somewhere else later.
-struct Keyboard {
-    tty: Terminal,
-    decoder: Decoder,
-    bytes: Vec<u8>,
-}
+        self.refresh_pane_info(lua);
+        self.publish_geometry(lua);
+        lua.dispatch_tick();
 
-impl Keyboard {
-    fn open() -> anyhow::Result<Self> {
-        Ok(Self {
-            tty: Terminal::open().context("open the terminal for input")?,
-            decoder: Decoder::default(),
-            bytes: Vec::new(),
+        if self.drain_ops(lua, notifications)? {
+            return Ok(Step {
+                frame: None,
+                end: Some(End::Quit),
+            });
+        }
+
+        let frame_output = lua.frame_output();
+        // After the frame's output is in hand, never before: both of these change the size of
+        // the surface, and this frame's buffers were committed against the old one.
+        let reserved_changed = self.reserved_changed(lua.reserved());
+        let gutter_changed = self.gutter_changed(lua.opt().pane_gutter);
+        if reserved_changed || gutter_changed {
+            self.apply_geometry(lua)?;
+        }
+
+        if frame_output != self.last_frame_output {
+            self.dirty = true;
+        }
+        self.last_frame_output = frame_output;
+        // A live notification needs a later frame just to notice it expired
+        // and stop being drawn, even if nothing else changed.
+        if !notifications.is_empty() {
+            self.dirty = true;
+        }
+
+        let eof = drained == Drained::Eof;
+        let frame = if self.dirty || eof {
+            Some(self.frame(notifications))
+        } else {
+            None
+        };
+        Ok(Step {
+            frame,
+            end: eof.then_some(End::Eof),
         })
     }
-
-    fn wait(&self, panes: Option<&Wakeup>, deadline: Instant) -> anyhow::Result<Ready> {
-        self.tty.wait(panes, deadline).context("wait for input")
-    }
-
-    fn typed(&mut self) -> anyhow::Result<Typed> {
-        self.bytes.clear();
-        if self.tty.read(&mut self.bytes).context("read input")? == 0 {
-            return Ok(Typed::HangUp);
-        }
-        Ok(Typed::Keys(self.decoder.feed(&self.bytes)))
-    }
 }
 
-/// Pumps input until the frame's time is up, or — when it was given the panes' wakeup —
-/// until a pane produces output, which is the frame's cue to start drawing. Returns the
-/// signal to exit on if one was raised while waiting, or if the terminal itself went away.
-fn pump_input(
-    session: &mut Session,
-    lua: &LuaSubsystem,
-    shutdown: &ShutdownSignal,
-    keyboard: &mut Keyboard,
-    panes: Option<&Wakeup>,
-    frame_end: Instant,
-) -> anyhow::Result<Option<i32>> {
-    loop {
-        if let Some(signal) = shutdown.raised() {
-            return Ok(Some(signal));
-        }
-        // Past `frame_end` the wait returns at once, which is what still lets a frame that
-        // overran collect the input waiting on it.
-        let ready = keyboard.wait(panes, frame_end)?;
-        if ready == Ready::HangUp {
-            return Ok(Some(signals::HANGUP));
-        }
-        if ready == Ready::Input {
-            match keyboard.typed()? {
-                Typed::HangUp => return Ok(Some(signals::HANGUP)),
-                Typed::Keys(keys) => {
-                    for key in keys {
-                        session.key(lua, key)?;
-                    }
-                }
-            }
-        }
-        // Output is no exception: a key that arrived with it belongs to the frame that is
-        // about to draw, not to the one after.
-        if ready == Ready::Output || Instant::now() >= frame_end {
-            return Ok(None);
-        }
-    }
+/// What one pass of the session produced.
+pub struct Step<'a> {
+    /// The frame to show, if this pass changed anything.
+    pub frame: Option<Frame<'a>>,
+    /// Why the session is over, if it is.
+    pub end: Option<End>,
 }
 
+/// The two ways a session ends of its own accord: a source asked it to, or its last pane's
+/// child did. A signal is neither — it ends the loop rather than the session.
+#[derive(PartialEq, Eq)]
+pub enum End {
+    Quit,
+    Eof,
+}
 /// A pane with no rect is a bug in the layout, not a 0x0 pane: spawning a PTY at the default
 /// size would turn it into a terminal nothing can draw on, which is far harder to find.
 fn pane_size(rect: Option<PRect>, pane: PaneId) -> anyhow::Result<Size> {
@@ -604,103 +565,11 @@ fn pane_size(rect: Option<PRect>, pane: PaneId) -> anyhow::Result<Size> {
     })
 }
 
-pub fn run(
-    terminal: &mut DefaultTerminal,
-    shutdown: &ShutdownSignal,
-    lua: &LuaSubsystem,
-    notifications: &mut Notifications,
-) -> anyhow::Result<Option<i32>> {
-    let mut keyboard = Keyboard::open()?;
-    let winch = signals::WindowChange::install()?;
-    let (wakeup, waker) = wakeup().context("open the panes' wakeup")?;
-    let mut session = Session::new(terminal_size(terminal)?, lua, waker)?;
-    session.refresh_pane_info(lua);
-    session.publish_geometry(lua);
-
-    #[cfg(debug_assertions)]
-    if std::env::var_os("NEOTMUX_PANIC_TEST").is_some() {
-        panic!("NEOTMUX_PANIC_TEST");
-    }
-
-    loop {
-        if let Some(signal) = shutdown.raised() {
-            return Ok(Some(signal));
-        }
-
-        let frame_end = Instant::now() + FRAME;
-
-        // The frame's own work waits for a reason to do it: a pane's output, or the deadline
-        // the tick is owed. Keys are handled the moment they arrive either way.
-        if let Some(signal) = pump_input(
-            &mut session,
-            lua,
-            shutdown,
-            &mut keyboard,
-            Some(&wakeup),
-            frame_end,
-        )? {
-            return Ok(Some(signal));
-        }
-
-        if winch.taken() {
-            session.resize(terminal_size(terminal)?, lua)?;
-        }
-
-        let drained = session.drain_panes(lua)?;
-
-        session.refresh_pane_info(lua);
-        session.publish_geometry(lua);
-        lua.dispatch_tick();
-
-        if session.drain_ops(lua, notifications)? {
-            return Ok(None);
-        }
-
-        let frame_output = lua.frame_output();
-        // After the frame's output is in hand, never before: both of these change the size of
-        // the surface, and this frame's buffers were committed against the old one.
-        let reserved_changed = session.reserved_changed(lua.reserved());
-        let gutter_changed = session.gutter_changed(lua.opt().pane_gutter);
-        if reserved_changed || gutter_changed {
-            session.apply_geometry(lua)?;
-        }
-
-        if frame_output != session.last_frame_output {
-            session.dirty = true;
-        }
-        // A live notification needs a later frame just to notice it expired
-        // and stop being drawn, even if nothing else changed.
-        if !notifications.is_empty() {
-            session.dirty = true;
-        }
-
-        let eof = drained == Drained::Eof;
-        if session.dirty || eof {
-            session.render(terminal, notifications, &frame_output)?;
-        }
-        session.last_frame_output = frame_output;
-
-        if eof {
-            break;
-        }
-
-        // The rest of the frame is the loop's rate, and it is spent on input rather than
-        // asleep: keys still reach their pane at once, while a pane's output waits for the
-        // next frame rather than drawing this one a second time.
-        if let Some(signal) =
-            pump_input(&mut session, lua, shutdown, &mut keyboard, None, frame_end)?
-        {
-            return Ok(Some(signal));
-        }
-    }
-
-    Ok(None)
-}
-
 #[cfg(test)]
 mod tests {
     use neotmux_term::pty::CommandBuilder;
     use neotmux_term::state::{MIN_GRID, TermState};
+    use neotmux_term::wakeup::wakeup;
 
     use super::*;
 

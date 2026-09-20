@@ -1,7 +1,45 @@
+use anyhow::Context as _;
 use neotmux_core::proto::{Color as PColor, GridSnapshot};
-use ratatui::Frame;
 use ratatui::layout::{Position, Rect};
 use ratatui::style::{Color, Modifier};
+use ratatui::{DefaultTerminal, Frame as TuiFrame};
+
+use crate::{notices, overlay};
+use neotmux::frame::Frame;
+
+/// Puts a frame on this process's terminal. The one place a produced frame meets a screen:
+/// everything above it is what to show, and everything here is the showing.
+pub fn show(terminal: &mut DefaultTerminal, frame: &Frame) -> anyhow::Result<()> {
+    terminal
+        .draw(|tui| {
+            let area = tui.area();
+            let mut focused_cell = None;
+            for pane in &frame.panes {
+                let cell = Rect {
+                    x: area.x + pane.rect.x,
+                    y: area.y + pane.rect.y,
+                    width: pane.rect.w,
+                    height: pane.rect.h,
+                }
+                .intersection(area);
+                draw_grid(tui, cell, pane.grid);
+                if frame.cursor == Some(pane.pane) {
+                    focused_cell = Some((cell, pane.grid));
+                }
+            }
+            if let Some(position) =
+                focused_cell.and_then(|(cell, grid)| cursor_position(cell, grid))
+            {
+                tui.set_cursor_position(position);
+            }
+            // The whole area, not the pane area: a `pane = nil` command is in surface
+            // coordinates, which is what lets a source draw in the band it reserved.
+            overlay::apply(tui, area, frame.overlay, frame.rects);
+            notices::render(tui, area, &frame.notices);
+        })
+        .context("draw")?;
+    Ok(())
+}
 
 pub(crate) fn color(c: PColor) -> Color {
     match c {
@@ -31,7 +69,7 @@ pub fn cursor_position(area: Rect, grid: &GridSnapshot) -> Option<Position> {
 }
 
 /// Draws one pane's grid into `area`.
-pub fn draw_grid(frame: &mut Frame, area: Rect, grid: &GridSnapshot) {
+pub fn draw_grid(frame: &mut TuiFrame, area: Rect, grid: &GridSnapshot) {
     let buf = frame.buffer_mut();
     let rows = grid.size.rows.min(area.height);
     let cols = grid.size.cols.min(area.width);

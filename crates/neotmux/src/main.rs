@@ -1,23 +1,14 @@
-mod app;
-mod decode;
-mod frame;
-mod input;
-mod keys;
-mod logging;
-mod notify;
+mod draw;
+mod notices;
 mod overlay;
-mod paneinfo;
-mod panes;
-mod procinfo;
-mod render;
-mod shells;
 mod signals;
 mod tty;
-mod windows;
+mod tui;
 
 use std::env;
 use std::path::{Path, PathBuf};
 
+use neotmux::{logging, notify};
 use neotmux_lua::LuaSubsystem;
 use neotmux_lua::ops::{Level, Op};
 use neotmux_lua::runtime::Layers;
@@ -140,7 +131,7 @@ fn main() -> anyhow::Result<()> {
     let shutdown = signals::ShutdownSignal::install()?;
     let mut notifications = notify::Notifications::new();
     let mut terminal = ratatui::init();
-    let result = app::run(&mut terminal, &shutdown, &lua, &mut notifications);
+    let result = tui::run(&mut terminal, &shutdown, &lua, &mut notifications);
     // Not `ratatui::restore`: it reports a failure with `eprintln!`, which panics when the
     // terminal it is trying to restore is the one that has gone away.
     if let Err(err) = ratatui::try_restore() {
