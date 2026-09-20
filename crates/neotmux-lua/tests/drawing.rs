@@ -320,6 +320,64 @@ fn a_line_still_takes_an_fg() {
     }
 }
 
+#[test]
+fn a_line_drawn_with_no_glyph_keeps_the_one_it_always_had() {
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.liner')"),
+        (
+            "lua/plugin/liner.lua",
+            "neotmux.on_tick(function(ctx) ctx:line(nil, 0, 0, 3, 0) end) return {}",
+        ),
+    ]);
+    frame(&sub, 24);
+    assert!(sub.drain_ops().is_empty());
+    match &sub.frame_output().0[..] {
+        [DrawCmd::Line { glyph, .. }] => assert_eq!(*glyph, '#'),
+        other => panic!("unexpected commands: {other:?}"),
+    }
+}
+
+/// The glyph is the caller's, and a box-drawing character is three bytes of one: the host
+/// must carry the character, not the first byte of it.
+#[test]
+fn a_line_draws_with_the_glyph_it_was_given() {
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.liner')"),
+        (
+            "lua/plugin/liner.lua",
+            "neotmux.on_tick(function(ctx) ctx:line(nil, 0, 0, 3, 0, nil, '\u{2502}') end) return {}",
+        ),
+    ]);
+    frame(&sub, 24);
+    assert!(sub.drain_ops().is_empty());
+    match &sub.frame_output().0[..] {
+        [DrawCmd::Line { glyph, .. }] => assert_eq!(*glyph, '\u{2502}'),
+        other => panic!("unexpected commands: {other:?}"),
+    }
+}
+
+#[test]
+fn a_glyph_of_more_than_one_character_is_refused_rather_than_truncated() {
+    for glyph in ["'->'", "''"] {
+        let (_dir, sub) = built(&[
+            ("init.lua", "require('plugin.liner')"),
+            (
+                "lua/plugin/liner.lua",
+                &format!(
+                    "neotmux.on_tick(function(ctx) ctx:line(nil, 0, 0, 3, 0, nil, {glyph}) end) return {{}}"
+                ),
+            ),
+        ]);
+        frame(&sub, 24);
+        let ops = sub.drain_ops();
+        assert_eq!(ops.len(), 1, "{glyph} should have raised");
+        assert!(
+            sub.frame_output().0.is_empty(),
+            "{glyph} was still drawn with"
+        );
+    }
+}
+
 /// Helper for the per-source commit tests: every `Text` command as (y, text).
 fn lines(sub: &LuaSubsystem) -> Vec<(u16, String)> {
     sub.frame_output()
