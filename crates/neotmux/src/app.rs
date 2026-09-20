@@ -1,7 +1,6 @@
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use anyhow::Context as _;
-use crossterm::event::{self, Event};
 use neotmux_core::proto::{DrawCmd, PaneId, Rect as PRect, Reserved, Size, WindowId};
 use neotmux_lua::ops::{Level, Op};
 use neotmux_lua::{Event as LuaEvent, Geometry, KeyOutcome, LuaSubsystem, Window as LuaWindow};
@@ -11,8 +10,10 @@ use neotmux_term::wakeup::{Waker, Wakeup, wakeup};
 use ratatui::DefaultTerminal;
 use ratatui::layout::Rect;
 
+use crate::decode::Decoder;
 use crate::frame::FRAME;
 use crate::input::{encode_key, key_spec};
+use crate::keys::Key;
 use crate::logging;
 use crate::notify::Notifications;
 use crate::overlay;
@@ -179,69 +180,23 @@ impl Session {
         Ok(())
     }
 
-    /// Pumps input until the frame's time is up, or — when it was given the panes' wakeup —
-    /// until a pane produces output, which is the frame's cue to start drawing. Returns the
-    /// signal to exit on if one was raised while waiting, or if the terminal itself went
-    /// away.
-    fn pump_input(
-        &mut self,
-        lua: &LuaSubsystem,
-        shutdown: &ShutdownSignal,
-        tty: &Terminal,
-        panes: Option<&Wakeup>,
-        frame_end: Instant,
-    ) -> anyhow::Result<Option<i32>> {
-        loop {
-            if let Some(signal) = shutdown.raised() {
-                return Ok(Some(signal));
-            }
-            // The wait is ours rather than crossterm's because only ours can report a
-            // hangup: `event::poll` answers one by reading zero bytes forever. Past
-            // `frame_end` it returns at once, which is what still lets a frame that
-            // overran collect the input waiting on it.
-            let ready = tty.wait(panes, frame_end).context("wait for input")?;
-            if ready == Ready::HangUp {
-                return Ok(Some(signals::HANGUP));
-            }
-            // No outcome settles whether there is an event: crossterm can be holding one
-            // parsed out of an earlier read, and it hears about a resize on a signal rather
-            // than on this file. Output is no exception — a key that arrived with it belongs
-            // to the frame that is about to draw, not to the one after.
-            while event::poll(Duration::ZERO).context("poll input")? {
-                self.handle_event(lua, event::read().context("read input")?)?;
-                if Instant::now() >= frame_end {
-                    return Ok(None);
-                }
-            }
-            if ready == Ready::Output || Instant::now() >= frame_end {
-                return Ok(None);
-            }
-        }
-    }
-
-    fn handle_event(&mut self, lua: &LuaSubsystem, event: Event) -> anyhow::Result<()> {
-        match event {
-            Event::Key(key) => {
-                let outcome = match key_spec(&key) {
-                    Some(spec) => lua.dispatch_key(&spec),
-                    None => KeyOutcome::Fallthrough,
-                };
-                // A key nobody consumed belongs to the focused pane and to no other. With no
-                // pane focused there is no shell left to type into.
-                if outcome == KeyOutcome::Fallthrough
-                    && let Some(focus) = self.windows.current().focus()
-                    && let Some(bytes) = encode_key(key)
-                {
-                    self.shells.write(focus, &bytes)?;
-                }
-            }
-            Event::Resize(cols, rows) => {
-                self.surface.size = clamp_to_min_grid(Size { rows, cols });
-                self.apply_geometry(lua)?;
-            }
-            _ => {}
+    /// A key the session was given. One nobody bound belongs to the focused pane and to no
+    /// other; with no pane focused there is no shell left to type into.
+    fn key(&mut self, lua: &LuaSubsystem, key: Key) -> anyhow::Result<()> {
+        if lua.dispatch_key(&key_spec(&key)) == KeyOutcome::Fallthrough
+            && let Some(focus) = self.windows.current().focus()
+            && let Some(bytes) = encode_key(key)
+        {
+            self.shells.write(focus, &bytes)?;
         }
         Ok(())
+    }
+
+    /// The terminal changed size. Nothing arrives on the terminal to say so — `SIGWINCH` is
+    /// the whole of the announcement — so the new size is asked for rather than read.
+    fn resize(&mut self, size: Size, lua: &LuaSubsystem) -> anyhow::Result<()> {
+        self.surface.size = clamp_to_min_grid(size);
+        self.apply_geometry(lua)
     }
 
     /// Every op a source raised this frame, applied in the order they were pushed (§4.6).
@@ -563,6 +518,82 @@ impl Session {
     }
 }
 
+/// What one read of the terminal produced.
+enum Typed {
+    Keys(Vec<Key>),
+    /// End of file rather than bytes: the terminal is gone.
+    HangUp,
+}
+
+/// The terminal's bytes, decoded into keys. A session is handed these and never reaches for
+/// the process's terminal itself, which is what lets one be driven from somewhere else later.
+struct Keyboard {
+    tty: Terminal,
+    decoder: Decoder,
+    bytes: Vec<u8>,
+}
+
+impl Keyboard {
+    fn open() -> anyhow::Result<Self> {
+        Ok(Self {
+            tty: Terminal::open().context("open the terminal for input")?,
+            decoder: Decoder::default(),
+            bytes: Vec::new(),
+        })
+    }
+
+    fn wait(&self, panes: Option<&Wakeup>, deadline: Instant) -> anyhow::Result<Ready> {
+        self.tty.wait(panes, deadline).context("wait for input")
+    }
+
+    fn typed(&mut self) -> anyhow::Result<Typed> {
+        self.bytes.clear();
+        if self.tty.read(&mut self.bytes).context("read input")? == 0 {
+            return Ok(Typed::HangUp);
+        }
+        Ok(Typed::Keys(self.decoder.feed(&self.bytes)))
+    }
+}
+
+/// Pumps input until the frame's time is up, or — when it was given the panes' wakeup —
+/// until a pane produces output, which is the frame's cue to start drawing. Returns the
+/// signal to exit on if one was raised while waiting, or if the terminal itself went away.
+fn pump_input(
+    session: &mut Session,
+    lua: &LuaSubsystem,
+    shutdown: &ShutdownSignal,
+    keyboard: &mut Keyboard,
+    panes: Option<&Wakeup>,
+    frame_end: Instant,
+) -> anyhow::Result<Option<i32>> {
+    loop {
+        if let Some(signal) = shutdown.raised() {
+            return Ok(Some(signal));
+        }
+        // Past `frame_end` the wait returns at once, which is what still lets a frame that
+        // overran collect the input waiting on it.
+        let ready = keyboard.wait(panes, frame_end)?;
+        if ready == Ready::HangUp {
+            return Ok(Some(signals::HANGUP));
+        }
+        if ready == Ready::Input {
+            match keyboard.typed()? {
+                Typed::HangUp => return Ok(Some(signals::HANGUP)),
+                Typed::Keys(keys) => {
+                    for key in keys {
+                        session.key(lua, key)?;
+                    }
+                }
+            }
+        }
+        // Output is no exception: a key that arrived with it belongs to the frame that is
+        // about to draw, not to the one after.
+        if ready == Ready::Output || Instant::now() >= frame_end {
+            return Ok(None);
+        }
+    }
+}
+
 /// A pane with no rect is a bug in the layout, not a 0x0 pane: spawning a PTY at the default
 /// size would turn it into a terminal nothing can draw on, which is far harder to find.
 fn pane_size(rect: Option<PRect>, pane: PaneId) -> anyhow::Result<Size> {
@@ -579,7 +610,8 @@ pub fn run(
     lua: &LuaSubsystem,
     notifications: &mut Notifications,
 ) -> anyhow::Result<Option<i32>> {
-    let tty = Terminal::open().context("open the terminal for input")?;
+    let mut keyboard = Keyboard::open()?;
+    let winch = signals::WindowChange::install()?;
     let (wakeup, waker) = wakeup().context("open the panes' wakeup")?;
     let mut session = Session::new(terminal_size(terminal)?, lua, waker)?;
     session.refresh_pane_info(lua);
@@ -599,8 +631,19 @@ pub fn run(
 
         // The frame's own work waits for a reason to do it: a pane's output, or the deadline
         // the tick is owed. Keys are handled the moment they arrive either way.
-        if let Some(signal) = session.pump_input(lua, shutdown, &tty, Some(&wakeup), frame_end)? {
+        if let Some(signal) = pump_input(
+            &mut session,
+            lua,
+            shutdown,
+            &mut keyboard,
+            Some(&wakeup),
+            frame_end,
+        )? {
             return Ok(Some(signal));
+        }
+
+        if winch.taken() {
+            session.resize(terminal_size(terminal)?, lua)?;
         }
 
         let drained = session.drain_panes(lua)?;
@@ -644,7 +687,9 @@ pub fn run(
         // The rest of the frame is the loop's rate, and it is spent on input rather than
         // asleep: keys still reach their pane at once, while a pane's output waits for the
         // next frame rather than drawing this one a second time.
-        if let Some(signal) = session.pump_input(lua, shutdown, &tty, None, frame_end)? {
+        if let Some(signal) =
+            pump_input(&mut session, lua, shutdown, &mut keyboard, None, frame_end)?
+        {
             return Ok(Some(signal));
         }
     }

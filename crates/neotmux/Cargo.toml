@@ -16,7 +16,6 @@ neotmux-core.workspace = true
 neotmux-lua.workspace = true
 neotmux-term.workspace = true
 anyhow.workspace = true
-crossterm.workspace = true
 nix.workspace = true
 ratatui.workspace = true
 signal-hook.workspace = true
