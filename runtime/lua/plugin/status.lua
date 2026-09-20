@@ -11,6 +11,7 @@
 -- On the left, the windows. On the right, what the focused pane is running and where. The
 -- bar is composed from scratch every tick, so it follows the focus, a command and a `cd`
 -- with no keystroke to prompt it.
+local position = require("status.position")
 local segments = require("status.segments")
 local path = require("status.path")
 
@@ -55,21 +56,31 @@ local function append(runs, more)
   end
 end
 
+-- What a block is numbered: the window's position, and for the one being shown the focused
+-- pane's position after it, the way tmux writes `window.pane`. Positions and not ids, because
+-- an id is never reused and so climbs past the number of things there are.
+local function number(window_at, pane_at)
+  if pane_at then
+    return window_at .. "." .. pane_at
+  end
+  return tostring(window_at)
+end
+
 -- tmux caps its active window and leaves the rest flat, and a window's name sits beside its
 -- number. The only name neotmux has for a window is what its focused pane is running, and
 -- `pane.info` answers about the current window alone — so the one being shown is the one
 -- that gets a name.
-local function window_runs(name)
+local function window_runs(name, pane_at)
   local runs = {}
   local current = neotmux.window.current()
-  for _, id in ipairs(neotmux.window.list()) do
+  for window_at, id in ipairs(neotmux.window.list()) do
     local is_current = id == current
     local accent = is_current and M.colors.current or M.colors.inactive
     -- A cap is the block's colour on the bar behind it; inverted it reads as a notch, not an end.
     append(runs, {
       { text = M.caps.left, fg = accent, bg = M.colors.bar },
       {
-        text = id .. " ",
+        text = (is_current and number(window_at, pane_at) or tostring(window_at)) .. " ",
         fg = is_current and M.colors.on_current or M.colors.on_inactive,
         bg = accent,
       },
@@ -115,7 +126,7 @@ neotmux.on_tick(function(ctx)
   -- has gone away answers nothing at all. Neither is an error worth a bar with a hole in it.
   local info = (focused and neotmux.pane.info(focused)) or {}
 
-  local left = window_runs(info.command)
+  local left = window_runs(info.command, focused and position.of(neotmux.pane.list(), focused))
   local right = {}
   if info.command then
     append(right, module_runs(M.icons.command, M.colors.command, info.command))

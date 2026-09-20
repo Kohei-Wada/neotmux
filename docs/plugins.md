@@ -166,7 +166,7 @@ key: you wrote a legal call and lost a race.
 ### Panes
 
 ```lua
-neotmux.pane.list()      -- { id, ... }
+neotmux.pane.list()      -- { id, ... }, in layout order
 neotmux.pane.current()   -- id, or nil
 neotmux.pane.rect(id)    -- { x = , y = , w = , h = }, or nil
 neotmux.pane.info(id)    -- { command = ..., cwd = ... }, or nil
@@ -174,6 +174,18 @@ neotmux.pane.split('horizontal' | 'vertical')
 neotmux.pane.focus(id)
 neotmux.pane.resize('left' | 'right' | 'up' | 'down', cells)
 ```
+
+**An id is an identity, not a number to show anybody.** A `PaneId` is handed out once and
+never reused, so the id of a pane outlives the pane and the next one gets a fresh one: open
+and close a second pane three times and the third of them is id 4, with only two panes on
+screen. That is deliberate — a plugin holding id 2 must never find that it now means a
+different pane — and it is why nothing renumbers.
+
+What a person reads off a bar is a **position**: where the pane sits among the ones that exist
+now, which closes the gap when a neighbour goes. `list()` is in layout order, so the position
+is the index in it, and finding it is a loop over the list you already have. The shipped bar
+does exactly that in `status/position.lua`. Use an id for anything you look a pane up by, and
+a position for anything you print.
 
 `rect` answers out of the same published geometry `ctx:pane_rect` reads, in the same surface
 coordinates and with the same table — so geometry is a question you can ask from a key
@@ -243,6 +255,10 @@ neotmux.window.current()  -- id
 neotmux.window.create()   -- the new window's id
 neotmux.window.focus(id)  -- show that one
 ```
+
+A `WindowId` is stable and never reused, exactly as a `PaneId` is, and the same rule follows:
+show the position in `list()`, not the id, or your window numbers climb for ever as windows
+are opened and closed.
 
 A window is an independent pane tree. Switching between them is what a multiplexer is mostly
 for, and it is the only level of grouping above a pane there is: tmux's session, the thing you
@@ -507,8 +523,10 @@ like it turned something off.
 ### Changing what the status bar looks like
 
 `plugin.status` reserves the top row and draws the windows on the left, then the focused
-pane's command and its working directory on the right. It returns four tables, all read every
-tick:
+pane's command and its working directory on the right. A window's block is numbered with its
+position, and the one being shown carries the focused pane's position after a dot — tmux's
+`window.pane`. Positions and not ids, for the reason the pane API gives. It returns four
+tables, all read every tick:
 
 ```lua
 local status = require('plugin.status')

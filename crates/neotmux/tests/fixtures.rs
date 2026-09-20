@@ -513,10 +513,15 @@ fn the_prefix_splits_horizontally() {
 /// columns 0..39, the divider column 40 and the right pane the rest; a horizontal one leaves
 /// the top pane rows 1..11, the divider row 12 and the bottom pane the rest.
 /// The cap `plugin.status` opens every block of the bar with, and what the bar says about a
-/// window whose focused pane is running `cat`: the window's number, then that command.
+/// window whose focused pane is running `cat`: the window's position, the focused pane's
+/// position after it, then that command.
 const CAP_LEFT: &str = "\u{e0b6}";
-const FIRST_WINDOW: &str = "1  cat";
-const SECOND_WINDOW: &str = "2  cat";
+const FIRST_WINDOW: &str = "1.1  cat";
+const SECOND_WINDOW: &str = "2.1  cat";
+/// The same once a split has landed and left the new pane focused. The bar now says both of
+/// the things a test has to wait for after a split, so it is what they wait on.
+const SECOND_PANE: &str = "1.2  cat";
+const THIRD_PANE: &str = "1.3  cat";
 
 const PANE_TOP: u16 = 1;
 const PANE_ROWS: usize = 23;
@@ -618,9 +623,7 @@ fn a_horizontal_split_draws_a_divider_row_between_the_panes() {
 fn resize_mode_moves_the_divider_five_columns_and_gives_the_keys_back() {
     let (mut nt, _init) = start_shipped("", "cat");
     nt.send("\x02v"); // C-b v: the new pane on the right is the focused one
-    // The divider is what says the split has landed, and the split leaves the new pane
-    // focused in the same frame that draws it.
-    nt.wait_for_cell(PANE_TOP, DIVIDER_COL, VERTICAL_DIVIDER, PATIENCE);
+    nt.wait_for_status(SECOND_PANE, PATIENCE);
     nt.settle(Duration::from_millis(500));
     assert_eq!(
         nt.cell(PANE_TOP, DIVIDER_COL),
@@ -676,11 +679,10 @@ fn resize_mode_moves_the_divider_five_columns_and_gives_the_keys_back() {
 fn directional_focus_lands_on_the_pane_a_person_would_point_at() {
     let (mut nt, _init) = start_shipped("", "cat");
     nt.send("\x02v"); // C-b v: pane 2, the right-hand column, is focused
-    nt.wait_for_cell(PANE_TOP, DIVIDER_COL, VERTICAL_DIVIDER, PATIENCE);
+    nt.wait_for_status(SECOND_PANE, PATIENCE);
     nt.settle(Duration::from_millis(500));
     nt.send("\x02-"); // C-b -: pane 3, the bottom of that column, is focused
-    // The second divider rules only the right-hand column, so it is looked for inside it.
-    nt.wait_for_cell(DIVIDER_ROW, DIVIDER_COL + 1, HORIZONTAL_DIVIDER, PATIENCE);
+    nt.wait_for_status(THIRD_PANE, PATIENCE);
     nt.settle(Duration::from_millis(500));
 
     nt.send("CCC");
@@ -837,6 +839,51 @@ fn the_bar_follows_a_command_and_a_cd_with_no_keystroke() {
     assert!(
         status.contains("bash"),
         "the bar lost the command when the directory changed: {status:?}"
+    );
+}
+
+/// A `PaneId` is allocated once and never reused, so after two splits and two closes the
+/// living pane's id is 3. A bar that showed the id counted up for ever; what it shows is the
+/// pane's place in `pane.list()`, which closes the gap the closed pane left.
+#[test]
+fn closing_a_pane_leaves_the_bars_pane_number_where_it_was() {
+    let (mut nt, _init) = start_shipped("", "cat");
+    nt.wait_for_status(FIRST_WINDOW, PATIENCE);
+
+    for _ in 0..3 {
+        nt.send("\x02v"); // C-b v
+        // The second pane is always the second, however many have been and gone.
+        nt.wait_for_status(SECOND_PANE, PATIENCE);
+        nt.send("\x04"); // C-d: EOF to `cat`, so the pane's shell ends and the pane goes
+        nt.wait_for_status(FIRST_WINDOW, PATIENCE);
+    }
+
+    let status = nt.status();
+    assert!(
+        !status.contains("1.4") && !status.contains("1.5"),
+        "the bar is showing pane ids rather than positions: {status:?}"
+    );
+}
+
+/// The same for windows. `window.list()` is in creation order and a `WindowId` is not reused
+/// either, so the bar counts positions there too: opening and closing a second window keeps
+/// saying 2, never 3.
+#[test]
+fn closing_a_window_leaves_the_bars_window_number_where_it_was() {
+    let (mut nt, _init) = start_shipped("", "cat");
+    nt.wait_for_status(FIRST_WINDOW, PATIENCE);
+
+    for _ in 0..3 {
+        nt.send("\x02c"); // C-b c: a window, shown
+        nt.wait_for_status(SECOND_WINDOW, PATIENCE);
+        nt.send("\x04"); // C-d: its only shell ends, so the window goes with it
+        nt.wait_for_status(FIRST_WINDOW, PATIENCE);
+    }
+
+    let status = nt.status();
+    assert!(
+        !status.contains("3.1") && !status.contains("4.1"),
+        "the bar is showing window ids rather than positions: {status:?}"
     );
 }
 

@@ -147,7 +147,7 @@ fn the_bar_is_composed_of_the_runs_it_was_drawn_from() {
         runs(&cmds),
         vec![
             (CAP_LEFT.to_string(), MAUVE, BAR),
-            ("1 ".to_string(), BAR, MAUVE),
+            ("1.1 ".to_string(), BAR, MAUVE),
             (" bash".to_string(), TEXT, SURFACE1),
             (CAP_RIGHT.to_string(), SURFACE1, BAR),
             (" ".to_string(), BAR, BAR),
@@ -201,13 +201,17 @@ fn the_bar_follows_the_focused_pane() {
 
 /// Every window is listed, in `window.list()` order, and only the one being shown is capped
 /// in the current colour.
+///
+/// The ids here are 5, 9 and 12 with pane 4 focused — none of them a position — because what
+/// a block is numbered with is its place in the list and not the id, which is allocated once
+/// and never reused. The window being shown carries the focused pane's position after a dot.
 #[test]
 fn every_window_is_listed_and_the_current_one_is_capped_in_mauve() {
     let (_dir, sub) = built("");
-    let cmds = frame(&sub, &[(1, info("bash", "/tmp"))], 1, &[1, 2, 3], 2);
+    let cmds = frame(&sub, &[(4, info("bash", "/tmp"))], 4, &[5, 9, 12], 9);
     let indices: Vec<(String, Color)> = runs(&cmds)
         .into_iter()
-        .filter(|(text, _, _)| matches!(text.as_str(), "1 " | "2 " | "3 "))
+        .filter(|(text, _, _)| matches!(text.as_str(), "1 " | "2.1 " | "3 "))
         .map(|(text, _, bg)| (text, bg))
         .collect();
 
@@ -215,7 +219,7 @@ fn every_window_is_listed_and_the_current_one_is_capped_in_mauve() {
         indices,
         vec![
             ("1 ".to_string(), SURFACE0),
-            ("2 ".to_string(), MAUVE),
+            ("2.1 ".to_string(), MAUVE),
             ("3 ".to_string(), SURFACE0),
         ]
     );
@@ -225,7 +229,7 @@ fn every_window_is_listed_and_the_current_one_is_capped_in_mauve() {
         "{text}"
     );
     assert!(
-        text.contains(&format!("{CAP_LEFT}2  bash{CAP_RIGHT} ")),
+        text.contains(&format!("{CAP_LEFT}2.1  bash{CAP_RIGHT} ")),
         "{text}"
     );
     assert!(
@@ -280,7 +284,7 @@ fn emptying_the_caps_takes_the_glyphs_off_the_bar() {
          s.icons = { command = '', directory = '' }",
     );
     let text = line(&frame(&sub, &[(1, info("bash", "/tmp"))], 1, &[1], 1));
-    assert_eq!(text, "1  bash   bash   /tmp ");
+    assert_eq!(text, "1.1  bash   bash   /tmp ");
 }
 
 /// `$HOME` is written the way a prompt writes it.

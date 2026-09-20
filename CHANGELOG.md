@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### The bar counts panes and windows the way a person does
+
+Split, end the shell in the new pane, split again: the number on the bar used to climb — 2,
+then 3, then 4 — with never more than two panes on screen. The ids were right. A `PaneId` is
+allocated once and never reused, and a `WindowId` likewise, because a plugin holding id 2 must
+not find that it now means something else. Showing one to a person was the mistake.
+
+The bar shows positions instead: where the pane sits in `pane.list()`, which is in layout
+order, and where the window sits in `window.list()`. Both close the gap when one goes, so a
+block is numbered the way tmux numbers them. Nothing in the host changed and no id was
+renumbered — `status/position.lua` is a loop over a list the bar already had.
+
+A block now reads `1.2  nvim`: the window's position, the focused pane's position, the command.
+
 ### Panes you can move between and resize
 
 `neotmux.pane.resize('left' | 'right' | 'up' | 'down', cells)` moves the boundary between the
