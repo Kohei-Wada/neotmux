@@ -3,6 +3,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use signal_hook::consts::{SIGHUP, SIGINT, SIGTERM};
 
+/// What a terminal that has gone away is reported as, so a hangup neotmux notices itself
+/// ends the session exactly the way the kernel's own SIGHUP does.
+pub const HANGUP: i32 = SIGHUP;
+
 pub struct ShutdownSignal {
     term: Arc<AtomicBool>,
     hup: Arc<AtomicBool>,
