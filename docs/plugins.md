@@ -168,10 +168,17 @@ key: you wrote a legal call and lost a race.
 ```lua
 neotmux.pane.list()      -- { id, ... }
 neotmux.pane.current()   -- id, or nil
+neotmux.pane.rect(id)    -- { x = , y = , w = , h = }, or nil
 neotmux.pane.info(id)    -- { command = ..., cwd = ... }, or nil
 neotmux.pane.split('horizontal' | 'vertical')
 neotmux.pane.focus(id)
 ```
+
+`rect` answers out of the same published geometry `ctx:pane_rect` reads, in the same surface
+coordinates and with the same table — so geometry is a question you can ask from a key
+handler, where there is no `ctx`. Which pane is to my left is that kind of question, and
+answering it should not oblige you to draw. Inside a tick `ctx:pane_rect` remains the natural
+call. An id no pane has answers `nil`, the way `pane.current()` answers nothing.
 
 `info` is what a status line needs to say more than how many panes there are. `command` is the
 pane's **foreground** process, not the shell neotmux spawned for it: a pane sitting at its

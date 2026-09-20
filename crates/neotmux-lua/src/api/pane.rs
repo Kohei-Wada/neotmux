@@ -5,14 +5,15 @@ use mlua::{Lua, Table, Value};
 
 use neotmux_core::proto::{PaneId, SplitDir};
 
+use crate::api::rect;
 use crate::geometry::Geometry;
 use crate::ops::{Op, OpBuffer};
 use crate::paneinfo::PaneInfos;
 use crate::source::{self, Sources};
 
-/// The M2 pane API (§6), signatures frozen now. `list` and `current` read this frame's
-/// geometry; `split` and `focus` are ops on the buffer (§4.6), applied after the tick, so a
-/// callback never sees its own request take effect synchronously.
+/// The M2 pane API (§6), signatures frozen now. `list`, `current` and `rect` read this
+/// frame's geometry; `split`, `focus` and `resize` are ops on the buffer (§4.6), applied
+/// after the tick, so a callback never sees its own request take effect synchronously.
 pub(crate) fn install(
     lua: &Lua,
     sources: Rc<Sources>,
@@ -45,6 +46,27 @@ pub(crate) fn install(
             })
         })?;
         pane.set("current", current)?;
+    }
+
+    {
+        // The same rects `ctx:pane_rect` answers with, out of the same published geometry.
+        // Geometry is a question a plugin can have without drawing — which pane is to my
+        // left is asked from a key handler, where there is no `ctx`.
+        let geometry = geometry.clone();
+        let rect = lua.create_function(move |lua, pane: u32| {
+            let pane = PaneId::from(pane);
+            let found = geometry
+                .borrow()
+                .panes
+                .iter()
+                .find(|(id, _)| *id == pane)
+                .map(|(_, rect)| *rect);
+            match found {
+                Some(found) => Ok(Value::Table(rect::to_table(lua, found)?)),
+                None => Ok(Value::Nil),
+            }
+        })?;
+        pane.set("rect", rect)?;
     }
 
     {
