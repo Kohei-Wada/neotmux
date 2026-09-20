@@ -1719,3 +1719,194 @@ fn creating_a_window_without_focusing_it_leaves_it_hidden() {
         "the shown window's pane was replaced by one nobody asked to see:\n{screen}"
     );
 }
+
+/// M3: reading what a pane is showing. `plugin.content` reads every pane it has heard output
+/// from, out of a tick and out of the `pane_output` handler the chunk arrived in.
+/// A "shell" that waits for a file to appear, says one line, and then behaves like `cat`.
+/// Typing only ever reaches the focused pane, so this is how a pane is hidden first and made
+/// to produce output afterwards — which is the only pane a watcher is really for.
+fn triggered_shell(dir: &Path, trigger: &Path, says: &str) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let path = dir.join("triggered-shell");
+    std::fs::write(
+        &path,
+        format!(
+            "#!/bin/sh\nwhile [ ! -f '{}' ]; do sleep 0.05; done\nprintf '%s\\n' '{says}'\nexec cat\n",
+            trigger.display()
+        ),
+    )
+    .expect("write the shell");
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    path
+}
+
+/// The first log line holding every one of `parts`, waited for. `wait_for_log` takes one
+/// marker, and these tests are about a particular pane's line among several panes'.
+fn wait_for_log_line(nt: &Neotmux, parts: &[&str]) -> String {
+    let deadline = std::time::Instant::now() + PATIENCE;
+    loop {
+        let log = nt.log_text();
+        if let Some(line) = log
+            .lines()
+            .find(|line| parts.iter().all(|part| line.contains(part)))
+        {
+            return line.to_string();
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "no log line holds all of {parts:?}:\n{log}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// Lines, not bytes: what the child wrote, with the terminal already reconstructed, so a
+/// plugin matching a pattern is never handed an escape sequence to strip.
+#[test]
+fn a_panes_content_is_what_was_written_to_it_as_lines() {
+    let (mut nt, _init) = start("require('plugin.content')", "/bin/cat");
+    // `cat` echoes what is typed and then says it again, so the pane shows two rows.
+    nt.send("HELLO\r");
+
+    let line = wait_for_log_line(&nt, &["content 1 tick", "[HELLO|HELLO]"]);
+    assert!(!line.contains('\u{1b}'), "an escape survived into {line:?}");
+    // The chunk has reached the pane's terminal before the event carrying it is dispatched.
+    wait_for_log_line(&nt, &["content 1 output", "HELLO"]);
+}
+
+/// An id no pane has is not an error, and a watcher loop must not stop over one.
+#[test]
+fn an_unknown_pane_id_has_no_content_rather_than_raising() {
+    let (nt, _init) = start("require('plugin.content')", "/bin/cat");
+    let log = nt.wait_for_log("content unknown=", PATIENCE);
+    assert!(
+        line_with(&log, "content unknown=").contains("unknown=nil"),
+        "{log}"
+    );
+    assert!(!log.contains("[ERROR]"), "{log}");
+}
+
+/// A shell exiting between one pass of the loop and the next is an ordinary end.
+#[test]
+fn a_pane_that_closes_while_being_read_does_not_raise() {
+    let (mut nt, _init) = start(
+        "require('plugin.content') require('plugin.splitter')",
+        "/bin/cat",
+    );
+    nt.send("\x02"); // C-b: split
+    nt.wait_for_log("splitter pane_opened 2", PATIENCE);
+    nt.send("DOOMED\r");
+    wait_for_log_line(&nt, &["content 2 tick", "DOOMED"]);
+
+    nt.send("\x04"); // C-d: EOF for the focused pane's cat
+    nt.wait_for_log("splitter pane_closed 2", PATIENCE);
+    // The pane does not exist any more, so nothing may still be reading its terminal.
+    let log = nt.wait_for_log("content 2 closed=", PATIENCE);
+    assert!(
+        line_with(&log, "content 2 closed=").contains("closed=nil"),
+        "a dead pane was still showing something:\n{log}"
+    );
+    nt.settle(Duration::from_millis(500));
+    assert!(!nt.log_text().contains("[ERROR]"), "{}", nt.log_text());
+
+    // Still reading the pane that is left, rather than having quietly stopped.
+    nt.send("SURVIVOR\r");
+    wait_for_log_line(&nt, &["content 1 tick", "SURVIVOR"]);
+}
+
+/// The whole point. A pane in a window nobody is looking at is in no `pane.list()`, its shell
+/// is running anyway, and what it is showing is exactly the question worth asking — including
+/// what it said while it was hidden.
+#[test]
+fn a_hidden_windows_pane_can_be_read_and_reflects_output_that_arrived_while_hidden() {
+    let scratch = tempfile::tempdir().expect("scratch dir");
+    let trigger = scratch.path().join("go");
+    let shell = triggered_shell(scratch.path(), &trigger, "SPOKE-WHILE-HIDDEN");
+    let dir = harness::runtime(&[(
+        "init.lua",
+        "require('plugin.content') require('plugin.windows')",
+    )]);
+    let fixtures = harness::fixture_layer();
+    let mut nt = Neotmux::start_layered(
+        &[dir.path(), &fixtures],
+        shell.to_str().expect("a utf-8 path"),
+    );
+
+    // The session has to be in raw mode before `C-w` is sent, or the line discipline eats it
+    // as a word erase. The first tick is over by then.
+    nt.wait_for_log("content unknown=", PATIENCE);
+    nt.send("\x17"); // C-w: a second window, shown; window 1's pane is now hidden
+    nt.wait_for_log("windows window_changed 2", PATIENCE);
+    // The hidden pane is in no list, so nothing here could have come from one.
+    let report = {
+        nt.send("\x12"); // C-r
+        wait_for_log_line(&nt, &["windows report"])
+    };
+    assert!(
+        report.contains("windows=1,2 current=2 panes=2"),
+        "pane 1 was not hidden: {report}"
+    );
+
+    std::fs::write(&trigger, "").expect("trigger the shells");
+
+    let line = wait_for_log_line(&nt, &["content 1 ", "SPOKE-WHILE-HIDDEN"]);
+    assert!(
+        line.contains("rev="),
+        "a hidden pane answered without a revision: {line}"
+    );
+}
+
+/// The herdr job, end to end and over a PTY: the agent you are *not* looking at is the one
+/// that has to tell you it is waiting.
+#[test]
+fn the_shipped_watcher_says_when_a_hidden_pane_is_waiting_for_you() {
+    let scratch = tempfile::tempdir().expect("scratch dir");
+    let trigger = scratch.path().join("go");
+    let shell = triggered_shell(scratch.path(), &trigger, "Do you want to proceed? [y/N]");
+    let init = harness::runtime(&[("init.lua", "require('neotmux.defaults').watch = true")]);
+    let mut nt = Neotmux::start_layered(
+        &[init.path(), &shipped_layer()],
+        shell.to_str().expect("a utf-8 path"),
+    );
+
+    nt.wait_for_screen("1.1", PATIENCE);
+    nt.send("\x02c"); // C-b c: a second window, shown; pane 1 is now hidden
+    nt.wait_for_screen("2.1", PATIENCE);
+    nt.settle(Duration::from_millis(300));
+
+    // Both panes run the same shell, so both say the same thing at the same moment.
+    std::fs::write(&trigger, "").expect("trigger the shells");
+
+    nt.wait_for_log("pane 1 looks like it is waiting for you", PATIENCE);
+    nt.settle(Duration::from_millis(500));
+    assert!(
+        !nt.log_text().contains("pane 2 looks like"),
+        "the pane in front of the user was reported anyway:\n{}",
+        nt.log_text()
+    );
+}
+
+/// Off unless the user says otherwise: the watcher is an opinion about what is being run,
+/// which the other shipped plugins are not.
+#[test]
+fn the_shipped_watcher_is_off_by_default() {
+    let scratch = tempfile::tempdir().expect("scratch dir");
+    let trigger = scratch.path().join("go");
+    let shell = triggered_shell(scratch.path(), &trigger, "Do you want to proceed? [y/N]");
+    let init = harness::runtime(&[("init.lua", "")]);
+    let mut nt = Neotmux::start_layered(
+        &[init.path(), &shipped_layer()],
+        shell.to_str().expect("a utf-8 path"),
+    );
+
+    nt.wait_for_screen("1.1", PATIENCE);
+    std::fs::write(&trigger, "").expect("trigger the shell");
+    nt.wait_for_screen("Do you want to proceed?", PATIENCE);
+    nt.settle(Duration::from_millis(500));
+    assert!(
+        !nt.log_text().contains("looks like it is waiting"),
+        "a plugin nobody asked for was running:\n{}",
+        nt.log_text()
+    );
+}

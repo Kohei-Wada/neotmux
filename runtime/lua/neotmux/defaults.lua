@@ -9,4 +9,7 @@ return {
   status = true,
   prefix = true,
   borders = true,
+  -- Off, unlike the rest: which output means a pane is waiting for a human is an opinion
+  -- about what you run, and the other three are not.
+  watch = false,
 }

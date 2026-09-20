@@ -82,7 +82,7 @@ impl Session {
         };
         let (windows, first) = Windows::new(lua.reserve_window_id(), surface);
         lua.lay_out_reservations(size, windows.current().bands_applied(surface.reserved));
-        let mut shells = Shells::new(waker);
+        let mut shells = Shells::new(waker, lua.terminals());
         shells.open(
             first,
             PtyHandle::default_shell_command(),
