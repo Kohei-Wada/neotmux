@@ -1870,9 +1870,9 @@ fn the_shipped_watcher_says_when_a_hidden_pane_is_waiting_for_you() {
         shell.to_str().expect("a utf-8 path"),
     );
 
-    nt.wait_for_screen("panes 1 focus 1", PATIENCE);
+    nt.wait_for_screen("1.1", PATIENCE);
     nt.send("\x02c"); // C-b c: a second window, shown; pane 1 is now hidden
-    nt.wait_for_screen("panes 1 focus 2", PATIENCE);
+    nt.wait_for_screen("2.1", PATIENCE);
     nt.settle(Duration::from_millis(300));
 
     // Both panes run the same shell, so both say the same thing at the same moment.
@@ -1900,7 +1900,7 @@ fn the_shipped_watcher_is_off_by_default() {
         shell.to_str().expect("a utf-8 path"),
     );
 
-    nt.wait_for_screen("panes 1 focus 1", PATIENCE);
+    nt.wait_for_screen("1.1", PATIENCE);
     std::fs::write(&trigger, "").expect("trigger the shell");
     nt.wait_for_screen("Do you want to proceed?", PATIENCE);
     nt.settle(Duration::from_millis(500));
