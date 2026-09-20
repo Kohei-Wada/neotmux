@@ -767,22 +767,24 @@ costs one plugin one frame instead of costing you the program.
 
 ## The shipped defaults
 
-neotmux ships five plugins in the runtime layer an install puts on the search path:
+neotmux ships six plugins in the runtime layer an install puts on the search path:
 
 | plugin | what it does |
 |---|---|
 | `status` | the default status bar, on one reserved top row |
-| `prefix` | a `C-b` prefix over `v`, `-`, `o`, `h/j/k/l`, `r`, `c` and `n` |
+| `prefix` | a `C-b` prefix over `v`, `-`, `o`, `h/j/k/l`, `r`, `c`, `n` and `[` |
+| `copy` | copy mode: read back over a pane's scrollback, select a region, yank it |
 | `borders` | a rule along every boundary between two panes |
 | `watch` | says which pane looks like it is waiting for you — **off by default** |
 | `sidebar` | the windows and their panes, down a reserved left band, folded by `C-b b` — **off by default** |
 
-None of them is a host feature — all five are ordinary files making ordinary API calls, and
+None of them is a host feature — all six are ordinary files making ordinary API calls, and
 the prefix is the only reason a fresh install can make a second pane at all. `C-b v` splits
 vertically (the panes end up side by side, because `pane.split('vertical')` divides the
 width), `C-b -` splits horizontally (one above the other), `C-b o` focuses the next pane,
 `C-b h/j/k/l` focuses the pane to the left, below, above or to the right, `C-b r` enters
-resize mode, `C-b c` opens a window and switches to it, and `C-b n` walks to the next window.
+resize mode, `C-b [` enters copy mode, `C-b c` opens a window and switches to it, and `C-b n`
+walks to the next window.
 With the sidebar on, `C-b b` folds it — the sidebar adds that one itself, since it is the
 optional plugin and the prefix is the standard one.
 
@@ -806,11 +808,14 @@ own `init.lua` can decide what the shipped ones do:
 require('neotmux.defaults').status = false
 require('neotmux.defaults').prefix = false
 require('neotmux.defaults').borders = false
+require('neotmux.defaults').copy = false
 ```
 
 `watch` and `sidebar` go the other way: they are off until you turn them on. What counts as a
 pane waiting for you is an opinion about what you run, and twenty-four columns of sidebar is
-an opinion about screen real estate; a status line is neither.
+an opinion about screen real estate; a status line is neither, and neither is copy mode — it
+takes no band, no gutter and no cell from any pane, and what it reads is a buffer the host is
+already keeping whether or not anything ever looks at it.
 
 The sidebar has two widths rather than an on and an off — `require('plugin.sidebar').widths`
 is `{ open = 24, closed = 1 }`, and `C-b b` swaps them. Closed is the markers column: you can
@@ -885,6 +890,119 @@ which costs you the `~` and nothing else; assign to it if you want a different p
 
 A directory too long for the space left loses its leading components — `.../src/neotmux` —
 and is dropped along with its icon if not even its last component fits.
+
+### Changing what copy mode does
+
+`plugin.copy` is `C-b [`, a cursor over a snapshot of the pane's history and screen, a
+selection drawn with `ctx:tint`, and a yank. It reserves nothing and binds no key of its own:
+the mode is a local in the file and an `on_key`, exactly as the prefix's own two modes are.
+
+```
+h j k l     the cursor, one cell
+C-u C-d     half a screen
+g G         the oldest line the snapshot holds, the newest
+Space       start a selection here, or drop the one there is
+y           yank it
+Esc q       leave
+```
+
+**Keys and commands are two tables, not a chain of ifs.** `M.keys` maps a key spec to the
+*name* of a command and `M.commands` maps that name to a function, and the key handler does
+nothing but look one up in the other. Rebinding is then an assignment, and a command is
+nameable from outside the file:
+
+```lua
+local copy = require('plugin.copy')
+copy.keys['v'] = 'begin-selection'   -- vi muscle memory, alongside Space
+copy.keys['C-b'] = nil               -- and one taken away
+copy.colors.selection = '#45475a'    -- read every tick
+copy.page = 0.5                      -- what C-u and C-d move, as a fraction of the pane
+neotmux.log.info(copy.register)      -- what the last yank took
+```
+
+A key with no entry does nothing and is still swallowed. Resize mode leaves on the first key
+that is not an adjustment because there is nothing in it to lose; dropping a half-made
+selection over a typo is a different bargain, and `Esc` and `q` are both already the way out.
+
+Note the one ordering trap: `require`ing this file from your own `init.lua` — which is what
+rebinding a key means — loads it before the shipped layer runs, so it loads the prefix itself
+rather than probing for it. Otherwise `C-b [` would silently go unbound.
+
+#### The buffer is taken once
+
+Entering the mode reads the pane's whole history and its screen, in one pass, and never reads
+them again. That is not a cache. The child keeps printing while you are reading it, and a
+buffer re-read every frame is a buffer whose line 400 is one thing when the cursor lands on it
+and another when it is yanked — so what you copy would not be what you selected. tmux clones
+the grid on the way in for exactly this reason and reads only the clone.
+
+It costs what it says: a full ten-thousand-line history is about **11 ms** to snapshot, on one
+key press, outside any tick and therefore outside the budget. tmux's version of this is a
+memcpy; ours builds ten thousand Lua strings out of the terminal's cells, which is three
+orders of magnitude worse and is the strongest argument for a host call that freezes a pane
+instead.
+
+Two consequences you can see. A pane that prints while you are in the mode does not change what
+the mode shows — it shows the snapshot. And because the pane's own grid has then moved out from
+under the snapshot, the frame stops being free (below).
+
+#### What the view costs per frame
+
+The pane's own grid is what the host renders. There is exactly one case where that grid is
+already showing what the mode wants shown — the view sitting on the snapshot's own screen over
+a pane that has not been fed since — and then the frame is **one `ctx:tint` for the cursor and
+nothing else**. Scrolled, or overtaken by output, every row is in the wrong place: the pane is
+erased and redrawn out of the snapshot, one `ctx:rect` and one `ctx:text` per non-blank row,
+which on a 23-row pane is **25 commands**. Measured on a release build against a
+ten-thousand-line buffer: 8 µs a frame sitting still, 14 µs scrolled, 32 µs with the cursor
+moving every frame, against a budget of 8 ms.
+
+No read is on that bill. The lines were taken on the way in; the tick slices a table.
+
+A line out of the snapshot has no colours on it — the ABI hands back text — so a redrawn view
+is monochrome, and the selection's tint is the only colour in it. Sitting on the pane's own
+screen the colours are all there, because nothing is drawn over them.
+
+#### The selection is two absolute points
+
+`{ line, col }` twice, where `line` is a line number in the buffer and never a screen row. A
+selection held in screen coordinates evaporates the moment the view scrolls under it; held
+against the buffer it survives, and `neotmux.selection.span` projects it back onto whichever
+rows are on screen — an end that has scrolled out of view is clamped to the edge rather than
+lost, and a view that has left the selection behind draws nothing rather than forgetting it.
+
+#### Where a yank goes
+
+Into `require('plugin.copy').register`, and into the system clipboard if this host can reach
+one — which today it cannot, so the notification says the register and does not claim
+otherwise.
+
+Neither of the two routes that would stay inside Lua is open. **OSC 52** needs a plugin to
+write bytes to the outer terminal, and there is no such call: `io` is nil in the VM, and every
+drawing call puts a character into a cell of the surface's grid, where an escape byte is a
+glyph and not an escape. **Writing the text into a pane** needs a way to send input to one, and
+the pane API splits, focuses and resizes — that is all of it. So the internal buffer is the
+whole of it, and it is deliberately separate from the clipboard so that a paste command can
+attach to it later without caring whether a clipboard existed. A clipboard call, when there is
+one, must say whether the terminal advertised the capability: reporting a copy that never left
+the process is worse than reporting none.
+
+#### Two things it gets wrong, on purpose rather than by accident
+
+**A soft-wrapped line is yanked with a newline in the middle of it.** A terminal wraps a long
+command across two rows, and the right answer is to join them with nothing at all — the rule
+tmux keeps in `window_copy_copy_line`. It can keep it because its grid says which rows are
+continuations. This ABI hands back lines and nothing else: there is no wrap flag, and none can
+be inferred, because a wrapped row and a row that happens to fill the width read identically
+once trailing blanks are cut. Guessing would put the defect somewhere unpredictable instead of
+somewhere stated. It wants a `wrapped` flag on the lines `content` and `scrollback` return.
+
+**A slice of a line holding a double-width character can be a character short.** The host hands
+a wide character back once, at the column it starts in, so a line's character indices and its
+columns part company. Everything drawn is in columns, because `ctx:tint` counts columns;
+`selection.slice` counts characters, because that is all a Lua string offers. An ASCII line is
+exact; a CJK one drifts left by one per wide character before the cut. It wants a way to
+measure a string in columns.
 
 ### Changing what the sidebar looks like
 

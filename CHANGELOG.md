@@ -2,6 +2,48 @@
 
 ## Unreleased
 
+### Copy mode
+
+`C-b [` enters a copy mode over the pane you are in: `h/j/k/l` and `C-u`/`C-d` move a cursor,
+`g` and `G` go to the ends of the buffer, `Space` starts a selection, `y` yanks it and `Esc`
+or `q` leaves. It ships on, with the status bar and the prefix rather than with the watcher
+and the sidebar: it takes no band, no gutter and no cell from any pane, and what it reads is a
+buffer the host is already keeping whether or not anything looks at it. One line turns it off:
+
+```lua
+require('neotmux.defaults').copy = false
+```
+
+It is a plugin, and the host learned nothing. The mode is a local and an `on_key`, the way the
+prefix's own two modes are; the cursor and the selection are `ctx:tint`, so the pane's real
+text stays readable under them; the keys are a table of command names over a table of
+commands, so rebinding one is an assignment from an `init.lua`.
+
+**The buffer is taken once, on the way in.** The pane's whole history and its screen are read
+in a single pass and never read again, because the child keeps printing while you read: a
+buffer re-read every frame is one whose line 400 is one thing when the cursor lands on it and
+another when it is yanked. A ten-thousand-line history costs about 11 ms to snapshot, on a key
+press and outside any tick. The frames after it are free of reads entirely — sitting on the
+pane's own screen a frame is one tint, and scrolled it is one `ctx:rect` and one `ctx:text` per
+row, 8–32 µs against a budget of 8 ms.
+
+**The selection is two absolute line numbers**, never screen rows, so scrolling past one of its
+ends clamps it rather than losing it.
+
+Yanked text goes into `require('plugin.copy').register` and not into the system clipboard,
+because this ABI cannot reach one. OSC 52 would need a plugin to write bytes to the outer
+terminal, and there is no such call — `io` is nil in the VM and every drawing call puts a
+character into a cell of the grid, where an escape byte is a glyph. Writing the text into a
+pane would need a way to send input to one, and the pane API splits, focuses and resizes.
+Neither gap was closed here: adding a host call was not what copy mode was for.
+
+Two defects are stated rather than guessed at, both for want of something the ABI does not
+say. A soft-wrapped line is yanked with a newline in the middle of it, because no row carries
+a wrap flag and a wrapped row reads identically to one that happens to fill the width. And a
+slice of a line holding a double-width character can come up a character short, because
+`ctx:tint` counts columns while a Lua string counts characters and the host collapses a wide
+character to one entry. `docs/plugins.md` says what each would need.
+
 ### A plugin can hold a pane still
 
 `neotmux.pane.freeze(id)` stops the pane moving; `neotmux.pane.unfreeze(id)` lets it catch up,
