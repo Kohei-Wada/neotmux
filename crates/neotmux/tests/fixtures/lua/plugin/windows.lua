@@ -55,6 +55,13 @@ neotmux.on_key(function(key)
   return false
 end)
 
+-- Every chunk, whichever window's pane produced it: a hidden pane's output being consumed
+-- while it is hidden is the difference between a window that goes on working and one that is
+-- merely caught up with on the way back.
+neotmux.on_event("pane_output", function(event)
+  neotmux.log.info("windows output " .. event.pane)
+end)
+
 neotmux.on_event("window_opened", function(event)
   neotmux.log.info("windows window_opened " .. event.window .. seen())
 end)

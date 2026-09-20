@@ -1234,9 +1234,9 @@ fn a_second_window_shows_its_own_pane_and_the_first_keeps_its_content() {
     );
 }
 
-/// The whole point of a window nobody is looking at: its shell goes on working. Its output
-/// has to be read — or the reader's channel fills and blocks the child — and it has to be
-/// kept, or switching back shows a hole where it was.
+/// The whole point of a window nobody is looking at: its shell goes on working, and its
+/// output is read while it is hidden rather than caught up with on the way back — a pane
+/// whose reader nobody empties eventually blocks its child.
 ///
 /// The marker is computed by the shell rather than typed, so the echo of the command line
 /// cannot be mistaken for the output of running it.
@@ -1257,6 +1257,19 @@ fn a_command_run_in_a_hidden_window_has_produced_its_output_by_the_time_you_swit
     assert!(
         !screen.contains("LATE42"),
         "the hidden window's output landed in the window being shown:\n{screen}"
+    );
+
+    // Everything the log has to say between leaving the second window and going back to it.
+    let log = nt.log_text();
+    let while_hidden: Vec<&str> = log
+        .lines()
+        .skip_while(|line| !line.contains("window_changed 1"))
+        .collect();
+    assert!(
+        while_hidden
+            .iter()
+            .any(|line| line.contains("windows output 2")),
+        "the hidden pane's output was not read while it was hidden:\n{log}"
     );
 
     nt.send("\x0e"); // C-n: back to it, well after the output was produced
