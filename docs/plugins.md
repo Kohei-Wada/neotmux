@@ -102,6 +102,7 @@ neotmux.on_tick(function(ctx)
   local size = ctx:size()                      -- { rows = , cols = }: what the panes have
   ctx:text(nil, x, y, 'text', { fg = 2 })      -- nil pane = the whole surface
   ctx:rect(nil, x, y, w, h, { bg = '#202020' })
+  ctx:tint(nil, x, y, w, h, { bg = 4 })        -- recolours, writes no glyph
   ctx:line(nil, x1, y1, x2, y2, { fg = 4 }, '|') -- no bg: it paints single cells
                                                -- the glyph is optional and defaults to '#'
   local r = ctx:pane_rect(pane_id)             -- { x = , y = , w = , h = } or nil
@@ -130,6 +131,29 @@ tile the surface exactly.
 
 **`ctx:rect` with no colours clears the area.** It is not a no-op — default background is a
 colour like any other, and painting it is how you erase.
+
+**`ctx:tint` is `ctx:rect` that does not erase.** Same rectangle, same coordinates, and that
+is where the resemblance stops: `rect` writes a space into every cell it covers, and `tint`
+writes nothing at all. It changes the colours of the cells that are there and leaves the
+characters alone, which is what highlighting a region of a pane's text is.
+
+```lua
+ctx:tint(id, 0, row, r.w, 1, { bg = 4 })            -- the line stays readable
+ctx:rect(id, 0, row, r.w, 1, { bg = 4 })            -- the line is now a blue bar
+```
+
+**A colour you leave out is a colour the cell keeps.** `{ bg = 4 }` recolours the background
+and leaves whatever coloured the text — so a tint over syntax-highlighted output keeps the
+highlighting. Name both and both change. There is no way to spell "put this channel back to
+the terminal's default": omitting it means *keep*, not *reset*.
+
+**A tint that names no colour raises.** `rect` with no colours is a deliberate erase, but a
+tint with no colours could only be a mistake, so it is not quietly accepted.
+
+**A cell nothing has written tints like any other.** The pane grid is full of cells the child
+never touched; each one is a blank with the terminal's own colours, and tinting one recolours
+that blank. No glyph appears where there was none — you get a coloured space, which is what
+selecting past the end of a line looks like.
 
 ### Reserving a band
 

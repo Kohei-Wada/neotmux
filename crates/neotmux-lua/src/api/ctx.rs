@@ -112,6 +112,36 @@ fn parse_fg_only(colours: Option<Table>) -> mlua::Result<Color> {
     colour_field(&table, "fg")
 }
 
+/// A channel the caller did not name at all, as distinct from one named `Default`. Only
+/// `tint` can tell the two apart: everything else paints a whole cell.
+fn optional_colour_field(table: &Table, field: &'static str) -> mlua::Result<Option<Color>> {
+    match table.get::<Value>(field)? {
+        Value::Nil => Ok(None),
+        _ => colour_field(table, field).map(Some),
+    }
+}
+
+/// `rect` with no colours is a deliberate erase, but a `tint` with no colours would change
+/// nothing at all — which is the mistake `tint` exists to make loud rather than silent.
+fn parse_tint_colours(colours: Option<Table>) -> mlua::Result<(Option<Color>, Option<Color>)> {
+    let fg = match &colours {
+        Some(table) => optional_colour_field(table, "fg")?,
+        None => None,
+    };
+    let bg = match &colours {
+        Some(table) => optional_colour_field(table, "bg")?,
+        None => None,
+    };
+    if fg.is_none() && bg.is_none() {
+        return Err(mlua::Error::RuntimeError(
+            "tint takes the colours to change, at least one of fg and bg: it recolours what \
+             is already there, and rect is what paints over it"
+                .to_string(),
+        ));
+    }
+    Ok((fg, bg))
+}
+
 fn parse_colours(colours: Option<Table>) -> mlua::Result<(Color, Color)> {
     let Some(table) = colours else {
         return Ok((Color::Default, Color::Default));
@@ -185,6 +215,32 @@ impl UserData for Ctx {
                 this.buffers.record(
                     this.owner,
                     DrawCmd::Rect {
+                        pane: pane.map(PaneId::from),
+                        rect: Rect::new(x, y, w, h),
+                        fg,
+                        bg,
+                    },
+                );
+                Ok(())
+            },
+        );
+
+        methods.add_method(
+            "tint",
+            |_,
+             this,
+             (pane, x, y, w, h, colours): (
+                Option<u32>,
+                u16,
+                u16,
+                u16,
+                u16,
+                Option<Table>,
+            )| {
+                let (fg, bg) = parse_tint_colours(colours)?;
+                this.buffers.record(
+                    this.owner,
+                    DrawCmd::Tint {
                         pane: pane.map(PaneId::from),
                         rect: Rect::new(x, y, w, h),
                         fg,

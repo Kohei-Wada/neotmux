@@ -366,6 +366,68 @@ fn a_glyph_of_more_than_one_character_is_refused_rather_than_truncated() {
     }
 }
 
+fn tinter(body: &str) -> (tempfile::TempDir, LuaSubsystem) {
+    built(&[
+        ("init.lua", "require('plugin.tinter')"),
+        (
+            "lua/plugin/tinter.lua",
+            &format!("neotmux.on_tick(function(ctx) {body} end) return {{}}"),
+        ),
+    ])
+}
+
+#[test]
+fn a_tint_records_the_rectangle_and_both_colours() {
+    let (_dir, sub) = tinter("ctx:tint(nil, 1, 2, 3, 4, { fg = 7, bg = '#102030' })");
+    frame(&sub, 24);
+    let cmds = sub.frame_output();
+    assert_eq!(cmds.len(), 1);
+    match &cmds[0] {
+        DrawCmd::Tint { rect, fg, bg, .. } => {
+            assert_eq!(*rect, Rect::new(1, 2, 3, 4));
+            assert_eq!(*fg, Some(Color::Idx(7)));
+            assert_eq!(*bg, Some(Color::Rgb(0x10, 0x20, 0x30)));
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+}
+
+/// The selection case: change the background, keep whatever coloured the text.
+#[test]
+fn a_colour_the_tint_does_not_name_is_left_out_of_the_command() {
+    let (_dir, sub) = tinter("ctx:tint(nil, 0, 0, 1, 1, { bg = 4 })");
+    frame(&sub, 24);
+    match &sub.frame_output()[0] {
+        DrawCmd::Tint { fg, bg, .. } => {
+            assert_eq!(*fg, None);
+            assert_eq!(*bg, Some(Color::Idx(4)));
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+}
+
+/// `rect` with no colours erases; a `tint` with none would do nothing, so it says so.
+#[test]
+fn a_tint_naming_no_colour_is_refused() {
+    for colours in ["", ", {}", ", { fg = nil }"] {
+        let (_dir, sub) = tinter(&format!("ctx:tint(nil, 0, 0, 1, 1{colours})"));
+        frame(&sub, 24);
+        let ops = sub.drain_ops();
+        assert_eq!(ops.len(), 1, "{colours:?} should have raised");
+        assert!(sub.frame_output().is_empty(), "{colours:?} was still drawn");
+    }
+}
+
+#[test]
+fn a_tint_can_name_a_pane_the_way_a_rect_can() {
+    let (_dir, sub) = tinter("ctx:tint(1, 0, 0, 2, 2, { bg = 1 })");
+    frame(&sub, 24);
+    match &sub.frame_output()[0] {
+        DrawCmd::Tint { pane, .. } => assert_eq!(*pane, Some(PaneId::from(1))),
+        other => panic!("unexpected command: {other:?}"),
+    }
+}
+
 /// Helper for the per-source commit tests: every `Text` command as (y, text).
 fn lines(sub: &LuaSubsystem) -> Vec<(u16, String)> {
     sub.frame_output()
