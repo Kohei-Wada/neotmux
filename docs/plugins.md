@@ -323,6 +323,17 @@ resize moves it as well, because reflowing changes what the pane reads as.
 `opts.lines` bounds the work as well as the answer: the rows above it are never built. Ask for
 the few at the bottom if a prompt is what you are after.
 
+`opts.pad` keeps the blank rest of every row instead of cutting it, so each line comes back
+exactly as wide as the pane — in **columns**, so a row holding a wide character is two
+characters shorter than it is wide. Cutting is right for reading text and wrong for a
+rectangle: a selection three columns wide over a line of two characters has to know that the
+third column is a space the pane is showing. It is off unless you ask for it, and
+`pane.scrollback` takes it on the same terms.
+
+```lua
+local rows = neotmux.pane.content(id, { pad = true })
+```
+
 #### What a pane has already said
 
 `scrollback` is the lines above the visible screen, and `history` is how many of them there

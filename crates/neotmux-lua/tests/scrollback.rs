@@ -167,3 +167,19 @@ fn a_negative_from_or_line_count_raises() {
         );
     }
 }
+
+/// A rectangle selection that reaches into the history needs the same columns there as on
+/// the screen, so `pad` reads the same way on both.
+#[test]
+fn the_pad_option_keeps_every_history_row_as_wide_as_the_pane() {
+    let (_dir, sub) = built("report(1, { pad = true })");
+    sub.terminals().open(pane(1), SIZE, 100);
+    sub.terminals()
+        .feed(pane(1), b"one\r\ntwo\r\nthree\r\nfour");
+
+    let line = ticked(&sub).remove(0);
+    assert!(
+        line.starts_with("1 [one     |two     ] rev="),
+        "a padded history row was not the pane's eight columns: {line:?}"
+    );
+}

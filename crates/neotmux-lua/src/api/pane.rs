@@ -4,6 +4,7 @@ use std::rc::Rc;
 use mlua::{Lua, Table, Value};
 
 use neotmux_core::proto::{Dir, PaneId, SplitDir};
+use neotmux_term::lines::Trailing;
 use neotmux_term::terminals::PaneTerminals;
 
 use crate::api::rect;
@@ -24,6 +25,16 @@ fn count(call: &str, field: &str, value: Option<i64>) -> mlua::Result<Option<usi
             })
         })
         .transpose()
+}
+
+/// What `opts.pad` asks for: the blank rest of every row kept, rather than cut. Default —
+/// and absent — is cut, which is what reading a line of text wants.
+fn trailing(opts: Option<&Table>) -> mlua::Result<Trailing> {
+    let pad = match opts {
+        Some(opts) => opts.get::<Option<bool>>("pad")?.unwrap_or(false),
+        None => false,
+    };
+    Ok(if pad { Trailing::Pad } else { Trailing::Trim })
 }
 
 /// The M2 pane API (§6), signatures frozen now. `list`, `current` and `rect` read this
@@ -134,12 +145,14 @@ pub(crate) fn install(
         // panes exist is a separate question, and `pane.list` and `pane_output` answer it.
         let terminals = terminals.clone();
         let content = lua.create_function(move |lua, (pane, opts): (u32, Option<Table>)| {
-            let last = match opts {
+            let last = match &opts {
                 Some(opts) => opts.get::<Option<i64>>("lines")?,
                 None => None,
             };
             let last = count("content", "lines count", last)?;
-            let Some((lines, revision)) = terminals.content(PaneId::from(pane), last) else {
+            let trailing = trailing(opts.as_ref())?;
+            let Some((lines, revision)) = terminals.content(PaneId::from(pane), last, trailing)
+            else {
                 return Ok((Value::Nil, Value::Nil));
             };
             Ok((
@@ -169,7 +182,7 @@ pub(crate) fn install(
         // `content`'s does. Reading moves the terminal's position in its scrollback and puts
         // it back before answering, so nothing a person is looking at moves.
         let scrollback = lua.create_function(move |lua, (pane, opts): (u32, Option<Table>)| {
-            let (from, lines) = match opts {
+            let (from, lines) = match &opts {
                 Some(opts) => (
                     opts.get::<Option<i64>>("from")?,
                     opts.get::<Option<i64>>("lines")?,
@@ -179,7 +192,10 @@ pub(crate) fn install(
             let from = count("scrollback", "from", from)?.unwrap_or(0);
             // No count is the rest of the history, as no `lines` is the whole screen.
             let lines = count("scrollback", "lines count", lines)?.unwrap_or(usize::MAX);
-            let Some((lines, revision)) = terminals.history(PaneId::from(pane), from, lines) else {
+            let trailing = trailing(opts.as_ref())?;
+            let Some((lines, revision)) =
+                terminals.history(PaneId::from(pane), from, lines, trailing)
+            else {
                 return Ok((Value::Nil, Value::Nil));
             };
             Ok((

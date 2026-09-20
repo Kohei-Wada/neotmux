@@ -1,3 +1,14 @@
+/// What to do with the blank rest of a row.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Trailing {
+    /// Cut it, so an untouched row is `""`. What reading a line of text wants.
+    #[default]
+    Trim,
+    /// Keep it, so every row is exactly as wide as the pane. What a rectangle wants: the
+    /// interior spacing of a short line is where its columns are.
+    Pad,
+}
+
 /// One row of a terminal as plain text, and the rules a plugin matching a pattern against it
 /// can rely on.
 ///
@@ -11,8 +22,9 @@
 ///   plugin must not try to.
 ///
 /// Trailing spaces are cut, so an untouched row is the empty string: the blank rest of a line
-/// is the terminal's, not something the child said.
-pub(crate) fn row(screen: &vt100::Screen, row: u16, cols: u16) -> String {
+/// is the terminal's, not something the child said. [`Trailing::Pad`] keeps them instead,
+/// because a rectangle drawn over a short line has to know where its columns are.
+pub(crate) fn row(screen: &vt100::Screen, row: u16, cols: u16, trailing: Trailing) -> String {
     let mut out = String::new();
     let mut col = 0;
     while col < cols {
@@ -33,8 +45,12 @@ pub(crate) fn row(screen: &vt100::Screen, row: u16, cols: u16) -> String {
         }
         col += if cell.is_wide() { 2 } else { 1 };
     }
-    let end = out.trim_end().len();
-    out.truncate(end);
+    match trailing {
+        Trailing::Trim => out.truncate(out.trim_end().len()),
+        // The walk stops short only where a cell is missing; fill what it never reached, so
+        // a padded row is the pane's width whichever way the loop ended.
+        Trailing::Pad => (col..cols).for_each(|_| out.push(' ')),
+    }
     out
 }
 
@@ -43,13 +59,19 @@ pub(crate) fn row(screen: &vt100::Screen, row: u16, cols: u16) -> String {
 /// `last` is how many rows from the bottom to take, and it bounds the work rather than the
 /// answer: the rows above it are never built. `None` is the whole screen. What is above the
 /// screen is [`crate::scrollback`]'s question, not this one.
-pub fn visible(screen: &vt100::Screen, last: Option<usize>) -> Vec<String> {
+pub fn visible(screen: &vt100::Screen, last: Option<usize>, trailing: Trailing) -> Vec<String> {
     let (rows, cols) = screen.size();
-    let first = match last {
+    (first_row(rows, last)..rows)
+        .map(|r| row(screen, r, cols, trailing))
+        .collect()
+}
+
+/// The top of the window `last` names, counted from the bottom of the screen.
+pub(crate) fn first_row(rows: u16, last: Option<usize>) -> u16 {
+    match last {
         Some(last) => rows.saturating_sub(u16::try_from(last).unwrap_or(u16::MAX)),
         None => 0,
-    };
-    (first..rows).map(|r| row(screen, r, cols)).collect()
+    }
 }
 
 #[cfg(test)]
@@ -63,7 +85,11 @@ mod tests {
     }
 
     fn lines(rows: u16, cols: u16, feed: &[u8], last: Option<usize>) -> Vec<String> {
-        visible(screen(rows, cols, feed).screen(), last)
+        visible(screen(rows, cols, feed).screen(), last, Trailing::Trim)
+    }
+
+    fn padded(rows: u16, cols: u16, feed: &[u8]) -> Vec<String> {
+        visible(screen(rows, cols, feed).screen(), None, Trailing::Pad)
     }
 
     #[test]
@@ -125,6 +151,23 @@ mod tests {
     #[test]
     fn asking_for_no_rows_gives_nothing() {
         assert!(lines(2, 8, b"one\r\ntwo", Some(0)).is_empty());
+    }
+
+    /// The blank rest of a short line is where a rectangle selection's columns are, so it
+    /// has to survive the read that a text reader wants it cut from.
+    #[test]
+    fn padding_keeps_every_row_as_wide_as_the_pane() {
+        assert_eq!(padded(2, 6, b"ab\r\ncd"), vec!["ab    ", "cd    "]);
+        assert_eq!(padded(1, 6, b""), vec!["      "]);
+    }
+
+    /// Columns, not characters: a padded row that holds a wide character is two cells
+    /// shorter in `char`s than the pane is wide, and it is the cells that have to line up.
+    #[test]
+    fn a_padded_row_is_the_panes_width_in_columns() {
+        let line = padded(1, 6, "\u{3042}b".as_bytes()).remove(0);
+        assert_eq!(line, "\u{3042}b   ");
+        assert_eq!(crate::width::of_str(&line), 6);
     }
 
     /// Output that scrolled off the top is gone from the visible screen; reaching it is

@@ -1,5 +1,7 @@
 use neotmux_core::proto::{Color, GridSnapshot, Size};
 
+use crate::lines::Trailing;
+
 pub struct TermState {
     parser: vt100::Parser,
 }
@@ -49,8 +51,8 @@ impl TermState {
 
     /// What the pane is showing, as plain-text lines (`crate::lines`). `last` bounds the work
     /// to the bottom of the screen rather than trimming an answer that was built in full.
-    pub fn lines(&self, last: Option<usize>) -> Vec<String> {
-        crate::lines::visible(self.parser.screen(), last)
+    pub fn lines(&self, last: Option<usize>, trailing: Trailing) -> Vec<String> {
+        crate::lines::visible(self.parser.screen(), last, trailing)
     }
 
     /// How many lines the pane holds above its visible screen. `&mut` because reading it
@@ -61,8 +63,8 @@ impl TermState {
 
     /// Lines from above the visible screen, oldest first, numbered as
     /// [`crate::scrollback`] describes.
-    pub fn history(&mut self, from: usize, count: usize) -> Vec<String> {
-        crate::scrollback::lines(self.parser.screen_mut(), from, count)
+    pub fn history(&mut self, from: usize, count: usize, trailing: Trailing) -> Vec<String> {
+        crate::scrollback::lines(self.parser.screen_mut(), from, count, trailing)
     }
 
     pub fn size(&self) -> Size {
@@ -199,8 +201,8 @@ mod tests {
         let mut s = TermState::new(Size { rows: 2, cols: 8 }, 100);
         s.feed(b"one\r\ntwo\r\nthree\r\nfour");
         assert_eq!(s.history_len(), 2);
-        assert_eq!(s.history(0, 10), vec!["one", "two"]);
-        assert_eq!(s.lines(None), vec!["three", "four"]);
+        assert_eq!(s.history(0, 10, Trailing::Trim), vec!["one", "two"]);
+        assert_eq!(s.lines(None, Trailing::Trim), vec!["three", "four"]);
     }
 
     #[test]

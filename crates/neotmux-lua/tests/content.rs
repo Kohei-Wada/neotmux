@@ -135,3 +135,30 @@ fn the_revision_content_reports_is_the_one_the_lines_were_read_at() {
     let reported = logged[0].rsplit("rev=").next().expect("a revision");
     assert_eq!(reported, logged[1]);
 }
+
+/// The blank rest of a short line is where a rectangle selection's columns are. Cutting it
+/// is right for reading text and wrong for a rectangle, so it is asked for rather than
+/// assumed.
+#[test]
+fn the_pad_option_keeps_every_row_as_wide_as_the_pane() {
+    let (_dir, sub) = built("report(1, { pad = true })");
+    sub.terminals().open(pane(1), SIZE, 0);
+    sub.terminals().feed(pane(1), b"ab\r\ncd");
+
+    let line = ticked(&sub).remove(0);
+    assert!(
+        line.starts_with("1 [ab                  |cd                  |                    |                    ] rev="),
+        "a padded row was not the pane's twenty columns: {line:?}"
+    );
+}
+
+#[test]
+fn padding_is_off_unless_it_is_asked_for() {
+    let (_dir, sub) = built("report(1, { pad = false })\nreport(1)");
+    sub.terminals().open(pane(1), SIZE, 0);
+    sub.terminals().feed(pane(1), b"ab");
+
+    let lines = ticked(&sub);
+    assert!(lines[0].starts_with("1 [ab|||] rev="), "{lines:?}");
+    assert!(lines[1].starts_with("1 [ab|||] rev="), "{lines:?}");
+}
