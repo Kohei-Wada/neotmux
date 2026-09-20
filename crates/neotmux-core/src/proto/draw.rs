@@ -36,6 +36,14 @@ pub enum DrawCmd {
         fg: Color,
         bg: Color,
     },
+    /// Recolours the cells of a rectangle and writes no glyph: whatever is under it stays
+    /// legible. `None` for a channel leaves that channel as it was found.
+    Tint {
+        pane: Option<PaneId>,
+        rect: Rect,
+        fg: Option<Color>,
+        bg: Option<Color>,
+    },
     Line {
         pane: Option<PaneId>,
         from: (u16, u16),

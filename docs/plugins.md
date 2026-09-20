@@ -102,6 +102,7 @@ neotmux.on_tick(function(ctx)
   local size = ctx:size()                      -- { rows = , cols = }: what the panes have
   ctx:text(nil, x, y, 'text', { fg = 2 })      -- nil pane = the whole surface
   ctx:rect(nil, x, y, w, h, { bg = '#202020' })
+  ctx:tint(nil, x, y, w, h, { bg = 4 })        -- recolours, writes no glyph
   ctx:line(nil, x1, y1, x2, y2, { fg = 4 }, '|') -- no bg: it paints single cells
                                                -- the glyph is optional and defaults to '#'
   local r = ctx:pane_rect(pane_id)             -- { x = , y = , w = , h = } or nil
@@ -130,6 +131,29 @@ tile the surface exactly.
 
 **`ctx:rect` with no colours clears the area.** It is not a no-op — default background is a
 colour like any other, and painting it is how you erase.
+
+**`ctx:tint` is `ctx:rect` that does not erase.** Same rectangle, same coordinates, and that
+is where the resemblance stops: `rect` writes a space into every cell it covers, and `tint`
+writes nothing at all. It changes the colours of the cells that are there and leaves the
+characters alone, which is what highlighting a region of a pane's text is.
+
+```lua
+ctx:tint(id, 0, row, r.w, 1, { bg = 4 })            -- the line stays readable
+ctx:rect(id, 0, row, r.w, 1, { bg = 4 })            -- the line is now a blue bar
+```
+
+**A colour you leave out is a colour the cell keeps.** `{ bg = 4 }` recolours the background
+and leaves whatever coloured the text — so a tint over syntax-highlighted output keeps the
+highlighting. Name both and both change. There is no way to spell "put this channel back to
+the terminal's default": omitting it means *keep*, not *reset*.
+
+**A tint that names no colour raises.** `rect` with no colours is a deliberate erase, but a
+tint with no colours could only be a mistake, so it is not quietly accepted.
+
+**A cell nothing has written tints like any other.** The pane grid is full of cells the child
+never touched; each one is a blank with the terminal's own colours, and tinting one recolours
+that blank. No glyph appears where there was none — you get a coloured space, which is what
+selecting past the end of a line looks like.
 
 ### Reserving a band
 
@@ -202,6 +226,8 @@ neotmux.pane.rect(id)    -- { x = , y = , w = , h = }, or nil
 neotmux.pane.info(id)    -- { command = ..., cwd = ... }, or nil
 neotmux.pane.revision(id)     -- a number that moves when the pane is fed, or nil
 neotmux.pane.content(id, opts) -- { line, ... }, revision — or nil, nil
+neotmux.pane.history(id)      -- how many lines are above the screen, or nil
+neotmux.pane.scrollback(id, opts) -- { line, ... }, revision — or nil, nil
 neotmux.pane.split('horizontal' | 'vertical')
 neotmux.pane.focus(id)
 neotmux.pane.resize('left' | 'right' | 'up' | 'down', cells)
@@ -263,8 +289,7 @@ nothing reads as a space, and the trailing run of them is cut, so an untouched r
 cell that was never written and one that was erased are the same cell to the terminal, and
 nothing tells them apart.
 
-It is the **visible** screen. What has scrolled off the top is gone — scrollback is not in
-v0.1.
+It is the **visible** screen. What has scrolled off the top is `scrollback`'s question, below.
 
 A pane in a hidden window answers like any other. Its shell is running and its output is being
 read into its terminal whether or not you are looking at it, which is the whole point: the
@@ -297,6 +322,51 @@ resize moves it as well, because reflowing changes what the pane reads as.
 
 `opts.lines` bounds the work as well as the answer: the rows above it are never built. Ask for
 the few at the bottom if a prompt is what you are after.
+
+#### What a pane has already said
+
+`scrollback` is the lines above the visible screen, and `history` is how many of them there
+are:
+
+```lua
+local n = neotmux.pane.history(id)                              -- 0 if it has not scrolled
+local all  = neotmux.pane.scrollback(id)                        -- the whole history
+local tail = neotmux.pane.scrollback(id, { from = n - 10, lines = 10 })  -- the last ten
+```
+
+Same lines as `content`, on exactly the same terms: no escape sequences, one string per row,
+a wide character once at the column it starts in, trailing blanks cut. An id no pane has
+answers `nil, nil`, and so does a pane that closed between two calls.
+
+**Line 0 is the oldest line the pane still holds**, and numbers increase downwards, so the
+line directly above the top of the visible screen is `history() - 1`. The visible screen
+itself is not addressable here — it is `content()`.
+
+**A line's number does not change when the child prints more.** New output is appended to the
+end of the history and takes the next number; `history()` grows and nothing already numbered
+is renumbered. That is the whole reason the numbering runs from the oldest line rather than
+from the bottom of the screen: a position you saved last tick still means the line you saved
+it for.
+
+**The exception is the history filling up.** A pane keeps 10 000 lines. Once it holds that
+many, each new line drops the oldest and every number shifts down by one — so a plugin
+holding a position across that will find it pointing one line later for each line dropped.
+`history()` sitting still at the limit while the pane is producing output is what that looks
+like.
+
+**Reading does not scroll the pane.** The terminal's own position in its scrollback is moved
+to reach the lines and put back before you are answered, inside one call, so nobody watching
+the pane sees it move.
+
+**The revision gates this too.** `scrollback` returns the revision it was read at, the same
+number `content` and `revision` answer with, and the history cannot change without the pane's
+terminal being fed — so an unchanged revision means an unchanged history. `history()` is the
+cheap question: it is a number, with no line built to answer it.
+
+A read costs the lines it returns: every row it hands back is built, character by character,
+out of the terminal's cells. `opts.lines` is what keeps that bill down, and a call with no count at
+all is the whole history — up to 10 000 rows, which is not a
+thing to do on every tick.
 
 `resize` **moves the boundary between the focused pane and its neighbour in that direction**,
 by exactly that many cells — so the pane grows by them and the neighbour loses them. There is

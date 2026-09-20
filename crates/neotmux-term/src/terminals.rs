@@ -92,6 +92,25 @@ impl PaneTerminals {
         self.panes.borrow().get(&pane).map(|t| t.revision)
     }
 
+    /// How many lines the pane holds above its visible screen. `None` for a pane that does
+    /// not exist. This is the cheap half of reading the history, the way `revision` is the
+    /// cheap half of reading the screen: it builds no lines.
+    pub fn history_len(&self, pane: PaneId) -> Option<usize> {
+        self.panes
+            .borrow_mut()
+            .get_mut(&pane)
+            .map(|t| t.state.history_len())
+    }
+
+    /// Lines from above the pane's visible screen, oldest first, with the revision they were
+    /// read at. The read moves the screen's position in the scrollback and puts it back
+    /// before returning, all inside this one borrow — see `crate::scrollback`.
+    pub fn history(&self, pane: PaneId, from: usize, count: usize) -> Option<(Vec<String>, u64)> {
+        let mut panes = self.panes.borrow_mut();
+        let terminal = panes.get_mut(&pane)?;
+        Some((terminal.state.history(from, count), terminal.revision))
+    }
+
     /// What the pane is showing, as lines, together with the revision they were read at.
     /// `None` for a pane that does not exist.
     pub fn content(&self, pane: PaneId, last: Option<usize>) -> Option<(Vec<String>, u64)> {
@@ -165,11 +184,25 @@ mod tests {
     fn a_pane_nobody_has_answers_nothing_rather_than_raising() {
         let terminals = terminals();
         assert_eq!(terminals.content(pane(4242), None), None);
+        assert_eq!(terminals.history_len(pane(4242)), None);
+        assert_eq!(terminals.history(pane(4242), 0, 10), None);
         assert_eq!(terminals.revision(pane(4242)), None);
         assert_eq!(terminals.size(pane(4242)), None);
         assert!(terminals.feed(pane(4242), b"\x1b[c").is_empty());
         terminals.resize(pane(4242), Size { rows: 2, cols: 2 });
         terminals.close(pane(4242));
+    }
+
+    #[test]
+    fn a_panes_history_is_read_without_moving_what_it_is_showing() {
+        let terminals = PaneTerminals::new();
+        terminals.open(pane(1), Size { rows: 2, cols: 8 }, 100);
+        terminals.feed(pane(1), b"one\r\ntwo\r\nthree\r\nfour");
+        assert_eq!(terminals.history_len(pane(1)), Some(2));
+        let (history, revision) = terminals.history(pane(1), 0, 10).expect("a live pane");
+        assert_eq!(history, vec!["one", "two"]);
+        assert_eq!(Some(revision), terminals.revision(pane(1)));
+        assert_eq!(lines(&terminals, 1), vec!["three", "four"]);
     }
 
     /// A shell exiting between one pass of a watcher's loop and the next is not the watcher's

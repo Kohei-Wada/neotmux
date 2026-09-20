@@ -12,6 +12,13 @@ struct Colors {
     bg: PColor,
 }
 
+/// A tint's colours: a channel left out is a channel the cell keeps.
+#[derive(Clone, Copy)]
+struct TintColors {
+    fg: Option<PColor>,
+    bg: Option<PColor>,
+}
+
 /// The local coordinate frame a command's (x, y) is relative to: either a
 /// pane's rect, or the whole surface for `pane: None`. Pane rects are in surface
 /// coordinates too, so both are offsets into the same `area` — which is the whole terminal,
@@ -23,6 +30,26 @@ fn bounds(panes: &PaneRects, area: Rect, pane: Option<PaneId>) -> Option<PRect> 
     }
 }
 
+/// The one cell a local (x, y) names, or nothing when it falls outside its bound or off the
+/// surface. Every command goes through here, so clipping is decided once.
+fn cell_at(
+    buf: &mut Buffer,
+    area: Rect,
+    bound: PRect,
+    pos: (u16, u16),
+) -> Option<&mut ratatui::buffer::Cell> {
+    let (x, y) = pos;
+    if x >= bound.w || y >= bound.h {
+        return None;
+    }
+    let ax = area.x + bound.x + x;
+    let ay = area.y + bound.y + y;
+    if ax >= area.x + area.width || ay >= area.y + area.height {
+        return None;
+    }
+    buf.cell_mut((ax, ay))
+}
+
 fn draw_char(
     buf: &mut Buffer,
     area: Rect,
@@ -31,20 +58,22 @@ fn draw_char(
     ch: char,
     colors: Colors,
 ) {
-    let (x, y) = pos;
-    if x >= bound.w || y >= bound.h {
-        return;
-    }
-    let ax = area.x + bound.x + x;
-    let ay = area.y + bound.y + y;
-    if ax >= area.x + area.width || ay >= area.y + area.height {
-        return;
-    }
-    if let Some(cell) = buf.cell_mut((ax, ay)) {
+    if let Some(cell) = cell_at(buf, area, bound, pos) {
         let mut tmp = [0u8; 4];
         cell.set_symbol(ch.encode_utf8(&mut tmp));
         cell.set_fg(color(colors.fg));
         cell.set_bg(color(colors.bg));
+    }
+}
+
+fn tint_cell(buf: &mut Buffer, area: Rect, bound: PRect, pos: (u16, u16), colors: TintColors) {
+    if let Some(cell) = cell_at(buf, area, bound, pos) {
+        if let Some(fg) = colors.fg {
+            cell.set_fg(color(fg));
+        }
+        if let Some(bg) = colors.bg {
+            cell.set_bg(color(bg));
+        }
     }
 }
 
@@ -65,15 +94,24 @@ fn draw_text(
     }
 }
 
-fn draw_rect(buf: &mut Buffer, area: Rect, bound: PRect, rect: PRect, colors: Colors) {
+/// The cells of a rectangle that are inside `bound`, in reading order.
+fn cells_of(bound: PRect, rect: PRect) -> impl Iterator<Item = (u16, u16)> {
     let x0 = rect.x.min(bound.w);
     let y0 = rect.y.min(bound.h);
     let x1 = rect.x.saturating_add(rect.w).min(bound.w);
     let y1 = rect.y.saturating_add(rect.h).min(bound.h);
-    for y in y0..y1 {
-        for x in x0..x1 {
-            draw_char(buf, area, bound, (x, y), ' ', colors);
-        }
+    (y0..y1).flat_map(move |y| (x0..x1).map(move |x| (x, y)))
+}
+
+fn draw_rect(buf: &mut Buffer, area: Rect, bound: PRect, rect: PRect, colors: Colors) {
+    for pos in cells_of(bound, rect) {
+        draw_char(buf, area, bound, pos, ' ', colors);
+    }
+}
+
+fn draw_tint(buf: &mut Buffer, area: Rect, bound: PRect, rect: PRect, colors: TintColors) {
+    for pos in cells_of(bound, rect) {
+        tint_cell(buf, area, bound, pos, colors);
     }
 }
 
@@ -149,6 +187,12 @@ pub fn apply(frame: &mut Frame, area: Rect, cmds: &[DrawCmd], panes: &PaneRects)
                     continue;
                 };
                 draw_rect(buf, area, bound, *rect, Colors { fg: *fg, bg: *bg });
+            }
+            DrawCmd::Tint { pane, rect, fg, bg } => {
+                let Some(bound) = bounds(panes, area, *pane) else {
+                    continue;
+                };
+                draw_tint(buf, area, bound, *rect, TintColors { fg: *fg, bg: *bg });
             }
             DrawCmd::Line {
                 pane,
@@ -370,6 +414,133 @@ mod tests {
         assert_eq!(buf[(4, 2)].bg, RColor::Indexed(4));
         assert_eq!(buf[(5, 1)].bg, RColor::Reset, "past the pane's right edge");
         assert_eq!(buf[(3, 3)].bg, RColor::Reset, "past the pane's bottom edge");
+    }
+
+    fn tint(rect: PRect, fg: Option<Color>, bg: Option<Color>) -> DrawCmd {
+        DrawCmd::Tint {
+            pane: None,
+            rect,
+            fg,
+            bg,
+        }
+    }
+
+    /// The whole point of a tint: the text under it is still there to read.
+    #[test]
+    fn a_tint_recolours_a_cell_and_leaves_its_glyph_alone() {
+        let cmds = vec![
+            DrawCmd::Text {
+                pane: None,
+                x: 0,
+                y: 0,
+                text: "abc".to_string(),
+                fg: Color::Idx(1),
+                bg: Color::Idx(2),
+            },
+            tint(
+                PRect::new(0, 0, 3, 1),
+                Some(Color::Idx(7)),
+                Some(Color::Idx(4)),
+            ),
+        ];
+        let panes = PaneRects::new();
+        let buf = render((10, 2), |frame, area| apply(frame, area, &cmds, &panes));
+        for (x, ch) in "abc".chars().enumerate() {
+            let x = x as u16;
+            assert_eq!(buf[(x, 0)].symbol(), ch.to_string(), "x={x}");
+            assert_eq!(buf[(x, 0)].fg, RColor::Indexed(7), "x={x}");
+            assert_eq!(buf[(x, 0)].bg, RColor::Indexed(4), "x={x}");
+        }
+    }
+
+    /// A selection changes the background and keeps whatever coloured the text.
+    #[test]
+    fn a_channel_the_tint_leaves_out_is_a_channel_the_cell_keeps() {
+        let cmds = vec![
+            DrawCmd::Text {
+                pane: None,
+                x: 0,
+                y: 0,
+                text: "x".to_string(),
+                fg: Color::Idx(3),
+                bg: Color::Idx(5),
+            },
+            tint(PRect::new(0, 0, 1, 1), None, Some(Color::Idx(6))),
+        ];
+        let panes = PaneRects::new();
+        let buf = render((10, 2), |frame, area| apply(frame, area, &cmds, &panes));
+        assert_eq!(buf[(0, 0)].symbol(), "x");
+        assert_eq!(buf[(0, 0)].fg, RColor::Indexed(3), "the fg was not named");
+        assert_eq!(buf[(0, 0)].bg, RColor::Indexed(6));
+    }
+
+    /// A cell nothing has written is a blank with the terminal's own colours, and tinting it
+    /// recolours that blank: the tint shows, and no glyph appears where there was none.
+    #[test]
+    fn tinting_a_cell_nothing_has_written_recolours_the_blank() {
+        let cmds = vec![tint(PRect::new(2, 1, 1, 1), None, Some(Color::Idx(8)))];
+        let panes = PaneRects::new();
+        let buf = render((10, 5), |frame, area| apply(frame, area, &cmds, &panes));
+        assert_eq!(buf[(2, 1)].symbol(), " ");
+        assert_eq!(buf[(2, 1)].bg, RColor::Indexed(8));
+    }
+
+    #[test]
+    fn a_tint_straddling_its_bounds_edges_is_clipped() {
+        let pane = PaneId::from(1);
+        let cmds = vec![DrawCmd::Tint {
+            pane: Some(pane),
+            rect: PRect::new(3, 1, 10, 10),
+            fg: None,
+            bg: Some(Color::Idx(4)),
+        }];
+        let mut panes = PaneRects::new();
+        panes.insert(pane, PRect::new(0, 0, 5, 3));
+        let buf = render((10, 5), |frame, area| apply(frame, area, &cmds, &panes));
+        assert_eq!(buf[(3, 1)].bg, RColor::Indexed(4));
+        assert_eq!(buf[(5, 1)].bg, RColor::Reset, "past the pane's right edge");
+        assert_eq!(buf[(3, 3)].bg, RColor::Reset, "past the pane's bottom edge");
+    }
+
+    #[test]
+    fn a_tint_naming_no_colour_changes_nothing() {
+        let cmds = vec![
+            DrawCmd::Text {
+                pane: None,
+                x: 0,
+                y: 0,
+                text: "q".to_string(),
+                fg: Color::Idx(1),
+                bg: Color::Idx(2),
+            },
+            tint(PRect::new(0, 0, 1, 1), None, None),
+        ];
+        let panes = PaneRects::new();
+        let buf = render((10, 2), |frame, area| apply(frame, area, &cmds, &panes));
+        assert_eq!(buf[(0, 0)].symbol(), "q");
+        assert_eq!(buf[(0, 0)].fg, RColor::Indexed(1));
+        assert_eq!(buf[(0, 0)].bg, RColor::Indexed(2));
+    }
+
+    #[test]
+    fn a_zero_sized_tint_changes_nothing() {
+        let cmds = vec![tint(PRect::new(2, 2, 0, 0), None, Some(Color::Idx(9)))];
+        let panes = PaneRects::new();
+        let buf = render((10, 5), |frame, area| apply(frame, area, &cmds, &panes));
+        assert_eq!(buf[(2, 2)].bg, RColor::Reset);
+    }
+
+    #[test]
+    fn a_tint_for_a_closed_pane_is_ignored() {
+        let cmds = vec![DrawCmd::Tint {
+            pane: Some(PaneId::from(1)),
+            rect: PRect::new(0, 0, 2, 2),
+            fg: None,
+            bg: Some(Color::Idx(9)),
+        }];
+        let panes = PaneRects::new();
+        let buf = render((10, 5), |frame, area| apply(frame, area, &cmds, &panes));
+        assert_eq!(buf[(0, 0)].bg, RColor::Reset);
     }
 
     #[test]

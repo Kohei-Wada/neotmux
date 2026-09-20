@@ -53,6 +53,18 @@ impl TermState {
         crate::lines::visible(self.parser.screen(), last)
     }
 
+    /// How many lines the pane holds above its visible screen. `&mut` because reading it
+    /// goes through the screen's own position in the scrollback — see [`crate::scrollback`].
+    pub fn history_len(&mut self) -> usize {
+        crate::scrollback::len(self.parser.screen_mut())
+    }
+
+    /// Lines from above the visible screen, oldest first, numbered as
+    /// [`crate::scrollback`] describes.
+    pub fn history(&mut self, from: usize, count: usize) -> Vec<String> {
+        crate::scrollback::lines(self.parser.screen_mut(), from, count)
+    }
+
     pub fn size(&self) -> Size {
         let (rows, cols) = self.parser.screen().size();
         Size { rows, cols }
@@ -180,6 +192,15 @@ mod tests {
         let mut s = TermState::new(Size { rows: 24, cols: 80 }, 100);
         s.resize(Size { rows: 1, cols: 1 });
         feed_scrolling_output(s);
+    }
+
+    #[test]
+    fn a_panes_history_is_what_scrolled_off_its_screen() {
+        let mut s = TermState::new(Size { rows: 2, cols: 8 }, 100);
+        s.feed(b"one\r\ntwo\r\nthree\r\nfour");
+        assert_eq!(s.history_len(), 2);
+        assert_eq!(s.history(0, 10), vec!["one", "two"]);
+        assert_eq!(s.lines(None), vec!["three", "four"]);
     }
 
     #[test]

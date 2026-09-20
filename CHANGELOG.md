@@ -2,6 +2,47 @@
 
 ## Unreleased
 
+### A plugin can recolour a region without erasing it
+
+`ctx:tint(pane, x, y, w, h, colours)` sits next to `ctx:rect` and takes the same rectangle.
+`rect` paints its area by writing a space into every cell, so it erases whatever was under it;
+`tint` writes no glyph at all and only changes the colours of the cells that are there. That
+is the visual of selecting text, and until now it could not be expressed.
+
+A colour left out is a colour the cell keeps. `{ bg = 4 }` recolours the background and leaves
+whatever coloured the text, so a tint over syntax-highlighted output keeps the highlighting;
+name both and both change. There is no spelling for "put this channel back to the default" —
+omitting it means keep, not reset.
+
+A tint naming no colour raises. `rect` with no colours is a deliberate erase, but a tint with
+none could only be a mistake, and the two calls are going to sit beside each other in plugin
+code where the wrong one is otherwise silent.
+
+A cell nothing has written tints like any other: it is a blank with the terminal's own
+colours, and tinting it gives a coloured blank rather than a glyph.
+
+### A plugin can read the lines above a pane's screen
+
+`neotmux.pane.scrollback(id, opts)` answers the history above the visible screen on the same
+terms as `pane.content` — lines, never bytes — with `opts.from` and `opts.lines` picking a
+window out of it. `neotmux.pane.history(id)` is the cheap count beside it, the way
+`pane.revision` is the cheap half of reading the screen.
+
+**Line 0 is the oldest line the pane still holds**, and numbers increase downwards. New output
+is appended and takes the next number, so a position a plugin saved last tick still means the
+line it saved it for; `history()` grows and nothing is renumbered. The exception is the
+10 000-line history filling up, where each new line drops the oldest and every number shifts
+down by one.
+
+Reading does not scroll the pane. `vt100` has no read path into its scrollback that does not
+go through the screen's own position in it, so the read moves that position and puts it back
+before answering — inside one call, on the thread that also renders, so no frame is drawn in
+between and nobody watching the pane sees it move.
+
+The revision gates this too: the history cannot change without the pane's terminal being fed,
+so an unchanged revision means an unchanged history. A read costs the lines it returns, and a
+call with no `lines` count is the whole history.
+
 ### A band can be taken off the left or the right
 
 `neotmux.reserve` now takes `'left'` and `'right'` as well, measured in **columns** rather

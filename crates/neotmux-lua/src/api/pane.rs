@@ -12,6 +12,20 @@ use crate::ops::{Op, OpBuffer};
 use crate::paneinfo::PaneInfos;
 use crate::source::{self, Sources};
 
+/// A count a caller gave in Lua, where the only wrong value is a negative one: that is a
+/// typo rather than a refusal, as a resize by a negative number of cells is.
+fn count(call: &str, field: &str, value: Option<i64>) -> mlua::Result<Option<usize>> {
+    value
+        .map(|value| {
+            usize::try_from(value).map_err(|_| {
+                mlua::Error::RuntimeError(format!(
+                    "pane.{call} takes a {field} of zero or more, got {value}"
+                ))
+            })
+        })
+        .transpose()
+}
+
 /// The M2 pane API (§6), signatures frozen now. `list`, `current` and `rect` read this
 /// frame's geometry; `content` and `revision` read the pane's own terminal; `split`, `focus`
 /// and `resize` are ops on the buffer (§4.6), applied after the tick, so a callback never
@@ -118,21 +132,13 @@ pub(crate) fn install(
         // A pane nobody has answers nil rather than raising, and so does one that closed
         // between two passes of a loop: a shell exiting is not the caller's error. Which
         // panes exist is a separate question, and `pane.list` and `pane_output` answer it.
+        let terminals = terminals.clone();
         let content = lua.create_function(move |lua, (pane, opts): (u32, Option<Table>)| {
             let last = match opts {
                 Some(opts) => opts.get::<Option<i64>>("lines")?,
                 None => None,
             };
-            let last = match last {
-                // A negative count is a typo rather than a refusal, as a resize by a
-                // negative number of cells is.
-                Some(lines) => Some(usize::try_from(lines).map_err(|_| {
-                    mlua::Error::RuntimeError(format!(
-                        "pane.content takes a lines count of zero or more, got {lines}"
-                    ))
-                })?),
-                None => None,
-            };
+            let last = count("content", "lines count", last)?;
             let Some((lines, revision)) = terminals.content(PaneId::from(pane), last) else {
                 return Ok((Value::Nil, Value::Nil));
             };
@@ -142,6 +148,46 @@ pub(crate) fn install(
             ))
         })?;
         pane.set("content", content)?;
+    }
+
+    {
+        // The cheap half of reading the history, as `revision` is of reading the screen: a
+        // number, with no line built to answer it.
+        let terminals = terminals.clone();
+        let history = lua.create_function(move |_, pane: u32| {
+            Ok(match terminals.history_len(PaneId::from(pane)) {
+                Some(len) => Value::Integer(len as i64),
+                None => Value::Nil,
+            })
+        })?;
+        pane.set("history", history)?;
+    }
+
+    {
+        // The lines above the screen. `from` is a line number in the pane's own history,
+        // where 0 is the oldest line it still holds, and `lines` bounds the read the way
+        // `content`'s does. Reading moves the terminal's position in its scrollback and puts
+        // it back before answering, so nothing a person is looking at moves.
+        let scrollback = lua.create_function(move |lua, (pane, opts): (u32, Option<Table>)| {
+            let (from, lines) = match opts {
+                Some(opts) => (
+                    opts.get::<Option<i64>>("from")?,
+                    opts.get::<Option<i64>>("lines")?,
+                ),
+                None => (None, None),
+            };
+            let from = count("scrollback", "from", from)?.unwrap_or(0);
+            // No count is the rest of the history, as no `lines` is the whole screen.
+            let lines = count("scrollback", "lines count", lines)?.unwrap_or(usize::MAX);
+            let Some((lines, revision)) = terminals.history(PaneId::from(pane), from, lines) else {
+                return Ok((Value::Nil, Value::Nil));
+            };
+            Ok((
+                Value::Table(lua.create_sequence_from(lines)?),
+                Value::Integer(revision as i64),
+            ))
+        })?;
+        pane.set("scrollback", scrollback)?;
     }
 
     {

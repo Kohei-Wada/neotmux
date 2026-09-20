@@ -12,7 +12,7 @@
 ///
 /// Trailing spaces are cut, so an untouched row is the empty string: the blank rest of a line
 /// is the terminal's, not something the child said.
-fn row(screen: &vt100::Screen, row: u16, cols: u16) -> String {
+pub(crate) fn row(screen: &vt100::Screen, row: u16, cols: u16) -> String {
     let mut out = String::new();
     let mut col = 0;
     while col < cols {
@@ -41,8 +41,8 @@ fn row(screen: &vt100::Screen, row: u16, cols: u16) -> String {
 /// The visible screen as lines, top to bottom, with no escape sequences in them.
 ///
 /// `last` is how many rows from the bottom to take, and it bounds the work rather than the
-/// answer: the rows above it are never built. `None` is the whole screen. Scrollback is not
-/// reachable from here — what is visible is what a pane is showing.
+/// answer: the rows above it are never built. `None` is the whole screen. What is above the
+/// screen is [`crate::scrollback`]'s question, not this one.
 pub fn visible(screen: &vt100::Screen, last: Option<usize>) -> Vec<String> {
     let (rows, cols) = screen.size();
     let first = match last {
@@ -127,8 +127,8 @@ mod tests {
         assert!(lines(2, 8, b"one\r\ntwo", Some(0)).is_empty());
     }
 
-    /// Output that scrolled off the top is gone from the visible screen; reaching it is a
-    /// scrollback API, which this is not.
+    /// Output that scrolled off the top is gone from the visible screen; reaching it is
+    /// `crate::scrollback`'s job, not this one's.
     #[test]
     fn what_scrolled_off_the_top_is_not_in_the_lines() {
         let lines = lines(2, 8, b"one\r\ntwo\r\nthree\r\n", None);
