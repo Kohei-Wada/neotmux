@@ -15,4 +15,5 @@ repository.workspace = true
 neotmux-core.workspace = true
 anyhow.workspace = true
 portable-pty.workspace = true
+unicode-width.workspace = true
 vt100.workspace = true

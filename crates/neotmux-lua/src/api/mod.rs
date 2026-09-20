@@ -273,6 +273,17 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
     }
 
     {
+        // The renderer's own rule, out of `neotmux-term`, so a plugin's columns and the
+        // renderer's columns cannot disagree: `pane.content` collapses a wide character to
+        // one entry at the column it starts in, and everything that takes a column — a
+        // tint, a rect, a draw — counts cells. `#line` counts neither.
+        let width = lua.create_function(move |_, text: String| {
+            Ok(neotmux_term::width::of_str(&text) as i64)
+        })?;
+        neotmux.set("width", width)?;
+    }
+
+    {
         let sources = sources.clone();
         let ops = ops.clone();
         let quit = lua.create_function(move |lua, ()| {

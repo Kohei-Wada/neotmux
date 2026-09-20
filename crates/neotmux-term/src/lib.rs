@@ -5,3 +5,4 @@ pub mod scrollback;
 pub mod state;
 pub mod terminals;
 pub mod wakeup;
+pub mod width;

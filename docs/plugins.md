@@ -469,8 +469,25 @@ neotmux.opt.tick_budget_ms = 8     -- per source per frame; 0 turns the budget o
 neotmux.opt.tick_overrun_limit = 5 -- consecutive overruns before the tick is dropped; >= 1
 neotmux.opt.pane_gutter = 0        -- cells left between panes, for whoever draws there; <= 4
 neotmux.resubscribe(name)          -- give a dropped source its tick back; returns handles
+neotmux.width(text)                -- how many columns `text` takes on a pane's grid
 neotmux.home                       -- `$HOME` as the host read it, or nil; read-only
 ```
+
+`neotmux.width` is the one measurement everything that takes a column agrees on. `#text` is
+bytes and `utf8.len(text)` is characters, and neither is a column: a wide character is one
+entry in a `pane.content` line and **two** cells on the grid, so `#line:sub(1, n)` is not
+column `n` on any line that has one in it, and a tint computed that way drifts right by one
+cell per wide character before it.
+
+```lua
+local line = neotmux.pane.content(id)[1]
+ctx:tint{ pane = id, x = 0, y = 0, w = neotmux.width(line), h = 1, bg = 4 }
+```
+
+It is the renderer's own rule, read out of the same code the grid is built with, so the two
+cannot disagree. A combining mark adds nothing, because it is drawn into the cell before it.
+A control character adds nothing either, because it is never drawn — a tab moves the cursor
+rather than filling cells, and no tab ever reaches a `pane.content` line for that reason.
 
 `neotmux.home` is a fact, not an option: it sits beside `pane.info`'s facts rather than under
 `opt`, because nothing sets it. The VM has no `os.getenv` — reading the process environment is
