@@ -1,7 +1,6 @@
-use crate::proto::geom::Size;
+use crate::geom::Size;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-#[non_exhaustive]
 pub enum Color {
     #[default]
     Default,

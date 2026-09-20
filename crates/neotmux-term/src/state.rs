@@ -1,4 +1,4 @@
-use neotmux_core::proto::{Color, GridSnapshot, Size};
+use neotmux_proto::{Color, GridSnapshot, Size};
 
 use crate::lines::Trailing;
 use crate::read::History;

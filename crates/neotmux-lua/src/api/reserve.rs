@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use mlua::{Function, Lua, Table, Value};
 
-use neotmux_core::proto::Edge;
+use neotmux_proto::Edge;
 
 use crate::reserve::{ReservationId, Reservations, max_reserved};
 use crate::source::{self, Sources};

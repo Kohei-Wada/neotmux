@@ -1,8 +1,8 @@
 use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
-use neotmux_core::proto::Size;
 use neotmux_lua::LuaSubsystem;
+use neotmux_proto::Size;
 use neotmux_term::state::clamp_to_min_grid;
 use neotmux_term::wakeup::{Wakeup, wakeup};
 use ratatui::DefaultTerminal;

@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use mlua::{Lua, Table, Value};
 
-use neotmux_core::proto::{Dir, PaneId, SplitDir};
+use neotmux_proto::{Dir, PaneId, SplitDir};
 use neotmux_term::lines::Trailing;
 use neotmux_term::read::{Text, Want};
 use neotmux_term::terminals::PaneTerminals;

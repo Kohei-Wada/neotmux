@@ -5,7 +5,7 @@
 //! nowhere else in this module, so that a Lua layout callback can later stand in for that
 //! one function instead of replacing the tree.
 
-use crate::proto::{Dir, PaneId, Rect, Size, SplitDir};
+use neotmux_proto::{Dir, PaneId, Rect, Size, SplitDir};
 use std::error::Error;
 use std::fmt;
 

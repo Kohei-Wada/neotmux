@@ -143,7 +143,7 @@ impl Queries {
 
 #[cfg(test)]
 mod tests {
-    use neotmux_core::proto::Size;
+    use neotmux_proto::Size;
 
     use super::*;
 
@@ -298,7 +298,7 @@ mod tests {
     fn the_output_a_query_is_embedded_in_still_reaches_the_terminal() {
         let (mut queries, mut state) = pane();
         queries.feed(b"ab\x1b[ccd", &mut state);
-        let mut grid = neotmux_core::proto::GridSnapshot::default();
+        let mut grid = neotmux_proto::GridSnapshot::default();
         state.snapshot_into(&mut grid);
         let row: String = (0..4)
             .map(|col| grid.cell(0, col).expect("in bounds").text.as_str())

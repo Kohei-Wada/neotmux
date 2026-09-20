@@ -2,10 +2,10 @@
 
 use std::fs;
 
-use neotmux_core::proto::{GridSnapshot, PaneId, Size};
 use neotmux_lua::LuaSubsystem;
 use neotmux_lua::ops::Op;
 use neotmux_lua::runtime::Layers;
+use neotmux_proto::{GridSnapshot, PaneId, Size};
 
 const SIZE: Size = Size { rows: 2, cols: 8 };
 

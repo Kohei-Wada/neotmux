@@ -1,10 +1,9 @@
-use neotmux_core::proto::{Color as PColor, DrawCmd, PaneId, Rect as PRect};
+use neotmux_proto::{Color as PColor, DrawCmd, PaneId, PaneRects, Rect as PRect};
 use ratatui::Frame;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 
 use crate::draw::color;
-use neotmux::panes::PaneRects;
 
 #[derive(Clone, Copy)]
 struct Colors {
@@ -214,7 +213,7 @@ pub fn apply(frame: &mut Frame, area: Rect, cmds: &[DrawCmd], panes: &PaneRects)
 
 #[cfg(test)]
 mod tests {
-    use neotmux_core::proto::Color;
+    use neotmux_proto::Color;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::style::Color as RColor;

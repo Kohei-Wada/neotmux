@@ -1,7 +1,4 @@
-use neotmux_core::proto::{DrawCmd, GridSnapshot, PaneId, Rect as PRect, Size};
-use neotmux_lua::ops::Level;
-
-use crate::panes::PaneRects;
+use neotmux_proto::{DrawCmd, GridSnapshot, Level, PaneId, PaneRects, Rect as PRect, Size};
 
 /// One pane's place in a frame, and the copy of its screen to put there.
 pub struct PaneFrame<'a> {

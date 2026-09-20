@@ -3,7 +3,7 @@ use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
-use neotmux_lua::ops::Level;
+use neotmux_proto::Level;
 
 static LOG_FILE: OnceLock<Mutex<fs::File>> = OnceLock::new();
 

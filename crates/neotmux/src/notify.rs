@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::io::Write;
 use std::time::{Duration, Instant};
 
-use neotmux_lua::ops::Level;
+use neotmux_proto::Level;
 
 use crate::frame::Notice;
 use crate::logging;

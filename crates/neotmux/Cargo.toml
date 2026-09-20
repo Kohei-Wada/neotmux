@@ -12,6 +12,7 @@ categories.workspace = true
 repository.workspace = true
 
 [dependencies]
+neotmux-proto.workspace = true
 neotmux-core.workspace = true
 neotmux-lua.workspace = true
 neotmux-term.workspace = true

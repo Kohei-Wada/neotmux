@@ -4,7 +4,7 @@
 
 use std::fs;
 
-use neotmux_core::proto::PaneInfo;
+use neotmux_proto::PaneInfo;
 
 /// What `/proc` says about one process. Never fails: the process can exit between the caller
 /// deciding to ask and this reading the file, and a status line must not start raising

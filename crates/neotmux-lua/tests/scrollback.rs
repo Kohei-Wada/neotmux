@@ -2,10 +2,10 @@
 
 use std::fs;
 
-use neotmux_core::proto::{PaneId, Size};
 use neotmux_lua::LuaSubsystem;
 use neotmux_lua::ops::Op;
 use neotmux_lua::runtime::Layers;
+use neotmux_proto::{PaneId, Size};
 
 /// Two rows, so the third line a pane prints is already history.
 const SIZE: Size = Size { rows: 2, cols: 8 };

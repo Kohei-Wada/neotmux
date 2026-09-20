@@ -4,10 +4,10 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use neotmux_core::proto::{Epoch, PaneId, Rect, Size, WindowId};
 use neotmux_lua::ops::Op;
 use neotmux_lua::runtime::Layers;
 use neotmux_lua::{Geometry, LuaSubsystem, Window};
+use neotmux_proto::{Epoch, PaneId, Rect, Size, WindowId};
 
 const SIZE: Size = Size { rows: 4, cols: 40 };
 const PROMPT: &[u8] = b"Do you want to proceed? [y/N]";

@@ -1,10 +1,10 @@
 use std::fs;
 
-use neotmux_core::proto::{DrawCmd, Epoch, PaneId, Rect, Size};
-use neotmux_lua::ops::{Level, Op};
+use neotmux_lua::ops::Op;
 use neotmux_lua::registry::KindTag;
 use neotmux_lua::runtime::Layers;
 use neotmux_lua::{Geometry, LuaSubsystem};
+use neotmux_proto::{DrawCmd, Epoch, Level, PaneId, Rect, Size};
 
 fn built(files: &[(&str, &str)]) -> (tempfile::TempDir, LuaSubsystem) {
     let dir = tempfile::tempdir().unwrap();

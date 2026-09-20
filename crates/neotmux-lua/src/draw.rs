@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
-use neotmux_core::proto::{DrawCmd, Epoch};
+use neotmux_proto::{DrawCmd, Epoch};
 
 use crate::source::SourceId;
 
@@ -81,7 +81,7 @@ impl Buffers {
 
 #[cfg(test)]
 mod tests {
-    use neotmux_core::proto::{Color, DrawCmd, Epoch, Size};
+    use neotmux_proto::{Color, DrawCmd, Epoch, Size};
 
     use super::*;
     use crate::source::Sources;

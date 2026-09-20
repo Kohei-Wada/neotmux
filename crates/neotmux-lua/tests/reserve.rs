@@ -3,9 +3,9 @@
 
 use std::fs;
 
-use neotmux_core::proto::{DrawCmd, Epoch, PaneId, Rect, Reserved, Size};
 use neotmux_lua::runtime::Layers;
 use neotmux_lua::{Geometry, LuaSubsystem};
+use neotmux_proto::{DrawCmd, Epoch, PaneId, Rect, Reserved, Size};
 
 const SURFACE: Size = Size { rows: 24, cols: 80 };
 

@@ -1,6 +1,6 @@
 use mlua::{Lua, LuaString, Table};
 
-use neotmux_core::proto::{PaneId, Size, WindowId};
+use neotmux_proto::{PaneId, Size, WindowId};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {

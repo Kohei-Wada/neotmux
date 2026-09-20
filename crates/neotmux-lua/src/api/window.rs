@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use mlua::{Lua, Table, Value};
 
-use neotmux_core::proto::WindowId;
+use neotmux_proto::WindowId;
 
 use crate::geometry::Geometry;
 use crate::ops::{Op, OpBuffer};

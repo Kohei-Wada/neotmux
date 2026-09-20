@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use neotmux_core::proto::{GridSnapshot, Size};
+use neotmux_proto::{GridSnapshot, Size};
 use neotmux_term::pty::{PtyEvent, PtyHandle};
 use neotmux_term::state::TermState;
 use neotmux_term::wakeup::wakeup;
