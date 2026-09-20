@@ -172,27 +172,7 @@ impl Session {
                 Ready::Input | Ready::Idle => {}
             }
             while event::poll(Duration::ZERO).context("poll input")? {
-                match event::read().context("read input")? {
-                    Event::Key(key) => {
-                        let outcome = match key_spec(&key) {
-                            Some(spec) => lua.dispatch_key(&spec),
-                            None => KeyOutcome::Fallthrough,
-                        };
-                        // A key nobody consumed belongs to the focused pane and to no other.
-                        // With no pane focused there is no shell left to type into.
-                        if outcome == KeyOutcome::Fallthrough
-                            && let Some(focus) = self.layout.focus()
-                            && let Some(bytes) = encode_key(key)
-                        {
-                            self.shells.write(focus, &bytes)?;
-                        }
-                    }
-                    Event::Resize(cols, rows) => {
-                        self.size = clamp_to_min_grid(Size { rows, cols });
-                        self.apply_geometry(lua)?;
-                    }
-                    _ => {}
-                }
+                self.handle_event(lua, event::read().context("read input")?)?;
                 if Instant::now() >= frame_end {
                     return Ok(None);
                 }
@@ -201,6 +181,31 @@ impl Session {
                 return Ok(None);
             }
         }
+    }
+
+    fn handle_event(&mut self, lua: &LuaSubsystem, event: Event) -> anyhow::Result<()> {
+        match event {
+            Event::Key(key) => {
+                let outcome = match key_spec(&key) {
+                    Some(spec) => lua.dispatch_key(&spec),
+                    None => KeyOutcome::Fallthrough,
+                };
+                // A key nobody consumed belongs to the focused pane and to no other. With no
+                // pane focused there is no shell left to type into.
+                if outcome == KeyOutcome::Fallthrough
+                    && let Some(focus) = self.layout.focus()
+                    && let Some(bytes) = encode_key(key)
+                {
+                    self.shells.write(focus, &bytes)?;
+                }
+            }
+            Event::Resize(cols, rows) => {
+                self.size = clamp_to_min_grid(Size { rows, cols });
+                self.apply_geometry(lua)?;
+            }
+            _ => {}
+        }
+        Ok(())
     }
 
     /// Every op a source raised this frame, applied in the order they were pushed (§4.6).
