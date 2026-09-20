@@ -12,7 +12,18 @@
 --
 -- Both are read inside the callback rather than captured at load time, which is what makes
 -- such an assignment take effect on the next key instead of never.
+--
+--   v  -        split the focused pane, side by side or stacked
+--   o           the next pane in layout order
+--   h j k l     the pane to the left, below, above, to the right
+--   r           resize mode: arrows or h/j/k/l move the boundary, anything else leaves
+--   c  n        a new window, and the next one
+local nav = require("neotmux.nav")
+
 local armed = false
+-- The second mode, kept the same way the first one is: a flag in this file. The host has no
+-- idea either of them exists.
+local resizing = false
 
 -- "The next pane" out of what the ABI offers: `list()` is in layout order and `current()`
 -- says where we are, so the successor is an index step with a wrap.
@@ -39,10 +50,38 @@ local function next_window()
   end
 end
 
+-- A direction key, in both spellings a hand reaches for. `h/j/k/l` move the focus; the same
+-- four, and the arrows, move a boundary once `r` has been pressed.
+local DIRECTIONS = {
+  h = "left",
+  j = "down",
+  k = "up",
+  l = "right",
+  Left = "left",
+  Down = "down",
+  Up = "up",
+  Right = "right",
+}
+
+-- The pane that way, or nothing at all: at the edge of the window `h` does nothing rather
+-- than wrapping round to the far side. A wrap is a jump across the whole window, and the
+-- reason to press `h` is that you are looking at what is to your left; `o` is still there
+-- for walking every pane in order.
+local function focus_toward(dir)
+  return function()
+    local id = nav.toward(dir)
+    if id then
+      neotmux.pane.focus(id)
+    end
+  end
+end
+
 -- `split('vertical')` divides the width, so `v` puts the two panes side by side; `-` divides
 -- the height, which is what the glyph looks like.
 local M = {
   key = "C-b",
+  -- How many cells one press of an arrow moves the boundary.
+  resize_step = 1,
   commands = {
     ["v"] = function()
       neotmux.pane.split("vertical")
@@ -51,6 +90,13 @@ local M = {
       neotmux.pane.split("horizontal")
     end,
     ["o"] = focus_next,
+    ["h"] = focus_toward("left"),
+    ["j"] = focus_toward("down"),
+    ["k"] = focus_toward("up"),
+    ["l"] = focus_toward("right"),
+    ["r"] = function()
+      resizing = true
+    end,
     -- `create()` answers with the id before the window exists, so the two ops go out in one
     -- tick and are applied in that order: opened, then shown.
     ["c"] = function()
@@ -61,6 +107,18 @@ local M = {
 }
 
 neotmux.on_key(function(key)
+  if resizing then
+    local dir = DIRECTIONS[key]
+    if dir then
+      neotmux.pane.resize(dir, M.resize_step)
+    else
+      -- One rule, so nothing can strand you in the mode: a key that is not an adjustment
+      -- leaves it and does nothing else. Esc and Enter are simply the two that mean nothing
+      -- else anywhere.
+      resizing = false
+    end
+    return true
+  end
   if armed then
     armed = false
     local command = M.commands[key]

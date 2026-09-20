@@ -1,9 +1,10 @@
 use std::fs;
+use std::path::{Path, PathBuf};
 
 use neotmux_core::proto::{Dir, Epoch, PaneId, Rect, Size};
 use neotmux_lua::ops::Op;
 use neotmux_lua::runtime::Layers;
-use neotmux_lua::{Geometry, LuaSubsystem};
+use neotmux_lua::{Geometry, KeyOutcome, LuaSubsystem};
 
 fn built(files: &[(&str, &str)]) -> (tempfile::TempDir, LuaSubsystem) {
     let dir = tempfile::tempdir().unwrap();
@@ -165,4 +166,119 @@ fn a_malformed_resize_raises_and_queues_nothing() {
         lines[2].contains("positive number of cells, got -2"),
         "{lines:?}"
     );
+}
+
+/// The runtime layer neotmux ships, read straight out of the source tree: the shipped prefix
+/// is the plugin under test here, not a fixture standing in for it.
+fn shipped_layer() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime")
+}
+
+fn with_prefix() -> (tempfile::TempDir, LuaSubsystem) {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("init.lua"), "require('plugin.prefix')").unwrap();
+    let sub = LuaSubsystem::build(Layers::from_paths(vec![
+        dir.path().to_path_buf(),
+        shipped_layer(),
+    ]))
+    .unwrap();
+    assert!(sub.run_init().is_empty());
+    (dir, sub)
+}
+
+fn ops(sub: &LuaSubsystem) -> Vec<Op> {
+    sub.drain_ops().into_iter().map(|(_, op)| op).collect()
+}
+
+/// A tall pane on the left, and two of unequal height stacked on the right. Pressing `l`
+/// from the left one has two candidates touching its edge, and the answer is the one facing
+/// most of it — not the first in the list, which is the four-row sliver at the top.
+#[test]
+fn directional_focus_picks_the_pane_facing_most_of_the_edge() {
+    let (_d, sub) = with_prefix();
+    publish(
+        &sub,
+        vec![
+            (PaneId::from(1), Rect::new(0, 0, 40, 24)),
+            (PaneId::from(2), Rect::new(41, 0, 39, 4)),
+            (PaneId::from(3), Rect::new(41, 5, 39, 19)),
+        ],
+        PaneId::from(1),
+    );
+
+    sub.dispatch_key("C-b");
+    sub.dispatch_key("l");
+    assert_eq!(
+        ops(&sub),
+        vec![Op::PaneFocus {
+            pane: PaneId::from(3)
+        }],
+        "the pane sharing 19 rows with the focused one, not the 4-row one listed first"
+    );
+}
+
+/// The window has an edge and the focus stops at it: no wrapping round to the far side.
+#[test]
+fn there_is_nothing_past_the_edge_of_the_window() {
+    let (_d, sub) = with_prefix();
+    side_by_side(&sub);
+    // Pane 2 is the right-hand one: nothing is to its right, above it or below it.
+    for key in ["l", "j", "k"] {
+        sub.dispatch_key("C-b");
+        assert_eq!(sub.dispatch_key(key), KeyOutcome::Consumed);
+        assert!(
+            ops(&sub).is_empty(),
+            "{key} from the right-hand pane focused something"
+        );
+    }
+    sub.dispatch_key("C-b");
+    sub.dispatch_key("h");
+    assert_eq!(
+        ops(&sub),
+        vec![Op::PaneFocus {
+            pane: PaneId::from(1)
+        }]
+    );
+}
+
+/// Resize mode is a flag in the plugin and an `on_key`, like the prefix itself: the host
+/// learns nothing about modes. Every key in it is swallowed, and the first that is not an
+/// adjustment leaves.
+#[test]
+fn resize_mode_adjusts_until_a_key_that_is_not_an_adjustment() {
+    let (_d, sub) = with_prefix();
+    side_by_side(&sub);
+
+    sub.dispatch_key("C-b");
+    sub.dispatch_key("r");
+    assert!(ops(&sub).is_empty(), "entering the mode is not an op");
+
+    for key in ["Left", "h", "Up"] {
+        assert_eq!(sub.dispatch_key(key), KeyOutcome::Consumed);
+    }
+    assert_eq!(
+        ops(&sub),
+        vec![
+            Op::PaneResize {
+                dir: Dir::Left,
+                cells: 1
+            },
+            Op::PaneResize {
+                dir: Dir::Left,
+                cells: 1
+            },
+            Op::PaneResize {
+                dir: Dir::Up,
+                cells: 1
+            },
+        ]
+    );
+
+    assert_eq!(sub.dispatch_key("Esc"), KeyOutcome::Consumed);
+    assert_eq!(
+        sub.dispatch_key("x"),
+        KeyOutcome::Fallthrough,
+        "the mode outlived the key that left it"
+    );
+    assert!(ops(&sub).is_empty());
 }

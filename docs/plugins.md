@@ -434,14 +434,25 @@ neotmux ships three plugins in the runtime layer an install puts on the search p
 | plugin | what it does |
 |---|---|
 | `status` | the default status line, on one reserved bottom row |
-| `prefix` | a `C-b` prefix over `v`, `-`, `o`, `c` and `n` |
+| `prefix` | a `C-b` prefix over `v`, `-`, `o`, `h/j/k/l`, `r`, `c` and `n` |
 | `borders` | a rule along every boundary between two panes |
 
 None of them is a host feature — all three are ordinary files making ordinary API calls, and
 the prefix is the only reason a fresh install can make a second pane at all. `C-b v` splits
 vertically (the panes end up side by side, because `pane.split('vertical')` divides the
 width), `C-b -` splits horizontally (one above the other), `C-b o` focuses the next pane,
-`C-b c` opens a window and switches to it, and `C-b n` walks to the next window.
+`C-b h/j/k/l` focuses the pane to the left, below, above or to the right, `C-b r` enters
+resize mode, `C-b c` opens a window and switches to it, and `C-b n` walks to the next window.
+
+`h/j/k/l` are geometry, not list order: the pane you get is the one whose edge faces most of
+yours on that side, which is what you would point at however deeply the splits are nested.
+There is no wrapping — at the edge of the window the key does nothing, and `o` is still there
+for walking every pane in turn.
+
+Resize mode is a flag in the plugin and an `on_key`, like the prefix itself; the host has no
+idea it exists. In it, the arrows and `h/j/k/l` move the boundary one cell at a time
+(`require('plugin.prefix').resize_step` sets how far), and the first key that is not one of
+them leaves — `Esc` and `Enter` being the two that mean nothing else.
 
 ### Turning one off
 
