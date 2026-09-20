@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use neotmux_core::proto::{PaneId, PaneInfo};
+use neotmux_proto::{PaneId, PaneInfo};
 
 /// What each pane is running, as last sampled by the host — not part of `Geometry` because it
 /// is published on its own cadence. The tree changes when a pane opens, closes or takes

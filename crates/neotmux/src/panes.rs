@@ -1,12 +1,6 @@
-use std::collections::HashMap;
-
 use neotmux_core::layout::{ResizeRefused, SplitRefused, Tree, assign};
-use neotmux_core::proto::{Dir, Edge, Epoch, PaneId, Rect as PRect, Reserved, Size, SplitDir};
+use neotmux_proto::{Dir, Edge, Epoch, PaneId, PaneRects, Rect as PRect, Reserved, Size, SplitDir};
 use neotmux_term::state::MIN_GRID;
-
-/// Where each pane currently sits, in surface-local coordinates (the same
-/// space `LuaSubsystem::begin_frame` was given).
-pub type PaneRects = HashMap<PaneId, PRect>;
 
 /// Everything the host knows about how panes are arranged: the tree (§6), the surface it is
 /// assigned onto, and which pane has focus. Nothing outside this file decides how many panes

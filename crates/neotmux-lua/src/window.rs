@@ -1,6 +1,6 @@
 use std::cell::Cell;
 
-use neotmux_core::proto::WindowId;
+use neotmux_proto::WindowId;
 
 /// Where window ids come from.
 ///

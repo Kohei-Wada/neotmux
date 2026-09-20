@@ -1,15 +1,8 @@
 use std::cell::RefCell;
 
-use neotmux_core::proto::{Dir, PaneId, SplitDir, WindowId};
+use neotmux_proto::{Dir, Level, PaneId, SplitDir, WindowId};
 
 use crate::source::SourceId;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Level {
-    Info,
-    Warn,
-    Error,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Op {

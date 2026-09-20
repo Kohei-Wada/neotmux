@@ -755,6 +755,7 @@ dependencies = [
  "anyhow",
  "neotmux-core",
  "neotmux-lua",
+ "neotmux-proto",
  "neotmux-term",
  "nix 0.28.0",
  "portable-pty",
@@ -767,6 +768,9 @@ dependencies = [
 [[package]]
 name = "neotmux-core"
 version = "0.1.0"
+dependencies = [
+ "neotmux-proto",
+]
 
 [[package]]
 name = "neotmux-lua"
@@ -775,9 +779,14 @@ dependencies = [
  "anyhow",
  "mlua",
  "neotmux-core",
+ "neotmux-proto",
  "neotmux-term",
  "tempfile",
 ]
+
+[[package]]
+name = "neotmux-proto"
+version = "0.1.0"
 
 [[package]]
 name = "neotmux-term"
@@ -786,6 +795,7 @@ dependencies = [
  "anyhow",
  "base64",
  "neotmux-core",
+ "neotmux-proto",
  "portable-pty",
  "unicode-width",
  "vt100",

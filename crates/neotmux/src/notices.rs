@@ -1,4 +1,4 @@
-use neotmux_lua::ops::Level;
+use neotmux_proto::Level;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::Color;

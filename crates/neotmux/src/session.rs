@@ -1,9 +1,9 @@
 use std::time::Instant;
 
 use anyhow::Context as _;
-use neotmux_core::proto::{DrawCmd, PaneId, Rect as PRect, Reserved, Size, WindowId};
-use neotmux_lua::ops::{Level, Op};
+use neotmux_lua::ops::Op;
 use neotmux_lua::{Event as LuaEvent, Geometry, KeyOutcome, LuaSubsystem, Window as LuaWindow};
+use neotmux_proto::{DrawCmd, Level, PaneId, Rect as PRect, Reserved, Size, WindowId};
 use neotmux_term::pty::PtyHandle;
 use neotmux_term::state::clamp_to_min_grid;
 use neotmux_term::wakeup::Waker;
@@ -244,7 +244,7 @@ impl Session {
         &mut self,
         lua: &LuaSubsystem,
         tag: &str,
-        dir: neotmux_core::proto::SplitDir,
+        dir: neotmux_proto::SplitDir,
     ) -> anyhow::Result<()> {
         let new = self.windows.take_pane_id();
         if let Err(refused) = self.windows.current_mut().split(dir, new) {
@@ -351,7 +351,7 @@ impl Session {
         &mut self,
         lua: &LuaSubsystem,
         tag: &str,
-        dir: neotmux_core::proto::Dir,
+        dir: neotmux_proto::Dir,
         cells: u16,
     ) -> anyhow::Result<()> {
         if let Err(refused) = self.windows.current_mut().resize(dir, cells) {

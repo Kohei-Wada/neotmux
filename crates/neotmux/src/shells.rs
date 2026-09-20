@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use anyhow::Context as _;
-use neotmux_core::proto::{GridSnapshot, PaneId, Rect as PRect, Size};
+use neotmux_proto::{GridSnapshot, PaneId, Rect as PRect, Size};
 use neotmux_term::pty::{CommandBuilder, PtyEvent, PtyHandle};
 use neotmux_term::terminals::PaneTerminals;
 use neotmux_term::wakeup::Waker;
@@ -208,7 +208,7 @@ impl Drop for Shells {
 mod tests {
     use std::time::{Duration, Instant};
 
-    use neotmux_core::proto::{Reserved, SplitDir};
+    use neotmux_proto::{Reserved, SplitDir};
     use nix::sys::wait::{WaitPidFlag, WaitStatus, waitpid};
     use nix::unistd::Pid;
 

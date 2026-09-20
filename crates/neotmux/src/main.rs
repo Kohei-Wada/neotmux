@@ -10,8 +10,9 @@ use std::path::{Path, PathBuf};
 
 use neotmux::{logging, notify};
 use neotmux_lua::LuaSubsystem;
-use neotmux_lua::ops::{Level, Op};
+use neotmux_lua::ops::Op;
 use neotmux_lua::runtime::Layers;
+use neotmux_proto::Level;
 
 struct LogFlag {
     path: Option<PathBuf>,

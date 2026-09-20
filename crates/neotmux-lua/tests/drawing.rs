@@ -1,8 +1,8 @@
 use std::fs;
 
-use neotmux_core::proto::{Color, DrawCmd, Epoch, PaneId, Rect, Size};
 use neotmux_lua::runtime::Layers;
 use neotmux_lua::{Geometry, KeyOutcome, LuaSubsystem};
+use neotmux_proto::{Color, DrawCmd, Epoch, PaneId, Rect, Size};
 
 fn layer(files: &[(&str, &str)]) -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();

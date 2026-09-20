@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
-use neotmux_core::proto::{Axis, Edge, Rect, Reserved, Size};
+use neotmux_proto::{Axis, Edge, Rect, Reserved, Size};
 
 use crate::source::SourceId;
 

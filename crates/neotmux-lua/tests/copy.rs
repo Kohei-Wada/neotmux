@@ -5,10 +5,10 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use neotmux_core::proto::{Color, DrawCmd, Epoch, PaneId, Rect, Size};
 use neotmux_lua::ops::Op;
 use neotmux_lua::runtime::Layers;
 use neotmux_lua::{Event, Geometry, KeyOutcome, LuaSubsystem};
+use neotmux_proto::{Color, DrawCmd, Epoch, PaneId, Rect, Size};
 
 /// Six rows, so ten printed lines leave four in the history.
 const SIZE: Size = Size { rows: 6, cols: 20 };

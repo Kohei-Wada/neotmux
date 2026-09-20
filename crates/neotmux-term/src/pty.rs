@@ -3,7 +3,7 @@ use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 use std::thread;
 
 use anyhow::Context as _;
-use neotmux_core::proto::Size;
+use neotmux_proto::Size;
 use portable_pty::{Child, ExitStatus, MasterPty, PtySize, native_pty_system};
 
 use crate::wakeup::Waker;

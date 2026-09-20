@@ -7,9 +7,9 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use neotmux_core::proto::{Color, DrawCmd, Epoch, PaneId, PaneInfo, Rect, Size, WindowId};
 use neotmux_lua::runtime::Layers;
 use neotmux_lua::{Geometry, LuaSubsystem, Window};
+use neotmux_proto::{Color, DrawCmd, Epoch, PaneId, PaneInfo, Rect, Size, WindowId};
 
 const COLS: u16 = 80;
 const SURFACE: Size = Size {

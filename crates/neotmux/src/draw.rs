@@ -1,5 +1,5 @@
 use anyhow::Context as _;
-use neotmux_core::proto::{Color as PColor, GridSnapshot};
+use neotmux_proto::{Color as PColor, GridSnapshot};
 use ratatui::layout::{Position, Rect};
 use ratatui::style::{Color, Modifier};
 use ratatui::{DefaultTerminal, Frame as TuiFrame};
@@ -100,7 +100,7 @@ pub fn draw_grid(frame: &mut TuiFrame, area: Rect, grid: &GridSnapshot) {
 
 #[cfg(test)]
 mod tests {
-    use neotmux_core::proto::{Color as PColor, GridSnapshot, Size};
+    use neotmux_proto::{Color as PColor, GridSnapshot, Size};
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::layout::{Position, Rect};

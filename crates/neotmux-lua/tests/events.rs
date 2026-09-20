@@ -1,8 +1,8 @@
 use std::fs;
 
-use neotmux_core::proto::{PaneId, Size};
 use neotmux_lua::runtime::Layers;
 use neotmux_lua::{Event, LuaSubsystem};
+use neotmux_proto::{PaneId, Size};
 
 fn built(files: &[(&str, &str)]) -> (tempfile::TempDir, LuaSubsystem) {
     let dir = tempfile::tempdir().unwrap();

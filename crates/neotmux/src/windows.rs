@@ -1,4 +1,4 @@
-use neotmux_core::proto::{PaneId, Rect as PRect, Reserved, Size, WindowId};
+use neotmux_proto::{PaneId, Rect as PRect, Reserved, Size, WindowId};
 
 use crate::panes::PaneLayout;
 
@@ -201,7 +201,7 @@ impl Windows {
 
 #[cfg(test)]
 mod tests {
-    use neotmux_core::proto::SplitDir;
+    use neotmux_proto::SplitDir;
 
     use super::*;
 

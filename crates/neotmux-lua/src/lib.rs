@@ -21,7 +21,7 @@ use std::time::Duration;
 use mlua::chunk::ChunkMode;
 use mlua::{Function, Lua, Value};
 
-use neotmux_core::proto::{DrawCmd, Epoch, PaneId, PaneInfo, Reserved, Size, WindowId};
+use neotmux_proto::{DrawCmd, Epoch, Level, PaneId, PaneInfo, Reserved, Size, WindowId};
 use neotmux_term::terminals::PaneTerminals;
 
 pub use api::Opts;
@@ -32,7 +32,7 @@ use api::ctx::Ctx;
 use budget::{Budget, Outcome};
 use draw::Buffers;
 pub use geometry::{Geometry, Window};
-use ops::{Level, Op, OpBuffer};
+use ops::{Op, OpBuffer};
 use overrun::Overrun;
 use paneinfo::PaneInfos;
 use registry::{Kind, KindTag, RegistrationId, Registry};

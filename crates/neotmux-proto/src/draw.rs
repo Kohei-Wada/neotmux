@@ -1,4 +1,4 @@
-use crate::proto::{Color, PaneId, Size};
+use crate::{Color, PaneId, Size};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
@@ -76,7 +76,7 @@ impl Epoch {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::proto::{PaneId, Size};
+    use crate::{PaneId, Size};
 
     #[test]
     fn a_rect_knows_what_it_contains() {

@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use mlua::{Table, UserData, UserDataMethods, Value};
 
-use neotmux_core::proto::{Color, DrawCmd, PaneId, Rect, Size};
+use neotmux_proto::{Color, DrawCmd, PaneId, Rect, Size};
 
 use crate::api::rect;
 use crate::draw::Buffers;

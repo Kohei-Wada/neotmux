@@ -1,6 +1,6 @@
 use mlua::{Lua, Table};
 
-use neotmux_core::proto::Rect;
+use neotmux_proto::Rect;
 
 /// The one shape a rect takes in Lua. `ctx:pane_rect` and `neotmux.pane.rect` read the same
 /// published geometry, so they answer with the same table and cannot drift apart.

@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
-use neotmux_core::proto::{PaneId, PaneInfo};
+use neotmux_proto::{PaneId, PaneInfo};
 
 /// How stale a pane's facts are allowed to get. A status plugin asks for them every tick, and
 /// answering each ask from `/proc` would be three syscalls per pane per frame — sixty times a
