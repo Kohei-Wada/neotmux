@@ -897,9 +897,10 @@ deliberate act the trust model already permits.
 
 - **M0b** hand-rolled grid behind `neotmux-term`'s boundary — only if `vt100` becomes the
   constraint
-- **M3** server/client split, detach/attach. **Lua stays on the client**: the server holds
-  other people's long-running jobs, so a frozen client should cost one client, not every
-  session. Promote `proto` to a crate here and close §2.1's open question
+- **M3** server/client split, detach/attach. **Done** — see
+  `docs/superpowers/specs/2026-09-21-detach-attach-design.md`. **Lua stays on the client**: the
+  server holds other people's long-running jobs, so a frozen client should cost one client, not
+  every session. Promote `proto` to a crate here and close §2.1's open question
 - **M4** scrollback and copy-mode, exposed to Lua as line access
 - **M5** distribution: single binary, nixpkgs, `neotmux plugin` subcommand, publish `proto`
 

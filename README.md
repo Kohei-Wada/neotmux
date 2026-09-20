@@ -35,9 +35,14 @@ which neotmux is a daily driver. Getting there needs the per-frame instruction b
 pane tree — splits, focus, resize, prefix key — plus `docs/plugins.md` and a default status
 line shipped as a plugin rather than built in.
 
-v0.1 deliberately does **not** include detach/attach. That is v0.2, and it is the largest
-structural change on the roadmap (the server/client split), which is exactly why it should
-happen against an ABI other people have already used instead of one nobody has touched.
+Detach and attach are in. `C-b d` (or `neotmux.detach()`) leaves the session running and
+exits the client; running `neotmux` again finds it and attaches instead of starting a new
+one. `neotmux --kill` ends a session from outside, for the case where a rebuilt client can no
+longer talk to it at all. A re-attach is a plugin restart: the panes, the shells, the layout
+and each pane's scrollback are the server's and survive; a plugin's own state — a copy
+register, a raised mode, a folded sidebar — is the client's and does not, and the plugin
+re-makes it when it loads. Multiple sessions, naming one, listing them, and two clients on one
+session at once are still out.
 
 Copy mode is in, as a plugin: `C-b [` reads back over a pane's scrollback, selects a
 region and yanks it. What is still out is the pane's *own* view moving — the plugin
