@@ -52,7 +52,8 @@ fn ticked(sub: &LuaSubsystem) -> Vec<String> {
 fn a_panes_content_is_what_was_written_to_it_as_lines() {
     let (_dir, sub) = built("report(1)");
     sub.terminals().open(pane(1), SIZE, 0);
-    sub.terminals().feed(pane(1), b"hello\r\n\x1b[1;32mworld\x1b[0m");
+    sub.terminals()
+        .feed(pane(1), b"hello\r\n\x1b[1;32mworld\x1b[0m");
 
     let line = ticked(&sub).remove(0);
     assert!(
@@ -65,7 +66,8 @@ fn a_panes_content_is_what_was_written_to_it_as_lines() {
 fn the_lines_option_reads_the_bottom_of_the_screen_only() {
     let (_dir, sub) = built("report(1, { lines = 2 })");
     sub.terminals().open(pane(1), SIZE, 0);
-    sub.terminals().feed(pane(1), b"one\r\ntwo\r\nthree\r\nfour");
+    sub.terminals()
+        .feed(pane(1), b"one\r\ntwo\r\nthree\r\nfour");
 
     assert!(ticked(&sub).remove(0).starts_with("1 [three|four] rev="));
 }

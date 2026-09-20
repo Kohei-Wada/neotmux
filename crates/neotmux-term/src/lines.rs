@@ -83,7 +83,12 @@ mod tests {
     /// strip SGR first.
     #[test]
     fn no_escape_sequence_survives_into_a_line() {
-        let lines = lines(1, 20, b"\x1b[1;31mred\x1b[0m \x1b[4munderlined\x1b[0m", None);
+        let lines = lines(
+            1,
+            20,
+            b"\x1b[1;31mred\x1b[0m \x1b[4munderlined\x1b[0m",
+            None,
+        );
         assert_eq!(lines, vec!["red underlined"]);
     }
 

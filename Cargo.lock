@@ -776,6 +776,7 @@ dependencies = [
  "anyhow",
  "mlua",
  "neotmux-core",
+ "neotmux-term",
  "tempfile",
 ]
 
