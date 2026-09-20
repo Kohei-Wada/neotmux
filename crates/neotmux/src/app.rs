@@ -4,7 +4,7 @@ use anyhow::Context as _;
 use crossterm::event::{self, Event};
 use neotmux_core::proto::{DrawCmd, PaneId, Rect as PRect, Reserved, Size, WindowId};
 use neotmux_lua::ops::{Level, Op};
-use neotmux_lua::{Event as LuaEvent, Geometry, KeyOutcome, LuaSubsystem};
+use neotmux_lua::{Event as LuaEvent, Geometry, KeyOutcome, LuaSubsystem, Window as LuaWindow};
 use neotmux_term::pty::PtyHandle;
 use neotmux_term::state::clamp_to_min_grid;
 use neotmux_term::wakeup::{Waker, Wakeup, wakeup};
@@ -476,14 +476,20 @@ impl Session {
         lua.republish_geometry(self.geometry());
     }
 
-    /// The session as Lua reads it: the shown window's panes, and every window's id.
+    /// The session as Lua reads it: the shown window's panes and rects, and every window
+    /// with the panes it holds.
     fn geometry(&self) -> Geometry {
         let layout = self.windows.current();
         Geometry {
             size: layout.content,
             panes: layout.panes(),
             focus: layout.focus(),
-            windows: self.windows.ids(),
+            windows: self
+                .windows
+                .panes()
+                .into_iter()
+                .map(|(id, panes)| LuaWindow { id, panes })
+                .collect(),
             window: Some(self.windows.current_id()),
         }
     }

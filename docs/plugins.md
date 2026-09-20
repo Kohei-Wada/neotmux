@@ -302,6 +302,7 @@ the wrong pane.
 
 ```lua
 neotmux.window.list()     -- { id, ... }, in creation order
+neotmux.window.panes(id)  -- { pane, ... }, in layout order, or nil
 neotmux.window.current()  -- id
 neotmux.window.create()   -- the new window's id
 neotmux.window.focus(id)  -- show that one
@@ -321,7 +322,15 @@ pane in another window is not in the list and has no info, even though its shell
 and its output is being read into its own terminal: switching to it shows everything that
 happened while you were away. `pane.content()` is the exception — it answers about any live
 pane, hidden or not, because what a pane you are not looking at is showing is exactly the
-question worth asking. What a hidden window's panes do not get is a size — they keep
+question worth asking.
+
+`window.panes(id)` is how you find those panes in the first place. It answers for any window,
+hidden or not, in layout order — left to right, top to bottom, the order `pane.list()` gives
+for the window being shown, and the order a hidden window will be shown in. A window id
+nothing holds answers `nil`, the way `pane.current()` and `pane.rect()` answer nothing; a
+living window always has at least one pane, so an empty list is not an answer you can get.
+Finding is all it is: there is no call that splits, focuses or resizes a pane in a window
+nobody is looking at. What a hidden window's panes do not get is a size — they keep
 the one they last had, and are resized to the surface on the way back in, so a terminal resize
 costs one relayout rather than one per window.
 

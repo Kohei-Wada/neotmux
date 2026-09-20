@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### A plugin can ask which panes a window has
+
+`neotmux.window.panes(id)` answers with a window's panes in layout order, for any window the
+host owns, hidden or not. Until now nothing mapped a window to its panes: `pane.list()` is the
+shown window's list and `window.list()` is only ids, so a plugin discovered a hidden pane by
+hearing it speak. A pane that had been silent since it opened therefore did not exist as far
+as any plugin was concerned — and a window opened with `window.create()` starts exactly that
+way, since it raises `window_opened` and no `pane_opened`.
+
+The order is the one `pane.list()` gives: left to right, top to bottom. A hidden window keeps
+the rects it was last assigned, so it has a layout too and gets the same answer — the
+arrangement it will be shown in. An id no window has answers `nil`, the way `pane.current()`
+and `pane.rect()` answer nothing; a living window always holds at least one pane, so an empty
+list is not something you can be told.
+
+`pane.list()` is unchanged: it is still the panes of the session in front of the user. And
+finding is all this adds — there is still no way to split, focus or resize a pane in a window
+nobody is looking at.
+
 ### The bar counts panes and windows the way a person does
 
 Split, end the shell in the new pane, split again: the number on the bar used to climb — 2,
