@@ -12,7 +12,8 @@ use neotmux::session::Session;
 use neotmux_lua::KeyOutcome;
 use neotmux_lua::LuaSubsystem;
 use neotmux_lua::runtime::Layers;
-use neotmux_proto::frame::Frame;
+use neotmux_proto::Level;
+use neotmux_proto::frame::{Frame, Notice};
 use neotmux_proto::keys::{Key, KeyCode};
 use neotmux_proto::msg::{Attach, End};
 use neotmux_proto::{DrawCmd, Reserved, Size, WindowId};
@@ -211,5 +212,68 @@ fn a_session_ends_when_its_last_shell_does_and_still_produces_that_frame() {
         ended,
         Some((true, true)),
         "the last shell's exit should end the session with one final frame"
+    );
+}
+
+/// A frame whose notices are whatever the caller says, so that a notice's whole life can be
+/// driven without waiting out the four seconds a real one takes to expire.
+fn frame_showing<'a>(
+    session: &'a mut Session,
+    plugins: &mut Plugins,
+    notices: Vec<Notice>,
+) -> neotmux::session::Pass<'a> {
+    let tick = session.tick().expect("tick");
+    let mut tock = plugins.respond(tick);
+    tock.notices = notices;
+    let mut pass = session.advance(&tock).expect("advance");
+    plugins.catch_up(std::mem::take(&mut pass.steps));
+    pass
+}
+
+/// Frames until the session stops producing them: a shell that has finished starting up has
+/// nothing more to say, and from there a frame means something this test did.
+fn settle(session: &mut Session, plugins: &mut Plugins) {
+    let deadline = Instant::now() + PATIENCE;
+    let mut quiet = 0;
+    while Instant::now() < deadline && quiet < 3 {
+        quiet = match frame_showing(session, plugins, Vec::new()).frame {
+            Some(_) => 0,
+            None => quiet + 1,
+        };
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(quiet >= 3, "the session never went quiet");
+}
+
+#[test]
+fn the_frame_that_takes_an_expired_notice_off_the_screen_is_produced() {
+    let (_dir, _wakeup, mut session, mut plugins) = halves(&[("init.lua", "return {}")]);
+    settle(&mut session, &mut plugins);
+
+    let notice = Notice {
+        level: Level::Info,
+        tag: "fixture".to_string(),
+        text: "noticed".to_string(),
+    };
+    let pass = frame_showing(&mut session, &mut plugins, vec![notice.clone()]);
+    assert_eq!(
+        pass.frame
+            .as_ref()
+            .expect("a frame while the notice is up")
+            .notices,
+        vec![notice]
+    );
+    drop(pass);
+
+    // The notice has expired, so this frame is the only thing that can stop it being drawn:
+    // without it the last picture the client was given still has it in.
+    let pass = frame_showing(&mut session, &mut plugins, Vec::new());
+    let shown = pass
+        .frame
+        .expect("the frame that stops showing an expired notice");
+    assert!(
+        shown.notices.is_empty(),
+        "the notice is still in the frame: {:?}",
+        shown.notices
     );
 }

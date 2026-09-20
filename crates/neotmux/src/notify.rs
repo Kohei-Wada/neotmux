@@ -76,12 +76,6 @@ impl Notifications {
         }
     }
 
-    /// Whether there's anything showing that will need a later frame purely
-    /// to notice it has expired and stop drawing it.
-    pub fn is_empty(&self) -> bool {
-        self.items.is_empty()
-    }
-
     pub fn expire(&mut self, now: Instant) {
         self.items
             .retain(|item| now.duration_since(item.created) < TTL);

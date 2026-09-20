@@ -53,6 +53,7 @@ pub struct Session {
     pane_info: PaneInfoCache,
     dirty: bool,
     last_overlay: Vec<DrawCmd>,
+    last_notices: Vec<Notice>,
     /// What has happened to the session since the client was last told, in order. A batch
     /// with one geometry attached would be a lie: a `pane_opened` handler must see the pane
     /// it is being told about, so the geometry moves between the events exactly as it does
@@ -100,6 +101,7 @@ impl Session {
             pane_info: PaneInfoCache::new(),
             dirty: true,
             last_overlay: Vec::new(),
+            last_notices: Vec::new(),
             steps: Vec::new(),
             wants_pane_output: attach.wants_pane_output,
             ended: false,
@@ -581,11 +583,12 @@ impl Session {
             self.dirty = true;
         }
         self.last_overlay.clone_from(&tock.overlay);
-        // A live notification needs a later frame just to notice it expired
-        // and stop being drawn, even if nothing else changed.
-        if !tock.notices.is_empty() {
+        // The frame a notification expires in is the only thing that can stop it being
+        // drawn: without it the last picture the client was given still has it in.
+        if tock.notices != self.last_notices {
             self.dirty = true;
         }
+        self.last_notices.clone_from(&tock.notices);
 
         let eof = self.ended;
         let steps = std::mem::take(&mut self.steps);
