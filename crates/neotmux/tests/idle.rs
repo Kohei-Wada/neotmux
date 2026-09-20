@@ -210,3 +210,59 @@ fn reading_every_pane_every_tick_costs_about_nothing_while_the_session_is_idle()
          {base:.3}s baseline"
     );
 }
+
+/// Several windows, so "every pane" is more than the panes on screen. One pane each and
+/// `/bin/cat` in all of them, so nothing but neotmux is spending anything.
+const WINDOWS: &str = r#"
+local made = 0
+neotmux.on_tick(function()
+  if made < 7 then
+    made = made + 1
+    neotmux.window.create()
+  end
+end)
+"#;
+
+/// A sidebar's discipline: every window, every pane of it, every tick.
+const INFO_EVERY_PANE: &str = r#"
+neotmux.on_tick(function()
+  for _, window in ipairs(neotmux.window.list()) do
+    for _, id in ipairs(neotmux.window.panes(window) or {}) do
+      neotmux.pane.info(id)
+    end
+  end
+end)
+"#;
+
+/// What sampling every pane the host owns costs, rather than only the ones being shown. The
+/// host reads `/proc` twice per pane on its own cadence and a plugin only reads the answer,
+/// so neither the hidden windows nor the plugin asking about them may show up as CPU while
+/// the session is idle.
+#[test]
+fn sampling_every_pane_in_every_window_costs_about_nothing_while_the_session_is_idle() {
+    const WINDOW: Duration = Duration::from_secs(3);
+
+    let one_pane = idle_cpu(&[], WINDOW);
+    let eight_panes = idle_cpu(&[("init.lua", WINDOWS)], WINDOW);
+    let reading = idle_cpu(
+        &[("init.lua", &format!("{WINDOWS}\n{INFO_EVERY_PANE}"))],
+        WINDOW,
+    );
+    println!(
+        "idle cpu over {WINDOW:?}: one pane {one_pane:.3}s eight panes {eight_panes:.3}s \
+         eight panes read every tick {reading:.3}s"
+    );
+
+    let windows_cost = eight_panes - one_pane;
+    assert!(
+        windows_cost <= 0.25,
+        "seven more panes, all hidden, cost {windows_cost:.3}s of CPU over {WINDOW:?} above \
+         the {one_pane:.3}s one-pane baseline"
+    );
+    let plugin_cost = reading - eight_panes;
+    assert!(
+        plugin_cost <= 0.25,
+        "asking about every pane every tick cost {plugin_cost:.3}s of CPU over {WINDOW:?} \
+         above the {eight_panes:.3}s baseline"
+    );
+}
