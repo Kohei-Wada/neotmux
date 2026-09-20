@@ -135,6 +135,7 @@ colour like any other, and painting it is how you erase.
 
 ```lua
 local handle, message = neotmux.reserve('bottom', 1)   -- 'top', 'bottom', 'left' or 'right'
+handle:resize_to(2)                                    -- the same band, a different size
 handle:remove()                                        -- give the cells back
 ```
 
@@ -166,6 +167,23 @@ nothing back for it.
 
 `reserve` takes effect on the **next** frame, like `pane.split`: the frame you call it in was
 already composed against the surface it had. Your first band arrives a frame later.
+
+`handle:resize_to(cells)` changes how many cells the band takes, in the edge's own unit,
+from the next frame. It is not `resize`, because `neotmux.pane.resize` moves a boundary by a
+delta and this sets a size; one verb for both is a bug waiting to be typed.
+
+**A band that resizes keeps its place on its edge.** That is the reason the call exists: bands
+sit in the order they were reserved, so a plugin that removed its band and asked for a new one
+would come back *inside* everyone who reserved after it, and folding something would walk it
+across the screen. Resizing edits the reservation in place, so a band that shrinks to one cell
+and grows back is exactly where it was.
+
+It answers `true`, or `nil` plus a message when the cells belong to somebody else — the same
+distinction `reserve` draws, and the cap is counted against the *other* bands on the edge, so
+a band never pays for its own cells twice. Zero and a count past the edge's bound raise, just
+as they do on `reserve`: there is no band of no cells, and `ctx:reserved()` therefore never
+answers a rect you must not draw in. Fold to one cell instead — one row or one column is a
+rail you can still see.
 
 A horizontal edge holds at most **4 rows** in total, a vertical one at most **40 columns**.
 The two numbers are decided separately: four is where a line or two of text stops being a
@@ -536,7 +554,7 @@ neotmux ships five plugins in the runtime layer an install puts on the search pa
 | `prefix` | a `C-b` prefix over `v`, `-`, `o`, `h/j/k/l`, `r`, `c` and `n` |
 | `borders` | a rule along every boundary between two panes |
 | `watch` | says which pane looks like it is waiting for you — **off by default** |
-| `sidebar` | the windows and their panes, down a reserved left band — **off by default** |
+| `sidebar` | the windows and their panes, down a reserved left band, folded by `C-b b` — **off by default** |
 
 None of them is a host feature — all five are ordinary files making ordinary API calls, and
 the prefix is the only reason a fresh install can make a second pane at all. `C-b v` splits
@@ -544,6 +562,8 @@ vertically (the panes end up side by side, because `pane.split('vertical')` divi
 width), `C-b -` splits horizontally (one above the other), `C-b o` focuses the next pane,
 `C-b h/j/k/l` focuses the pane to the left, below, above or to the right, `C-b r` enters
 resize mode, `C-b c` opens a window and switches to it, and `C-b n` walks to the next window.
+With the sidebar on, `C-b b` folds it — the sidebar adds that one itself, since it is the
+optional plugin and the prefix is the standard one.
 
 `h/j/k/l` are geometry, not list order: the pane you get is the one whose edge faces most of
 yours on that side, which is what you would point at however deeply the splits are nested.
@@ -570,6 +590,11 @@ require('neotmux.defaults').borders = false
 `watch` and `sidebar` go the other way: they are off until you turn them on. What counts as a
 pane waiting for you is an opinion about what you run, and twenty-four columns of sidebar is
 an opinion about screen real estate; a status line is neither.
+
+The sidebar has two widths rather than an on and an off — `require('plugin.sidebar').widths`
+is `{ open = 24, closed = 1 }`, and `C-b b` swaps them. Closed is the markers column: you can
+still see how many windows and panes there are and which one you are in, you just cannot read
+their names. A band of nothing would be a band you have to remember is there.
 
 ```lua
 require('neotmux.defaults').watch = true

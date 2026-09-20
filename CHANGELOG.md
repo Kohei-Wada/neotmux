@@ -26,6 +26,25 @@ over a shortage of rows would give the panes nothing back for it.
 A horizontal band spans the full width and a vertical one only what the horizontal bands
 left, so no two bands ever share a cell.
 
+### A reserved band can change size
+
+The handle `neotmux.reserve` answers now has a second method: `handle:resize_to(cells)`, the
+same band on the same edge at a different size, from the next frame.
+
+It is a resize rather than a remove and a fresh reservation because bands are laid out in the
+order they were reserved, outward in: a plugin that gave its band back and asked for another
+would come back inside everyone who reserved after it, so anything that folded would walk
+across the screen. Resizing edits the reservation in place and keeps its place on the edge.
+
+The refusals are the ones `reserve` already draws. Zero and a count past the edge's own bound
+raise, because they are typos — there is no band of no cells, so `ctx:reserved()` never
+answers a rect a plugin must not draw in. Growing into cells another plugin holds answers
+`nil` plus a message. The cap is counted against the other bands on the edge only, so a band
+never pays for its own cells twice.
+
+`neotmux.pane.resize` moves a boundary by a delta, which is why this one is spelled
+`resize_to`.
+
 ### A sidebar, shipped and off by default
 
 `plugin/sidebar.lua` lists every window, every window's panes and what each pane is running,
@@ -37,6 +56,12 @@ width.
 It is an ordinary file making ordinary API calls, and it needed no new ones. A pane in a
 window nobody is looking at shows an em dash instead of a command, because `pane.info` answers
 about the shown window's panes and no others.
+
+`C-b b` folds it, when the prefix is loaded too: the sidebar puts that command in the prefix's
+own table, because the sidebar is the optional plugin and the prefix is the standard one.
+Folded is a one-column rail rather than nothing — the markers column, so the shape of the
+session is still there to see and only the names are gone. The rail is the open sidebar with
+everything that does not fit cut off, so there is no second way of drawing it.
 
 ### A plugin can ask which panes a window has
 
