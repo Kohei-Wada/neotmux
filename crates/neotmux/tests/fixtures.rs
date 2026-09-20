@@ -205,7 +205,7 @@ fn nothing_is_written_while_nothing_happens() {
 #[test]
 fn prefix_swallows_its_key_and_the_next_one_while_an_unrelated_key_gets_through() {
     let (mut nt, _init) = start_shipped("", "cat");
-    nt.send("\x01"); // C-a, the prefix
+    nt.send("\x02"); // C-b, the prefix
     nt.send("z"); // the command key, bound by nobody
     nt.send("Q"); // unrelated, no prefix pending
     nt.send("\r");
@@ -393,18 +393,18 @@ fn a_coroutine_wrapped_spinner_loses_its_tick_too() {
     );
 }
 
-/// Task 4: the prefix does what a prefix is for. `C-a %` splits vertically and `C-a o`
+/// Task 4: the prefix does what a prefix is for. `C-b v` splits vertically and `C-b o`
 /// walks to the next pane, both expressed with nothing but `neotmux.pane`.
 #[test]
 fn the_prefix_splits_vertically_and_walks_to_the_next_pane() {
     let (mut nt, _init) = start_shipped("", "cat");
-    nt.send("\x01%"); // C-a %
+    nt.send("\x02v"); // C-b v
     nt.wait_for_screen("panes 2 focus 2", PATIENCE);
     nt.settle(Duration::from_millis(500));
 
     nt.send("RIGHT");
     nt.settle(Duration::from_millis(500));
-    nt.send("\x01o"); // C-a o
+    nt.send("\x02o"); // C-b o
     nt.settle(Duration::from_millis(500));
     nt.send("LEFT");
 
@@ -417,25 +417,25 @@ fn the_prefix_splits_vertically_and_walks_to_the_next_pane() {
         .unwrap_or_else(|| panic!("the pane the prefix walked back to never echoed:\n{screen}"));
     let right = row
         .find("RIGHT")
-        .unwrap_or_else(|| panic!("`C-a %` never produced a second pane:\n{screen}"));
+        .unwrap_or_else(|| panic!("`C-b v` never produced a second pane:\n{screen}"));
     assert!(left < 40 && right >= 40, "{screen}");
     assert!(
-        !screen.contains('%') && !screen.contains("^A"),
+        !screen.contains('v') && !screen.contains("^B"),
         "a prefix keystroke reached a shell:\n{screen}"
     );
 }
 
-/// Task 4: `C-a "` splits the other way — the two panes are stacked, not side by side.
+/// Task 4: `C-b -` splits the other way — the two panes are stacked, not side by side.
 #[test]
 fn the_prefix_splits_horizontally() {
     let (mut nt, _init) = start_shipped("", "cat");
-    nt.send("\x01\""); // C-a "
+    nt.send("\x02-"); // C-b -
     nt.wait_for_screen("panes 2 focus 2", PATIENCE);
     nt.settle(Duration::from_millis(500));
 
     nt.send("BELOW");
     nt.settle(Duration::from_millis(500));
-    nt.send("\x01o");
+    nt.send("\x02o");
     nt.settle(Duration::from_millis(500));
     nt.send("ABOVE");
 
@@ -452,30 +452,30 @@ fn the_prefix_splits_horizontally() {
         "the panes are not stacked, so the split was not horizontal:\n{screen}"
     );
     assert!(
-        !screen.contains('"'),
+        !screen.contains('-'),
         "the command key reached the shell:\n{screen}"
     );
 }
 
 /// Task 4 step 5: the prefix is a plugin, not a feature. Switched off from a user config —
-/// the same one line that switches the status line off — `C-a` is an ordinary keystroke and
+/// the same one line that switches the status line off — `C-b` is an ordinary keystroke and
 /// the multiplexer is otherwise unchanged. That the defaults table works for a second entry
 /// is the point: it is a convention, not a special case for the status line.
 #[test]
 fn a_user_config_can_switch_off_the_shipped_prefix() {
     let (mut nt, _init) = start_shipped("require('neotmux.defaults').prefix = false", "cat");
-    nt.send("\x01"); // C-a, now bound by nobody
-    nt.send("%");
+    nt.send("\x02"); // C-b, now bound by nobody
+    nt.send("v");
     nt.send("PLAIN\r");
 
     nt.wait_for_screen("PLAIN", PATIENCE);
     let screen = nt.screen_after(Duration::from_millis(500));
     assert!(
-        screen.contains("^A"),
-        "C-a was swallowed with no prefix plugin loaded:\n{screen}"
+        screen.contains("^B"),
+        "C-b was swallowed with no prefix plugin loaded:\n{screen}"
     );
     assert!(
-        screen.contains('%'),
+        screen.contains('v'),
         "the command key was swallowed with no prefix plugin loaded:\n{screen}"
     );
     assert!(
@@ -554,7 +554,7 @@ fn deleting_the_shipped_plugins_leaves_a_working_multiplexer() {
     std::fs::remove_dir_all(stripped.path().join("lua/plugin")).expect("remove the plugin dir");
 
     let mut nt = Neotmux::start_layered(&[stripped.path()], "cat");
-    nt.send("\x01"); // C-a: an ordinary keystroke with no prefix plugin left to swallow it
+    nt.send("\x02"); // C-b: an ordinary keystroke with no prefix plugin left to swallow it
     nt.send("STILL-HERE\r");
     nt.wait_for_screen("STILL-HERE", PATIENCE);
 
@@ -564,7 +564,7 @@ fn deleting_the_shipped_plugins_leaves_a_working_multiplexer() {
         "a status line survived the deletion:\n{screen}"
     );
     assert!(
-        screen.contains("^A"),
+        screen.contains("^B"),
         "a prefix survived the deletion of the file it lives in:\n{screen}"
     );
     let log = nt.log_text();
@@ -607,7 +607,7 @@ fn an_installed_neotmux_starts_on_its_shipped_layer() {
 
     // Out of the box, with no user Lua at all: the shipped prefix is the only way to reach
     // a second pane, so this is what v0.1's line costs an installed user.
-    nt.send("\x01%"); // C-a %
+    nt.send("\x02v"); // C-b v
     nt.wait_for_screen("panes 2 focus 2", PATIENCE);
 
     let log = nt.log_text();

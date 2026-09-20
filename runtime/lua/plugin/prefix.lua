@@ -1,5 +1,17 @@
 -- A real two-key prefix, bound to nothing: `on_key` is what lets it see the command key
 -- it never registered, and the modal flag is the plugin's own state, not the host's.
+--
+-- The key and the command table are both fields of the table this file returns, so a user
+-- can rebind, add or drop a command without editing this file:
+--
+--   local prefix = require('plugin.prefix')
+--   prefix.key = 'C-a'
+--   prefix.commands['%'] = prefix.commands['v']   -- tmux's muscle memory, alongside v and -
+--   prefix.commands['"'] = prefix.commands['-']
+--   prefix.commands['o'] = nil                    -- and one dropped
+--
+-- Both are read inside the callback rather than captured at load time, which is what makes
+-- such an assignment take effect on the next key instead of never.
 local armed = false
 
 -- "The next pane" out of what the ABI offers: `list()` is in layout order and `current()`
@@ -15,30 +27,35 @@ local function focus_next()
   end
 end
 
-local commands = {
-  ["%"] = function()
-    neotmux.pane.split("vertical")
-  end,
-  ['"'] = function()
-    neotmux.pane.split("horizontal")
-  end,
-  ["o"] = focus_next,
+-- `split('vertical')` divides the width, so `v` puts the two panes side by side; `-` divides
+-- the height, which is what the glyph looks like.
+local M = {
+  key = "C-b",
+  commands = {
+    ["v"] = function()
+      neotmux.pane.split("vertical")
+    end,
+    ["-"] = function()
+      neotmux.pane.split("horizontal")
+    end,
+    ["o"] = focus_next,
+  },
 }
 
 neotmux.on_key(function(key)
   if armed then
     armed = false
-    local command = commands[key]
+    local command = M.commands[key]
     if command then
       command()
     end
     return true
   end
-  if key == "C-a" then
+  if key == M.key then
     armed = true
     return true
   end
   return false
 end)
 
-return {}
+return M
