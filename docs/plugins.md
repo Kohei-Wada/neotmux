@@ -234,9 +234,11 @@ v0.1.
 A pane in a hidden window answers like any other. Its shell is running and its output is being
 read into its terminal whether or not you are looking at it, which is the whole point: the
 pane you are not watching is the one you want to be told about. `pane.list()` still answers
-about the current window only, so a plugin that wants to read a hidden pane learns the id from
-a `pane_output` event — every pane's output is dispatched, a hidden window's included — and
-forgets it on `pane_closed`.
+about the current window only, so a plugin that wants to read a hidden pane finds the id with
+`window.panes(id)` over `window.list()`, and forgets it on `pane_closed`. A `pane_output`
+event would find it too — every pane's output is dispatched, a hidden window's included — but
+only once the pane has said something, and a pane that has been silent since it opened is the
+one worth finding.
 
 An id no pane has answers `nil`, and so does a pane that closed between one call and the next.
 Neither raises: a loop that reads every pane must not start erroring because a shell exited.

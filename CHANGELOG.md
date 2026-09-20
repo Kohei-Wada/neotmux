@@ -21,6 +21,12 @@ list is not something you can be told.
 finding is all this adds — there is still no way to split, focus or resize a pane in a window
 nobody is looking at.
 
+The shipped watcher uses it. It enumerates every window's panes on each tick instead of
+learning ids from `pane_output`, so an agent started in a window you are not looking at is
+watched from the moment it exists rather than from the moment it first prints something. The
+revision gate is untouched: a pane's lines are still built only when its terminal has been fed
+since it was last read, so an idle session still reads nothing.
+
 ### The bar counts panes and windows the way a person does
 
 Split, end the shell in the new pane, split again: the number on the bar used to climb — 2,
