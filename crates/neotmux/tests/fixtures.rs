@@ -2,7 +2,7 @@
 //! the ordinary runtime-layer resolution and the ordinary `require`, driven over a PTY.
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 mod harness;
 use harness::Neotmux;
@@ -535,6 +535,25 @@ const HORIZONTAL_DIVIDER: &str = "\u{2500}";
 /// keystroke that leaked past the prefix could show up.
 fn pane_rows(screen: &str) -> impl Iterator<Item = &str> {
     screen.lines().skip(PANE_TOP as usize)
+}
+
+/// The pane once it has stopped changing: two consecutive reads that agree. A fixed sleep
+/// cannot express this — under a loaded runner the frame after it is still moving, which is
+/// how the copy-mode comparison below used to flake.
+fn settled_pane_area(nt: &mut Neotmux, patience: Duration) -> String {
+    let deadline = Instant::now() + patience;
+    let mut last = pane_area(&nt.screen_after(Duration::from_millis(100)));
+    loop {
+        let next = pane_area(&nt.screen_after(Duration::from_millis(100)));
+        if next == last {
+            return next;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the pane never stopped changing:\n{next}"
+        );
+        last = next;
+    }
 }
 
 fn pane_area(screen: &str) -> String {
@@ -2217,19 +2236,14 @@ fn copy_mode_leaves_the_pane_alone_and_gives_the_keys_back() {
     let (mut nt, _init) = start_shipped("", "cat");
     nt.send("ABCDEFGH\r");
     nt.wait_for_screen("ABCDEFGH", PATIENCE);
-    // The pane has to be quiet before the comparison: the mode snapshots the lines on the way
-    // in, so a byte still in flight would legitimately make the two frames differ.
-    nt.settle(Duration::from_millis(600));
-    let before = nt.screen_after(Duration::from_millis(200));
+    // Both sides are read once the pane has settled: the mode snapshots the lines on the way
+    // in, so a byte still in flight would legitimately make two frames differ.
+    let before = settled_pane_area(&mut nt, PATIENCE);
 
     nt.send("\x02["); // C-b [
     nt.send("jjllkh"); // every one of them a motion, and none of them a character
-    let inside = nt.screen_after(Duration::from_millis(600));
-    assert_eq!(
-        pane_area(&before),
-        pane_area(&inside),
-        "entering copy mode disturbed the pane"
-    );
+    let inside = settled_pane_area(&mut nt, PATIENCE);
+    assert_eq!(before, inside, "entering copy mode disturbed the pane");
 
     nt.send("q");
     nt.send("TYPED\r");
