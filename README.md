@@ -24,8 +24,9 @@ Pre-release, and the plugin ABI is not stable yet.
 
 Working today: a shell running full-screen on a PTY, and a Lua layer that loads code from
 `$XDG_CONFIG_HOME/neotmux`, lets it register tick, event and keymap callbacks, reserve a band
-of the surface to draw in, draw into the frame, and log — with every registration and every API call attributed to the chunk
-it was written in, so a misbehaving one can be named.
+of the surface to draw in — rows at the top or bottom, columns at the left or right —
+draw into the frame, and log, with every registration and every API call attributed to the
+chunk it was written in, so a misbehaving one can be named.
 
 ## Scope
 
