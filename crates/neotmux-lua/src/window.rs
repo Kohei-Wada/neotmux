@@ -32,6 +32,12 @@ impl WindowIds {
         self.next.set(id + 1);
         WindowId::from(id)
     }
+
+    /// An id this counter did not hand out — a window that was already there when this
+    /// client attached. Ids are never reused, so the counter moves past it and never back.
+    pub fn seen(&self, id: WindowId) {
+        self.next.set(self.next.get().max(id.get() + 1));
+    }
 }
 
 #[cfg(test)]
@@ -43,5 +49,15 @@ mod tests {
         let ids = WindowIds::new();
         let taken: Vec<u32> = (0..3).map(|_| ids.take().get()).collect();
         assert_eq!(taken, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn an_id_somebody_else_handed_out_is_never_handed_out_again() {
+        let ids = WindowIds::new();
+        ids.seen(WindowId::from(7));
+        assert_eq!(ids.take(), WindowId::from(8));
+        // A lower one changes nothing: the counter only ever moves forwards.
+        ids.seen(WindowId::from(2));
+        assert_eq!(ids.take(), WindowId::from(9));
     }
 }
