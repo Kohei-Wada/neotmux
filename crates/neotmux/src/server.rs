@@ -6,11 +6,10 @@
 //! and the pane reads a plugin makes are answered in the one window where the server is
 //! already waiting for that client to speak.
 //!
-//! Its life is the session's, plus a little: when the client goes away the session is kept
-//! for [`LINGER`] so that a disconnect is not a crash and so the children are hung up on by
-//! the process that made them, rather than orphaned by one that was killed. Nothing attaches
-//! twice yet — that is detach/attach, the next milestone — so a second client is refused
-//! with a reason rather than left hanging in the backlog.
+//! Its life is the session's: when the client goes away the session is kept until its last
+//! shell exits, still reading its children, so a disconnect is not a crash. A second client
+//! is still refused with a reason rather than left hanging in the backlog — sharing a
+//! session is detach and attach's problem, not this one's.
 
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::time::{Duration, Instant};
@@ -34,12 +33,6 @@ use crate::signals::ShutdownSignal;
 /// one-process loop used, for the same reason: it is a property of the loop rather than of
 /// whatever the wait happens to do.
 const FRAME: Duration = Duration::from_millis(16);
-
-/// How long a session outlives the client that was looking at it. Long enough that a client
-/// dying is not the same event as a session dying, short enough that a killed client does
-/// not leave a shell of somebody's running for ever. Detach and attach will make this a
-/// decision rather than a timeout.
-const LINGER: Duration = Duration::from_secs(3);
 
 /// How long a server with no session waits for the client that started it. It is the
 /// client's own patience: past that, nobody is coming and there is nothing to serve.
@@ -86,15 +79,15 @@ pub fn serve(listener: &UnixListener, shutdown: &ShutdownSignal) -> anyhow::Resu
         if over {
             return Ok(());
         }
-        // The client went, the session did not. It stays for LINGER, still reading its
-        // children, and the loop goes back to waiting for somebody to look at it.
+        // The client went, the session did not. It keeps reading its children for as long as
+        // it lives, and the loop goes back to waiting for somebody to look at it.
         running.forget_pane_output();
         session = Some(running);
     }
 }
 
 /// Waits for a client, running the session in the meantime so its children are not left
-/// talking into a pipe nobody empties. `None` means there will not be one: the linger ran
+/// talking into a pipe nobody empties. `None` means there will not be one: startup timed
 /// out, the session ended, or a signal arrived.
 fn accept(
     listener: &UnixListener,
@@ -103,18 +96,21 @@ fn accept(
     shutdown: &ShutdownSignal,
     born: Instant,
 ) -> anyhow::Result<Option<UnixStream>> {
+    // A session with a client to wait for waits for ever: that is what detach means. A
+    // server that never had one is not a session worth keeping, so `STARTUP` still applies.
     let give_up = match session {
-        Some(_) => Instant::now() + LINGER,
-        None => born + STARTUP,
+        Some(_) => None,
+        None => Some(born + STARTUP),
     };
     loop {
-        if shutdown.raised().is_some() || Instant::now() >= give_up {
+        if shutdown.raised().is_some() || give_up.is_some_and(|at| Instant::now() >= at) {
             return Ok(None);
         }
+        let frame_end = Instant::now() + FRAME;
         let ready = crate::tty::wait_on(
             std::os::fd::AsFd::as_fd(listener),
             session.is_some().then(|| wakeup.as_fd()),
-            give_up.min(Instant::now() + FRAME),
+            give_up.map_or(frame_end, |at| at.min(frame_end)),
         )
         .context("wait for a client")?;
         if let Some(session) = session.as_deref_mut() {

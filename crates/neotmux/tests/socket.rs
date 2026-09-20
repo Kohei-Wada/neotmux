@@ -181,6 +181,27 @@ fn the_server_outlives_a_client_that_disconnects() {
     );
 }
 
+/// The old behaviour was a three-second linger. This is the same question asked long
+/// enough after the client is gone that only an immortal session can answer it.
+#[test]
+fn a_session_with_nobody_looking_at_it_outlives_the_old_linger() {
+    let runtime = tempfile::tempdir().expect("runtime dir");
+    let mut client = started(runtime.path());
+
+    client.kill();
+    drop(client);
+    std::thread::sleep(Duration::from_secs(5));
+
+    let mut stream = UnixStream::connect(socket_in(runtime.path()))
+        .expect("the session died while nobody was looking at it");
+    let mut hello = [0u8; HELLO_LEN];
+    stream.write_all(&wire::encode_hello()).expect("greet");
+    stream
+        .read_exact(&mut hello)
+        .expect("the server did not greet");
+    assert_eq!(hello, wire::encode_hello());
+}
+
 /// Accepted and refused, rather than left in the backlog. One client, because the whole
 /// frame is a conversation with one Lua layer: two would each tick the same session, each
 /// believing the ops it raised were the only ones. Sharing a session is detach and attach's
