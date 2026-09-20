@@ -1452,6 +1452,21 @@ fn a_split_does_not_resize_every_pane() {
     );
 }
 
+/// A terminal resize arrives as `SIGWINCH` and as nothing else: no byte is sent on the
+/// terminal to announce one. Neotmux reads its own input now, so nothing else is listening
+/// for that signal on its behalf.
+#[test]
+fn a_terminal_resize_reaches_the_panes() {
+    let (mut nt, _init) = resize_probe();
+    nt.wait_for_status("cat", PATIENCE);
+    nt.settle(Duration::from_millis(500));
+
+    nt.resize(30, 100);
+
+    // One row of the thirty belongs to the shipped status bar.
+    nt.wait_for_log("resized 29x100", PATIENCE);
+}
+
 /// The same for a focus change, which invalidated the epoch for the same reason: focus is one
 /// of the three things it is made of.
 #[test]

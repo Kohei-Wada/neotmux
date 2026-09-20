@@ -166,6 +166,25 @@ impl Neotmux {
         }
     }
 
+    /// Resizes the outer terminal. The kernel announces this to neotmux as `SIGWINCH` and in
+    /// no other way — nothing is sent on the terminal to say so — so this is the only way a
+    /// test can exercise the path a real resize takes.
+    pub fn resize(&mut self, rows: u16, cols: u16) {
+        self.master
+            .resize(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .expect("resize pty");
+        self.parser
+            .lock()
+            .unwrap()
+            .screen_mut()
+            .set_size(rows, cols);
+    }
+
     pub fn send(&mut self, s: &str) {
         self.writer.write_all(s.as_bytes()).expect("write to pty");
         self.writer.flush().expect("flush pty");
@@ -338,6 +357,5 @@ impl Drop for Neotmux {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
-        let _ = &self.master;
     }
 }
