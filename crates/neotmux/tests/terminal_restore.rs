@@ -28,6 +28,7 @@ fn run_in_pty_sized(
         .expect("openpty");
 
     let isolation = tempfile::tempdir().expect("isolation dir");
+    let _end_session = session::EndsSession::new(isolation.path());
     let log = isolation.path().join("neotmux.log");
 
     let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_neotmux"));
@@ -75,7 +76,6 @@ fn run_in_pty_sized(
     let termios = pair.master.get_termios().expect("termios after exit");
     drop(pair.master);
     let out = collector.join().expect("collector");
-    session::end_session(isolation.path());
     (
         String::from_utf8_lossy(&out).into_owned(),
         status.success(),
@@ -131,6 +131,7 @@ fn send_signal_and_capture(sig: Signal) -> (bool, Option<String>, Termios) {
         .expect("openpty");
 
     let isolation = tempfile::tempdir().expect("isolation dir");
+    let _end_session = session::EndsSession::new(isolation.path());
     let log = isolation.path().join("neotmux.log");
 
     let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_neotmux"));
@@ -175,7 +176,6 @@ fn send_signal_and_capture(sig: Signal) -> (bool, Option<String>, Termios) {
     let termios = pair.master.get_termios().expect("termios after exit");
     drop(pair.master);
     collector.join().ok();
-    session::end_session(isolation.path());
     (
         status.success(),
         status.signal().map(str::to_owned),
@@ -358,7 +358,10 @@ struct AbandonedTerminal {
     master: Option<Box<dyn portable_pty::MasterPty + Send>>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
     pid: i32,
-    isolation: tempfile::TempDir,
+    // Declared before `_isolation` so it drops first, while the directory it looks for a lock
+    // in still exists. Held for that lifetime only — nothing reads it back.
+    _end_session: session::EndsSession,
+    _isolation: tempfile::TempDir,
 }
 
 impl AbandonedTerminal {
@@ -390,7 +393,8 @@ impl AbandonedTerminal {
             master: Some(pair.master),
             child,
             pid,
-            isolation,
+            _end_session: session::EndsSession::new(isolation.path()),
+            _isolation: isolation,
         }
     }
 
@@ -404,7 +408,6 @@ impl Drop for AbandonedTerminal {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
-        session::end_session(self.isolation.path());
     }
 }
 

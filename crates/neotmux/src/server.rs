@@ -293,10 +293,24 @@ fn converse(
 }
 
 /// Everything the client has already sent, applied. `false` means it sent something only the
-/// tick loop should see, or went away.
+/// tick loop should see, went away, or sent something that would not decode at all — that
+/// last one is a client's own doing and, like a hangup, costs its connection and nothing
+/// else (`attached`'s rule, extended past the handshake: nothing a client does to its own
+/// connection may end somebody's session).
 fn apply_pending(link: &mut Link, session: &mut Session) -> anyhow::Result<bool> {
     while let Some(message) = link.take()? {
-        match wire::decode_to_server(&message).context("decode a client message")? {
+        let decoded = match wire::decode_to_server(&message) {
+            Ok(decoded) => decoded,
+            Err(err) => {
+                logging::log(
+                    Level::Warn,
+                    "neotmux-server",
+                    &format!("an attached client sent something that would not decode: {err}"),
+                );
+                return Ok(false);
+            }
+        };
+        match decoded {
             ToServer::Key(key) => session.key(key)?,
             ToServer::Resize(size) => session.resize(size)?,
             ToServer::Read(read) => {
@@ -331,7 +345,18 @@ fn await_tock(
         let Some(message) = link.recv()? else {
             return Ok(None);
         };
-        match wire::decode_to_server(&message).context("decode a client message")? {
+        let decoded = match wire::decode_to_server(&message) {
+            Ok(decoded) => decoded,
+            Err(err) => {
+                logging::log(
+                    Level::Warn,
+                    "neotmux-server",
+                    &format!("an attached client sent something that would not decode: {err}"),
+                );
+                return Ok(None);
+            }
+        };
+        match decoded {
             ToServer::Tock(tock) => return Ok(Some(tock)),
             ToServer::Key(key) => session.key(key)?,
             ToServer::Resize(size) => session.resize(size)?,

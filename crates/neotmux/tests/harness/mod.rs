@@ -74,7 +74,11 @@ pub struct Neotmux {
     master: Box<dyn MasterPty + Send>,
     parser: Arc<Mutex<vt100::Parser>>,
     byte_rx: mpsc::Receiver<usize>,
-    isolation: tempfile::TempDir,
+    // Declared before `_isolation` so it drops first: fields drop in declaration order, and
+    // ending the session needs the isolation dir to still be there. Held for that lifetime
+    // only — nothing reads it back.
+    _end_session: session::EndsSession,
+    _isolation: tempfile::TempDir,
 }
 
 impl Neotmux {
@@ -166,7 +170,8 @@ impl Neotmux {
             master: pair.master,
             parser,
             byte_rx,
-            isolation,
+            _end_session: session::EndsSession::new(isolation.path()),
+            _isolation: isolation,
         };
         nt.wait_until_raw();
         nt
@@ -427,6 +432,5 @@ impl Drop for Neotmux {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
-        session::end_session(self.isolation.path());
     }
 }

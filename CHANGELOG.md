@@ -53,13 +53,12 @@ that and sends back the picture. Keys that no plugin bound, resizes, and the pan
 client's terminal in the process that runs the plugin — the same terminal ratatui draws on,
 which is what the call always claimed.
 
-Two things about this split are still worth knowing, though not quite as first written: while a
-session has a client, a second one is turned away with a reason rather than left waiting; and a
-client and a server built from different commits refuse each other by name and number rather
-than trying to survive it, so replacing the binary under a running session means restarting it
-— see the entry above for what a session's life and that number both are now, since this same
-branch moved both again. "Nothing about using neotmux changed" no longer holds either: `C-b d`,
-`neotmux --kill`, `--help` and `--version` are also new.
+Two things about this split are still worth knowing: while a session has a client, a second one
+is turned away with a reason rather than left waiting; and a client and a server built from
+different commits refuse each other by name and number rather than trying to survive it, so
+replacing the binary under a running session means restarting it. "Nothing about using neotmux
+changed" no longer holds either: `C-b d`, `neotmux --kill`, `--help` and `--version` are also
+new.
 
 ### Pasting more than 1024 bytes
 

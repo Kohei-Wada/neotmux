@@ -575,6 +575,11 @@ neotmux.clipboard.set(text)        -- written? — true, or false and why not
 neotmux.home                       -- `$HOME` as the host read it, or nil; read-only
 ```
 
+A detach ends the client's conversation, not the session: the panes, the shells and each
+pane's scrollback are the server's, and stay. Every plugin's own state is the client's, and
+does not — the copy register, a raised mode, a fold, and the reservations, which the plugin
+re-makes at load. Re-attaching is a plugin restart, in those words.
+
 `neotmux.width` is the one measurement everything that takes a column agrees on. `#text` is
 bytes and `utf8.len(text)` is characters, and neither is a column: a wide character is one
 entry in a `pane.content` line and **two** cells on the grid, so `#line:sub(1, n)` is not
@@ -592,11 +597,6 @@ A control character adds nothing either, because it is never drawn — a tab mov
 rather than filling cells, and no tab ever reaches a `pane.content` line for that reason.
 
 `neotmux.clipboard.set` writes an OSC 52 sequence carrying `text` to the client's terminal.
-
-A detach ends the client's conversation, not the session: the panes, the shells and each
-pane's scrollback are the server's, and stay. Every plugin's own state is the client's, and
-does not — the copy register, a raised mode, a fold, and the reservations, which the plugin
-re-makes at load. Re-attaching is a plugin restart, in those words.
 
 ```lua
 local ok, err = neotmux.clipboard.set(selected)

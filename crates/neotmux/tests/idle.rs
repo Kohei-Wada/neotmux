@@ -21,6 +21,7 @@ fn produces_no_output_while_idle() {
         .expect("openpty");
 
     let isolation = tempfile::tempdir().expect("isolation dir");
+    let _end_session = session::EndsSession::new(isolation.path());
     let log = isolation.path().join("neotmux.log");
 
     let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_neotmux"));
@@ -68,7 +69,6 @@ fn produces_no_output_while_idle() {
 
     child.kill().ok();
     child.wait().ok();
-    session::end_session(isolation.path());
 
     assert!(
         idle_bytes <= IDLE_BYTE_BOUND,
@@ -175,6 +175,7 @@ fn idle_cpu(plugins: &[(&str, &str)], window: Duration) -> f64 {
         .expect("openpty");
 
     let isolation = tempfile::tempdir().expect("isolation dir");
+    let _end_session = session::EndsSession::new(isolation.path());
     let runtime = tempfile::tempdir().expect("runtime dir");
     for (path, body) in plugins {
         let full = runtime.path().join(path);
@@ -216,7 +217,6 @@ fn idle_cpu(plugins: &[(&str, &str)], window: Duration) -> f64 {
 
     child.kill().ok();
     child.wait().ok();
-    session::end_session(isolation.path());
     after - before
 }
 

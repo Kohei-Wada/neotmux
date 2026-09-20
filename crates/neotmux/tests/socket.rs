@@ -18,24 +18,23 @@ mod session;
 /// passing run takes a small fraction of it.
 const PATIENCE: Duration = Duration::from_secs(20);
 
-/// A test's own `$XDG_RUNTIME_DIR`, dropped last among the locals declared after it so that
-/// whatever a test did with its session — including ending it itself, as the `--kill` tests
-/// do — has already happened by the time this reaches for it.
-struct TestRuntime(tempfile::TempDir);
+/// A test's own `$XDG_RUNTIME_DIR`. `_end_session` is declared first so it drops first —
+/// ending whatever session a test left behind, panic or no, before the directory it looked
+/// for a lock in is removed.
+struct TestRuntime {
+    _end_session: session::EndsSession,
+    dir: tempfile::TempDir,
+}
 
 impl TestRuntime {
     fn new() -> Self {
-        Self(tempfile::tempdir().expect("runtime dir"))
+        let dir = tempfile::tempdir().expect("runtime dir");
+        let _end_session = session::EndsSession::new(dir.path());
+        Self { _end_session, dir }
     }
 
     fn path(&self) -> &Path {
-        self.0.path()
-    }
-}
-
-impl Drop for TestRuntime {
-    fn drop(&mut self) {
-        session::end_session(self.0.path());
+        self.dir.path()
     }
 }
 
@@ -47,6 +46,40 @@ fn socket_in(runtime: &Path) -> PathBuf {
 /// read here straight out of the source tree.
 fn shipped_layer() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime")
+}
+
+/// A runtime layer of a test's own, written to a fresh temp dir.
+fn layer_with(files: &[(&str, &str)]) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("layer dir");
+    for (path, content) in files {
+        let full = dir.path().join(path);
+        if let Some(parent) = full.parent() {
+            std::fs::create_dir_all(parent).expect("create layer subdir");
+        }
+        std::fs::write(&full, content).expect("write layer file");
+    }
+    dir
+}
+
+/// The server's own log, which outlives any one client and so is where a fact about the
+/// session — not about one client's screen — is asserted.
+fn log_text(runtime: &Path) -> String {
+    std::fs::read_to_string(runtime.join("neotmux.log")).unwrap_or_default()
+}
+
+fn wait_for_log(runtime: &Path, marker: &str) -> String {
+    let deadline = Instant::now() + PATIENCE;
+    loop {
+        let text = log_text(runtime);
+        if text.contains(marker) {
+            return text;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "{marker:?} never reached the log:\n{text}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 /// A neotmux client on its own PTY, with `$XDG_RUNTIME_DIR` pointed wherever the test wants
@@ -69,11 +102,17 @@ impl Client {
     /// for a test to reach `C-b` for real, since [`Client::start`] runs with no runtime
     /// layer at all and so binds no keys.
     fn start_with_prefix(runtime: &Path, shell: &str) -> Self {
-        Self::start_with(runtime, shell, 24, 80, Some(&shipped_layer()))
+        Self::start_with(runtime, shell, 24, 80, &[&shipped_layer()])
+    }
+
+    /// The shipped plugins, with a test's own layer stacked in front so it can add a
+    /// reporting or reproduction plugin of its own without giving up `C-b`.
+    fn start_with_prefix_and_layer(runtime: &Path, shell: &str, layer: &Path) -> Self {
+        Self::start_with(runtime, shell, 24, 80, &[layer, &shipped_layer()])
     }
 
     fn start_sized(runtime: &Path, shell: &str, rows: u16, cols: u16) -> Self {
-        Self::start_with(runtime, shell, rows, cols, None)
+        Self::start_with(runtime, shell, rows, cols, &[])
     }
 
     fn start_with(
@@ -81,7 +120,7 @@ impl Client {
         shell: &str,
         rows: u16,
         cols: u16,
-        runtime_layer: Option<&Path>,
+        runtime_layers: &[&Path],
     ) -> Self {
         let pair = native_pty_system()
             .openpty(PtySize {
@@ -98,8 +137,13 @@ impl Client {
         cmd.env("HOME", runtime);
         cmd.env("XDG_CONFIG_HOME", runtime);
         cmd.env("XDG_RUNTIME_DIR", runtime);
-        if let Some(layer) = runtime_layer {
-            cmd.env("NEOTMUX_RUNTIME", layer);
+        if !runtime_layers.is_empty() {
+            let joined = runtime_layers
+                .iter()
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+                .join(":");
+            cmd.env("NEOTMUX_RUNTIME", joined);
         }
         cmd.arg("--log");
         cmd.arg(runtime.join("neotmux.log"));
@@ -314,12 +358,18 @@ fn a_detached_session_survives_a_connection_that_never_attaches() {
     second.wait_for_output("still-here-after-the-non-client");
 }
 
-/// Greets, then sends the given bytes as one framed message, then hangs up.
-fn greet_and_send_message(socket: &Path, payload: &[u8]) {
+/// Connects and exchanges the greeting, leaving a stream ready to send whatever a real
+/// client would send next.
+fn greeted(socket: &Path) -> UnixStream {
     let mut stream = UnixStream::connect(socket).expect("connect");
     stream.write_all(&wire::encode_hello()).expect("greet");
     let mut hello = [0u8; HELLO_LEN];
     stream.read_exact(&mut hello).expect("be greeted");
+    stream
+}
+
+/// Sends `payload` as one framed message.
+fn send_message(stream: &mut UnixStream, payload: &[u8]) {
     let mut framed = Vec::with_capacity(4 + payload.len());
     framed.extend_from_slice(
         &u32::try_from(payload.len())
@@ -329,6 +379,24 @@ fn greet_and_send_message(socket: &Path, payload: &[u8]) {
     framed.extend_from_slice(payload);
     stream.write_all(&framed).expect("send the message");
     stream.flush().expect("flush");
+}
+
+/// Greets, then sends the given bytes as one framed message, then hangs up.
+fn greet_and_send_message(socket: &Path, payload: &[u8]) {
+    let mut stream = greeted(socket);
+    send_message(&mut stream, payload);
+}
+
+/// A valid `Attach`, small enough that nothing about it is the point of whatever test sends
+/// it.
+fn an_attach() -> neotmux_proto::msg::Attach {
+    neotmux_proto::msg::Attach {
+        size: neotmux_proto::Size { rows: 24, cols: 80 },
+        first_window: neotmux_proto::WindowId::from(1),
+        reserved: neotmux_proto::Reserved::default(),
+        gutter: 0,
+        wants_pane_output: false,
+    }
 }
 
 /// A connection whose first message is not an `Attach` — one meant for a live conversation,
@@ -357,6 +425,45 @@ fn a_detached_session_survives_a_connection_whose_first_message_is_not_an_attach
     // The server is still there, and still holding the same session, for a real client.
     let second = Client::start(runtime.path(), "/bin/cat");
     second.wait_for_output("still-here-after-the-bad-message");
+}
+
+/// Finding 4: `attached`'s rule — nothing a client does to its own connection may end
+/// somebody's session — was only ever proved for the connection before it attaches. This is
+/// the other half: an attached client that sends something `apply_pending` or `await_tock`
+/// cannot decode must cost its own connection and nothing else.
+#[test]
+fn a_malformed_message_from_an_attached_client_costs_its_connection_not_the_session() {
+    let runtime = TestRuntime::new();
+    let mut first = Client::start(runtime.path(), "/bin/cat");
+    wait_for_socket(&socket_in(runtime.path()));
+    first.send("still-here-after-the-garbage\r");
+    first.wait_for_output("still-here-after-the-garbage");
+    first.kill();
+    drop(first);
+
+    // A raw connection that completes the handshake and attaches for real, so what follows
+    // reaches `apply_pending` or `await_tock` rather than `attached`.
+    let mut stream = greeted(&socket_in(runtime.path()));
+    let attach = wire::encode_to_server(&neotmux_proto::ToServer::Attach(an_attach()));
+    send_message(&mut stream, &attach);
+
+    // The attach's own Tick, read (and discarded) so the garbage below is unambiguously the
+    // second message of an attached conversation rather than something raced ahead of it.
+    let _ = stream.set_read_timeout(Some(PATIENCE));
+    let mut tick = [0u8; 64];
+    let read = stream
+        .read(&mut tick)
+        .expect("the tick the attach provokes");
+    assert!(read > 0, "no tick followed the attach");
+
+    // A discriminant no message uses: this does not decode at all.
+    send_message(&mut stream, &[0xff]);
+    drop(stream);
+
+    // Still the same session, for a real client — the bug this pins was the server dying
+    // with it, which would leave nothing here to attach to.
+    let second = Client::start(runtime.path(), "/bin/cat");
+    second.wait_for_output("still-here-after-the-garbage");
 }
 
 /// The session is laid out against whichever terminal is looking at it now.
@@ -511,6 +618,95 @@ fn a_detach_leaves_the_client_and_keeps_the_session() {
 
     let second = Client::start_with_prefix(runtime.path(), "/bin/cat");
     second.wait_for_output("survives-a-detach");
+}
+
+/// §8: "A window created before a detach and one created after do not share an id." The
+/// human path: `C-b c`, `C-b d`, re-attach, `C-b c` again — with a small reporting plugin
+/// stacked on the shipped layer so the window ids are on the record rather than the screen.
+#[test]
+fn a_window_created_before_a_detach_and_one_created_after_do_not_share_an_id() {
+    let runtime = TestRuntime::new();
+    let layer = layer_with(&[
+        ("init.lua", "require('plugin.windowreport')"),
+        (
+            "lua/plugin/windowreport.lua",
+            "neotmux.on_tick(function()\n  \
+             neotmux.log.info('windows=' .. table.concat(neotmux.window.list(), ','))\n\
+             end)\n",
+        ),
+    ]);
+
+    let mut first = Client::start_with_prefix_and_layer(runtime.path(), "/bin/cat", layer.path());
+    wait_for_socket(&socket_in(runtime.path()));
+    wait_for_log(runtime.path(), "windows=1");
+
+    first.send("\x02c"); // C-b c: a window made before the detach
+    wait_for_log(runtime.path(), "windows=1,2");
+
+    first.send("\x02d"); // C-b d
+    assert!(
+        first.wait_for_exit().success(),
+        "a detached client did not exit cleanly"
+    );
+
+    let mut second = Client::start_with_prefix_and_layer(runtime.path(), "/bin/cat", layer.path());
+    second.send("\x02c"); // C-b c again: a window made after the re-attach
+    let log = wait_for_log(runtime.path(), "windows=1,2,3");
+    assert!(
+        !log.contains("windows=1,2,1") && !log.contains("windows=1,1,2"),
+        "the window made after the re-attach collided with one from before it:\n{log}"
+    );
+}
+
+/// The mechanism finding 1 fixes, pinned directly: a `resized` event fired on attach is what
+/// let a plugin's own `on_event('resized', ...)` handler mint a window id before the
+/// watermark caught up. `C-b c` a moment later cannot show this — by the next tick the
+/// watermark has already caught up from that tick's own geometry, which is why the test
+/// above cannot fail against the old ordering. This one creates the colliding window the
+/// same way the bug did: synchronously, inside the event a re-attach used to raise.
+#[test]
+fn a_resized_handler_on_reattach_does_not_mint_a_window_id_that_already_exists() {
+    let runtime = TestRuntime::new();
+    // A window made before the detach, so the session has two: a re-attaching client's own
+    // `window_ids` starts past 1 regardless of this bug — `attach()` burns it on
+    // `first_window`, which a reattach ignores (§4) — so the collision this pins needs a
+    // second window already there for the client's un-caught-up watermark to walk into.
+    let layer = layer_with(&[(
+        "init.lua",
+        "neotmux.keymap.set('C-w', function()\n  \
+         neotmux.window.focus(neotmux.window.create())\n  return true\nend)\n\
+         neotmux.keymap.set('C-t', function()\n  neotmux.detach()\n  return true\nend)\n\
+         neotmux.on_event('resized', function()\n  \
+         neotmux.window.focus(neotmux.window.create())\nend)\n\
+         neotmux.on_tick(function()\n  \
+         neotmux.log.info('windows=' .. table.concat(neotmux.window.list(), ','))\nend)\n",
+    )]);
+
+    let mut first = Client::start_with(runtime.path(), "/bin/cat", 24, 80, &[layer.path()]);
+    wait_for_socket(&socket_in(runtime.path()));
+    wait_for_log(runtime.path(), "windows=1");
+
+    first.send("\x17"); // C-w: a second window, made before the detach
+    wait_for_log(runtime.path(), "windows=1,2");
+
+    first.send("\x14"); // C-t: detach, bound above rather than through the shipped prefix
+    assert!(
+        first.wait_for_exit().success(),
+        "a detached client did not exit cleanly"
+    );
+
+    let second = Client::start_with(runtime.path(), "/bin/cat", 24, 80, &[layer.path()]);
+    wait_for_socket(&socket_in(runtime.path()));
+    // Long enough for several ticks of the re-attached client's own `resized` handler, if it
+    // fires at all, to have run and been logged.
+    std::thread::sleep(Duration::from_millis(500));
+    drop(second);
+
+    let log = log_text(runtime.path());
+    assert!(
+        !log.contains("windows=1,2,2"),
+        "the re-attach's own `resized` event let a handler mint window 2 a second time:\n{log}"
+    );
 }
 
 #[test]

@@ -19,6 +19,7 @@ fn run_neotmux(runtime_dir: &Path, log: &Path) {
         .expect("openpty");
 
     let home = tempfile::tempdir().expect("isolated home");
+    let _end_session = session::EndsSession::new(home.path());
 
     let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_neotmux"));
     cmd.arg("--log");
@@ -52,7 +53,6 @@ fn run_neotmux(runtime_dir: &Path, log: &Path) {
     };
     drop(pair.master);
     collector.join().ok();
-    session::end_session(home.path());
     assert!(status.success(), "neotmux exited with {status:?}");
 }
 
@@ -156,6 +156,7 @@ fn an_init_time_quit_exits_before_entering_the_alternate_screen() {
 
     let log = dir.path().join("neotmux.log");
     let home = tempfile::tempdir().expect("isolated home");
+    let _end_session = session::EndsSession::new(home.path());
 
     let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_neotmux"));
     cmd.arg("--log");
@@ -192,7 +193,6 @@ fn an_init_time_quit_exits_before_entering_the_alternate_screen() {
     };
     drop(pair.master);
     let out = collector.join().expect("collector");
-    session::end_session(home.path());
     assert!(status.success(), "neotmux exited with {status:?}");
     assert!(
         !String::from_utf8_lossy(&out).contains("\x1b[?1049h"),

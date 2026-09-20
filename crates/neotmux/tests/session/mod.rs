@@ -22,3 +22,21 @@ pub(crate) fn end_session(runtime_dir: &Path) {
         );
     }
 }
+
+/// Ends the session behind a test's own `$XDG_RUNTIME_DIR` when dropped — on a panic as much
+/// as on a normal return. A bare `end_session(...)` at the end of a function is skipped by an
+/// assertion that fails above it, and the session it would have ended used to die in three
+/// seconds; now it lives until the machine reboots.
+pub(crate) struct EndsSession(std::path::PathBuf);
+
+impl EndsSession {
+    pub(crate) fn new(runtime_dir: &Path) -> Self {
+        Self(runtime_dir.to_owned())
+    }
+}
+
+impl Drop for EndsSession {
+    fn drop(&mut self) {
+        end_session(&self.0);
+    }
+}

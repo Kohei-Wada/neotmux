@@ -246,6 +246,9 @@ impl Session {
         // changed, and everything here is the former.
         self.steps.clear();
         self.apply_geometry()?;
+        // `apply_geometry` raises `Resized`, but a client that was never told a previous size
+        // has nothing to be resized from (§4: "No events are replayed").
+        self.steps.retain(|step| !matches!(step, Step::Event(_)));
         self.publish_geometry();
         // Nothing this client has been shown is on its screen, so the first frame is not
         // allowed to be "nothing changed".
