@@ -616,17 +616,25 @@ and is dropped along with its icon if not even its last component fits.
 
 ### Changing what the borders look like
 
-`plugin.borders` returns `{ fg = 8, vertical = '│', horizontal = '─' }`, all read every tick:
+`plugin.borders` returns `{ fg = 8, vertical = '│', horizontal = '─', cross = '┼', tee_up = '┴',
+tee_down = '┬', tee_left = '┤', tee_right = '├' }`, all read every tick:
 
 ```lua
 local borders = require('plugin.borders')
 borders.fg = '#404040'
 borders.vertical = '|'      -- ASCII, if your font or terminal prefers it
 borders.horizontal = '-'
+borders.cross = '+'
 ```
 
 Each glyph is one character, because a divider is one cell: a terminal cell cannot be
 subdivided, so box drawing is as thin as a line gets.
+
+The last five are what goes in a cell two dividers meet in. Which one is not a choice the
+plugin makes per layout: `neotmux.junctions` is handed the segments and answers which of the
+four arms are there, and a tee is named for the arm that is on its own — `├` is `tee_right`,
+because right is the way its stem points. A junction with fewer than three arms is a line
+carrying on, and nothing is drawn over it.
 
 The plugin sets `neotmux.opt.pane_gutter = 1` and draws in the reserved column or row, so a
 border costs no pane a cell of its shell's output. Switch the plugin off and the gutter goes
