@@ -2152,6 +2152,47 @@ fn the_shipped_sidebar_lists_the_session_and_narrows_the_panes() {
     nt.wait_for_screen("1.1 cat", PATIENCE);
 }
 
+/// What is left of the band when the sidebar is folded: the markers column.
+const SIDEBAR_RAIL_COLS: u16 = 1;
+
+/// The fold, on the screen a user sees: `C-b b` hands the columns back to the panes and
+/// leaves the marker column behind, and pressing it again brings the sidebar back the width
+/// it was and against the same edge. The echoed `X` is the ruler — it sits at the first
+/// column the pane owns, so where it lands says how wide the band is.
+#[test]
+fn the_shipped_sidebar_folds_to_a_rail_and_back() {
+    let init = harness::runtime(&[("init.lua", "require('neotmux.defaults').sidebar = true")]);
+    let mut nt = Neotmux::start_layered(&[init.path(), &shipped_layer()], "cat");
+
+    nt.wait_for_status("cat", PATIENCE);
+    nt.wait_for_screen("1.1 cat", PATIENCE);
+    nt.send("X");
+    nt.wait_for_cell(PANE_TOP, SIDEBAR_COLS, "X", PATIENCE);
+
+    nt.send("\x02b"); // C-b b
+    nt.wait_for_cell(PANE_TOP, SIDEBAR_RAIL_COLS, "X", PATIENCE);
+    let folded = nt.screen_after(Duration::ZERO);
+    assert!(
+        !folded.contains("1.1 cat"),
+        "the rail is too narrow to read and still had the names on it:\n{folded}"
+    );
+    assert_eq!(
+        nt.cell(PANE_TOP, 0),
+        CURRENT_WINDOW_MARKER,
+        "the fold took the markers column too:\n{folded}"
+    );
+
+    nt.send("\x02b");
+    nt.wait_for_cell(PANE_TOP, SIDEBAR_COLS, "X", PATIENCE);
+    nt.wait_for_screen("1.1 cat", PATIENCE);
+    assert_eq!(
+        nt.cell(PANE_TOP, 0),
+        CURRENT_WINDOW_MARKER,
+        "the band came back somewhere other than the left edge:\n{}",
+        nt.screen_after(Duration::ZERO)
+    );
+}
+
 /// Off unless the user says otherwise, like the watcher: what the watcher spends is an
 /// opinion about what you run, what a sidebar spends is a third of the width.
 #[test]
