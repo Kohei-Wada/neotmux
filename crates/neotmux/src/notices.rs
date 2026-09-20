@@ -3,7 +3,7 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::Color;
 
-use crate::frame::Notice;
+use neotmux::frame::Notice;
 
 fn fg(level: Level) -> Color {
     match level {
@@ -50,7 +50,7 @@ mod tests {
     use ratatui::backend::TestBackend;
 
     use super::*;
-    use crate::notify::Notifications;
+    use neotmux::notify::Notifications;
 
     fn draw(notifications: &Notifications) -> ratatui::buffer::Buffer {
         let notices = notifications.visible();

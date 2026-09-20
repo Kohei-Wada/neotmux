@@ -4,7 +4,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 
 use crate::draw::color;
-use crate::panes::PaneRects;
+use neotmux::panes::PaneRects;
 
 #[derive(Clone, Copy)]
 struct Colors {

@@ -1,4 +1,4 @@
-use neotmux_core::proto::{DrawCmd, GridSnapshot, PaneId, Rect as PRect};
+use neotmux_core::proto::{DrawCmd, GridSnapshot, PaneId, Rect as PRect, Size};
 use neotmux_lua::ops::Level;
 
 use crate::panes::PaneRects;
@@ -23,6 +23,9 @@ pub struct Notice {
 /// a terminal, or a handle to one — which is what lets a frame be produced for a screen
 /// that is somewhere else.
 pub struct Frame<'a> {
+    /// The surface the panes were laid out against: the whole screen, reserved bands
+    /// included.
+    pub size: Size,
     /// The panes big enough to be shown, in layout order, each with the copy of its screen.
     pub panes: Vec<PaneFrame<'a>>,
     /// Where every pane of the shown window sits, the ones too small to draw included: a
