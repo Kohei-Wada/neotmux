@@ -135,3 +135,57 @@ fn the_revision_content_reports_is_the_one_the_lines_were_read_at() {
     let reported = logged[0].rsplit("rev=").next().expect("a revision");
     assert_eq!(reported, logged[1]);
 }
+
+/// The blank rest of a short line is where a rectangle selection's columns are. Cutting it
+/// is right for reading text and wrong for a rectangle, so it is asked for rather than
+/// assumed.
+#[test]
+fn the_pad_option_keeps_every_row_as_wide_as_the_pane() {
+    let (_dir, sub) = built("report(1, { pad = true })");
+    sub.terminals().open(pane(1), SIZE, 0);
+    sub.terminals().feed(pane(1), b"ab\r\ncd");
+
+    let line = ticked(&sub).remove(0);
+    assert!(
+        line.starts_with("1 [ab                  |cd                  |                    |                    ] rev="),
+        "a padded row was not the pane's twenty columns: {line:?}"
+    );
+}
+
+#[test]
+fn padding_is_off_unless_it_is_asked_for() {
+    let (_dir, sub) = built("report(1, { pad = false })\nreport(1)");
+    sub.terminals().open(pane(1), SIZE, 0);
+    sub.terminals().feed(pane(1), b"ab");
+
+    let lines = ticked(&sub);
+    assert!(lines[0].starts_with("1 [ab|||] rev="), "{lines:?}");
+    assert!(lines[1].starts_with("1 [ab|||] rev="), "{lines:?}");
+}
+
+/// Whether a line ran off the end of the pane is the one thing a plugin copying a wrapped
+/// command line cannot work out for itself: a line exactly as wide as the pane looks the
+/// same either way.
+#[test]
+fn the_wrapped_option_says_which_rows_run_on_into_the_next() {
+    let (_dir, sub) = built(
+        "local lines, _, wrapped = neotmux.pane.content(1, { wrapped = true })\n\
+         local flags = {}\n\
+         for i = 1, #lines do flags[i] = tostring(wrapped[i]) end\n\
+         neotmux.log.info(table.concat(flags, ','))",
+    );
+    sub.terminals().open(pane(1), Size { rows: 3, cols: 4 }, 0);
+    sub.terminals().feed(pane(1), b"abcdef");
+
+    assert_eq!(ticked(&sub), vec!["true,false,false"]);
+}
+
+#[test]
+fn the_flags_are_nil_unless_they_are_asked_for() {
+    let (_dir, sub) = built(
+        "local _, _, wrapped = neotmux.pane.content(1)\n\
+         neotmux.log.info(tostring(wrapped))",
+    );
+    sub.terminals().open(pane(1), SIZE, 0);
+    assert_eq!(ticked(&sub), vec!["nil"]);
+}

@@ -2363,5 +2363,5 @@ fn yanking_reports_the_register_it_put_the_text_in() {
     nt.send("\x02["); // C-b [
     nt.send(" lll");
     nt.send("y");
-    nt.wait_for_screen("copied 1 line into plugin.copy.register", PATIENCE);
+    nt.wait_for_screen("yanked 1 line into plugin.copy.register", PATIENCE);
 }

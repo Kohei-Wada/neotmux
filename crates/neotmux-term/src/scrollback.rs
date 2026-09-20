@@ -27,13 +27,19 @@ pub fn len(screen: &mut vt100::Screen) -> usize {
     len
 }
 
-/// History lines `from` up to `from + count`, oldest first, as plain text on the same terms
-/// as [`crate::lines`]. A `from` past the end of the history answers nothing rather than
-/// raising, the way a pane that closed answers nothing.
+/// Reads history lines `from` up to `from + count`, oldest first, one at a time. A `from`
+/// past the end of the history answers nothing rather than raising, the way a pane that
+/// closed answers nothing.
 ///
 /// The window `vt100` can show is one screen tall, so a longer read walks the history a
-/// screen at a time.
-pub fn lines(screen: &mut vt100::Screen, from: usize, count: usize) -> Vec<String> {
+/// screen at a time. `read` is handed the screen with the line it is asked about at row
+/// `row`, and the pane's width, because that is all any reader here has needed.
+pub fn walk<T>(
+    screen: &mut vt100::Screen,
+    from: usize,
+    count: usize,
+    mut read: impl FnMut(&vt100::Screen, u16, u16) -> T,
+) -> Vec<T> {
     let saved = screen.scrollback();
     let len = len(screen);
     let (rows, cols) = screen.size();
@@ -47,12 +53,25 @@ pub fn lines(screen: &mut vt100::Screen, from: usize, count: usize) -> Vec<Strin
         let take = (end - at).min(rows);
         for row in 0..take {
             let row = u16::try_from(row).expect("a row index within one screen");
-            out.push(crate::lines::row(screen, row, cols));
+            out.push(read(screen, row, cols));
         }
         at += take;
     }
     screen.set_scrollback(saved);
     out
+}
+
+/// History lines `from` up to `from + count`, oldest first, as plain text on the same terms
+/// as [`crate::lines`].
+pub fn lines(
+    screen: &mut vt100::Screen,
+    from: usize,
+    count: usize,
+    trailing: crate::lines::Trailing,
+) -> Vec<String> {
+    walk(screen, from, count, |screen, row, cols| {
+        crate::lines::row(screen, row, cols, trailing)
+    })
 }
 
 #[cfg(test)]
@@ -67,7 +86,11 @@ mod tests {
     }
 
     fn visible(parser: &vt100::Parser) -> Vec<String> {
-        crate::lines::visible(parser.screen(), None)
+        crate::lines::visible(parser.screen(), None, crate::lines::Trailing::Trim)
+    }
+
+    fn lines(screen: &mut vt100::Screen, from: usize, count: usize) -> Vec<String> {
+        super::lines(screen, from, count, crate::lines::Trailing::Trim)
     }
 
     #[test]

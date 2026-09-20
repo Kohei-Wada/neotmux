@@ -225,9 +225,12 @@ neotmux.pane.current()   -- id, or nil
 neotmux.pane.rect(id)    -- { x = , y = , w = , h = }, or nil
 neotmux.pane.info(id)    -- { command = ..., cwd = ... }, or nil
 neotmux.pane.revision(id)     -- a number that moves when the pane is fed, or nil
-neotmux.pane.content(id, opts) -- { line, ... }, revision — or nil, nil
-neotmux.pane.history(id)      -- how many lines are above the screen, or nil
-neotmux.pane.scrollback(id, opts) -- { line, ... }, revision — or nil, nil
+neotmux.pane.content(id, opts) -- { line, ... }, revision, wrapped — or nil, nil, nil
+neotmux.pane.history(id)      -- how many lines are above the screen, how many fell off
+neotmux.pane.scrollback(id, opts) -- { line, ... }, revision, wrapped — or nil, nil, nil
+neotmux.pane.freeze(id)       -- hold the pane still; false if there is no such pane
+neotmux.pane.unfreeze(id)     -- let it catch up; false if there is no such pane
+neotmux.pane.frozen(id)       -- true, false, or nil for no such pane
 neotmux.pane.split('horizontal' | 'vertical')
 neotmux.pane.focus(id)
 neotmux.pane.resize('left' | 'right' | 'up' | 'down', cells)
@@ -323,13 +326,83 @@ resize moves it as well, because reflowing changes what the pane reads as.
 `opts.lines` bounds the work as well as the answer: the rows above it are never built. Ask for
 the few at the bottom if a prompt is what you are after.
 
+`opts.pad` keeps the blank rest of every row instead of cutting it, so each line comes back
+exactly as wide as the pane — in **columns**, so a row holding a wide character is two
+characters shorter than it is wide. Cutting is right for reading text and wrong for a
+rectangle: a selection three columns wide over a line of two characters has to know that the
+third column is a space the pane is showing. It is off unless you ask for it, and
+`pane.scrollback` takes it on the same terms.
+
+```lua
+local rows = neotmux.pane.content(id, { pad = true })
+```
+
+`opts.wrapped` adds a third return value: one boolean per line, saying whether that line ran
+off the end of the pane and continues on the one below. It is the terminal's own flag, not a
+guess — a line exactly as wide as the pane looks identical either way, so there is nothing to
+guess from. It is `nil` unless you ask, and `nil` means "not asked", never "none of them".
+
+```lua
+local lines, _, wrapped = neotmux.pane.content(id, { wrapped = true })
+```
+
+That is what a copy of a wrapped command line turns on: a wrapped line keeps its trailing
+blanks and gets no newline after it, an unwrapped one gets both. `pane.scrollback` answers
+the same way, which is where the top of a wrapped command line usually is.
+
+A resize clears the flags. The terminal drops them on every row when the column count
+changes, because the old wrap points no longer describe the new width, and neotmux does not
+invent replacements.
+
+#### Holding a pane still
+
+A selection highlight over a pane that is still printing is a highlight over different text a
+moment later: the lines move under it and the tint stays where it was put. `freeze` stops
+that.
+
+```lua
+neotmux.pane.freeze(id)
+-- the pane draws, reads and numbers its history as it was at this moment
+neotmux.pane.unfreeze(id)
+```
+
+While a pane is frozen the host draws the screen as it was when you froze it, and
+`pane.content`, `pane.scrollback` and `pane.history` all answer about that same held instant
+— **the frozen text, not the live text**. That is the point: a plugin computing a selection
+against text the host is not drawing has computed the wrong selection, and being handed the
+live text silently would defeat the freeze. `pane.revision` is held with them, so it is still
+true that the revision a read comes back with is the revision of what was read, and a watcher
+polling it does not re-read the same held text on every frame.
+
+Nothing is lost. The child's output goes on being read from its PTY, parsed, and fed into the
+live screen underneath, and `pane_output` goes on being dispatched for every chunk of it —
+freezing decides what is drawn and what is read, not whether the child is heard. Unfreezing
+shows everything that arrived.
+
+Four things worth knowing:
+
+- **A second `freeze` keeps the snapshot it already has.** It answers `true`, because the pane
+  is frozen when it returns, but it does not re-take the view — re-anchoring it would move a
+  selection out from under whoever took one. Unfreeze and freeze again if that is what you
+  want.
+- **A resize reaches the child, not the held view.** The pane's PTY and its live screen are
+  resized as usual, because a child must never be lied to about its terminal. The frozen view
+  keeps the size it was taken at and is clipped to whatever room the pane now has; unfreezing
+  shows the reflowed screen. A selection anchored to a frozen line survives the resize, and
+  what it names after the unfreeze is the reflowed text, which is a different thing.
+- **Freezing is not a lifeline.** A pane whose child exits closes like any other, frozen or
+  not: `pane_closed` is dispatched, and every read about it answers `nil` from then on.
+- **It costs what the pane costs.** The held view is a copy of the pane's whole screen,
+  scrollback included — a pane with a full 10 000-line history is tens of megabytes of it.
+  Freeze the pane you are working in, not every pane.
+
 #### What a pane has already said
 
 `scrollback` is the lines above the visible screen, and `history` is how many of them there
 are:
 
 ```lua
-local n = neotmux.pane.history(id)                              -- 0 if it has not scrolled
+local n, dropped = neotmux.pane.history(id)                     -- 0, 0 if it has not scrolled
 local all  = neotmux.pane.scrollback(id)                        -- the whole history
 local tail = neotmux.pane.scrollback(id, { from = n - 10, lines = 10 })  -- the last ten
 ```
@@ -353,6 +426,33 @@ many, each new line drops the oldest and every number shifts down by one — so 
 holding a position across that will find it pointing one line later for each line dropped.
 `history()` sitting still at the limit while the pane is producing output is what that looks
 like.
+
+**The second number `history()` returns is how many lines have gone that way** since the pane
+opened. That is what makes a saved position safe to hold: `dropped + index` is a number
+nothing renumbers, so save it and convert back when you use it.
+
+```lua
+local _, dropped = neotmux.pane.history(id)
+local anchor = dropped + index          -- save this, not the index
+
+local _, now = neotmux.pane.history(id)
+if anchor < now then
+  -- the line it named is gone; there is nothing to fall back to
+else
+  local line = neotmux.pane.scrollback(id, { from = anchor - now, lines = 1 })[1]
+end
+```
+
+The revision will not tell you this: it moves on any output at all, and stands still for none
+of the evictions.
+
+**The count can be low, in one case.** The terminal does not report evictions; the host counts
+them by watching the lines the terminal appends, and that count is exact as long as no single
+read from the pane's PTY appends as many lines as the pane holds. A read is at most 8 KiB and
+the pane holds 10 000 lines, so ordinary output — which needs a byte per line — cannot reach
+it. A child that sends thousands of scroll sequences in one chunk can, and then `dropped` is
+lower than the truth. Everything the plugin could have anchored to is gone in that case
+anyway, so what it loses is the numbering rather than the ability to notice.
 
 **Reading does not scroll the pane.** The terminal's own position in its scrollback is moved
 to reach the lines and put back before you are answered, inside one call, so nobody watching
@@ -469,8 +569,54 @@ neotmux.opt.tick_budget_ms = 8     -- per source per frame; 0 turns the budget o
 neotmux.opt.tick_overrun_limit = 5 -- consecutive overruns before the tick is dropped; >= 1
 neotmux.opt.pane_gutter = 0        -- cells left between panes, for whoever draws there; <= 4
 neotmux.resubscribe(name)          -- give a dropped source its tick back; returns handles
+neotmux.width(text)                -- how many columns `text` takes on a pane's grid
+neotmux.clipboard.set(text)        -- written? — true, or false and why not
 neotmux.home                       -- `$HOME` as the host read it, or nil; read-only
 ```
+
+`neotmux.width` is the one measurement everything that takes a column agrees on. `#text` is
+bytes and `utf8.len(text)` is characters, and neither is a column: a wide character is one
+entry in a `pane.content` line and **two** cells on the grid, so `#line:sub(1, n)` is not
+column `n` on any line that has one in it, and a tint computed that way drifts right by one
+cell per wide character before it.
+
+```lua
+local line = neotmux.pane.content(id)[1]
+ctx:tint{ pane = id, x = 0, y = 0, w = neotmux.width(line), h = 1, bg = 4 }
+```
+
+It is the renderer's own rule, read out of the same code the grid is built with, so the two
+cannot disagree. A combining mark adds nothing, because it is drawn into the cell before it.
+A control character adds nothing either, because it is never drawn — a tab moves the cursor
+rather than filling cells, and no tab ever reaches a `pane.content` line for that reason.
+
+`neotmux.clipboard.set` writes an OSC 52 sequence carrying `text` to the client's terminal.
+
+```lua
+local ok, err = neotmux.clipboard.set(selected)
+if not ok then
+  neotmux.notify('warn', 'could not reach the terminal: ' .. err)
+end
+```
+
+**`true` means the sequence was written and flushed, and nothing more.** It does not mean the
+clipboard holds the text, and neotmux cannot find out whether it does. OSC 52 has no reply; a
+terminal that does not implement it discards it in silence, as it would any escape sequence it
+does not know; and a terminal that does implement it may have it turned off, or there may be
+an ssh session or another multiplexer in between that dropped it. `false` comes with the
+reason, and it is always about the write — there was no terminal to write to, or writing to it
+failed.
+
+So do not put "Copied to clipboard" on the screen on a `true`. That is the bug this return
+value exists to let you avoid: tmux checks terminfo's `Ms` capability and writes nothing at all
+when it is absent, and a plugin that reported success on top of that says "copied" over
+nothing having been copied. neotmux does not read terminfo, because `Ms` describes what the
+entry for `$TERM` claims rather than what the terminal on the other end did, and because
+sending an OSC a terminal does not know costs nothing. Say what you know — "sent to the
+terminal" — or say nothing, and tell the person about the paste buffer you keep yourself,
+which you can actually check.
+
+There is no paste buffer in the host. Yanked text goes wherever your plugin puts it.
 
 `neotmux.home` is a fact, not an option: it sits beside `pane.info`'s facts rather than under
 `opt`, because nothing sets it. The VM has no `os.getenv` — reading the process environment is

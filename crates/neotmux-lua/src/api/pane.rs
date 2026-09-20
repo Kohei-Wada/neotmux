@@ -4,6 +4,8 @@ use std::rc::Rc;
 use mlua::{Lua, Table, Value};
 
 use neotmux_core::proto::{Dir, PaneId, SplitDir};
+use neotmux_term::lines::Trailing;
+use neotmux_term::read::{Text, Want};
 use neotmux_term::terminals::PaneTerminals;
 
 use crate::api::rect;
@@ -24,6 +26,42 @@ fn count(call: &str, field: &str, value: Option<i64>) -> mlua::Result<Option<usi
             })
         })
         .transpose()
+}
+
+/// A boolean a caller may have left out, which is the same as `false` everywhere here.
+fn flag(opts: Option<&Table>, name: &str) -> mlua::Result<bool> {
+    match opts {
+        Some(opts) => Ok(opts.get::<Option<bool>>(name)?.unwrap_or(false)),
+        None => Ok(false),
+    }
+}
+
+/// What a read of a pane's text was asked to include. `pad` keeps the blank rest of every
+/// row rather than cutting it, and `wrapped` asks for the per-row continuation flags;
+/// absent, both are off, which is what reading a line of text wants.
+fn want(opts: Option<&Table>) -> mlua::Result<Want> {
+    Ok(Want {
+        trailing: if flag(opts, "pad")? {
+            Trailing::Pad
+        } else {
+            Trailing::Trim
+        },
+        wrapped: flag(opts, "wrapped")?,
+    })
+}
+
+/// One read of a pane's text as Lua sees it: the lines, the revision they were read at, and
+/// the continuation flags where they were asked for — `nil` where they were not.
+fn answer(lua: &Lua, text: Text) -> mlua::Result<(Value, Value, Value)> {
+    let wrapped = match text.wrapped {
+        Some(wrapped) => Value::Table(lua.create_sequence_from(wrapped)?),
+        None => Value::Nil,
+    };
+    Ok((
+        Value::Table(lua.create_sequence_from(text.lines)?),
+        Value::Integer(text.revision as i64),
+        wrapped,
+    ))
 }
 
 /// The M2 pane API (§6), signatures frozen now. `list`, `current` and `rect` read this
@@ -134,30 +172,33 @@ pub(crate) fn install(
         // panes exist is a separate question, and `pane.list` and `pane_output` answer it.
         let terminals = terminals.clone();
         let content = lua.create_function(move |lua, (pane, opts): (u32, Option<Table>)| {
-            let last = match opts {
+            let last = match &opts {
                 Some(opts) => opts.get::<Option<i64>>("lines")?,
                 None => None,
             };
             let last = count("content", "lines count", last)?;
-            let Some((lines, revision)) = terminals.content(PaneId::from(pane), last) else {
-                return Ok((Value::Nil, Value::Nil));
+            let want = want(opts.as_ref())?;
+            let Some(text) = terminals.content(PaneId::from(pane), last, want) else {
+                return Ok((Value::Nil, Value::Nil, Value::Nil));
             };
-            Ok((
-                Value::Table(lua.create_sequence_from(lines)?),
-                Value::Integer(revision as i64),
-            ))
+            answer(lua, text)
         })?;
         pane.set("content", content)?;
     }
 
     {
-        // The cheap half of reading the history, as `revision` is of reading the screen: a
-        // number, with no line built to answer it.
+        // The cheap half of reading the history, as `revision` is of reading the screen: two
+        // numbers, with no line built to answer them. The second is what makes the first
+        // safe to hold on to — a line number means a different line after the ring drops
+        // one, and nothing else in the read path shows that it happened.
         let terminals = terminals.clone();
         let history = lua.create_function(move |_, pane: u32| {
-            Ok(match terminals.history_len(PaneId::from(pane)) {
-                Some(len) => Value::Integer(len as i64),
-                None => Value::Nil,
+            Ok(match terminals.history_extent(PaneId::from(pane)) {
+                Some(history) => (
+                    Value::Integer(history.len as i64),
+                    Value::Integer(history.dropped as i64),
+                ),
+                None => (Value::Nil, Value::Nil),
             })
         })?;
         pane.set("history", history)?;
@@ -168,8 +209,9 @@ pub(crate) fn install(
         // where 0 is the oldest line it still holds, and `lines` bounds the read the way
         // `content`'s does. Reading moves the terminal's position in its scrollback and puts
         // it back before answering, so nothing a person is looking at moves.
+        let terminals = terminals.clone();
         let scrollback = lua.create_function(move |lua, (pane, opts): (u32, Option<Table>)| {
-            let (from, lines) = match opts {
+            let (from, lines) = match &opts {
                 Some(opts) => (
                     opts.get::<Option<i64>>("from")?,
                     opts.get::<Option<i64>>("lines")?,
@@ -179,15 +221,41 @@ pub(crate) fn install(
             let from = count("scrollback", "from", from)?.unwrap_or(0);
             // No count is the rest of the history, as no `lines` is the whole screen.
             let lines = count("scrollback", "lines count", lines)?.unwrap_or(usize::MAX);
-            let Some((lines, revision)) = terminals.history(PaneId::from(pane), from, lines) else {
-                return Ok((Value::Nil, Value::Nil));
+            let want = want(opts.as_ref())?;
+            let Some(text) = terminals.history(PaneId::from(pane), from, lines, want) else {
+                return Ok((Value::Nil, Value::Nil, Value::Nil));
             };
-            Ok((
-                Value::Table(lua.create_sequence_from(lines)?),
-                Value::Integer(revision as i64),
-            ))
+            answer(lua, text)
         })?;
         pane.set("scrollback", scrollback)?;
+    }
+
+    {
+        // Immediate, not an op: a plugin freezes a pane in order to read it in the same
+        // call, and an op applied after the tick would hand it the live text it froze to
+        // get away from. Nothing about the tree changes, so there is nothing for the rest of
+        // the frame to catch up with.
+        let terminals = terminals.clone();
+        let freeze =
+            lua.create_function(move |_, pane: u32| Ok(terminals.freeze(PaneId::from(pane))))?;
+        pane.set("freeze", freeze)?;
+    }
+
+    {
+        let terminals = terminals.clone();
+        let unfreeze =
+            lua.create_function(move |_, pane: u32| Ok(terminals.unfreeze(PaneId::from(pane))))?;
+        pane.set("unfreeze", unfreeze)?;
+    }
+
+    {
+        let frozen = lua.create_function(move |_, pane: u32| {
+            Ok(match terminals.is_frozen(PaneId::from(pane)) {
+                Some(frozen) => Value::Boolean(frozen),
+                None => Value::Nil,
+            })
+        })?;
+        pane.set("frozen", frozen)?;
     }
 
     {

@@ -167,3 +167,61 @@ fn a_negative_from_or_line_count_raises() {
         );
     }
 }
+
+/// A rectangle selection that reaches into the history needs the same columns there as on
+/// the screen, so `pad` reads the same way on both.
+#[test]
+fn the_pad_option_keeps_every_history_row_as_wide_as_the_pane() {
+    let (_dir, sub) = built("report(1, { pad = true })");
+    sub.terminals().open(pane(1), SIZE, 100);
+    sub.terminals()
+        .feed(pane(1), b"one\r\ntwo\r\nthree\r\nfour");
+
+    let line = ticked(&sub).remove(0);
+    assert!(
+        line.starts_with("1 [one     |two     ] rev="),
+        "a padded history row was not the pane's eight columns: {line:?}"
+    );
+}
+
+/// A wrapped command line usually straddles the top of the screen, so the flags have to be
+/// readable in the history on the same terms.
+#[test]
+fn the_wrapped_option_says_which_history_rows_run_on_into_the_next() {
+    let (_dir, sub) = built(
+        "local lines, _, wrapped = neotmux.pane.scrollback(1, { wrapped = true })\n\
+         local flags = {}\n\
+         for i = 1, #lines do flags[i] = tostring(wrapped[i]) end\n\
+         neotmux.log.info(table.concat(flags, ','))",
+    );
+    sub.terminals()
+        .open(pane(1), Size { rows: 2, cols: 4 }, 100);
+    sub.terminals().feed(pane(1), b"abcdef\r\n\r\nxy");
+
+    assert_eq!(ticked(&sub), vec!["true,false"]);
+}
+
+/// An anchored line number means a different line once the ring drops one, and the count of
+/// what it dropped is the only way to see it. Four lines of ring, six scrolled away.
+#[test]
+fn history_also_reports_how_many_lines_have_fallen_out_of_the_front() {
+    let (_dir, sub) = built(
+        "local len, dropped = neotmux.pane.history(1)\n\
+         neotmux.log.info(len .. '+' .. dropped)",
+    );
+    sub.terminals().open(pane(1), SIZE, 4);
+    sub.terminals().feed(pane(1), b"1\r\n2\r\n3\r\n4\r\n5");
+    assert_eq!(ticked(&sub), vec!["3+0"]);
+
+    sub.terminals().feed(pane(1), b"\r\n6\r\n7\r\n8");
+    assert_eq!(ticked(&sub), vec!["4+2"]);
+}
+
+#[test]
+fn a_pane_nobody_has_reports_neither_number() {
+    let (_dir, sub) = built(
+        "local len, dropped = neotmux.pane.history(4242)\n\
+         neotmux.log.info(tostring(len) .. '+' .. tostring(dropped))",
+    );
+    assert_eq!(ticked(&sub), vec!["nil+nil"]);
+}

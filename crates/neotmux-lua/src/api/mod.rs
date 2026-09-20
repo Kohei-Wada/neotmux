@@ -1,3 +1,4 @@
+pub mod clipboard;
 pub mod ctx;
 pub mod event;
 pub mod keymap;
@@ -258,6 +259,12 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
         neotmux.set("window", window)?;
     }
 
+    {
+        let clipboard = clipboard::install(lua)?;
+        let clipboard = seal(lua, clipboard, "neotmux.clipboard")?;
+        neotmux.set("clipboard", clipboard)?;
+    }
+
     let log = log::install(lua, sources.clone(), ops.clone())?;
     let log = seal(lua, log, "neotmux.log")?;
     neotmux.set("log", log)?;
@@ -270,6 +277,17 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
     // Absent, not "", where there was no `HOME` — the same answer the rest of the ABI gives.
     if let Some(home) = home {
         neotmux.set("home", home)?;
+    }
+
+    {
+        // The renderer's own rule, out of `neotmux-term`, so a plugin's columns and the
+        // renderer's columns cannot disagree: `pane.content` collapses a wide character to
+        // one entry at the column it starts in, and everything that takes a column — a
+        // tint, a rect, a draw — counts cells. `#line` counts neither.
+        let width = lua.create_function(move |_, text: String| {
+            Ok(neotmux_term::width::of_str(&text) as i64)
+        })?;
+        neotmux.set("width", width)?;
     }
 
     {

@@ -146,7 +146,11 @@ fn the_cursor_moves_and_is_drawn_where_it_landed() {
 fn scrolling_above_the_screen_draws_lines_the_pane_no_longer_shows() {
     let (_dir, sub) = built("");
     scrolled(&sub);
-    let (screen, _) = sub.terminals().content(pane(), None).unwrap();
+    let screen = sub
+        .terminals()
+        .content(pane(), None, neotmux_term::read::Want::default())
+        .unwrap()
+        .lines;
     assert!(!screen.contains(&"four".to_string()), "{screen:?}");
 
     enter(&sub);
@@ -262,8 +266,9 @@ fn yanking_puts_the_selected_text_in_the_register() {
         "{said:?}"
     );
     assert!(
-        said.iter()
-            .any(|line| line == "copied 3 lines into plugin.copy.register"),
+        said.iter().any(|line| line
+            == "yanked 3 lines into plugin.copy.register, \
+                and offered them to the terminal's clipboard"),
         "{said:?}"
     );
 }
@@ -453,23 +458,27 @@ fn a_user_config_can_switch_copy_mode_off() {
     assert!(frame(&sub).is_empty());
 }
 
-/// There is no clipboard call in this ABI, so a yank says where the text actually went. A
-/// copy mode that claimed the system clipboard here would be claiming something it has no way
-/// to check.
+/// `clipboard.set` returning true says the escape reached the terminal, not that the terminal
+/// took it — OSC 52 has no reply, and one that ignores it is byte-identical to one that
+/// accepted it. So a yank says the register plainly and the clipboard as an offer. Claiming
+/// the clipboard holds the text is the false-success other multiplexers ship.
 #[test]
-fn a_yank_does_not_claim_a_clipboard_this_host_has_not_got() {
+fn a_yank_claims_the_register_and_only_offers_the_clipboard() {
     let (_dir, sub) = built("");
     scrolled(&sub);
     enter(&sub);
     keys(&sub, &[" ", "l", "y"]);
     let said = logged(&sub);
     assert!(
-        said.iter()
-            .any(|line| line == "copied 1 line into plugin.copy.register"),
+        said.iter().any(|line| line
+            == "yanked 1 line into plugin.copy.register, \
+                and offered them to the terminal's clipboard"),
         "{said:?}"
     );
     assert!(
-        !said.iter().any(|line| line.contains("clipboard")),
+        !said
+            .iter()
+            .any(|line| line.contains("copied") && line.contains("clipboard")),
         "the yank claimed a clipboard: {said:?}"
     );
 }

@@ -145,10 +145,18 @@ M.commands = {
     end)
     mode.anchor = nil
     local count = last.line - first.line + 1
-    local where = clipboard(M.register) and "the system clipboard" or "plugin.copy.register"
+    -- The register is a fact; the clipboard is not. `clipboard.set` returning true says the
+    -- escape reached the terminal, not that the terminal took it — OSC 52 has no reply, and a
+    -- terminal that ignores it is byte-identical to one that accepted it. Saying "copied to
+    -- the clipboard" on the strength of that is the false-success bug other multiplexers ship.
+    local offered = clipboard(M.register)
     neotmux.notify(
       "info",
-      "copied " .. count .. (count == 1 and " line" or " lines") .. " into " .. where
+      "yanked "
+        .. count
+        .. (count == 1 and " line" or " lines")
+        .. " into plugin.copy.register"
+        .. (offered and ", and offered them to the terminal's clipboard" or "")
     )
   end,
   ["cancel"] = function()
