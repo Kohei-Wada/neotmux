@@ -4,6 +4,8 @@
 //! wants a different subset of the same read and the alternative is a signature that grows
 //! a parameter and a tuple slot every time one of them wants one more thing.
 
+use neotmux_proto::PaneId;
+
 use crate::lines::Trailing;
 
 /// What to include in a read.
@@ -36,4 +38,19 @@ pub struct History {
     /// line `i` is the `dropped + i`th line the pane ever scrolled away. See
     /// [`crate::evictions`] for the one case in which this can be low.
     pub dropped: usize,
+}
+
+/// Reading a pane's text, from wherever the pane's terminal happens to be.
+///
+/// [`crate::terminals::PaneTerminals`] is the local answer, and the one the session holds.
+/// The Lua layer runs in the process with the screen rather than the one with the panes, so
+/// its reads are answered across a socket instead — same questions, a different distance.
+pub trait PaneRead {
+    fn revision(&self, pane: PaneId) -> Option<u64>;
+    fn content(&self, pane: PaneId, last: Option<usize>, want: Want) -> Option<Text>;
+    fn history_extent(&self, pane: PaneId) -> Option<History>;
+    fn history(&self, pane: PaneId, from: usize, count: usize, want: Want) -> Option<Text>;
+    fn freeze(&self, pane: PaneId) -> bool;
+    fn unfreeze(&self, pane: PaneId) -> bool;
+    fn is_frozen(&self, pane: PaneId) -> Option<bool>;
 }

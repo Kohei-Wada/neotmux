@@ -7,12 +7,14 @@ mod tui;
 
 use std::env;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use neotmux::{logging, notify};
 use neotmux_lua::LuaSubsystem;
 use neotmux_lua::ops::Op;
 use neotmux_lua::runtime::Layers;
 use neotmux_proto::Level;
+use neotmux_term::terminals::PaneTerminals;
 
 struct LogFlag {
     path: Option<PathBuf>,
@@ -85,7 +87,8 @@ fn main() -> anyhow::Result<()> {
         .ok()
         .and_then(|path| path.parent().map(Path::to_path_buf));
     let layers = Layers::resolve(&|key| env::var_os(key), exe_dir.as_deref());
-    let lua = LuaSubsystem::build(layers)?;
+    let terminals = Rc::new(PaneTerminals::new());
+    let lua = LuaSubsystem::build(layers, terminals.clone())?;
     for failure in lua.run_init() {
         logging::log(Level::Warn, &failure.source, &failure.message);
     }
@@ -163,7 +166,13 @@ fn main() -> anyhow::Result<()> {
     let shutdown = signals::ShutdownSignal::install()?;
     let mut notifications = notify::Notifications::new();
     let mut terminal = ratatui::init();
-    let result = tui::run(&mut terminal, &shutdown, &lua, &mut notifications);
+    let result = tui::run(
+        &mut terminal,
+        &shutdown,
+        &lua,
+        terminals,
+        &mut notifications,
+    );
     // Not `ratatui::restore`: it reports a failure with `eprintln!`, which panics when the
     // terminal it is trying to restore is the one that has gone away.
     if let Err(err) = ratatui::try_restore() {

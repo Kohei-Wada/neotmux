@@ -10,6 +10,10 @@ use neotmux_lua::runtime::Layers;
 use neotmux_lua::{Event, Geometry, KeyOutcome, LuaSubsystem};
 use neotmux_proto::{Color, DrawCmd, Epoch, PaneId, Rect, Size};
 
+mod support;
+
+use support::Built;
+
 /// Six rows, so ten printed lines leave four in the history.
 const SIZE: Size = Size { rows: 6, cols: 20 };
 const SELECTION: Color = Color::Rgb(0x45, 0x47, 0x5a);
@@ -24,7 +28,7 @@ fn pane() -> PaneId {
 
 /// The shipped runtime with the prefix and copy mode on and everything else off, so every
 /// draw command in a frame is copy mode's.
-fn built(extra: &str) -> (tempfile::TempDir, LuaSubsystem) {
+fn built(extra: &str) -> (tempfile::TempDir, Built) {
     let dir = tempfile::tempdir().unwrap();
     fs::write(
         dir.path().join("init.lua"),
@@ -36,10 +40,11 @@ fn built(extra: &str) -> (tempfile::TempDir, LuaSubsystem) {
         ),
     )
     .unwrap();
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![
-        dir.path().to_path_buf(),
-        shipped_layer(),
-    ]))
+    let terminals = support::panes();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf(), shipped_layer()]),
+        terminals.clone(),
+    )
     .unwrap();
     assert!(sub.run_init().is_empty());
     sub.begin_frame(
@@ -51,12 +56,12 @@ fn built(extra: &str) -> (tempfile::TempDir, LuaSubsystem) {
             ..Default::default()
         },
     );
-    (dir, sub)
+    (dir, Built::new(sub, terminals))
 }
 
 /// Ten lines into a six-row pane: `one` through `four` are history, `five` through `ten` are
 /// the visible screen.
-fn scrolled(sub: &LuaSubsystem) {
+fn scrolled(sub: &Built) {
     sub.terminals().open(pane(), SIZE, 100);
     sub.terminals().feed(
         pane(),

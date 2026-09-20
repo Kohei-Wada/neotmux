@@ -5,8 +5,7 @@ use mlua::{Lua, Table, Value};
 
 use neotmux_proto::{Dir, PaneId, SplitDir};
 use neotmux_term::lines::Trailing;
-use neotmux_term::read::{Text, Want};
-use neotmux_term::terminals::PaneTerminals;
+use neotmux_term::read::{PaneRead, Text, Want};
 
 use crate::api::rect;
 use crate::geometry::Geometry;
@@ -74,7 +73,7 @@ pub(crate) fn install(
     ops: Rc<OpBuffer>,
     geometry: Rc<RefCell<Geometry>>,
     pane_info: Rc<RefCell<PaneInfos>>,
-    terminals: Rc<PaneTerminals>,
+    terminals: Rc<dyn PaneRead>,
 ) -> mlua::Result<Table> {
     let pane = lua.create_table()?;
 

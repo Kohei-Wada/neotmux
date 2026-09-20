@@ -7,6 +7,10 @@ use neotmux_lua::ops::Op;
 use neotmux_lua::runtime::Layers;
 use neotmux_proto::{PaneId, Size};
 
+mod support;
+
+use support::Built;
+
 /// Two rows, so the third line a pane prints is already history.
 const SIZE: Size = Size { rows: 2, cols: 8 };
 
@@ -30,13 +34,18 @@ local function report_visible(id)
 end
 "#;
 
-fn built(body: &str) -> (tempfile::TempDir, LuaSubsystem) {
+fn built(body: &str) -> (tempfile::TempDir, Built) {
     let dir = tempfile::tempdir().unwrap();
     let init = format!("{REPORT}\nneotmux.on_tick(function()\n{body}\nend)\n");
     fs::write(dir.path().join("init.lua"), init).unwrap();
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let terminals = support::panes();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        terminals.clone(),
+    )
+    .unwrap();
     assert!(sub.run_init().is_empty());
-    (dir, sub)
+    (dir, Built::new(sub, terminals))
 }
 
 fn pane(id: u32) -> PaneId {
@@ -55,7 +64,7 @@ fn ticked(sub: &LuaSubsystem) -> Vec<String> {
 }
 
 /// A pane with four lines printed into a two-row screen: two of history, two visible.
-fn scrolled(sub: &LuaSubsystem) {
+fn scrolled(sub: &Built) {
     sub.terminals().open(pane(1), SIZE, 100);
     sub.terminals()
         .feed(pane(1), b"one\r\ntwo\r\nthree\r\nfour");

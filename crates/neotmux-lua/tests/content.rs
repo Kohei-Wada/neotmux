@@ -7,6 +7,10 @@ use neotmux_lua::ops::Op;
 use neotmux_lua::runtime::Layers;
 use neotmux_proto::{PaneId, Size};
 
+mod support;
+
+use support::Built;
+
 const SIZE: Size = Size { rows: 4, cols: 20 };
 
 /// Reports a pane's lines joined by `|`, so one log line pins the whole answer. Every test
@@ -23,13 +27,18 @@ end
 "#;
 
 /// `body` runs on every tick, with `report` in scope.
-fn built(body: &str) -> (tempfile::TempDir, LuaSubsystem) {
+fn built(body: &str) -> (tempfile::TempDir, Built) {
     let dir = tempfile::tempdir().unwrap();
     let init = format!("{REPORT}\nneotmux.on_tick(function()\n{body}\nend)\n");
     fs::write(dir.path().join("init.lua"), init).unwrap();
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let terminals = support::panes();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        terminals.clone(),
+    )
+    .unwrap();
     assert!(sub.run_init().is_empty());
-    (dir, sub)
+    (dir, Built::new(sub, terminals))
 }
 
 fn pane(id: u32) -> PaneId {

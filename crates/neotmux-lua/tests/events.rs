@@ -4,6 +4,8 @@ use neotmux_lua::runtime::Layers;
 use neotmux_lua::{Event, LuaSubsystem};
 use neotmux_proto::{PaneId, Size};
 
+mod support;
+
 fn built(files: &[(&str, &str)]) -> (tempfile::TempDir, LuaSubsystem) {
     let dir = tempfile::tempdir().unwrap();
     for (rel, body) in files {
@@ -11,7 +13,11 @@ fn built(files: &[(&str, &str)]) -> (tempfile::TempDir, LuaSubsystem) {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, body).unwrap();
     }
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     (dir, sub)
 }
 

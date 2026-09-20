@@ -7,6 +7,10 @@ use neotmux_lua::ops::Op;
 use neotmux_lua::runtime::Layers;
 use neotmux_proto::{GridSnapshot, PaneId, Size};
 
+mod support;
+
+use support::Built;
+
 const SIZE: Size = Size { rows: 2, cols: 8 };
 
 const REPORT: &str = r#"
@@ -19,13 +23,18 @@ local function report(id)
 end
 "#;
 
-fn built(body: &str) -> (tempfile::TempDir, LuaSubsystem) {
+fn built(body: &str) -> (tempfile::TempDir, Built) {
     let dir = tempfile::tempdir().unwrap();
     let init = format!("{REPORT}\nneotmux.on_tick(function()\n{body}\nend)\n");
     fs::write(dir.path().join("init.lua"), init).unwrap();
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let terminals = support::panes();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        terminals.clone(),
+    )
+    .unwrap();
     assert!(sub.run_init().is_empty());
-    (dir, sub)
+    (dir, Built::new(sub, terminals))
 }
 
 fn pane(id: u32) -> PaneId {
@@ -44,7 +53,7 @@ fn ticked(sub: &LuaSubsystem) -> Vec<String> {
 }
 
 /// What the host would draw: the grid it copies out of the pane's terminal every frame.
-fn drawn(sub: &LuaSubsystem, id: u32) -> Vec<String> {
+fn drawn(sub: &Built, id: u32) -> Vec<String> {
     let mut grid = GridSnapshot::default();
     sub.terminals().snapshot_into(pane(id), &mut grid);
     (0..grid.size.rows)

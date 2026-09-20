@@ -7,6 +7,8 @@ use neotmux_lua::runtime::Layers;
 use neotmux_lua::{Geometry, LuaSubsystem, Window};
 use neotmux_proto::{Epoch, PaneId, Rect, Size, WindowId};
 
+mod support;
+
 const SIZE: Size = Size { rows: 24, cols: 80 };
 
 /// `body` runs on every tick, with `report` in scope: it says a window's panes joined by
@@ -28,7 +30,11 @@ end)
 "#
     );
     fs::write(dir.path().join("init.lua"), init).unwrap();
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     assert!(sub.run_init().is_empty());
     (dir, sub)
 }

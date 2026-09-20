@@ -1,3 +1,4 @@
+use std::rc::Rc;
 use std::time::Instant;
 
 use anyhow::Context as _;
@@ -6,6 +7,7 @@ use neotmux_lua::{Event as LuaEvent, Geometry, KeyOutcome, LuaSubsystem, Window 
 use neotmux_proto::{DrawCmd, Level, PaneId, Rect as PRect, Reserved, Size, WindowId};
 use neotmux_term::pty::PtyHandle;
 use neotmux_term::state::clamp_to_min_grid;
+use neotmux_term::terminals::PaneTerminals;
 use neotmux_term::wakeup::Waker;
 
 use crate::input::{encode_key, key_spec};
@@ -60,7 +62,12 @@ enum Drained {
 }
 
 impl Session {
-    pub fn new(size: Size, lua: &LuaSubsystem, waker: Waker) -> anyhow::Result<Self> {
+    pub fn new(
+        size: Size,
+        lua: &LuaSubsystem,
+        terminals: Rc<PaneTerminals>,
+        waker: Waker,
+    ) -> anyhow::Result<Self> {
         let surface = Surface {
             size,
             reserved: lua.reserved(),
@@ -68,7 +75,7 @@ impl Session {
         };
         let (windows, first) = Windows::new(lua.reserve_window_id(), surface);
         lua.lay_out_reservations(size, windows.current().applied_bands());
-        let mut shells = Shells::new(waker, lua.terminals());
+        let mut shells = Shells::new(waker, terminals);
         shells.open(
             first,
             PtyHandle::default_shell_command(),

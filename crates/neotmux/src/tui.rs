@@ -1,9 +1,11 @@
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
 use neotmux_lua::LuaSubsystem;
 use neotmux_proto::Size;
 use neotmux_term::state::clamp_to_min_grid;
+use neotmux_term::terminals::PaneTerminals;
 use neotmux_term::wakeup::{Wakeup, wakeup};
 use ratatui::DefaultTerminal;
 
@@ -110,12 +112,13 @@ pub fn run(
     terminal: &mut DefaultTerminal,
     shutdown: &ShutdownSignal,
     lua: &LuaSubsystem,
+    terminals: Rc<PaneTerminals>,
     notifications: &mut Notifications,
 ) -> anyhow::Result<Option<i32>> {
     let mut keyboard = Keyboard::open()?;
     let winch = signals::WindowChange::install()?;
     let (wakeup, waker) = wakeup().context("open the panes' wakeup")?;
-    let mut session = Session::new(terminal_size(terminal)?, lua, waker)?;
+    let mut session = Session::new(terminal_size(terminal)?, lua, terminals, waker)?;
 
     #[cfg(debug_assertions)]
     if std::env::var_os("NEOTMUX_PANIC_TEST").is_some() {

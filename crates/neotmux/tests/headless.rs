@@ -4,6 +4,7 @@
 //! tested as a property rather than through any of the session's internals.
 
 use std::fs;
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use neotmux::notify::Notifications;
@@ -13,6 +14,7 @@ use neotmux_lua::runtime::Layers;
 use neotmux_proto::frame::Frame;
 use neotmux_proto::keys::{Key, KeyCode};
 use neotmux_proto::{DrawCmd, Size};
+use neotmux_term::terminals::PaneTerminals;
 use neotmux_term::wakeup::{Wakeup, wakeup};
 
 const SURFACE: Size = Size { rows: 10, cols: 40 };
@@ -20,22 +22,26 @@ const SURFACE: Size = Size { rows: 10, cols: 40 };
 /// small fraction of it.
 const PATIENCE: Duration = Duration::from_secs(20);
 
-fn lua(files: &[(&str, &str)]) -> (tempfile::TempDir, LuaSubsystem) {
+fn lua(files: &[(&str, &str)]) -> (tempfile::TempDir, LuaSubsystem, Rc<PaneTerminals>) {
     let dir = tempfile::tempdir().expect("tempdir");
     for (rel, body) in files {
         let path = dir.path().join(rel);
         fs::create_dir_all(path.parent().expect("parent")).expect("create layer dir");
         fs::write(path, body).expect("write layer file");
     }
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()]))
-        .expect("build the Lua subsystem");
+    let terminals = Rc::new(PaneTerminals::new());
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        terminals.clone(),
+    )
+    .expect("build the Lua subsystem");
     assert!(sub.run_init().is_empty(), "the layer failed to load");
-    (dir, sub)
+    (dir, sub, terminals)
 }
 
-fn session(lua: &LuaSubsystem) -> (Wakeup, Session) {
+fn session(lua: &LuaSubsystem, terminals: Rc<PaneTerminals>) -> (Wakeup, Session) {
     let (wakeup, waker) = wakeup().expect("wakeup");
-    let session = Session::new(SURFACE, lua, waker).expect("start a session");
+    let session = Session::new(SURFACE, lua, terminals, waker).expect("start a session");
     (wakeup, session)
 }
 
@@ -92,8 +98,8 @@ fn step_until(
 
 #[test]
 fn a_session_runs_with_no_terminal_and_what_was_typed_comes_back_in_a_frame() {
-    let (_dir, lua) = lua(&[("init.lua", "return {}")]);
-    let (_wakeup, mut session) = session(&lua);
+    let (_dir, lua, terminals) = lua(&[("init.lua", "return {}")]);
+    let (_wakeup, mut session) = session(&lua, terminals);
     let mut notifications = Notifications::new();
 
     for key in typed("echo neotmux-is-headless\n") {
@@ -112,8 +118,8 @@ fn a_session_runs_with_no_terminal_and_what_was_typed_comes_back_in_a_frame() {
 
 #[test]
 fn a_frame_carries_the_pane_it_is_showing() {
-    let (_dir, lua) = lua(&[("init.lua", "return {}")]);
-    let (_wakeup, mut session) = session(&lua);
+    let (_dir, lua, terminals) = lua(&[("init.lua", "return {}")]);
+    let (_wakeup, mut session) = session(&lua, terminals);
     let mut notifications = Notifications::new();
 
     let step = session.advance(&lua, &mut notifications).expect("advance");
@@ -130,7 +136,7 @@ fn a_frame_carries_the_pane_it_is_showing() {
 
 #[test]
 fn a_frame_carries_what_the_sources_drew_and_what_they_notified() {
-    let (_dir, lua) = lua(&[
+    let (_dir, lua, terminals) = lua(&[
         ("init.lua", "require('plugin.painter')"),
         (
             "lua/plugin/painter.lua",
@@ -139,7 +145,7 @@ fn a_frame_carries_what_the_sources_drew_and_what_they_notified() {
              return {}",
         ),
     ]);
-    let (_wakeup, mut session) = session(&lua);
+    let (_wakeup, mut session) = session(&lua, terminals);
     let mut notifications = Notifications::new();
     // `notify` ran at load time, so its op is waiting where a host's own startup drain
     // would have taken it; the first step takes it instead.
@@ -160,8 +166,8 @@ fn a_frame_carries_what_the_sources_drew_and_what_they_notified() {
 
 #[test]
 fn a_session_ends_when_its_last_shell_does_and_still_produces_that_frame() {
-    let (_dir, lua) = lua(&[("init.lua", "return {}")]);
-    let (_wakeup, mut session) = session(&lua);
+    let (_dir, lua, terminals) = lua(&[("init.lua", "return {}")]);
+    let (_wakeup, mut session) = session(&lua, terminals);
     let mut notifications = Notifications::new();
 
     for key in typed("exit\n") {

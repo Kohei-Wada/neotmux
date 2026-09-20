@@ -9,6 +9,10 @@ use neotmux_lua::runtime::Layers;
 use neotmux_lua::{Geometry, LuaSubsystem, Window};
 use neotmux_proto::{Epoch, PaneId, Rect, Size, WindowId};
 
+mod support;
+
+use support::Built;
+
 const SIZE: Size = Size { rows: 4, cols: 40 };
 const PROMPT: &[u8] = b"Do you want to proceed? [y/N]";
 
@@ -18,7 +22,7 @@ fn shipped_layer() -> PathBuf {
 
 /// The shipped runtime with the watcher on and the other three off, so the only ops a tick
 /// can produce are the watcher's.
-fn built() -> (tempfile::TempDir, LuaSubsystem) {
+fn built() -> (tempfile::TempDir, Built) {
     let dir = tempfile::tempdir().unwrap();
     fs::write(
         dir.path().join("init.lua"),
@@ -29,13 +33,14 @@ fn built() -> (tempfile::TempDir, LuaSubsystem) {
          defaults.watch = true\n",
     )
     .unwrap();
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![
-        dir.path().to_path_buf(),
-        shipped_layer(),
-    ]))
+    let terminals = support::panes();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf(), shipped_layer()]),
+        terminals.clone(),
+    )
     .unwrap();
     assert!(sub.run_init().is_empty());
-    (dir, sub)
+    (dir, Built::new(sub, terminals))
 }
 
 fn pane(id: u32) -> PaneId {

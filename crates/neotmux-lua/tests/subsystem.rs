@@ -6,6 +6,8 @@ use neotmux_lua::registry::KindTag;
 use neotmux_lua::runtime::Layers;
 use neotmux_proto::Level;
 
+mod support;
+
 fn layer(files: &[(&str, &str)]) -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     for (rel, body) in files {
@@ -25,7 +27,11 @@ fn a_plugin_can_register_and_is_attributed() {
             "neotmux.on_tick(function() end) neotmux.on_key(function() end) return {}",
         ),
     ]);
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     let failures = sub.run_init();
     assert!(failures.is_empty(), "{failures:?}");
 
@@ -45,7 +51,11 @@ fn a_handle_removes_its_registration_and_is_idempotent() {
             "local h = neotmux.on_tick(function() end) h:remove() h:remove() return {}",
         ),
     ]);
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     assert!(sub.run_init().is_empty());
     assert!(sub.registry().snapshot(KindTag::Tick).is_empty());
 }
@@ -63,7 +73,11 @@ fn a_plugin_that_raises_is_inert_and_withdraws_its_registrations() {
             "neotmux.on_tick(function() end) error('nope')",
         ),
     ]);
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     let failures = sub.run_init();
     assert_eq!(failures.len(), 1);
     assert!(failures[0].message.contains("nope"));
@@ -77,7 +91,11 @@ fn a_plugin_that_raises_is_inert_and_withdraws_its_registrations() {
 #[test]
 fn a_broken_init_still_leaves_a_working_subsystem() {
     let dir = layer(&[("init.lua", "this is not lua")]);
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     let failures = sub.run_init();
     assert_eq!(failures.len(), 1);
     assert!(sub.registry().is_empty());
@@ -85,7 +103,7 @@ fn a_broken_init_still_leaves_a_working_subsystem() {
 
 #[test]
 fn no_layers_at_all_is_a_normal_startup() {
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![])).unwrap();
+    let sub = LuaSubsystem::build(Layers::from_paths(vec![]), support::panes()).unwrap();
     assert!(sub.run_init().is_empty());
     assert!(sub.registry().is_empty());
 }
@@ -99,7 +117,11 @@ fn ops_reach_the_host_with_their_owner() {
             "neotmux.log.warn('hi') neotmux.quit() return {}",
         ),
     ]);
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     assert!(sub.run_init().is_empty());
     let ops = sub.drain_ops();
     assert_eq!(ops.len(), 2);
@@ -116,7 +138,7 @@ fn ops_reach_the_host_with_their_owner() {
 
 #[test]
 fn opt_defaults_match_the_spec_before_any_init_lua_runs() {
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![])).unwrap();
+    let sub = LuaSubsystem::build(Layers::from_paths(vec![]), support::panes()).unwrap();
     let opt = sub.opt();
     assert_eq!(opt.tick_budget_ms, 8);
     assert_eq!(opt.tick_overrun_limit, 5);
@@ -128,12 +150,20 @@ fn opt_defaults_match_the_spec_before_any_init_lua_runs() {
 #[test]
 fn opt_takes_a_pane_gutter_and_refuses_one_too_wide_to_be_a_divider() {
     let dir = layer(&[("init.lua", "neotmux.opt.pane_gutter = 1")]);
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     assert!(sub.run_init().is_empty());
     assert_eq!(sub.opt().pane_gutter, 1);
 
     let dir = layer(&[("init.lua", "neotmux.opt.pane_gutter = 5")]);
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     let failures = sub.run_init();
     assert_eq!(failures.len(), 1);
     assert!(
@@ -147,12 +177,20 @@ fn opt_takes_a_pane_gutter_and_refuses_one_too_wide_to_be_a_divider() {
 #[test]
 fn opt_sets_host_settings_and_rejects_unknown_keys() {
     let dir = layer(&[("init.lua", "neotmux.opt.tick_budget_ms = 12")]);
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     assert!(sub.run_init().is_empty());
     assert_eq!(sub.opt().tick_budget_ms, 12);
 
     let dir = layer(&[("init.lua", "neotmux.opt.no_such_option = 1")]);
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     let failures = sub.run_init();
     assert_eq!(failures.len(), 1);
     assert!(failures[0].message.contains("no_such_option"));
@@ -167,7 +205,11 @@ fn a_setup_call_after_require_is_attributed_to_the_plugin_not_init() {
             "return { setup = function() neotmux.on_tick(function() end) end }",
         ),
     ]);
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     assert!(sub.run_init().is_empty());
 
     let ticks = sub.registry().snapshot(KindTag::Tick);
@@ -188,7 +230,11 @@ fn a_plugin_required_twice_still_attributes_its_cached_table_correctly() {
             "return { setup = function() neotmux.on_tick(function() end) end }",
         ),
     ]);
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     assert!(sub.run_init().is_empty());
 
     let ticks = sub.registry().snapshot(KindTag::Tick);
@@ -200,7 +246,11 @@ fn a_plugin_required_twice_still_attributes_its_cached_table_correctly() {
 #[test]
 fn a_bare_init_lua_registration_is_still_attributed_to_init() {
     let dir = layer(&[("init.lua", "neotmux.on_tick(function() end)")]);
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     assert!(sub.run_init().is_empty());
 
     let ticks = sub.registry().snapshot(KindTag::Tick);
@@ -222,7 +272,11 @@ fn a_library_helper_registering_on_a_plugins_behalf_is_attributed_to_the_callbac
             "local helper = require('neotmux.helper') helper.register(function() end) return {}",
         ),
     ]);
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     assert!(sub.run_init().is_empty());
 
     let ticks = sub.registry().snapshot(KindTag::Tick);
@@ -240,7 +294,11 @@ fn a_registration_made_during_a_dispatch_is_owned_by_the_chunk_it_was_written_in
             "neotmux.on_tick(function() neotmux.on_tick(function() end) end) return {}",
         ),
     ]);
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     assert!(sub.run_init().is_empty());
     let before = sub.registry().snapshot(KindTag::Tick);
     assert_eq!(before.len(), 1);
@@ -268,7 +326,11 @@ fn a_callback_written_in_a_library_and_registered_during_a_dispatch_is_the_libra
             "local factory = require('neotmux.factory') neotmux.on_tick(function() neotmux.on_tick(factory.make()) end) return {}",
         ),
     ]);
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     assert!(sub.run_init().is_empty());
     sub.dispatch_tick();
 
@@ -297,7 +359,11 @@ fn requiring_plugin_foo_init_and_plugin_foo_share_one_id() {
             "neotmux.on_event('chunk', function() end) return { setup = function() neotmux.on_event('setup', function() end) end }",
         ),
     ]);
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     assert!(sub.run_init().is_empty());
 
     let events = sub.registry().snapshot(KindTag::Event);
@@ -326,7 +392,11 @@ fn requiring_plugin_foo_init_and_plugin_foo_share_one_id() {
 #[test]
 fn a_plugin_cannot_overwrite_a_neotmux_field() {
     let dir = layer(&[("init.lua", "neotmux.on_tick = function() end")]);
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     let failures = sub.run_init();
     assert_eq!(failures.len(), 1);
     assert!(failures[0].message.contains("read-only"));
@@ -335,7 +405,11 @@ fn a_plugin_cannot_overwrite_a_neotmux_field() {
 #[test]
 fn a_plugin_cannot_swap_the_neotmux_metatable() {
     let dir = layer(&[("init.lua", "setmetatable(neotmux, {})")]);
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     let failures = sub.run_init();
     assert_eq!(failures.len(), 1);
 }
@@ -343,7 +417,11 @@ fn a_plugin_cannot_swap_the_neotmux_metatable() {
 #[test]
 fn a_plugin_cannot_swap_the_opt_metatable() {
     let dir = layer(&[("init.lua", "setmetatable(neotmux.opt, {})")]);
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     let failures = sub.run_init();
     assert_eq!(failures.len(), 1);
 }
@@ -351,7 +429,11 @@ fn a_plugin_cannot_swap_the_opt_metatable() {
 #[test]
 fn neotmux_opt_assignment_still_works_once_sealed() {
     let dir = layer(&[("init.lua", "neotmux.opt.tick_overrun_limit = 9")]);
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     assert!(sub.run_init().is_empty());
     assert_eq!(sub.opt().tick_overrun_limit, 9);
 }
@@ -365,7 +447,11 @@ fn setting_every_opt_key_in_one_statement_does_not_conflict() {
         "init.lua",
         "neotmux.opt.tick_budget_ms = 12 neotmux.opt.tick_overrun_limit = 3",
     )]);
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     assert!(sub.run_init().is_empty());
     assert_eq!(sub.opt().tick_budget_ms, 12);
     assert_eq!(sub.opt().tick_overrun_limit, 3);
@@ -374,7 +460,11 @@ fn setting_every_opt_key_in_one_statement_does_not_conflict() {
 #[test]
 fn a_plugin_cannot_monkey_patch_neotmux_log() {
     let dir = layer(&[("init.lua", "neotmux.log.info = function() end")]);
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     let failures = sub.run_init();
     assert_eq!(failures.len(), 1);
     assert!(failures[0].message.contains("read-only"));
@@ -383,7 +473,11 @@ fn a_plugin_cannot_monkey_patch_neotmux_log() {
 #[test]
 fn a_plugin_cannot_monkey_patch_neotmux_keymap() {
     let dir = layer(&[("init.lua", "neotmux.keymap.set = function() end")]);
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     let failures = sub.run_init();
     assert_eq!(failures.len(), 1);
     assert!(failures[0].message.contains("read-only"));
@@ -392,7 +486,11 @@ fn a_plugin_cannot_monkey_patch_neotmux_keymap() {
 #[test]
 fn a_plugin_cannot_monkey_patch_neotmux_pane() {
     let dir = layer(&[("init.lua", "neotmux.pane.split = function() end")]);
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     let failures = sub.run_init();
     assert_eq!(failures.len(), 1);
     assert!(failures[0].message.contains("read-only"));
@@ -404,7 +502,11 @@ fn sealed_subtable_functions_still_work_through_the_proxy() {
         "init.lua",
         "neotmux.log.info('from log') neotmux.keymap.set('x', function() end)",
     )]);
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     assert!(sub.run_init().is_empty());
     let ops = sub.drain_ops();
     assert!(ops.iter().any(|(_, op)| matches!(
@@ -425,7 +527,11 @@ fn pairs_over_the_sealed_top_level_table_sees_the_real_fields() {
         neotmux.notify("info", table.concat(names, " "))
         "#,
     )]);
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     assert!(sub.run_init().is_empty());
     let ops = sub.drain_ops();
     let (_, op) = ops
@@ -453,7 +559,11 @@ fn pairs_over_a_sealed_subtable_sees_its_real_fields() {
         neotmux.notify("info", table.concat(names, " "))
         "#,
     )]);
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     assert!(sub.run_init().is_empty());
     let ops = sub.drain_ops();
     let (_, op) = ops
@@ -489,7 +599,11 @@ fn a_log_call_from_a_plugin_function_invoked_by_init_is_attributed_to_the_plugin
             "local M = {} function M.setup(o) neotmux.on_tick(function() end) neotmux.log.info('clock configured') end return M",
         ),
     ]);
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     assert!(sub.run_init().is_empty());
 
     let ticks = sub.registry().snapshot(KindTag::Tick);
@@ -520,7 +634,7 @@ fn a_layer_whose_own_path_contains_lua_is_still_named_by_its_relative_path() {
     )
     .unwrap();
 
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![layer_dir])).unwrap();
+    let sub = LuaSubsystem::build(Layers::from_paths(vec![layer_dir]), support::panes()).unwrap();
     assert!(sub.run_init().is_empty());
     assert_eq!(log_owner(&sub), "plugin/clock");
 }
@@ -528,7 +642,11 @@ fn a_layer_whose_own_path_contains_lua_is_still_named_by_its_relative_path() {
 #[test]
 fn a_log_call_from_init_lua_top_level_is_attributed_to_init() {
     let dir = layer(&[("init.lua", "neotmux.log.info('straight from init')")]);
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     assert!(sub.run_init().is_empty());
     assert_eq!(log_owner(&sub), "init");
 }
@@ -546,7 +664,11 @@ fn a_log_call_reached_through_a_library_is_attributed_to_the_library() {
             "require('neotmux.helper').say('via the library') return {}",
         ),
     ]);
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     assert!(sub.run_init().is_empty());
     assert_eq!(log_owner(&sub), "neotmux/helper");
 }
@@ -560,7 +682,11 @@ fn a_notify_from_a_plugin_tick_callback_is_attributed_to_the_plugin() {
             "neotmux.on_tick(function() neotmux.notify('warn', 'tick') end) return {}",
         ),
     ]);
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     assert!(sub.run_init().is_empty());
     sub.dispatch_tick();
 
@@ -580,7 +706,11 @@ fn an_unresolvable_require_leaves_anonymous_registrations_alone() {
         "init.lua",
         "neotmux.on_tick(load('return function() end')()) require('plugin.does_not_exist')",
     )]);
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     let failures = sub.run_init();
 
     assert_eq!(failures.len(), 1, "{failures:?}");
@@ -605,7 +735,11 @@ fn a_plugins_own_failing_require_is_attributed_to_the_plugin() {
             "neotmux.on_tick(function() end) require('plugin.absent_dep') neotmux.on_tick(function() end) return {}",
         ),
     ]);
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     let failures = sub.run_init();
 
     assert_eq!(failures.len(), 1, "{failures:?}");
@@ -634,7 +768,11 @@ fn a_require_outside_init_raises_instead_of_returning_nil() {
             "neotmux.on_tick(function() local ok = pcall(require, 'plugin.absent') neotmux.log.info('ok=' .. tostring(ok)) end) return {}",
         ),
     ]);
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     assert!(sub.run_init().is_empty());
     sub.dispatch_tick();
 
@@ -648,7 +786,11 @@ fn a_require_outside_init_raises_instead_of_returning_nil() {
 #[test]
 fn a_quit_called_through_pcall_is_attributed_to_the_calling_chunk() {
     let dir = layer(&[("init.lua", "pcall(neotmux.quit)")]);
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     assert!(sub.run_init().is_empty());
 
     let ops = sub.drain_ops();
@@ -668,7 +810,11 @@ fn a_log_call_from_inside_a_resumed_coroutine_is_attributed_to_its_chunk() {
             "local co = coroutine.create(function() neotmux.log.info('from the coroutine') end) neotmux.on_tick(function() coroutine.resume(co) end) return {}",
         ),
     ]);
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     assert!(sub.run_init().is_empty());
     sub.dispatch_tick();
 
@@ -686,7 +832,11 @@ fn a_chunk_built_with_load_can_reach_the_host_api() {
         "init.lua",
         "local f = assert(load(\"neotmux.log.info('from a loaded chunk')\")) f()",
     )]);
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     let failures = sub.run_init();
     assert!(failures.is_empty(), "{failures:?}");
 
@@ -717,7 +867,11 @@ fn a_failed_loads_rollback_does_not_reach_a_callback_it_got_from_a_library() {
             "#,
         ),
     ]);
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     let failures = sub.run_init();
     assert_eq!(failures.len(), 1, "{failures:?}");
     assert_eq!(failures[0].source, "plugin/half");
@@ -744,7 +898,11 @@ fn a_failed_loads_rollback_does_not_reach_a_callback_it_got_from_a_library() {
 #[test]
 fn a_tick_overrun_limit_of_zero_is_rejected_at_assignment() {
     let dir = layer(&[("init.lua", "neotmux.opt.tick_overrun_limit = 0")]);
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     let failures = sub.run_init();
     assert_eq!(failures.len(), 1, "{failures:?}");
     assert!(failures[0].message.contains("at least 1"), "{failures:?}");

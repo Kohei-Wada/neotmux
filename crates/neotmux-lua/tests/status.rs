@@ -11,6 +11,8 @@ use neotmux_lua::runtime::Layers;
 use neotmux_lua::{Geometry, LuaSubsystem, Window};
 use neotmux_proto::{Color, DrawCmd, Epoch, PaneId, PaneInfo, Rect, Size, WindowId};
 
+mod support;
+
 const COLS: u16 = 80;
 const SURFACE: Size = Size {
     rows: 24,
@@ -58,10 +60,10 @@ fn shipped_layer() -> PathBuf {
 fn built(init: &str) -> (tempfile::TempDir, LuaSubsystem) {
     let dir = tempfile::tempdir().unwrap();
     fs::write(dir.path().join("init.lua"), init).unwrap();
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![
-        dir.path().to_path_buf(),
-        shipped_layer(),
-    ]))
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf(), shipped_layer()]),
+        support::panes(),
+    )
     .unwrap();
     assert!(sub.run_init().is_empty());
     (dir, sub)
@@ -70,7 +72,7 @@ fn built(init: &str) -> (tempfile::TempDir, LuaSubsystem) {
 /// The shipped layer with nothing configured, under the `$HOME` the host published.
 fn built_with_home(home: &str) -> LuaSubsystem {
     let layers = Layers::from_paths(vec![shipped_layer()]).with_home(PathBuf::from(home));
-    let sub = LuaSubsystem::build(layers).unwrap();
+    let sub = LuaSubsystem::build(layers, support::panes()).unwrap();
     assert!(sub.run_init().is_empty());
     sub
 }
@@ -367,7 +369,8 @@ fn the_published_home_is_abbreviated_and_nothing_else_is() {
 /// the path out in full rather than raising on a nil.
 #[test]
 fn with_no_home_published_the_path_stays_absolute() {
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![shipped_layer()])).unwrap();
+    let sub =
+        LuaSubsystem::build(Layers::from_paths(vec![shipped_layer()]), support::panes()).unwrap();
     assert!(sub.run_init().is_empty());
     let text = line(&frame(
         &sub,

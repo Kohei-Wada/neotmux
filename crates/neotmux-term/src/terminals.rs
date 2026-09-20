@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use neotmux_proto::{GridSnapshot, PaneId, Size};
 
 use crate::query::Queries;
-use crate::read::{History, Text, Want};
+use crate::read::{History, PaneRead, Text, Want};
 use crate::state::TermState;
 
 /// One pane's terminal: the screen its child writes into, the reply path that answers the
@@ -174,6 +174,38 @@ impl PaneTerminals {
             wrapped: want.wrapped.then(|| terminal.state.wrapped(last)),
             revision: terminal.read_revision(),
         })
+    }
+}
+
+/// The read half, as a trait: the Lua layer asks these seven questions and nothing else, and
+/// when it is in another process it asks them of a socket instead.
+impl PaneRead for PaneTerminals {
+    fn revision(&self, pane: PaneId) -> Option<u64> {
+        PaneTerminals::revision(self, pane)
+    }
+
+    fn content(&self, pane: PaneId, last: Option<usize>, want: Want) -> Option<Text> {
+        PaneTerminals::content(self, pane, last, want)
+    }
+
+    fn history_extent(&self, pane: PaneId) -> Option<History> {
+        PaneTerminals::history_extent(self, pane)
+    }
+
+    fn history(&self, pane: PaneId, from: usize, count: usize, want: Want) -> Option<Text> {
+        PaneTerminals::history(self, pane, from, count, want)
+    }
+
+    fn freeze(&self, pane: PaneId) -> bool {
+        PaneTerminals::freeze(self, pane)
+    }
+
+    fn unfreeze(&self, pane: PaneId) -> bool {
+        PaneTerminals::unfreeze(self, pane)
+    }
+
+    fn is_frozen(&self, pane: PaneId) -> Option<bool> {
+        PaneTerminals::is_frozen(self, pane)
     }
 }
 

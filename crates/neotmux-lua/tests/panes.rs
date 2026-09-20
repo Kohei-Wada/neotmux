@@ -6,6 +6,8 @@ use neotmux_lua::runtime::Layers;
 use neotmux_lua::{Geometry, KeyOutcome, LuaSubsystem};
 use neotmux_proto::{Dir, Epoch, PaneId, Rect, Size};
 
+mod support;
+
 fn built(files: &[(&str, &str)]) -> (tempfile::TempDir, LuaSubsystem) {
     let dir = tempfile::tempdir().unwrap();
     for (rel, body) in files {
@@ -13,7 +15,11 @@ fn built(files: &[(&str, &str)]) -> (tempfile::TempDir, LuaSubsystem) {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, body).unwrap();
     }
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![dir.path().to_path_buf()])).unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
     assert!(sub.run_init().is_empty());
     (dir, sub)
 }
@@ -177,10 +183,10 @@ fn shipped_layer() -> PathBuf {
 fn with_prefix() -> (tempfile::TempDir, LuaSubsystem) {
     let dir = tempfile::tempdir().unwrap();
     fs::write(dir.path().join("init.lua"), "require('plugin.prefix')").unwrap();
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![
-        dir.path().to_path_buf(),
-        shipped_layer(),
-    ]))
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf(), shipped_layer()]),
+        support::panes(),
+    )
     .unwrap();
     assert!(sub.run_init().is_empty());
     (dir, sub)
