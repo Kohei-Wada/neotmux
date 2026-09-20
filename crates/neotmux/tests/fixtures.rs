@@ -652,6 +652,37 @@ fn a_border_takes_no_column_from_either_pane_it_divides() {
     );
 }
 
+/// The other half of the bargain: the gutter is reserved because a plugin asked for it, so
+/// with that plugin switched off the panes tile the surface again and pay nothing.
+#[test]
+fn switching_the_borders_off_gives_the_panes_their_cells_back() {
+    let init = harness::runtime(&[(
+        "init.lua",
+        "require('neotmux.defaults').borders = false\nrequire('plugin.splitter')",
+    )]);
+    let mut nt = Neotmux::start_layered(
+        &[init.path(), &harness::fixture_layer(), &shipped_layer()],
+        "cat",
+    );
+
+    nt.wait_for_screen("panes 1 focus 1", PATIENCE);
+    nt.send("\x02"); // C-b: split, focusing the new pane on the right
+    nt.wait_for_screen("panes 2 focus 2", PATIENCE);
+    nt.send("R");
+    nt.wait_for_screen("R", PATIENCE);
+
+    let screen = nt.screen_after(Duration::from_millis(500));
+    assert!(
+        !screen.contains(VERTICAL_DIVIDER),
+        "a divider survived the opt-out:\n{screen}"
+    );
+    assert_eq!(
+        nt.cell(0, DIVIDER_COL as u16),
+        "R",
+        "the right pane does not start where a tiling layout puts it:\n{screen}"
+    );
+}
+
 /// §1's fourth exit criterion for the *shipped* defaults: a user who does not want one
 /// turns it off from their own config, in one line, without touching an installed file.
 /// Every layer's `init.lua` runs earliest-first and the shipped layer is last, so the user's
