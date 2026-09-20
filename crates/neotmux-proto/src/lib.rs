@@ -7,6 +7,7 @@ pub mod grid;
 pub mod ids;
 pub mod keys;
 pub mod level;
+pub mod msg;
 pub mod paneinfo;
 pub mod panerects;
 pub mod reserve;
@@ -21,6 +22,7 @@ pub use grid::{Color, GridSnapshot, SnapCell};
 pub use ids::{PaneId, WindowId};
 pub use keys::{Key, KeyCode, Modifiers};
 pub use level::Level;
+pub use msg::{ToClient, ToServer};
 pub use paneinfo::PaneInfo;
 pub use panerects::PaneRects;
 pub use reserve::{Axis, Edge, Reserved};
@@ -34,4 +36,7 @@ pub use wire::WireError;
 /// that count is only checkable if it is written down here.
 ///
 /// - 1: initial version.
-pub const PROTOCOL_VERSION: u32 = 1;
+/// - 2: the frame stopped being the only thing on the wire. A tick, its reply, the ops, the
+///   events, the geometry and the pane reads all cross now, because the Lua layer runs in
+///   the client (§11, M3). A renderer needed every one of them.
+pub const PROTOCOL_VERSION: u32 = 2;

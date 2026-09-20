@@ -71,6 +71,18 @@ impl Epoch {
     pub fn matches(&self, other: &Self) -> bool {
         self == other
     }
+
+    pub fn size(&self) -> Size {
+        self.size
+    }
+
+    pub fn panes(&self) -> &[PaneId] {
+        &self.panes
+    }
+
+    pub fn focus(&self) -> Option<PaneId> {
+        self.focus
+    }
 }
 
 #[cfg(test)]
