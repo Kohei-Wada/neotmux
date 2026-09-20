@@ -261,7 +261,14 @@ neotmux.opt.tick_budget_ms = 8     -- per source per frame; 0 turns the budget o
 neotmux.opt.tick_overrun_limit = 5 -- consecutive overruns before the tick is dropped; >= 1
 neotmux.opt.pane_gutter = 0        -- cells left between panes, for whoever draws there; <= 4
 neotmux.resubscribe(name)          -- give a dropped source its tick back; returns handles
+neotmux.home                       -- `$HOME` as the host read it, or nil; read-only
 ```
+
+`neotmux.home` is a fact, not an option: it sits beside `pane.info`'s facts rather than under
+`opt`, because nothing sets it. The VM has no `os.getenv` — reading the process environment is
+the host's alone — so this is the one value out of it a plugin ever sees, and it is the same
+read the `~/.config/neotmux` layer is resolved from. It is `nil`, not `''`, where the process
+had no `HOME`.
 
 Logs go to `$XDG_STATE_HOME/neotmux/neotmux.log`, or wherever `--log` says. Notifications also
 replay on stderr when neotmux exits, so a message from a frame you never saw is not lost.
@@ -477,19 +484,19 @@ status.icons = { command = '', directory = '' }      -- and no icons
 status.home = '/home/you'           -- the prefix written `~`
 ```
 
-The glyphs default to Nerd Font ones — a rounded cap either side (`U+E0B6`, `U+E0B4`), a
-terminal (`U+F489`) and a folder (`U+F4D4`). Without such a font they come out as boxes, and
-the two lines above are the whole escape: empty strings leave the coloured blocks and take the
-glyphs off.
+The glyphs default to Nerd Font ones — a rounded cap either side (`U+E0B6`, `U+E0B4`), and
+one in front of each module (`U+F1AE`, `U+E795`). Without such a font they come out as boxes,
+and the two lines above are the whole escape: empty strings leave the coloured blocks and take
+the glyphs off.
 
 `colors` is Catppuccin Mocha, keyed by what each colour is for rather than by its name:
 `bar`, `current`, `inactive`, `on_current`, `on_inactive`, `body`, `body_text`, `module`,
 `module_text`, `icon`, `command`, `directory`.
 
-`home` is what gets written `~`, the way a shell prompt writes it. The VM has no `os.getenv`,
-so it is recovered from the search path the host built out of `$HOME` — which works when your
-config lives in `~/.config/neotmux` or neotmux is installed under `~/.local`, and is `nil`
-otherwise. A `nil` costs you the `~` and nothing else; assign to it if you want one anyway.
+`home` is what gets written `~`, the way a shell prompt writes it. It defaults to
+`neotmux.home`: the VM has no `os.getenv`, so the host reads `$HOME` once — the same read the
+config layer is resolved from — and publishes it. It is `nil` where the process had no `HOME`,
+which costs you the `~` and nothing else; assign to it if you want a different prefix.
 
 A directory too long for the space left loses its leading components — `.../src/neotmux` —
 and is dropped along with its icon if not even its last component fits.

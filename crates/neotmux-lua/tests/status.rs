@@ -28,8 +28,8 @@ const GREEN: Color = rgb("#a6e3a1");
 
 const CAP_LEFT: &str = "\u{e0b6}";
 const CAP_RIGHT: &str = "\u{e0b4}";
-const TERMINAL: &str = "\u{f489}";
-const FOLDER: &str = "\u{f4d4}";
+const COMMAND_ICON: &str = "\u{f1ae}";
+const DIRECTORY_ICON: &str = "\u{e795}";
 
 const fn hex(byte: u8) -> u8 {
     match byte {
@@ -67,13 +67,10 @@ fn built(init: &str) -> (tempfile::TempDir, LuaSubsystem) {
     (dir, sub)
 }
 
-/// The shipped layer behind a user's own config layer, at the place the host resolves out of
-/// `$HOME` — which is the only place a plugin can learn what `$HOME` is.
-fn built_under_home(home: &Path, layer: &str) -> LuaSubsystem {
-    let layer = home.join(layer);
-    fs::create_dir_all(layer.join("lua")).unwrap();
-    fs::write(layer.join("init.lua"), "").unwrap();
-    let sub = LuaSubsystem::build(Layers::from_paths(vec![layer, shipped_layer()])).unwrap();
+/// The shipped layer with nothing configured, under the `$HOME` the host published.
+fn built_with_home(home: &str) -> LuaSubsystem {
+    let layers = Layers::from_paths(vec![shipped_layer()]).with_home(PathBuf::from(home));
+    let sub = LuaSubsystem::build(layers).unwrap();
     assert!(sub.run_init().is_empty());
     sub
 }
@@ -152,13 +149,13 @@ fn the_bar_is_composed_of_the_runs_it_was_drawn_from() {
             (CAP_LEFT.to_string(), MAUVE, BAR),
             ("1 ".to_string(), BAR, MAUVE),
             (" bash".to_string(), TEXT, SURFACE1),
-            (CAP_RIGHT.to_string(), BAR, SURFACE1),
+            (CAP_RIGHT.to_string(), SURFACE1, BAR),
             (" ".to_string(), BAR, BAR),
             (CAP_LEFT.to_string(), MAROON, BAR),
-            (format!("{TERMINAL} "), CRUST, MAROON),
+            (format!("{COMMAND_ICON} "), CRUST, MAROON),
             (" bash ".to_string(), TEXT, SURFACE0),
             (CAP_LEFT.to_string(), GREEN, BAR),
-            (format!("{FOLDER} "), CRUST, GREEN),
+            (format!("{DIRECTORY_ICON} "), CRUST, GREEN),
             (" ~/life ".to_string(), TEXT, SURFACE0),
         ]
     );
@@ -237,6 +234,30 @@ fn every_window_is_listed_and_the_current_one_is_capped_in_mauve() {
     );
 }
 
+/// A cap is the half-circle that closes a block: drawn in the block's own colour on the bar
+/// behind it. The other way round it reads as a notch bitten out of the block.
+#[test]
+fn every_cap_is_its_blocks_colour_on_the_bar() {
+    let (_dir, sub) = built("");
+    let cmds = frame(&sub, &[(1, info("bash", "/tmp"))], 1, &[1, 2], 1);
+    let caps: Vec<(String, Color, Color)> = runs(&cmds)
+        .into_iter()
+        .filter(|(text, _, _)| text == CAP_LEFT || text == CAP_RIGHT)
+        .collect();
+
+    assert_eq!(
+        caps,
+        vec![
+            (CAP_LEFT.to_string(), MAUVE, BAR),
+            (CAP_RIGHT.to_string(), SURFACE1, BAR),
+            (CAP_LEFT.to_string(), SURFACE0, BAR),
+            (CAP_RIGHT.to_string(), SURFACE0, BAR),
+            (CAP_LEFT.to_string(), MAROON, BAR),
+            (CAP_LEFT.to_string(), GREEN, BAR),
+        ]
+    );
+}
+
 /// A colour is a field, and the field is read on the tick: changing one changes what reaches
 /// the screen and nothing else.
 #[test]
@@ -245,7 +266,7 @@ fn a_colour_field_reaches_the_screen() {
     let cmds = frame(&sub, &[(1, info("bash", "/tmp"))], 1, &[1], 1);
     let icon = runs(&cmds)
         .into_iter()
-        .find(|(text, _, _)| text.starts_with(TERMINAL))
+        .find(|(text, _, _)| text.starts_with(COMMAND_ICON))
         .expect("the command module");
     assert_eq!(icon.2, rgb("#ff0000"));
 }
@@ -306,23 +327,37 @@ fn a_directory_with_no_room_at_all_is_dropped() {
     assert!(text.contains("bash"), "{text}");
 }
 
-/// And the `~` is there with nothing configured at all: the home directory is recovered from
-/// the search path the host built out of it.
+/// And the `~` is there with nothing configured at all: the host publishes `$HOME` and the
+/// bar reads it. A directory outside it stays absolute.
 #[test]
-fn the_home_directory_is_found_without_being_configured() {
-    // The user's own config layer, and the layer an install under `~/.local` puts on the path
-    // — which the host spells with the `bin/../` an exe-relative path is built from.
-    for layer in [".config/neotmux", ".local/bin/../share/neotmux"] {
-        let home = tempfile::tempdir().expect("home");
-        let sub = built_under_home(home.path(), layer);
-        let cwd = home.path().join("work");
-        let text = line(&frame(
-            &sub,
-            &[(1, info("bash", &cwd.to_string_lossy()))],
-            1,
-            &[1],
-            1,
-        ));
-        assert!(text.ends_with(" ~/work "), "{layer}: {text}");
-    }
+fn the_published_home_is_abbreviated_and_nothing_else_is() {
+    let sub = built_with_home("/home/someone");
+
+    let inside = line(&frame(
+        &sub,
+        &[(1, info("bash", "/home/someone/work"))],
+        1,
+        &[1],
+        1,
+    ));
+    assert!(inside.ends_with(" ~/work "), "{inside}");
+
+    let outside = line(&frame(&sub, &[(1, info("bash", "/srv/work"))], 1, &[1], 1));
+    assert!(outside.ends_with(" /srv/work "), "{outside}");
+}
+
+/// With no `HOME` in the host's environment there is nothing to publish, so the bar writes
+/// the path out in full rather than raising on a nil.
+#[test]
+fn with_no_home_published_the_path_stays_absolute() {
+    let sub = LuaSubsystem::build(Layers::from_paths(vec![shipped_layer()])).unwrap();
+    assert!(sub.run_init().is_empty());
+    let text = line(&frame(
+        &sub,
+        &[(1, info("bash", "/home/someone/work"))],
+        1,
+        &[1],
+        1,
+    ));
+    assert!(text.ends_with(" /home/someone/work "), "{text}");
 }

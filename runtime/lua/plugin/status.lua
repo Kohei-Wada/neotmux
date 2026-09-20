@@ -41,11 +41,11 @@ M.colors = {
 -- Written as escapes rather than as the characters themselves so the file stays readable in
 -- an editor that has no such font.
 M.caps = { left = "\u{e0b6}", right = "\u{e0b4}" }
-M.icons = { command = "\u{f489}", directory = "\u{f4d4}" }
+M.icons = { command = "\u{f1ae}", directory = "\u{e795}" }
 
--- `$HOME`, for the `~` a shell prompt writes. The VM has no `os.getenv`, so assign to this
--- from your own init.lua if the search path does not carry it either.
-M.home = path.home(package.path)
+-- `$HOME`, for the `~` a shell prompt writes: what the host read out of the environment, and
+-- nil where it had no `HOME`. Assign to it from your own init.lua to write a different prefix.
+M.home = neotmux.home
 
 M.band = neotmux.reserve("top", 1)
 
@@ -65,6 +65,7 @@ local function window_runs(name)
   for _, id in ipairs(neotmux.window.list()) do
     local is_current = id == current
     local accent = is_current and M.colors.current or M.colors.inactive
+    -- A cap is the block's colour on the bar behind it; inverted it reads as a notch, not an end.
     append(runs, {
       { text = M.caps.left, fg = accent, bg = M.colors.bar },
       {
@@ -76,10 +77,10 @@ local function window_runs(name)
     if is_current and name then
       append(runs, {
         { text = " " .. name, fg = M.colors.body_text, bg = M.colors.body },
-        { text = M.caps.right, fg = M.colors.bar, bg = M.colors.body },
+        { text = M.caps.right, fg = M.colors.body, bg = M.colors.bar },
       })
     else
-      runs[#runs + 1] = { text = M.caps.right, fg = M.colors.bar, bg = accent }
+      runs[#runs + 1] = { text = M.caps.right, fg = accent, bg = M.colors.bar }
     end
     runs[#runs + 1] = { text = " ", fg = M.colors.bar, bg = M.colors.bar }
   end

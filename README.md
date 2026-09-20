@@ -67,8 +67,8 @@ program knows what they said.
 
 The shipped status bar takes the top row: the windows on the left, and the focused pane's
 command and working directory on the right. It draws with Nerd Font glyphs — a rounded cap
-either side, a terminal and a folder. Without such a font, two lines in your own `init.lua`
-take them off and leave the colours:
+either side and one in front of each module. Without such a font, two lines in your own
+`init.lua` take them off and leave the colours:
 
 ```lua
 require('plugin.status').caps = { left = '', right = '' }
