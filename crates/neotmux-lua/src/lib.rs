@@ -4,6 +4,7 @@ pub mod draw;
 mod geometry;
 pub mod ops;
 pub mod overrun;
+mod paneinfo;
 pub mod registry;
 pub mod reserve;
 pub mod runtime;
@@ -19,7 +20,7 @@ use std::time::Duration;
 use mlua::chunk::ChunkMode;
 use mlua::{Function, Lua, Value};
 
-use neotmux_core::proto::{DrawCmd, Epoch, PaneId, Rect, Reserved, Size};
+use neotmux_core::proto::{DrawCmd, Epoch, PaneId, PaneInfo, Rect, Reserved, Size};
 
 pub use api::Opts;
 pub use api::event::Event;
@@ -31,6 +32,7 @@ use draw::Buffers;
 use geometry::Geometry;
 use ops::{Level, Op, OpBuffer};
 use overrun::Overrun;
+use paneinfo::PaneInfos;
 use registry::{Kind, KindTag, RegistrationId, Registry};
 use reserve::Reservations;
 use runtime::Layers;
@@ -59,6 +61,7 @@ pub struct LuaSubsystem {
     loading: Rc<Cell<bool>>,
     buffers: Rc<Buffers>,
     geometry: Rc<RefCell<Geometry>>,
+    pane_info: Rc<RefCell<PaneInfos>>,
     budget: Rc<Budget>,
     overrun: Rc<Overrun>,
     reservations: Rc<Reservations>,
@@ -77,6 +80,7 @@ impl LuaSubsystem {
         let opts = Rc::new(RefCell::new(Opts::default()));
         let load_failures = Rc::new(RefCell::new(Vec::new()));
         let geometry = Rc::new(RefCell::new(Geometry::default()));
+        let pane_info = Rc::new(RefCell::new(PaneInfos::new()));
         let reservations = Rc::new(Reservations::new());
         let buffers = Rc::new(Buffers::new());
 
@@ -93,6 +97,7 @@ impl LuaSubsystem {
                 opts: opts.clone(),
                 load_failures: load_failures.clone(),
                 geometry: geometry.clone(),
+                pane_info: pane_info.clone(),
                 overrun: overrun.clone(),
                 reservations: reservations.clone(),
             },
@@ -110,6 +115,7 @@ impl LuaSubsystem {
             loading,
             buffers,
             geometry,
+            pane_info,
             budget,
             overrun,
             reservations,
@@ -204,6 +210,12 @@ impl LuaSubsystem {
         focus: Option<PaneId>,
     ) {
         *self.geometry.borrow_mut() = Geometry { size, panes, focus };
+    }
+
+    /// What every pane is running, as the host last sampled it. Published on the host's own
+    /// cadence rather than per frame: a plugin asks every tick, and the answer is a syscall.
+    pub fn publish_pane_info(&self, info: BTreeMap<PaneId, PaneInfo>) {
+        *self.pane_info.borrow_mut() = info;
     }
 
     /// The unit of commit is the source, not the callback: a source's frame is the union of

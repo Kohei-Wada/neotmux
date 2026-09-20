@@ -16,7 +16,9 @@ use crate::input::{encode_key, key_spec};
 use crate::logging;
 use crate::notify::Notifications;
 use crate::overlay;
+use crate::paneinfo::PaneInfoCache;
 use crate::panes::PaneLayout;
+use crate::procinfo;
 use crate::render::{cursor_position, draw_grid};
 use crate::shells::Shells;
 use crate::signals::{self, ShutdownSignal};
@@ -57,6 +59,8 @@ struct Session {
     /// The cells left between panes, from `neotmux.opt.pane_gutter`.
     gutter: u16,
     shells: Shells,
+    /// What each pane is running, sampled on its own cadence rather than per frame.
+    pane_info: PaneInfoCache,
     /// Pane ids are never reused: a stale `pane.focus(id)` must not land on a new pane.
     next_pane: u32,
     dirty: bool,
@@ -90,6 +94,7 @@ impl Session {
             reserved,
             gutter,
             shells,
+            pane_info: PaneInfoCache::new(),
             next_pane: FIRST_PANE + 1,
             dirty: true,
             last_frame_output: Vec::new(),
@@ -141,6 +146,7 @@ impl Session {
     /// was the focused one. The other panes keep running.
     fn close_pane(&mut self, pane: PaneId, lua: &LuaSubsystem) -> anyhow::Result<()> {
         self.shells.close(pane);
+        self.pane_info.invalidate();
         let before = self.layout.focus();
         let after = self.layout.close(pane);
         self.fit()?;
@@ -288,6 +294,7 @@ impl Session {
         }
 
         self.next_pane += 1;
+        self.pane_info.invalidate();
         self.fit()?;
         self.republish_geometry(lua);
         lua.dispatch_event(&LuaEvent::PaneOpened { pane: new });
@@ -308,6 +315,24 @@ impl Session {
         self.republish_geometry(lua);
         lua.dispatch_event(&LuaEvent::FocusChanged { pane });
         self.dirty = true;
+    }
+
+    /// Samples what each pane is running, if the cadence says it is time, and hands the
+    /// result to Lua. Reading `/proc` for every pane on every frame is the syscall storm this
+    /// exists to avoid, so most frames do nothing here.
+    fn refresh_pane_info(&mut self, lua: &LuaSubsystem) {
+        let shells = &self.shells;
+        let refreshed = self
+            .pane_info
+            .refresh(Instant::now(), shells.panes(), |pane| {
+                match shells.foreground(pane) {
+                    Some(pid) => procinfo::read(pid),
+                    None => Default::default(),
+                }
+            });
+        if refreshed {
+            lua.publish_pane_info(self.pane_info.snapshot());
+        }
     }
 
     /// Hands Lua this frame's geometry. Called once before the loop as well, because keys
@@ -426,6 +451,7 @@ pub fn run(
     let tty = Terminal::open().context("open the terminal for input")?;
     let (wakeup, waker) = wakeup().context("open the panes' wakeup")?;
     let mut session = Session::new(terminal_size(terminal)?, lua, waker)?;
+    session.refresh_pane_info(lua);
     session.publish_geometry(lua);
 
     #[cfg(debug_assertions)]
@@ -448,6 +474,7 @@ pub fn run(
 
         let drained = session.drain_panes(lua)?;
 
+        session.refresh_pane_info(lua);
         session.publish_geometry(lua);
         lua.dispatch_tick();
 

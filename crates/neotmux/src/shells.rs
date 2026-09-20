@@ -165,6 +165,17 @@ impl Shells {
         }
     }
 
+    /// The pane's foreground process group: the shell while the pane is idle, whatever it
+    /// launched while it is busy. `None` for a pane that is not here, or whose child has gone.
+    pub fn foreground(&self, pane: PaneId) -> Option<i32> {
+        self.shells.get(&pane)?.pty.foreground()
+    }
+
+    /// The panes that are running, in pane order.
+    pub fn panes(&self) -> impl Iterator<Item = PaneId> + '_ {
+        self.shells.keys().copied()
+    }
+
     pub fn grid(&self, pane: PaneId) -> Option<&GridSnapshot> {
         self.shells.get(&pane).map(|shell| &shell.grid)
     }
