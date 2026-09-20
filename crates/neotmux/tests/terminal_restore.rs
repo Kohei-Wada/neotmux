@@ -238,6 +238,53 @@ fn renders_output_written_in_the_same_batch_as_exit() {
     );
 }
 
+/// A child that asks its terminal what it is, waits for the answer, and reports whether one
+/// came. Raw mode because the reply has no newline in it, and a generous read timeout so a
+/// terminal that never answers is caught by the elapsed time rather than by the shell.
+fn write_querying_shell() -> TempScript {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let path = std::env::temp_dir().join(format!("neotmux-query-shell-{}", std::process::id()));
+    std::fs::write(
+        &path,
+        "#!/usr/bin/env bash\n\
+         stty raw -echo\n\
+         printf '\\033[c'\n\
+         if IFS= read -r -s -d c -t 10 _reply; then\n\
+         \tprintf 'DA1_ANSWERED\\r\\n'\n\
+         else\n\
+         \tprintf 'DA1_TIMEOUT\\r\\n'\n\
+         fi\n",
+    )
+    .expect("write script");
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    TempScript(path)
+}
+
+/// The user's symptom, measured: nvim sends a run of queries and blocks on the reply to the
+/// last of them, so against a terminal that never answers every `:q` waits out nvim's own
+/// timeout — a whole second. The bound here is loose on purpose; what it separates is "the
+/// terminal answered" from "the child gave up waiting".
+#[test]
+fn a_child_waiting_on_a_device_attributes_reply_is_not_left_waiting() {
+    let shell = write_querying_shell();
+    let shell_path = shell.0.to_str().expect("utf8 path").to_owned();
+
+    let started = Instant::now();
+    let (out, ok, _termios) = run_in_pty(&[("SHELL", &shell_path)], b"");
+    let took = started.elapsed();
+
+    assert!(ok, "expected a clean exit");
+    assert!(
+        out.contains("DA1_ANSWERED"),
+        "the child never got an answer to CSI c: {out:?}"
+    );
+    assert!(
+        took < Duration::from_secs(3),
+        "a child that asked what its terminal was waited {took:?} for the answer"
+    );
+}
+
 /// A PTY whose window size was never set reports 0x0, which is what `pty.fork()` and an
 /// ssh session with no TTY size produce. Shell output there has to scroll a grid that
 /// `vt100` cannot scroll unless the host clamps it up first.
