@@ -1,0 +1,328 @@
+//! The shipped status bar, driven as the host drives it: the real `runtime/` layer, a frame,
+//! and the draw commands it produced. What a PTY test can only see as characters on a screen
+//! is a run of text with a foreground and a background here, which is where the colours and
+//! the glyphs are pinned.
+
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use neotmux_core::proto::{Color, DrawCmd, Epoch, PaneId, PaneInfo, Rect, Size, WindowId};
+use neotmux_lua::runtime::Layers;
+use neotmux_lua::{Geometry, LuaSubsystem};
+
+const COLS: u16 = 80;
+const SURFACE: Size = Size {
+    rows: 24,
+    cols: COLS,
+};
+
+const BAR: Color = rgb("#181825");
+const MAUVE: Color = rgb("#cba6f7");
+const SURFACE0: Color = rgb("#313244");
+const SURFACE1: Color = rgb("#45475a");
+const TEXT: Color = rgb("#cdd6f4");
+const CRUST: Color = rgb("#11111b");
+const MAROON: Color = rgb("#eba0ac");
+const GREEN: Color = rgb("#a6e3a1");
+
+const CAP_LEFT: &str = "\u{e0b6}";
+const CAP_RIGHT: &str = "\u{e0b4}";
+const TERMINAL: &str = "\u{f489}";
+const FOLDER: &str = "\u{f4d4}";
+
+const fn hex(byte: u8) -> u8 {
+    match byte {
+        b'0'..=b'9' => byte - b'0',
+        b'a'..=b'f' => byte - b'a' + 10,
+        _ => panic!("colours in this test are lowercase #rrggbb"),
+    }
+}
+
+/// `Color::Rgb` from the same `#rrggbb` the Lua writes, so the two can be compared by eye.
+const fn rgb(s: &str) -> Color {
+    let b = s.as_bytes();
+    assert!(b.len() == 7 && b[0] == b'#');
+    Color::Rgb(
+        hex(b[1]) * 16 + hex(b[2]),
+        hex(b[3]) * 16 + hex(b[4]),
+        hex(b[5]) * 16 + hex(b[6]),
+    )
+}
+
+fn shipped_layer() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime")
+}
+
+/// The shipped layer, behind a user layer holding only the `init.lua` a user would write.
+fn built(init: &str) -> (tempfile::TempDir, LuaSubsystem) {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("init.lua"), init).unwrap();
+    let sub = LuaSubsystem::build(Layers::from_paths(vec![
+        dir.path().to_path_buf(),
+        shipped_layer(),
+    ]))
+    .unwrap();
+    assert!(sub.run_init().is_empty());
+    (dir, sub)
+}
+
+/// The shipped layer behind a user's own config layer, at the place the host resolves out of
+/// `$HOME` — which is the only place a plugin can learn what `$HOME` is.
+fn built_under_home(home: &Path, layer: &str) -> LuaSubsystem {
+    let layer = home.join(layer);
+    fs::create_dir_all(layer.join("lua")).unwrap();
+    fs::write(layer.join("init.lua"), "").unwrap();
+    let sub = LuaSubsystem::build(Layers::from_paths(vec![layer, shipped_layer()])).unwrap();
+    assert!(sub.run_init().is_empty());
+    sub
+}
+
+fn info(command: &str, cwd: &str) -> PaneInfo {
+    PaneInfo {
+        command: Some(command.to_string()),
+        cwd: Some(cwd.to_string()),
+    }
+}
+
+/// One frame with the given panes, the given focus and the given windows, laid out the way
+/// the host lays one out: bands first, then the geometry the panes were left with.
+fn frame(
+    sub: &LuaSubsystem,
+    panes: &[(u32, PaneInfo)],
+    focus: u32,
+    windows: &[u32],
+    current: u32,
+) -> Vec<DrawCmd> {
+    let reserved = sub.reserved();
+    sub.lay_out_reservations(SURFACE, true);
+    let content = Size {
+        rows: SURFACE.rows - reserved.rows(),
+        cols: COLS,
+    };
+    sub.publish_pane_info(
+        panes
+            .iter()
+            .map(|(id, info)| (PaneId::from(*id), info.clone()))
+            .collect::<BTreeMap<_, _>>(),
+    );
+    let ids: Vec<PaneId> = panes.iter().map(|(id, _)| PaneId::from(*id)).collect();
+    sub.begin_frame(
+        Epoch::new(content, ids.clone(), Some(PaneId::from(focus))),
+        Geometry {
+            size: content,
+            panes: ids
+                .iter()
+                .map(|id| (*id, Rect::new(0, reserved.top, COLS, content.rows)))
+                .collect(),
+            focus: Some(PaneId::from(focus)),
+            windows: windows.iter().copied().map(WindowId::from).collect(),
+            window: Some(WindowId::from(current)),
+        },
+    );
+    sub.dispatch_tick();
+    sub.frame_output()
+}
+
+/// Every text run the frame drew, with its colours, in the order it drew them.
+fn runs(cmds: &[DrawCmd]) -> Vec<(String, Color, Color)> {
+    cmds.iter()
+        .filter_map(|cmd| match cmd {
+            DrawCmd::Text { text, fg, bg, .. } => Some((text.clone(), *fg, *bg)),
+            _ => None,
+        })
+        .collect()
+}
+
+fn line(cmds: &[DrawCmd]) -> String {
+    runs(cmds).into_iter().map(|(text, _, _)| text).collect()
+}
+
+/// The bar the capture was taken from, run for run: the current window capped in mauve with
+/// what its focused pane is running beside it, then that command and that directory as the
+/// two right-hand modules.
+#[test]
+fn the_bar_is_composed_of_the_runs_it_was_drawn_from() {
+    let (_dir, sub) = built("require('plugin.status').home = '/home/kohei'");
+    let cmds = frame(&sub, &[(1, info("bash", "/home/kohei/life"))], 1, &[1], 1);
+
+    assert_eq!(
+        runs(&cmds),
+        vec![
+            (CAP_LEFT.to_string(), MAUVE, BAR),
+            ("1 ".to_string(), BAR, MAUVE),
+            (" bash".to_string(), TEXT, SURFACE1),
+            (CAP_RIGHT.to_string(), BAR, SURFACE1),
+            (" ".to_string(), BAR, BAR),
+            (CAP_LEFT.to_string(), MAROON, BAR),
+            (format!("{TERMINAL} "), CRUST, MAROON),
+            (" bash ".to_string(), TEXT, SURFACE0),
+            (CAP_LEFT.to_string(), GREEN, BAR),
+            (format!("{FOLDER} "), CRUST, GREEN),
+            (" ~/life ".to_string(), TEXT, SURFACE0),
+        ]
+    );
+}
+
+/// The band is painted before anything lands in it, so the row is the bar's colour from end
+/// to end rather than whatever the terminal's default happens to be.
+#[test]
+fn the_whole_row_is_painted_in_the_bars_colour() {
+    let (_dir, sub) = built("");
+    let cmds = frame(&sub, &[(1, info("bash", "/tmp"))], 1, &[1], 1);
+    let painted = cmds.iter().find_map(|cmd| match cmd {
+        DrawCmd::Rect { rect, bg, .. } => Some((*rect, *bg)),
+        _ => None,
+    });
+    assert_eq!(painted, Some((Rect::new(0, 0, COLS, 1), BAR)));
+}
+
+/// The requirement the user stated first: what the bar *says* follows the focus, not merely
+/// that the focus moved.
+#[test]
+fn the_bar_follows_the_focused_pane() {
+    let (_dir, sub) = built("require('plugin.status').home = '/home/kohei'");
+    let panes = [
+        (1, info("bash", "/home/kohei/life")),
+        (2, info("nvim", "/etc")),
+    ];
+
+    let first = line(&frame(&sub, &panes, 1, &[1], 1));
+    let second = line(&frame(&sub, &panes, 2, &[1], 1));
+
+    assert_ne!(first, second);
+    assert!(
+        first.contains("bash") && first.contains("~/life"),
+        "{first}"
+    );
+    assert!(
+        second.contains("nvim") && second.contains("/etc"),
+        "{second}"
+    );
+    assert!(!second.contains("bash"), "{second}");
+}
+
+/// Every window is listed, in `window.list()` order, and only the one being shown is capped
+/// in the current colour.
+#[test]
+fn every_window_is_listed_and_the_current_one_is_capped_in_mauve() {
+    let (_dir, sub) = built("");
+    let cmds = frame(&sub, &[(1, info("bash", "/tmp"))], 1, &[1, 2, 3], 2);
+    let indices: Vec<(String, Color)> = runs(&cmds)
+        .into_iter()
+        .filter(|(text, _, _)| matches!(text.as_str(), "1 " | "2 " | "3 "))
+        .map(|(text, _, bg)| (text, bg))
+        .collect();
+
+    assert_eq!(
+        indices,
+        vec![
+            ("1 ".to_string(), SURFACE0),
+            ("2 ".to_string(), MAUVE),
+            ("3 ".to_string(), SURFACE0),
+        ]
+    );
+    let text = line(&cmds);
+    assert!(
+        text.starts_with(&format!("{CAP_LEFT}1 {CAP_RIGHT} ")),
+        "{text}"
+    );
+    assert!(
+        text.contains(&format!("{CAP_LEFT}2  bash{CAP_RIGHT} ")),
+        "{text}"
+    );
+    assert!(
+        text.contains(&format!("{CAP_LEFT}3 {CAP_RIGHT} ")),
+        "{text}"
+    );
+}
+
+/// A colour is a field, and the field is read on the tick: changing one changes what reaches
+/// the screen and nothing else.
+#[test]
+fn a_colour_field_reaches_the_screen() {
+    let (_dir, sub) = built("require('plugin.status').colors.command = '#ff0000'");
+    let cmds = frame(&sub, &[(1, info("bash", "/tmp"))], 1, &[1], 1);
+    let icon = runs(&cmds)
+        .into_iter()
+        .find(|(text, _, _)| text.starts_with(TERMINAL))
+        .expect("the command module");
+    assert_eq!(icon.2, rgb("#ff0000"));
+}
+
+/// And so is a glyph: the one line someone without a Nerd Font writes.
+#[test]
+fn emptying_the_caps_takes_the_glyphs_off_the_bar() {
+    let (_dir, sub) = built(
+        "local s = require('plugin.status')\n\
+         s.caps = { left = '', right = '' }\n\
+         s.icons = { command = '', directory = '' }",
+    );
+    let text = line(&frame(&sub, &[(1, info("bash", "/tmp"))], 1, &[1], 1));
+    assert_eq!(text, "1  bash   bash   /tmp ");
+}
+
+/// `$HOME` is written the way a prompt writes it.
+#[test]
+fn the_home_directory_is_written_as_a_tilde() {
+    let (_dir, sub) = built("require('plugin.status').home = '/home/kohei'");
+    let text = line(&frame(
+        &sub,
+        &[(1, info("bash", "/home/kohei"))],
+        1,
+        &[1],
+        1,
+    ));
+    assert!(text.ends_with(" ~ "), "{text}");
+}
+
+/// A directory too long for what is left of the row loses its leading components, keeping
+/// the end — the part that says where you are.
+#[test]
+fn a_directory_that_does_not_fit_keeps_its_tail() {
+    let (_dir, sub) = built("require('plugin.status').home = '/home/kohei'");
+    let deep = format!("/home/kohei/{}leaf", "middle/".repeat(12));
+    let text = line(&frame(&sub, &[(1, info("bash", &deep))], 1, &[1], 1));
+    assert!(
+        text.contains(" .../middle/") && text.ends_with("/leaf "),
+        "{text}"
+    );
+    assert!(!text.contains("~/middle"), "{text}");
+    assert!(
+        text.chars().count() <= COLS as usize,
+        "the bar is {} columns wide: {text}",
+        text.chars().count()
+    );
+}
+
+/// And when not even its last component fits, the module goes rather than the bar being
+/// drawn over itself.
+#[test]
+fn a_directory_with_no_room_at_all_is_dropped() {
+    let (_dir, sub) = built("require('plugin.status').home = '/home/kohei'");
+    let long = format!("/home/kohei/{}", "x".repeat(200));
+    let text = line(&frame(&sub, &[(1, info("bash", &long))], 1, &[1], 1));
+    assert!(!text.contains('x'), "{text}");
+    assert!(text.contains("bash"), "{text}");
+}
+
+/// And the `~` is there with nothing configured at all: the home directory is recovered from
+/// the search path the host built out of it.
+#[test]
+fn the_home_directory_is_found_without_being_configured() {
+    // The user's own config layer, and the layer an install under `~/.local` puts on the path
+    // — which the host spells with the `bin/../` an exe-relative path is built from.
+    for layer in [".config/neotmux", ".local/bin/../share/neotmux"] {
+        let home = tempfile::tempdir().expect("home");
+        let sub = built_under_home(home.path(), layer);
+        let cwd = home.path().join("work");
+        let text = line(&frame(
+            &sub,
+            &[(1, info("bash", &cwd.to_string_lossy()))],
+            1,
+            &[1],
+            1,
+        ));
+        assert!(text.ends_with(" ~/work "), "{layer}: {text}");
+    }
+}

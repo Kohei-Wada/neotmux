@@ -257,16 +257,19 @@ fn prefix_swallows_its_key_and_the_next_one_while_an_unrelated_key_gets_through(
     nt.send("\r");
 
     let screen = nt.screen_after(Duration::from_secs(2));
+    // The panes only: the bar's row carries a working directory, and what is in one of those
+    // is not this test's business.
+    let panes = pane_area(&screen);
     assert!(
-        !screen.contains("^A"),
+        !panes.contains("^A"),
         "the prefix key reached the shell:\n{screen}"
     );
     assert!(
-        !screen.contains('z'),
+        !panes.contains('z'),
         "the command key after the prefix reached the shell:\n{screen}"
     );
     assert!(
-        screen.contains('Q'),
+        panes.contains('Q'),
         "the unrelated key never reached the shell:\n{screen}"
     );
 }
@@ -445,7 +448,7 @@ fn a_coroutine_wrapped_spinner_loses_its_tick_too() {
 fn the_prefix_splits_vertically_and_walks_to_the_next_pane() {
     let (mut nt, _init) = start_shipped("", "cat");
     nt.send("\x02v"); // C-b v
-    nt.wait_for_screen("panes 2 focus 2", PATIENCE);
+    nt.wait_for_cell(PANE_TOP, DIVIDER_COL, VERTICAL_DIVIDER, PATIENCE);
     nt.settle(Duration::from_millis(500));
 
     nt.send("RIGHT");
@@ -456,7 +459,7 @@ fn the_prefix_splits_vertically_and_walks_to_the_next_pane() {
 
     nt.wait_for_screen("LEFT", PATIENCE);
     let screen = nt.screen_after(Duration::from_millis(500));
-    let row = screen.lines().next().unwrap_or_default().to_string();
+    let row = pane_rows(&screen).next().unwrap_or_default().to_string();
 
     let left = row
         .find("LEFT")
@@ -465,8 +468,9 @@ fn the_prefix_splits_vertically_and_walks_to_the_next_pane() {
         .find("RIGHT")
         .unwrap_or_else(|| panic!("`C-b v` never produced a second pane:\n{screen}"));
     assert!(left < 40 && right >= 40, "{screen}");
+    let panes = pane_area(&screen);
     assert!(
-        !screen.contains('v') && !screen.contains("^B"),
+        !panes.contains('v') && !panes.contains("^B"),
         "a prefix keystroke reached a shell:\n{screen}"
     );
 }
@@ -476,7 +480,7 @@ fn the_prefix_splits_vertically_and_walks_to_the_next_pane() {
 fn the_prefix_splits_horizontally() {
     let (mut nt, _init) = start_shipped("", "cat");
     nt.send("\x02-"); // C-b -
-    nt.wait_for_screen("panes 2 focus 2", PATIENCE);
+    nt.wait_for_cell(DIVIDER_ROW, 0, HORIZONTAL_DIVIDER, PATIENCE);
     nt.settle(Duration::from_millis(500));
 
     nt.send("BELOW");
@@ -497,22 +501,40 @@ fn the_prefix_splits_horizontally() {
         line_of("ABOVE") < line_of("BELOW"),
         "the panes are not stacked, so the split was not horizontal:\n{screen}"
     );
+    // The bar's own row is left out: a working directory with a dash in it is not a leak.
     assert!(
-        !screen.contains('-'),
+        !pane_area(&screen).contains('-'),
         "the command key reached the shell:\n{screen}"
     );
 }
 
-/// The shipped surface is 80 columns and, with the status row, 23 usable rows. A gutter of
-/// one goes between the panes, so a vertical split leaves the left pane columns 0..39, the
-/// divider column 40 and the right pane the rest; a horizontal one leaves the top pane rows
-/// 0..10, the divider row 11 and the bottom pane the rest.
+/// The shipped surface is 80 columns and, with the status bar's row taken off the top, rows
+/// 1..23. A gutter of one goes between the panes, so a vertical split leaves the left pane
+/// columns 0..39, the divider column 40 and the right pane the rest; a horizontal one leaves
+/// the top pane rows 1..11, the divider row 12 and the bottom pane the rest.
+/// The cap `plugin.status` opens every block of the bar with, and what the bar says about a
+/// window whose focused pane is running `cat`: the window's number, then that command.
+const CAP_LEFT: &str = "\u{e0b6}";
+const FIRST_WINDOW: &str = "1  cat";
+const SECOND_WINDOW: &str = "2  cat";
+
+const PANE_TOP: u16 = 1;
 const PANE_ROWS: usize = 23;
 const PANE_COLS: usize = 80;
-const DIVIDER_COL: usize = 40;
-const DIVIDER_ROW: usize = 11;
-const VERTICAL_DIVIDER: char = '\u{2502}';
-const HORIZONTAL_DIVIDER: char = '\u{2500}';
+const DIVIDER_COL: u16 = 40;
+const DIVIDER_ROW: u16 = 12;
+const VERTICAL_DIVIDER: &str = "\u{2502}";
+const HORIZONTAL_DIVIDER: &str = "\u{2500}";
+
+/// The screen below the bar's row: what the shells were given, and the only place a
+/// keystroke that leaked past the prefix could show up.
+fn pane_rows(screen: &str) -> impl Iterator<Item = &str> {
+    screen.lines().skip(PANE_TOP as usize)
+}
+
+fn pane_area(screen: &str) -> String {
+    pane_rows(screen).collect::<Vec<_>>().join("\n")
+}
 
 /// The UI a split had no way to show: with the panes tiling the surface exactly, nothing on
 /// screen said where one ended. `C-b v` now rules the reserved column between them, and a
@@ -521,7 +543,7 @@ const HORIZONTAL_DIVIDER: char = '\u{2500}';
 fn a_vertical_split_draws_a_divider_column_between_the_panes() {
     let (mut nt, _init) = start_shipped("", "cat");
     nt.send("\x02v"); // C-b v
-    nt.wait_for_screen("panes 2 focus 2", PATIENCE);
+    nt.wait_for_cell(PANE_TOP, DIVIDER_COL, VERTICAL_DIVIDER, PATIENCE);
     nt.settle(Duration::from_millis(500));
 
     nt.send("RIGHT");
@@ -532,18 +554,16 @@ fn a_vertical_split_draws_a_divider_column_between_the_panes() {
     nt.wait_for_screen("LEFT", PATIENCE);
 
     let screen = nt.screen_after(Duration::from_millis(500));
-    let rows: Vec<&str> = screen.lines().collect();
-    let ruled = rows
-        .iter()
+    let ruled = pane_rows(&screen)
         .take(PANE_ROWS)
-        .filter(|row| row.chars().nth(DIVIDER_COL) == Some(VERTICAL_DIVIDER))
+        .filter(|row| row.chars().nth(DIVIDER_COL as usize) == VERTICAL_DIVIDER.chars().next())
         .count();
     assert_eq!(
         ruled, PANE_ROWS,
         "no divider column down the boundary between the panes:\n{screen}"
     );
 
-    let top = rows.first().copied().unwrap_or_default();
+    let top = pane_rows(&screen).next().unwrap_or_default();
     let left = top
         .find("LEFT")
         .unwrap_or_else(|| panic!("the left pane never echoed:\n{screen}"));
@@ -551,7 +571,7 @@ fn a_vertical_split_draws_a_divider_column_between_the_panes() {
         .find("RIGHT")
         .unwrap_or_else(|| panic!("the right pane never echoed:\n{screen}"));
     assert!(
-        left < DIVIDER_COL && right > DIVIDER_COL,
+        left < DIVIDER_COL as usize && right > DIVIDER_COL as usize,
         "the divider is not between the two shells:\n{screen}"
     );
 }
@@ -561,7 +581,7 @@ fn a_vertical_split_draws_a_divider_column_between_the_panes() {
 fn a_horizontal_split_draws_a_divider_row_between_the_panes() {
     let (mut nt, _init) = start_shipped("", "cat");
     nt.send("\x02-"); // C-b -
-    nt.wait_for_screen("panes 2 focus 2", PATIENCE);
+    nt.wait_for_cell(DIVIDER_ROW, 0, HORIZONTAL_DIVIDER, PATIENCE);
     nt.settle(Duration::from_millis(500));
 
     nt.send("BELOW");
@@ -573,9 +593,9 @@ fn a_horizontal_split_draws_a_divider_row_between_the_panes() {
 
     let screen = nt.screen_after(Duration::from_millis(500));
     let rows: Vec<&str> = screen.lines().collect();
-    let rule = rows.get(DIVIDER_ROW).copied().unwrap_or_default();
+    let rule = rows.get(DIVIDER_ROW as usize).copied().unwrap_or_default();
     assert_eq!(
-        rule.chars().filter(|c| *c == HORIZONTAL_DIVIDER).count(),
+        rule.matches(HORIZONTAL_DIVIDER).count(),
         PANE_COLS,
         "no divider row across the boundary between the panes:\n{screen}"
     );
@@ -586,7 +606,7 @@ fn a_horizontal_split_draws_a_divider_row_between_the_panes() {
             .unwrap_or_else(|| panic!("{needle} never reached a pane:\n{screen}"))
     };
     assert!(
-        line_of("ABOVE") < DIVIDER_ROW && line_of("BELOW") > DIVIDER_ROW,
+        line_of("ABOVE") < DIVIDER_ROW as usize && line_of("BELOW") > DIVIDER_ROW as usize,
         "the divider is not between the two shells:\n{screen}"
     );
 }
@@ -637,8 +657,9 @@ fn copy_tree(from: &Path, to: &Path) {
     }
 }
 
-/// Task 5: the default status line is a shipped plugin, so it is there with no user config
-/// at all — and it reports the pane tree, which means it follows a split and the focus.
+/// Task 5: the default status bar is a shipped plugin, so it is there with no user config at
+/// all — in the row it reserved, naming the window it is showing and what the focused pane
+/// is running.
 #[test]
 fn the_shipped_status_line_shows_with_no_user_config() {
     let init = harness::runtime(&[("init.lua", "require('plugin.splitter')")]);
@@ -646,16 +667,64 @@ fn the_shipped_status_line_shows_with_no_user_config() {
     let shipped = shipped_layer();
     let mut nt = Neotmux::start_layered(&[init.path(), &fixtures, &shipped], "cat");
 
-    nt.wait_for_screen("panes 1 focus 1", PATIENCE);
+    let status = nt.wait_for_status("cat", PATIENCE);
+    assert!(status.contains("1"), "the window is not listed: {status:?}");
     nt.send("\x02"); // C-b: split, focusing the new pane
-    nt.wait_for_screen("panes 2 focus 2", PATIENCE);
+    nt.wait_for_log("splitter pane_opened 2", PATIENCE);
     nt.send("\x0f"); // C-o: focus the other one
-    nt.wait_for_screen("panes 2 focus 1", PATIENCE);
+    nt.wait_for_log("splitter focus_changed 1", PATIENCE);
+    nt.wait_for_status("cat", PATIENCE);
     assert_eq!(
-        nt.cell(23, 0),
-        "p",
-        "the status line is not in the row it reserved:\n{}",
+        nt.cell(0, 0),
+        CAP_LEFT,
+        "the status bar is not in the row it reserved:\n{}",
         nt.screen_after(Duration::ZERO)
+    );
+}
+
+/// The requirement the user stated first, on the screen a user sees: the bar does not merely
+/// change when the focus moves, it says something different about the pane the focus is on.
+#[test]
+fn the_bar_says_something_different_about_each_focused_pane() {
+    let (mut nt, _init) = start_shipped("", "bash");
+    nt.wait_for_status("bash", PATIENCE);
+
+    nt.send("\x02v"); // C-b v: a second pane, focused
+    nt.wait_for_cell(PANE_TOP, DIVIDER_COL, VERTICAL_DIVIDER, PATIENCE);
+    nt.send("sleep 30\n");
+    let running = nt.wait_for_status("sleep", PATIENCE);
+
+    nt.send("\x02o"); // C-b o: back to the pane sitting at its prompt
+    let prompt = nt.wait_for_status("bash", PATIENCE);
+
+    assert_ne!(
+        running, prompt,
+        "the bar says the same thing about both panes"
+    );
+    assert!(
+        !prompt.contains("sleep"),
+        "the bar is still describing the pane the focus left: {prompt:?}"
+    );
+}
+
+/// Nothing else wakes the frame. A command starting, that command ending and a `cd` each move
+/// the bar on their own — the second of those with no keystroke at all in between.
+#[test]
+fn the_bar_follows_a_command_and_a_cd_with_no_keystroke() {
+    let (mut nt, _init) = start_shipped("", "bash");
+    nt.wait_for_status("bash", PATIENCE);
+
+    nt.send("sleep 2\n");
+    nt.wait_for_status("sleep", PATIENCE);
+    // Nothing is sent from here: the sleep finishing is the only thing that moves the bar.
+    nt.wait_for_status("bash", PATIENCE);
+
+    let target = std::fs::canonicalize("/tmp").expect("canonicalise /tmp");
+    nt.send(&format!("cd {}\n", target.display()));
+    let status = nt.wait_for_status(&target.display().to_string(), PATIENCE);
+    assert!(
+        status.contains("bash"),
+        "the bar lost the command when the directory changed: {status:?}"
     );
 }
 
@@ -673,31 +742,31 @@ fn a_border_takes_no_column_from_either_pane_it_divides() {
         "cat",
     );
 
-    nt.wait_for_screen("panes 1 focus 1", PATIENCE);
+    nt.wait_for_status("cat", PATIENCE);
     nt.send("\x02"); // C-b: splitter splits the width, so the new pane is the right one
-    nt.wait_for_screen("panes 2 focus 2", PATIENCE);
+    nt.wait_for_log("splitter pane_opened 2", PATIENCE);
     nt.send("R"); // into the right pane's first column, which the divider must not take
     nt.send("\x0f"); // C-o: back to the left pane
     // The focus op is applied at the end of the frame the key was read in, so keys sent
-    // before the status catches up would still land in the pane on the right.
-    nt.wait_for_screen("panes 2 focus 1", PATIENCE);
+    // before the event lands would still go to the pane on the right.
+    nt.wait_for_log("splitter focus_changed 1", PATIENCE);
     nt.send(FILL);
 
     nt.wait_for_screen(FILL, PATIENCE);
     assert_eq!(
-        nt.cell(0, 39),
+        nt.cell(PANE_TOP, 39),
         "d",
         "the border ate the last column of the left pane:\n{}",
         nt.screen_after(Duration::ZERO)
     );
     assert_eq!(
-        nt.cell(0, 40),
-        "\u{2502}",
+        nt.cell(PANE_TOP, DIVIDER_COL),
+        VERTICAL_DIVIDER,
         "the divider is not in the reserved column:\n{}",
         nt.screen_after(Duration::ZERO)
     );
     assert_eq!(
-        nt.cell(0, 41),
+        nt.cell(PANE_TOP, 41),
         "R",
         "the border ate the first column of the right pane:\n{}",
         nt.screen_after(Duration::ZERO)
@@ -717,9 +786,9 @@ fn switching_the_borders_off_gives_the_panes_their_cells_back() {
         "cat",
     );
 
-    nt.wait_for_screen("panes 1 focus 1", PATIENCE);
+    nt.wait_for_status("cat", PATIENCE);
     nt.send("\x02"); // C-b: split, focusing the new pane on the right
-    nt.wait_for_screen("panes 2 focus 2", PATIENCE);
+    nt.wait_for_log("splitter pane_opened 2", PATIENCE);
     nt.send("R");
     nt.wait_for_screen("R", PATIENCE);
 
@@ -729,7 +798,7 @@ fn switching_the_borders_off_gives_the_panes_their_cells_back() {
         "a divider survived the opt-out:\n{screen}"
     );
     assert_eq!(
-        nt.cell(0, DIVIDER_COL as u16),
+        nt.cell(PANE_TOP, DIVIDER_COL),
         "R",
         "the right pane does not start where a tiling layout puts it:\n{screen}"
     );
@@ -783,24 +852,24 @@ fn two_sources_reserving_the_bottom_get_a_row_each() {
 #[test]
 fn a_flooding_shell_cannot_reach_a_reserved_band() {
     let (mut nt, _init) = start_shipped("", "cat");
-    nt.wait_for_screen("panes 1 focus 1", PATIENCE);
+    nt.wait_for_status("cat", PATIENCE);
     for _ in 0..30 {
         nt.send("ZZZZZZZZ\r");
     }
     nt.settle(Duration::from_millis(500));
 
     let screen = nt.screen_after(Duration::from_millis(300));
-    let rows: Vec<&str> = screen.lines().collect();
     assert!(
-        rows[0].contains('Z'),
+        pane_area(&screen).contains('Z'),
         "the shell never filled its pane:\n{screen}"
     );
+    let status = nt.status();
     assert!(
-        !rows[23].contains('Z'),
+        !status.contains("ZZ"),
         "the shell wrote into the reserved band:\n{screen}"
     );
     assert!(
-        rows[23].starts_with("panes 1 focus 1"),
+        status.starts_with(CAP_LEFT) && status.contains("cat"),
         "the band's content did not survive the flood:\n{screen}"
     );
 }
@@ -845,7 +914,7 @@ fn reserving_a_band_costs_one_layout_recompute() {
         &[init.path(), &harness::fixture_layer(), &shipped_layer()],
         "cat",
     );
-    nt.wait_for_screen("panes 1 focus 1", PATIENCE);
+    nt.wait_for_status("cat", PATIENCE);
     nt.settle(Duration::from_millis(500));
     let before = resizes(&nt.log_text()).len();
 
@@ -863,7 +932,7 @@ fn reserving_a_band_costs_one_layout_recompute() {
     );
     let screen = nt.screen_after(Duration::from_millis(300));
     assert!(
-        screen.contains("panes 1 focus 1"),
+        nt.status().contains("cat"),
         "the shipped band did not survive another source reserving one:\n{screen}"
     );
 }
@@ -882,9 +951,10 @@ fn a_user_config_can_switch_off_a_shipped_default() {
     nt.wait_for_screen("STILL-HERE", PATIENCE);
 
     let screen = nt.screen_after(Duration::from_millis(500));
+    // The top row is the shell's again, which is the row the bar would have taken.
     assert!(
-        !screen.contains("panes "),
-        "the shipped status line ignored the opt-out:\n{screen}"
+        !screen.contains(CAP_LEFT) && nt.status().contains("STILL-HERE"),
+        "the shipped status bar ignored the opt-out:\n{screen}"
     );
     assert!(
         nt.log_text().is_empty(),
@@ -909,8 +979,8 @@ fn deleting_the_shipped_plugins_leaves_a_working_multiplexer() {
 
     let screen = nt.screen_after(Duration::from_millis(500));
     assert!(
-        !screen.contains("panes "),
-        "a status line survived the deletion:\n{screen}"
+        !screen.contains(CAP_LEFT) && nt.status().contains("STILL-HERE"),
+        "a status bar survived the deletion:\n{screen}"
     );
     assert!(
         screen.contains("^B"),
@@ -952,12 +1022,16 @@ fn an_installed_neotmux_starts_on_its_shipped_layer() {
     install_into(prefix.path());
 
     let mut nt = Neotmux::start_installed(prefix.path(), "cat");
-    nt.wait_for_screen("panes 1 focus 1", PATIENCE);
+    let status = nt.wait_for_status("cat", PATIENCE);
+    assert!(
+        status.starts_with(CAP_LEFT),
+        "the installed bar is missing its glyphs: {status:?}"
+    );
 
     // Out of the box, with no user Lua at all: the shipped prefix is the only way to reach
     // a second pane, so this is what v0.1's line costs an installed user.
     nt.send("\x02v"); // C-b v
-    nt.wait_for_screen("panes 2 focus 2", PATIENCE);
+    nt.wait_for_cell(PANE_TOP, DIVIDER_COL, VERTICAL_DIVIDER, PATIENCE);
 
     let log = nt.log_text();
     assert!(
@@ -1046,7 +1120,7 @@ fn resize_probe() -> (Neotmux, tempfile::TempDir) {
 #[test]
 fn a_split_does_not_resize_every_pane() {
     let (mut nt, _init) = resize_probe();
-    nt.wait_for_screen("panes 1 focus 1", PATIENCE);
+    nt.wait_for_status("cat", PATIENCE);
     nt.settle(Duration::from_millis(500));
     let before = resizes(&nt.log_text()).len();
 
@@ -1065,7 +1139,7 @@ fn a_split_does_not_resize_every_pane() {
     );
     let screen = nt.screen_after(Duration::from_millis(300));
     assert!(
-        screen.contains("panes 2 focus 2"),
+        nt.status().contains("cat"),
         "the status row did not survive the split:\n{screen}"
     );
 }
@@ -1075,7 +1149,7 @@ fn a_split_does_not_resize_every_pane() {
 #[test]
 fn a_focus_change_does_not_resize_every_pane() {
     let (mut nt, _init) = resize_probe();
-    nt.wait_for_screen("panes 1 focus 1", PATIENCE);
+    nt.wait_for_status("cat", PATIENCE);
     nt.send("\x02"); // C-b: split
     nt.wait_for_log("splitter pane_opened 2", PATIENCE);
     nt.settle(Duration::from_millis(500));
@@ -1096,7 +1170,7 @@ fn a_focus_change_does_not_resize_every_pane() {
     );
     let screen = nt.screen_after(Duration::from_millis(300));
     assert!(
-        screen.contains("panes 2 focus 1"),
+        nt.status().contains("cat"),
         "the status row did not survive the focus change:\n{screen}"
     );
 }
@@ -1409,24 +1483,24 @@ fn focusing_an_unknown_window_is_reported_and_does_not_stop_the_session() {
 #[test]
 fn the_shipped_status_band_survives_a_switch() {
     let (mut nt, _init) = start_shipped("", "cat");
-    nt.wait_for_screen("panes 1 focus 1", PATIENCE);
+    nt.wait_for_status(FIRST_WINDOW, PATIENCE);
     nt.settle(Duration::from_millis(300));
 
     nt.send("\x02c"); // C-b c: a window, shown
-    nt.wait_for_screen("panes 1 focus 2", PATIENCE);
+    nt.wait_for_status(SECOND_WINDOW, PATIENCE);
     assert_eq!(
-        nt.cell(23, 0),
-        "p",
-        "the status line left the row it reserved:\n{}",
+        nt.cell(0, 0),
+        CAP_LEFT,
+        "the status bar left the row it reserved:\n{}",
         nt.screen_after(Duration::ZERO)
     );
 
     nt.send("\x02n"); // C-b n: back
-    nt.wait_for_screen("panes 1 focus 1", PATIENCE);
+    nt.wait_for_status(FIRST_WINDOW, PATIENCE);
     assert_eq!(
-        nt.cell(23, 0),
-        "p",
-        "the status line lost its band on the way back:\n{}",
+        nt.cell(0, 0),
+        CAP_LEFT,
+        "the status bar lost its band on the way back:\n{}",
         nt.screen_after(Duration::ZERO)
     );
 }
@@ -1435,31 +1509,32 @@ fn the_shipped_status_band_survives_a_switch() {
 #[test]
 fn the_prefix_opens_a_window_and_walks_to_the_next_one() {
     let (mut nt, _init) = start_shipped("", "cat");
-    nt.wait_for_screen("panes 1 focus 1", PATIENCE);
+    nt.wait_for_status(FIRST_WINDOW, PATIENCE);
     nt.send("ONE");
     nt.wait_for_screen("ONE", PATIENCE);
 
     nt.send("\x02c"); // C-b c
-    nt.wait_for_screen("panes 1 focus 2", PATIENCE);
+    nt.wait_for_status(SECOND_WINDOW, PATIENCE);
     nt.settle(Duration::from_millis(500));
     nt.send("TWO");
     nt.wait_for_screen("TWO", PATIENCE);
     let screen = nt.screen_after(Duration::from_millis(300));
     assert!(
-        !screen.contains("ONE"),
+        !pane_area(&screen).contains("ONE"),
         "`C-b c` did not open a window of its own:\n{screen}"
     );
 
     nt.send("\x02n"); // C-b n
-    nt.wait_for_screen("panes 1 focus 1", PATIENCE);
+    nt.wait_for_status(FIRST_WINDOW, PATIENCE);
     nt.wait_for_screen("ONE", PATIENCE);
     let screen = nt.screen_after(Duration::from_millis(300));
+    let panes = pane_area(&screen);
     assert!(
-        !screen.contains("TWO"),
+        !panes.contains("TWO"),
         "`C-b n` did not walk to the other window:\n{screen}"
     );
     assert!(
-        !screen.contains("^B"),
+        !panes.contains("^B"),
         "a prefix keystroke reached a shell:\n{screen}"
     );
 }

@@ -187,6 +187,48 @@ impl Neotmux {
             .unwrap_or_default()
     }
 
+    /// The row the shipped status bar reserves for itself, as text.
+    pub fn status(&self) -> String {
+        self.screen_contents()
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .to_string()
+    }
+
+    /// Blocks until the status bar says `marker`. What the bar says is the assertion in most
+    /// of these tests, and it is also how they know a split or a switch has landed.
+    pub fn wait_for_status(&mut self, marker: &str, timeout: Duration) -> String {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let status = self.status();
+            if status.contains(marker) {
+                return status;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the status bar never said {marker:?}; it says {status:?}"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// Blocks until one cell holds `expected` — a pane boundary appearing, most often.
+    pub fn wait_for_cell(&mut self, row: u16, col: u16, expected: &str, timeout: Duration) {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if self.cell(row, col) == expected {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "cell ({row}, {col}) never held {expected:?}:\n{}",
+                self.screen_contents()
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
     pub fn wait_for_screen(&mut self, marker: &str, timeout: Duration) {
         let deadline = Instant::now() + timeout;
         loop {
