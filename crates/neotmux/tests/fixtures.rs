@@ -33,6 +33,52 @@ fn line_with<'a>(log: &'a str, marker: &str) -> &'a str {
         .unwrap_or_else(|| panic!("no log line contains {marker:?}:\n{log}"))
 }
 
+/// Half a frame, with the frame at 16 ms. The median of a run of keystrokes on an idle
+/// session measures about a millisecond, so this leaves the room a loaded runner needs
+/// while still failing outright if a keystroke ever waits for the next frame boundary.
+const ECHO_BUDGET: Duration = Duration::from_millis(6);
+const ECHO_SAMPLES: usize = 40;
+
+/// How long to leave the session quiet before the next sample. A fixed wait would alias
+/// with the frame: every keystroke would land at the same point of it, and the run would
+/// measure one phase of the loop rather than all of them.
+fn quiet_before(sample: usize) -> Duration {
+    Duration::from_millis(20 + (sample as u64 * 7) % 17)
+}
+
+/// Typing must not cost a frame. The loop has to wake on the pane's output rather than find
+/// it on its next pass, and this measures the difference the way a hand feels it: a byte
+/// into the terminal, the first byte of the redraw back out.
+///
+/// The median rather than the worst sample, because one descheduled moment on a busy runner
+/// says nothing about the loop.
+#[test]
+fn a_keystroke_is_echoed_back_well_inside_a_frame() {
+    let dir = harness::runtime(&[("init.lua", "")]);
+    // A small surface, so what is measured is the loop noticing the output rather than the
+    // cost of drawing a full screen under an unoptimised test build.
+    let mut nt = Neotmux::start_sized(&[dir.path()], "/bin/cat", 10, 40);
+    // The shell's own startup output must be over before the first sample is taken.
+    nt.settle(Duration::from_millis(500));
+
+    let mut samples: Vec<Duration> = (0..ECHO_SAMPLES)
+        .filter_map(|i| nt.round_trip("x", quiet_before(i), PATIENCE))
+        .collect();
+    assert_eq!(
+        samples.len(),
+        ECHO_SAMPLES,
+        "only {} of {ECHO_SAMPLES} keystrokes were ever echoed back",
+        samples.len()
+    );
+
+    samples.sort_unstable();
+    let median = samples[samples.len() / 2];
+    assert!(
+        median <= ECHO_BUDGET,
+        "a keystroke took a median {median:?} to come back, budget {ECHO_BUDGET:?}: {samples:?}"
+    );
+}
+
 #[test]
 fn clock_draws_a_status_line_sized_from_ctx_size_on_every_frame() {
     let (mut nt, _init) = start("require('plugin.clock')", "/bin/cat");

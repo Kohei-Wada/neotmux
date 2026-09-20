@@ -7,10 +7,11 @@ use neotmux_lua::ops::{Level, Op};
 use neotmux_lua::{Event as LuaEvent, KeyOutcome, LuaSubsystem};
 use neotmux_term::pty::PtyHandle;
 use neotmux_term::state::clamp_to_min_grid;
+use neotmux_term::wakeup::{Waker, Wakeup, wakeup};
 use ratatui::DefaultTerminal;
 use ratatui::layout::Rect;
 
-use crate::frame::{FRAME, sleep_out};
+use crate::frame::FRAME;
 use crate::input::{encode_key, key_spec};
 use crate::logging;
 use crate::notify::Notifications;
@@ -70,11 +71,11 @@ enum Drained {
 }
 
 impl Session {
-    fn new(size: Size, gutter: u16) -> anyhow::Result<Self> {
+    fn new(size: Size, gutter: u16, waker: Waker) -> anyhow::Result<Self> {
         let has_status = false;
         let first = PaneId::from(FIRST_PANE);
         let layout = PaneLayout::new(size, has_status, gutter, first);
-        let mut shells = Shells::default();
+        let mut shells = Shells::new(waker);
         shells.open(
             first,
             PtyHandle::default_shell_command(),
@@ -151,13 +152,16 @@ impl Session {
         Ok(())
     }
 
-    /// Reads input until the frame's time is up. Returns the signal to exit on if one was
-    /// raised while waiting, or if the terminal itself went away.
+    /// Pumps input until the frame's time is up, or — when it was given the panes' wakeup —
+    /// until a pane produces output, which is the frame's cue to start drawing. Returns the
+    /// signal to exit on if one was raised while waiting, or if the terminal itself went
+    /// away.
     fn pump_input(
         &mut self,
         lua: &LuaSubsystem,
         shutdown: &ShutdownSignal,
         tty: &Terminal,
+        panes: Option<&Wakeup>,
         frame_end: Instant,
     ) -> anyhow::Result<Option<i32>> {
         loop {
@@ -168,20 +172,21 @@ impl Session {
             // hangup: `event::poll` answers one by reading zero bytes forever. Past
             // `frame_end` it returns at once, which is what still lets a frame that
             // overran collect the input waiting on it.
-            match tty.wait(frame_end).context("wait for input")? {
-                Ready::HangUp => return Ok(Some(signals::HANGUP)),
-                // Neither outcome settles whether there is an event: crossterm can be
-                // holding one parsed out of an earlier read, and it hears about a resize on
-                // a signal rather than on this file.
-                Ready::Input | Ready::Idle => {}
+            let ready = tty.wait(panes, frame_end).context("wait for input")?;
+            if ready == Ready::HangUp {
+                return Ok(Some(signals::HANGUP));
             }
+            // No outcome settles whether there is an event: crossterm can be holding one
+            // parsed out of an earlier read, and it hears about a resize on a signal rather
+            // than on this file. Output is no exception — a key that arrived with it belongs
+            // to the frame that is about to draw, not to the one after.
             while event::poll(Duration::ZERO).context("poll input")? {
                 self.handle_event(lua, event::read().context("read input")?)?;
                 if Instant::now() >= frame_end {
                     return Ok(None);
                 }
             }
-            if Instant::now() >= frame_end {
+            if ready == Ready::Output || Instant::now() >= frame_end {
                 return Ok(None);
             }
         }
@@ -418,7 +423,8 @@ pub fn run(
     notifications: &mut Notifications,
 ) -> anyhow::Result<Option<i32>> {
     let tty = Terminal::open().context("open the terminal for input")?;
-    let mut session = Session::new(terminal_size(terminal)?, lua.opt().pane_gutter)?;
+    let (wakeup, waker) = wakeup().context("open the panes' wakeup")?;
+    let mut session = Session::new(terminal_size(terminal)?, lua.opt().pane_gutter, waker)?;
     session.publish_geometry(lua);
 
     #[cfg(debug_assertions)]
@@ -432,13 +438,14 @@ pub fn run(
         }
 
         let frame_end = Instant::now() + FRAME;
-        let drained = session.drain_panes(lua)?;
 
-        if drained == Drained::More
-            && let Some(signal) = session.pump_input(lua, shutdown, &tty, frame_end)?
-        {
+        // The frame's own work waits for a reason to do it: a pane's output, or the deadline
+        // the tick is owed. Keys are handled the moment they arrive either way.
+        if let Some(signal) = session.pump_input(lua, shutdown, &tty, Some(&wakeup), frame_end)? {
             return Ok(Some(signal));
         }
+
+        let drained = session.drain_panes(lua)?;
 
         session.publish_geometry(lua);
         lua.dispatch_tick();
@@ -474,7 +481,12 @@ pub fn run(
             break;
         }
 
-        sleep_out(frame_end);
+        // The rest of the frame is the loop's rate, and it is spent on input rather than
+        // asleep: keys still reach their pane at once, while a pane's output waits for the
+        // next frame rather than drawing this one a second time.
+        if let Some(signal) = session.pump_input(lua, shutdown, &tty, None, frame_end)? {
+            return Ok(Some(signal));
+        }
     }
 
     Ok(None)
@@ -496,7 +508,8 @@ mod tests {
         let mut cmd = CommandBuilder::new("sh");
         cmd.args(["-c", "true"]);
         let state = TermState::new(clamped, 0);
-        let mut pty = PtyHandle::spawn(cmd, clamped).expect("spawn pty");
+        let (_wakeup, waker) = wakeup().expect("wakeup");
+        let mut pty = PtyHandle::spawn(cmd, clamped, waker).expect("spawn pty");
 
         assert_eq!(state.size(), clamped);
         assert_eq!(pty.size().expect("pty size"), clamped);
@@ -510,7 +523,8 @@ mod tests {
         let mut cmd = CommandBuilder::new("sh");
         cmd.args(["-c", "true"]);
         let mut state = TermState::new(initial, 0);
-        let pty = PtyHandle::spawn(cmd, initial).expect("spawn pty");
+        let (_wakeup, waker) = wakeup().expect("wakeup");
+        let pty = PtyHandle::spawn(cmd, initial, waker).expect("spawn pty");
 
         let clamped = clamp_to_min_grid(Size { rows: 0, cols: 0 });
         state.resize(clamped);

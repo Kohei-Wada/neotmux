@@ -3,6 +3,7 @@ use std::io::{self, IsTerminal};
 use std::os::fd::{AsFd, OwnedFd};
 use std::time::{Duration, Instant};
 
+use neotmux_term::wakeup::Wakeup;
 use nix::errno::Errno;
 use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
 
@@ -11,6 +12,10 @@ use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
 pub enum Ready {
     /// Bytes are waiting to be read.
     Input,
+    /// A pane's reader thread has enqueued output. The frame that draws it is worth starting
+    /// now rather than at the next deadline, which is the whole of why the wait watches
+    /// anything but the terminal.
+    Output,
     /// The deadline passed with nothing to read.
     Idle,
     /// The terminal is gone. `POLLHUP` is the kernel saying the other end of the PTY has been
@@ -36,25 +41,44 @@ impl Terminal {
         Ok(Self { fd })
     }
 
-    /// Waits until the terminal has something to read, has gone away, or `deadline` passes.
-    /// A wait cut short by a signal is retried, so the deadline is the only thing that ends
-    /// it early — the caller checks for a raised signal on its own terms.
-    pub fn wait(&self, deadline: Instant) -> io::Result<Ready> {
+    /// Waits until the terminal has something to read, a pane produces output, the terminal
+    /// goes away, or `deadline` passes. A wait cut short by a signal is retried, so the
+    /// deadline is the only thing that ends it early — the caller checks for a raised signal
+    /// on its own terms.
+    ///
+    /// `panes` is a parameter rather than a field because half of every frame is spent
+    /// deliberately not listening to it: once the frame has drawn, a pane's output is a
+    /// reason for the *next* frame, and passing `None` is how the caller says so.
+    pub fn wait(&self, panes: Option<&Wakeup>, deadline: Instant) -> io::Result<Ready> {
         loop {
-            let mut fds = [PollFd::new(self.fd.as_fd(), PollFlags::POLLIN)];
+            let tty = PollFd::new(self.fd.as_fd(), PollFlags::POLLIN);
+            let mut watched = [tty; 2];
+            let watched = match panes {
+                Some(panes) => {
+                    watched[1] = PollFd::new(panes.as_fd(), PollFlags::POLLIN);
+                    &mut watched[..2]
+                }
+                None => &mut watched[..1],
+            };
             match poll(
-                &mut fds,
+                watched,
                 timeout(deadline.saturating_duration_since(Instant::now())),
             ) {
                 Ok(0) => return Ok(Ready::Idle),
                 Ok(_) => {
-                    let revents = fds[0].revents().unwrap_or_else(PollFlags::empty);
+                    let revents = watched[0].revents().unwrap_or_else(PollFlags::empty);
                     // A hangup is reported alongside `POLLIN`, so it has to be looked at first.
                     let gone = PollFlags::POLLHUP | PollFlags::POLLERR | PollFlags::POLLNVAL;
                     if revents.intersects(gone) {
                         return Ok(Ready::HangUp);
                     }
-                    return Ok(Ready::Input);
+                    if revents.contains(PollFlags::POLLIN) {
+                        return Ok(Ready::Input);
+                    }
+                    if let Some(panes) = panes {
+                        panes.clear();
+                    }
+                    return Ok(Ready::Output);
                 }
                 Err(Errno::EINTR) => {
                     if Instant::now() >= deadline {
@@ -96,7 +120,9 @@ mod tests {
         let tty = slave_terminal(&slave);
 
         let started = Instant::now();
-        let ready = tty.wait(started + Duration::from_millis(30)).expect("wait");
+        let ready = tty
+            .wait(None, started + Duration::from_millis(30))
+            .expect("wait");
 
         assert_eq!(ready, Ready::Idle);
         assert!(
@@ -114,7 +140,7 @@ mod tests {
         nix::unistd::write(master.as_fd(), b"x\n").expect("write");
 
         assert_eq!(
-            tty.wait(Instant::now() + Duration::from_secs(5))
+            tty.wait(None, Instant::now() + Duration::from_secs(5))
                 .expect("wait"),
             Ready::Input
         );
@@ -130,7 +156,8 @@ mod tests {
 
         let started = Instant::now();
         assert_eq!(
-            tty.wait(started + Duration::from_secs(5)).expect("wait"),
+            tty.wait(None, started + Duration::from_secs(5))
+                .expect("wait"),
             Ready::HangUp
         );
         assert!(
@@ -147,11 +174,99 @@ mod tests {
 
         for _ in 0..3 {
             assert_eq!(
-                tty.wait(Instant::now() + Duration::from_secs(5))
+                tty.wait(None, Instant::now() + Duration::from_secs(5))
                     .expect("wait"),
                 Ready::HangUp
             );
         }
+    }
+
+    /// The defect this parameter exists for: a pane that produced output a millisecond into
+    /// the frame must not be left unnoticed until the deadline.
+    #[test]
+    fn a_pane_nudge_ends_the_wait_long_before_the_deadline() {
+        let (_master, slave) = pty_pair();
+        let tty = slave_terminal(&slave);
+        let (wakeup, waker) = neotmux_term::wakeup::wakeup().expect("wakeup");
+        waker.wake();
+
+        let started = Instant::now();
+        let ready = tty
+            .wait(Some(&wakeup), started + Duration::from_secs(5))
+            .expect("wait");
+
+        assert_eq!(ready, Ready::Output);
+        assert!(
+            started.elapsed() < Duration::from_millis(100),
+            "the nudge was noticed only after {:?}",
+            started.elapsed()
+        );
+    }
+
+    /// The nudge is taken as it is reported, so the same output cannot wake the next wait a
+    /// second time and turn one chunk into a frame per wait.
+    #[test]
+    fn a_reported_nudge_does_not_wake_the_next_wait_as_well() {
+        let (_master, slave) = pty_pair();
+        let tty = slave_terminal(&slave);
+        let (wakeup, waker) = neotmux_term::wakeup::wakeup().expect("wakeup");
+        waker.wake();
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        assert_eq!(
+            tty.wait(Some(&wakeup), deadline).expect("wait"),
+            Ready::Output
+        );
+
+        let started = Instant::now();
+        assert_eq!(
+            tty.wait(Some(&wakeup), started + Duration::from_millis(30))
+                .expect("wait"),
+            Ready::Idle
+        );
+        assert!(started.elapsed() >= Duration::from_millis(25));
+    }
+
+    /// Half of every frame is spent not listening for output: once the frame has drawn, a
+    /// pane's nudge is a reason for the next frame and must not end this wait.
+    #[test]
+    fn a_wait_that_was_given_no_wakeup_ignores_a_nudge() {
+        let (_master, slave) = pty_pair();
+        let tty = slave_terminal(&slave);
+        let (_wakeup, waker) = neotmux_term::wakeup::wakeup().expect("wakeup");
+        waker.wake();
+
+        let started = Instant::now();
+        assert_eq!(
+            tty.wait(None, started + Duration::from_millis(30))
+                .expect("wait"),
+            Ready::Idle
+        );
+        assert!(started.elapsed() >= Duration::from_millis(25));
+    }
+
+    /// Input wins a tie, and the nudge it beat is still there for the next wait: a keystroke
+    /// reaches its pane in the same frame as the output that arrived with it.
+    #[test]
+    fn input_is_reported_first_and_the_nudge_survives_for_the_next_wait() {
+        let (master, slave) = pty_pair();
+        let tty = slave_terminal(&slave);
+        let (wakeup, waker) = neotmux_term::wakeup::wakeup().expect("wakeup");
+        waker.wake();
+        nix::unistd::write(master.as_fd(), b"x\n").expect("write");
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        assert_eq!(
+            tty.wait(Some(&wakeup), deadline).expect("wait"),
+            Ready::Input
+        );
+
+        let mut buf = [0u8; 8];
+        nix::unistd::read(std::os::fd::AsRawFd::as_raw_fd(&slave), &mut buf).expect("read");
+        assert_eq!(
+            tty.wait(Some(&wakeup), deadline).expect("wait"),
+            Ready::Output
+        );
     }
 
     #[test]

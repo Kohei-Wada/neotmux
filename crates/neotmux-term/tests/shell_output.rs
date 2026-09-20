@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 use neotmux_core::proto::{GridSnapshot, Size};
 use neotmux_term::pty::{PtyEvent, PtyHandle};
 use neotmux_term::state::TermState;
+use neotmux_term::wakeup::wakeup;
 use portable_pty::CommandBuilder;
 
 #[test]
@@ -10,7 +11,8 @@ fn a_command_running_on_the_pty_reaches_the_grid() {
     let size = Size { rows: 24, cols: 80 };
     let mut cmd = CommandBuilder::new("sh");
     cmd.args(["-c", "printf X"]);
-    let mut pty = PtyHandle::spawn(cmd, size).expect("spawn");
+    let (_wakeup, waker) = wakeup().expect("wakeup");
+    let mut pty = PtyHandle::spawn(cmd, size, waker).expect("spawn");
 
     let mut state = TermState::new(size, 0);
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -37,7 +39,8 @@ fn writing_to_the_pty_reaches_the_child() {
     let size = Size { rows: 24, cols: 80 };
     let mut cmd = CommandBuilder::new("sh");
     cmd.args(["-c", "read line; printf '[%s]' \"$line\""]);
-    let mut pty = PtyHandle::spawn(cmd, size).expect("spawn");
+    let (_wakeup, waker) = wakeup().expect("wakeup");
+    let mut pty = PtyHandle::spawn(cmd, size, waker).expect("spawn");
     pty.write(b"ok\n").expect("write");
 
     let mut state = TermState::new(size, 0);

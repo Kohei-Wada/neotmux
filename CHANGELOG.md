@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Keystrokes that no longer wait for the frame
+
+A keystroke used to cost a whole frame. The loop waited on one of the two things that make a
+frame worth drawing — the terminal's own input — and collected each pane's output with a
+non-blocking read once per pass, so a shell that echoed a character a millisecond later went
+unnoticed until the next frame boundary. Measured keystroke to first byte back, typing into
+bash: a median of 20 ms against a bare PTY's 0.2 ms.
+
+Every pane's reader thread now nudges a pipe the wait watches alongside the terminal, and the
+frame's work starts as soon as there is a reason for it rather than at the next deadline. The
+same measurement is a median of 1.3 ms.
+
+A frame is still 16 ms and still draws at most once. What changed is where the drawing sits
+inside it: the frame waits for its reason, draws, and spends the rest of its time pumping
+input rather than asleep, so a key still reaches its pane the moment it arrives and a pane's
+output waits for the next frame rather than drawing this one twice.
+
 ### Panes you can see
 
 `borders`, a third shipped plugin, rules every gap between two panes with `│` and `─`.

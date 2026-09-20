@@ -244,6 +244,26 @@ impl Neotmux {
         }
     }
 
+    /// A byte in, the first byte of the redraw out — the round trip a hand feels as
+    /// latency. `None` if nothing came back inside `timeout`. The screen is let go quiet for
+    /// `quiet` first, so what comes back belongs to this keystroke and not to an earlier one;
+    /// the caller varies that so a run of samples does not land at the same point of the
+    /// frame every time.
+    pub fn round_trip(
+        &mut self,
+        keys: &str,
+        quiet: Duration,
+        timeout: Duration,
+    ) -> Option<Duration> {
+        self.settle(quiet);
+        let started = Instant::now();
+        self.send(keys);
+        self.byte_rx
+            .recv_timeout(timeout)
+            .ok()
+            .map(|_| started.elapsed())
+    }
+
     pub fn bytes_in(&mut self, duration: Duration) -> usize {
         std::thread::sleep(duration);
         let mut total = 0usize;
