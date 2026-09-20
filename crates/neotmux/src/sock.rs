@@ -238,15 +238,22 @@ mod tests {
         let socket = dir.path().join("default.sock");
         assert!(connect(&socket).expect("connect").is_none(), "no file");
 
-        // A plain file at the path answers `ECONNREFUSED` too on Linux; either way there is
-        // nothing to talk to.
         let listener = UnixListener::bind(&socket).expect("bind");
         assert!(connect(&socket).expect("connect").is_some());
+
+        // Given a moment: a connection the listener never accepted is still queued on it as
+        // it closes, and the kernel answers the next connect out of that queue until it has
+        // torn it down. What matters is that the file it leaves behind is not mistaken for a
+        // server, not how many microseconds that takes.
         drop(listener);
-        assert!(
-            connect(&socket).expect("connect").is_none(),
-            "the file the dead listener left behind was taken for a live server"
-        );
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while connect(&socket).expect("connect").is_some() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the file the dead listener left behind was taken for a live server"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
     }
 
     #[test]

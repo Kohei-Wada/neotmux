@@ -6,6 +6,7 @@
 //! that is the only question about a unix socket with no race in it — see [`neotmux::sock`].
 
 use std::cell::RefCell;
+use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt as _;
 use std::process::{Command, Stdio};
 use std::rc::Rc;
@@ -55,29 +56,49 @@ pub fn serve() -> anyhow::Result<()> {
     served
 }
 
-/// A connection to this session's server, starting one if nothing is listening.
-pub fn connect() -> anyhow::Result<Rc<RefCell<Link>>> {
-    let paths = Paths::resolve(&|key| std::env::var_os(key))?;
-    if let Some(stream) = sock::connect(&paths.socket)? {
-        return open(stream);
-    }
+/// A server being started, or one that was already there.
+///
+/// Split in two so that the two slow things a client does at startup happen at the same
+/// time rather than one after the other: starting a server is a fork, an exec and a bind,
+/// and building the Lua layer is every plugin's `init.lua`. Neither needs the other to have
+/// finished, and on a busy machine doing them in series is what a person feels.
+pub struct Starting {
+    paths: Paths,
+    connected: Option<UnixStream>,
+}
 
-    spawn()?;
-    let deadline = Instant::now() + START_TIMEOUT;
-    loop {
-        if let Some(stream) = sock::connect(&paths.socket)? {
+/// Finds this session's server, or starts one, and returns without waiting for it.
+pub fn begin() -> anyhow::Result<Starting> {
+    let paths = Paths::resolve(&|key| std::env::var_os(key))?;
+    let connected = sock::connect(&paths.socket)?;
+    if connected.is_none() {
+        spawn()?;
+    }
+    Ok(Starting { paths, connected })
+}
+
+impl Starting {
+    /// The connection, once there is one to have.
+    pub fn finish(self) -> anyhow::Result<Rc<RefCell<Link>>> {
+        if let Some(stream) = self.connected {
             return open(stream);
         }
-        anyhow::ensure!(
-            Instant::now() < deadline,
-            "the neotmux server did not come up on {}",
-            paths.socket.display()
-        );
-        std::thread::sleep(Duration::from_millis(2));
+        let deadline = Instant::now() + START_TIMEOUT;
+        loop {
+            if let Some(stream) = sock::connect(&self.paths.socket)? {
+                return open(stream);
+            }
+            anyhow::ensure!(
+                Instant::now() < deadline,
+                "the neotmux server did not come up on {}",
+                self.paths.socket.display()
+            );
+            std::thread::sleep(Duration::from_millis(2));
+        }
     }
 }
 
-fn open(stream: std::os::unix::net::UnixStream) -> anyhow::Result<Rc<RefCell<Link>>> {
+fn open(stream: UnixStream) -> anyhow::Result<Rc<RefCell<Link>>> {
     // The version check is `decode_hello`'s, inside `Link::open`, and its message names both
     // numbers. Everything else about a failed greeting is an ordinary I/O error.
     let link = Link::open(stream).context("greet the neotmux server")?;

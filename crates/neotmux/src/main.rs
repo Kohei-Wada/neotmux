@@ -102,13 +102,15 @@ fn client() -> anyhow::Result<()> {
     // answering the keyboard, and starting a server is not fast.
     let _raw = RawMode::enter();
 
-    let link = start::connect()?;
+    // Started here and waited for below: a server is a fork and an exec, and loading the
+    // plugins is the other slow thing a client does. Neither waits for the other.
+    let starting = start::begin()?;
 
     let exe_dir = env::current_exe()
         .ok()
         .and_then(|path| path.parent().map(Path::to_path_buf));
     let layers = Layers::resolve(&|key| env::var_os(key), exe_dir.as_deref());
-    let panes = std::rc::Rc::new(reads::RemotePanes::new(link.clone()));
+    let panes = std::rc::Rc::new(reads::RemotePanes::new());
     let lua = LuaSubsystem::build(layers, panes.clone())?;
     let mut plugins = Plugins::new(lua);
     for failure in plugins.lua().run_init() {
@@ -120,6 +122,9 @@ fn client() -> anyhow::Result<()> {
     if plugins.drain_load_ops() {
         return Ok(());
     }
+
+    let link = starting.finish()?;
+    panes.attach(link.clone());
 
     let shutdown = signals::ShutdownSignal::install()?;
     let mut terminal = ratatui::init();

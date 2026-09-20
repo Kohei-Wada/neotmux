@@ -26,8 +26,12 @@ use neotmux_term::read::{History, PaneRead, Text, Want};
 
 use crate::link::Link;
 
+#[derive(Default)]
 pub struct RemotePanes {
-    link: Rc<RefCell<Link>>,
+    /// Set once the server answers. The Lua layer is built before there is a connection —
+    /// the two are started together — and before there is one there are no panes to read,
+    /// which is the `nil` a read already means.
+    link: RefCell<Option<Rc<RefCell<Link>>>>,
     /// Every pane's read stamp as of the last tick. Answered from here rather than asked
     /// for, because a watcher asks it every tick for every pane: it is the question that
     /// exists so the expensive one is rare, and a round trip would undo that.
@@ -35,11 +39,13 @@ pub struct RemotePanes {
 }
 
 impl RemotePanes {
-    pub fn new(link: Rc<RefCell<Link>>) -> Self {
-        Self {
-            link,
-            revisions: RefCell::new(BTreeMap::new()),
-        }
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The connection the reads go over, once the client has one.
+    pub fn attach(&self, link: Rc<RefCell<Link>>) {
+        *self.link.borrow_mut() = Some(link);
     }
 
     /// What the tick said every pane's stamp is.
@@ -48,18 +54,30 @@ impl RemotePanes {
     }
 
     fn ask(&self, read: Read) -> Option<Reading> {
-        let mut link = self.link.borrow_mut();
+        let connected = self.link.borrow();
+        let mut link = connected.as_ref()?.borrow_mut();
         link.send(&wire::encode_to_server(&ToServer::Read(read)))
             .ok()?;
-        loop {
-            let message = link.recv().ok()??;
-            match wire::decode_to_client(&message).ok()? {
-                OwnedToClient::Reading(reading) => return Some(reading),
-                // The frame loop's, not this call's: it goes back in the queue in the order
-                // it arrived, and the loop picks it up when the handler that asked returns.
-                _ => link.defer(message),
+        // Held rather than put back one at a time: putting one back is putting it where the
+        // next read of this connection looks first, which is here, and this call would take
+        // it again and again instead of ever reaching the socket.
+        let mut theirs = Vec::new();
+        let reading = loop {
+            let Some(message) = link.recv().ok().flatten() else {
+                break None;
+            };
+            match wire::decode_to_client(&message).ok() {
+                Some(OwnedToClient::Reading(reading)) => break Some(reading),
+                // The frame loop's, not this call's.
+                Some(_) => theirs.push(message),
+                None => break None,
             }
+        };
+        // Back in the order they arrived, for the loop whose messages they are.
+        for message in theirs {
+            link.defer(message);
         }
+        reading
     }
 
     fn text(&self, pane: PaneId, read: Read) -> Option<Text> {
@@ -229,7 +247,8 @@ mod tests {
             }
         });
 
-        let remote = RemotePanes::new(Rc::new(RefCell::new(client)));
+        let remote = RemotePanes::new();
+        remote.attach(Rc::new(RefCell::new(client)));
         remote.publish(BTreeMap::from([(pane(), 1)]));
         assert_eq!(remote.revision(pane()), Some(1));
         let text = remote
@@ -257,7 +276,8 @@ mod tests {
         served.join().expect("join");
     }
 
-    /// A server that has gone away answers `nil` rather than taking the client down with it.
+    /// A read before there is anything to read from — the Lua layer exists first — and one
+    /// after the server has gone: both answer `nil` rather than taking the client with them.
     #[test]
     fn a_read_with_nobody_on_the_other_end_is_nil_rather_than_a_panic() {
         let (client, server) = std::os::unix::net::UnixStream::pair().expect("socketpair");
@@ -265,7 +285,12 @@ mod tests {
         let client = Link::open(client).expect("open");
         drop(opened.join().expect("join"));
 
-        let remote = RemotePanes::new(Rc::new(RefCell::new(client)));
+        let unconnected = RemotePanes::new();
+        assert_eq!(unconnected.content(pane(), None, Want::default()), None);
+        assert_eq!(unconnected.revision(pane()), None);
+
+        let remote = RemotePanes::new();
+        remote.attach(Rc::new(RefCell::new(client)));
         assert_eq!(remote.content(pane(), None, Want::default()), None);
         assert_eq!(remote.is_frozen(pane()), None);
         assert!(!remote.freeze(pane()));
