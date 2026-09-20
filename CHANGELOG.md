@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+### Pasting more than 1024 bytes
+
+A paste larger than 1024 bytes used to lose its tail. Exactly one bufferful arrived; the rest
+sat in the terminal until the next keystroke shook another bufferful loose, and while it sat
+there neotmux held a core at 100%.
+
+Neotmux now reads its own terminal and parses its own keys. The read drains until the terminal
+has nothing left, so a paste of any size arrives in one pass, and the keys come out of a parser
+that covers what the program binds: characters including UTF-8, the control characters, the
+CSI and SS3 forms of the arrows, the function keys, Home/End/PageUp/PageDown/Insert/Delete,
+their xterm modifier parameters, and Escape.
+
+Two consequences worth knowing. An `ESC` with nothing behind it in a fully drained read is the
+Escape key, decided at once with no timeout to wait out; an `ESC` with more bytes behind it
+begins a sequence. And a sequence neotmux has no key for — a mouse report, a focus
+notification — is consumed and discarded rather than typed into the pane, since neotmux turns
+none of those modes on and the pane's child never asked for them.
+
+Nothing about output changed: ratatui and crossterm still draw the screen.
+
 ### Copy mode
 
 `C-b [` enters a copy mode over the pane you are in: `h/j/k/l` and `C-u`/`C-d` move a cursor,
