@@ -457,6 +457,92 @@ fn the_prefix_splits_horizontally() {
     );
 }
 
+/// The shipped surface is 80 columns and, with the status row, 23 usable rows. Two panes
+/// split down the middle get 40 columns each, so the left one's last column — where the
+/// divider goes, there being no gap between panes to put it in — is 39; split across, the
+/// top one gets 12 rows and its last is 11.
+const PANE_ROWS: usize = 23;
+const PANE_COLS: usize = 80;
+const DIVIDER_COL: usize = 39;
+const DIVIDER_ROW: usize = 11;
+
+/// The UI a split had no way to show: with the panes tiling the surface exactly, nothing on
+/// screen said where one ended. `C-b v` now rules the boundary column, and a shell is still
+/// live on each side of it.
+#[test]
+fn a_vertical_split_draws_a_divider_column_between_the_panes() {
+    let (mut nt, _init) = start_shipped("", "cat");
+    nt.send("\x02v"); // C-b v
+    nt.wait_for_screen("panes 2 focus 2", PATIENCE);
+    nt.settle(Duration::from_millis(500));
+
+    nt.send("RIGHT");
+    nt.settle(Duration::from_millis(500));
+    nt.send("\x02o"); // C-b o
+    nt.settle(Duration::from_millis(500));
+    nt.send("LEFT");
+    nt.wait_for_screen("LEFT", PATIENCE);
+
+    let screen = nt.screen_after(Duration::from_millis(500));
+    let rows: Vec<&str> = screen.lines().collect();
+    let ruled = rows
+        .iter()
+        .take(PANE_ROWS)
+        .filter(|row| row.chars().nth(DIVIDER_COL) == Some('#'))
+        .count();
+    assert_eq!(
+        ruled, PANE_ROWS,
+        "no divider column down the boundary between the panes:\n{screen}"
+    );
+
+    let top = rows.first().copied().unwrap_or_default();
+    let left = top
+        .find("LEFT")
+        .unwrap_or_else(|| panic!("the left pane never echoed:\n{screen}"));
+    let right = top
+        .find("RIGHT")
+        .unwrap_or_else(|| panic!("the right pane never echoed:\n{screen}"));
+    assert!(
+        left < DIVIDER_COL && right > DIVIDER_COL,
+        "the divider is not between the two shells:\n{screen}"
+    );
+}
+
+/// The same, the other way up: `C-b -` rules the boundary row, with a shell above and below.
+#[test]
+fn a_horizontal_split_draws_a_divider_row_between_the_panes() {
+    let (mut nt, _init) = start_shipped("", "cat");
+    nt.send("\x02-"); // C-b -
+    nt.wait_for_screen("panes 2 focus 2", PATIENCE);
+    nt.settle(Duration::from_millis(500));
+
+    nt.send("BELOW");
+    nt.settle(Duration::from_millis(500));
+    nt.send("\x02o"); // C-b o
+    nt.settle(Duration::from_millis(500));
+    nt.send("ABOVE");
+    nt.wait_for_screen("ABOVE", PATIENCE);
+
+    let screen = nt.screen_after(Duration::from_millis(500));
+    let rows: Vec<&str> = screen.lines().collect();
+    let rule = rows.get(DIVIDER_ROW).copied().unwrap_or_default();
+    assert_eq!(
+        rule.chars().filter(|c| *c == '#').count(),
+        PANE_COLS,
+        "no divider row across the boundary between the panes:\n{screen}"
+    );
+
+    let line_of = |needle: &str| {
+        rows.iter()
+            .position(|row| row.contains(needle))
+            .unwrap_or_else(|| panic!("{needle} never reached a pane:\n{screen}"))
+    };
+    assert!(
+        line_of("ABOVE") < DIVIDER_ROW && line_of("BELOW") > DIVIDER_ROW,
+        "the divider is not between the two shells:\n{screen}"
+    );
+}
+
 /// Task 4 step 5: the prefix is a plugin, not a feature. Switched off from a user config —
 /// the same one line that switches the status line off — `C-b` is an ordinary keystroke and
 /// the multiplexer is otherwise unchanged. That the defaults table works for a second entry
