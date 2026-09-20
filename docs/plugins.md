@@ -32,8 +32,13 @@ The first directory that has a file wins, so a layer earlier in the list shadows
 `~/.config/neotmux/lua/plugin/hello.lua`:
 
 ```lua
+local band = neotmux.reserve('bottom', 1)
+
 neotmux.on_tick(function(ctx)
-  ctx:status('hello', { fg = '#00ff88' })
+  local row = ctx:reserved()
+  if row then
+    ctx:text(nil, row.x, row.y, 'hello', { fg = '#00ff88' })
+  end
 end)
 ```
 
@@ -43,8 +48,8 @@ end)
 require('plugin.hello')
 ```
 
-Start neotmux and `hello` is in the status line. Delete the `require` line and it is not. That
-is the whole lifecycle.
+Start neotmux and `hello` is along the bottom of the screen, on a row the panes no longer
+have. Delete the `require` line and it is not. That is the whole lifecycle.
 
 ## The API
 
@@ -61,12 +66,13 @@ Each of these returns a handle with one method, `handle:remove()`, which is idem
 | `neotmux.on_event(name, fn)` | when that event fires, with a table of fields |
 | `neotmux.on_key(fn)` | for every key, before any binding; return `true` to consume it |
 | `neotmux.keymap.set(spec, fn)` | for that one key; return `true` to consume it |
+| `neotmux.reserve(edge, rows)` | nothing runs; it takes a band of the surface (below) |
 
 Every event that fires, and the fields it carries:
 
 | name | fields | when |
 |---|---|---|
-| `resized` | `rows`, `cols` | the area available to panes changed — including when a status row appears or goes |
+| `resized` | `rows`, `cols` | the area available to panes changed — including when a band is reserved or released |
 | `pane_output` | `pane`, `bytes` | that pane's child wrote something |
 | `pane_opened` | `pane` | a split created it |
 | `pane_closed` | `pane` | its child exited and the pane is gone |
@@ -93,13 +99,13 @@ and you show nothing. There is no clear call because you never need one.
 
 ```lua
 neotmux.on_tick(function(ctx)
-  local size = ctx:size()                      -- { rows = , cols = }
-  ctx:status('text', { fg = '#ffffff', bg = 1 })
-  ctx:text(nil, x, y, 'text', { fg = 2 })      -- nil pane = the whole window
+  local size = ctx:size()                      -- { rows = , cols = }: what the panes have
+  ctx:text(nil, x, y, 'text', { fg = 2 })      -- nil pane = the whole surface
   ctx:rect(nil, x, y, w, h, { bg = '#202020' })
   ctx:line(nil, x1, y1, x2, y2, { fg = 4 }, '|') -- no bg: it paints single cells
                                                -- the glyph is optional and defaults to '#'
   local r = ctx:pane_rect(pane_id)             -- { x = , y = , w = , h = } or nil
+  local band = ctx:reserved()                  -- your own band, or nil (below)
 end)
 ```
 
@@ -109,10 +115,14 @@ terminal's defaults.
 `ctx:line`'s glyph is one character: it fills one cell per step, so anything longer raises
 rather than being truncated.
 
-`ctx:size()` is the area available to the shell, so it shrinks by a row the moment any source
-contributes a status fragment. Read it every tick rather than caching it.
+`ctx:size()` is the area available to the shells, so it shrinks by whatever is reserved at the
+edges. Read it every tick rather than caching it.
 
-`pane_gutter` is the same bargain as a status fragment, in the other direction: the host takes
+**Coordinates are the surface's.** A `nil` pane means the whole terminal, reserved bands
+included, and `ctx:pane_rect` answers in those same coordinates — a band at the top moves the
+panes down, so a pane's rect is never relative to anything but the terminal itself.
+
+`pane_gutter` is the same bargain as a reserved band, in the other direction: the host takes
 the cells away from the panes and has no idea what goes in them. With a gutter of `g`, a
 pane's right neighbour starts at `r.x + r.w + g` and the `g` columns from `r.x + r.w` belong
 to nobody — which is where `plugin.borders` puts its dividers. At `0`, the default, the panes
@@ -120,6 +130,38 @@ tile the surface exactly.
 
 **`ctx:rect` with no colours clears the area.** It is not a no-op — default background is a
 colour like any other, and painting it is how you erase.
+
+### Reserving a band
+
+```lua
+local handle, message = neotmux.reserve('bottom', 1)   -- or 'top'
+handle:remove()                                        -- give the rows back
+```
+
+The panes get what is left. A band is outside every pane's rect, so nothing a shell writes can
+land in it and nothing in it is overwritten by a pane. That is the whole of what the status
+row used to be, and it is why there is no `ctx:status`: a status line is a plugin that wants
+one row at the bottom.
+
+There is no `'left'` and no `'right'`. The consumers are a status line and a window list, both
+horizontal; a vertical band is a different axis with a different unit and nobody asking for it.
+
+`ctx:reserved()` answers **your own** band, as `{ x, y, w, h }` in surface coordinates, or
+`nil`. It is per source: two plugins reserving the bottom get a row each, and the one that
+asked first gets the outermost. Draw in it with a `nil` pane, at the coordinates it gives you.
+
+It is `nil` in three cases, and all three mean *draw nothing this tick*: you reserved nothing,
+your reservation was refused, or the terminal is too small to spare the rows. That last one is
+the same rule that hides a pane too small to show — the bands come straight back when the
+terminal grows.
+
+`reserve` takes effect on the **next** frame, like `pane.split`: the frame you call it in was
+already composed against the surface it had. Your first band arrives a frame later.
+
+An edge holds at most **4** rows in total. Asking for more than that, for zero rows, or for an
+edge that is not `top` or `bottom` *raises* — those are typos. Losing the rows to a plugin that
+asked first returns `nil` plus a message instead, exactly as `keymap.set` does when it loses a
+key: you wrote a legal call and lost a race.
 
 ### Panes
 
@@ -180,8 +222,9 @@ to `plugin/clock` whether it runs during load, from a tick, from a coroutine, or
 A name with a slash is a file that was found. A failed `require` is named after the module you
 asked for instead — `plugin.nosuch`, with a dot — because there is no file to name.
 
-Fragments from several sources compose in load order, so two plugins both writing to the status
-line appear in the order `init.lua` required them.
+Drawing from several sources composes in load order, so a plugin loaded later draws over one
+loaded earlier — and two plugins reserving the same edge are given their bands in that order
+too, outermost first.
 
 One consequence worth knowing: if your plugin gets a callback from a library and registers it,
 the **library** owns it, because that is where it was written. Errors are reported against the
@@ -309,7 +352,7 @@ neotmux ships three plugins in the runtime layer an install puts on the search p
 
 | plugin | what it does |
 |---|---|
-| `status` | the default status line |
+| `status` | the default status line, on one reserved bottom row |
 | `prefix` | a `C-b` prefix over `v`, `-` and `o` |
 | `borders` | a rule along every boundary between two panes |
 
@@ -332,7 +375,8 @@ require('neotmux.defaults').borders = false
 
 That is a Lua module the runtime layer ships, not a host feature: neotmux has no idea the
 defaults table exists. Deleting the installed `lua/plugin/` directory works too, and leaves a
-multiplexer with no status line, no prefix, no borders and no error.
+multiplexer with no status line, no prefix, no borders and no error — and with every row of
+the terminal going to the panes, because nothing is left to reserve one.
 
 ### Changing what the prefix does
 
@@ -397,7 +441,7 @@ remove them first if re-running the chunk would register twice.
 `examples/` has three plugins written only against what is documented here, each showing
 something the others do not:
 
-- `clock.lua` — the status line, and a table a user assigns to from their own config
+- `clock.lua` — reserving a row and drawing in it, and a table a user assigns to from their own config
 - `prefix.lua` — `on_key`, modal state, and driving panes; a tmux-style prefix that binds no key
 - `pane_labels.lua` — drawing into a particular pane, so a label follows it through splits
 

@@ -1,7 +1,7 @@
 -- The dividers between panes.
 --
 -- The host reserves the space; this plugin draws in it. `neotmux.opt.pane_gutter` says
--- "leave this many cells between panes", the same deal as a status fragment saying "leave a
+-- "leave this many cells between panes", the same deal as `neotmux.reserve` saying "leave a
 -- row": the host takes the cells away from the panes and never learns what goes in them. So
 -- a divider costs no pane a column of its shell's output.
 --

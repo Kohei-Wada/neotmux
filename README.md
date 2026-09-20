@@ -23,8 +23,8 @@ failure stays partial and attributable instead of freezing the whole UI.
 Pre-release, and the plugin ABI is not stable yet.
 
 Working today: a shell running full-screen on a PTY, and a Lua layer that loads code from
-`$XDG_CONFIG_HOME/neotmux`, lets it register tick, event, keymap and status callbacks, draw
-into the frame, and log — with every registration and every API call attributed to the chunk
+`$XDG_CONFIG_HOME/neotmux`, lets it register tick, event and keymap callbacks, reserve a band
+of the surface to draw in, draw into the frame, and log — with every registration and every API call attributed to the chunk
 it was written in, so a misbehaving one can be named.
 
 ## Scope
