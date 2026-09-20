@@ -239,8 +239,6 @@ fn usable(dir: SplitDir, rect: Rect, gutter: u16) -> u16 {
     let along = match dir {
         SplitDir::Vertical => rect.w,
         SplitDir::Horizontal => rect.h,
-        // `SplitDir` is `#[non_exhaustive]` for a variant neotmux-proto has not added yet.
-        _ => unreachable!("no other split direction exists yet"),
     };
     along - gutter.min(along)
 }
@@ -261,7 +259,6 @@ fn divide(split: &Split, rect: Rect, gutter: u16) -> (Rect, Rect) {
     let gap = match split.dir {
         SplitDir::Vertical => rect.w,
         SplitDir::Horizontal => rect.h,
-        _ => unreachable!("no other split direction exists yet"),
     } - usable;
     let head = head(usable, split.fraction);
     let tail = usable - head;
@@ -274,7 +271,6 @@ fn divide(split: &Split, rect: Rect, gutter: u16) -> (Rect, Rect) {
             Rect::new(rect.x, rect.y, rect.w, head),
             Rect::new(rect.x, rect.y + head + gap, rect.w, tail),
         ),
-        _ => unreachable!("no other split direction exists yet"),
     }
 }
 
@@ -927,7 +923,6 @@ mod tests {
                         after.h as i32 - before.h as i32,
                         after_other.h as i32 - before_other.h as i32,
                     ),
-                    _ => unreachable!("no other split direction exists yet"),
                 };
                 assert_eq!(grew, 7, "{dir} at gutter {gutter}: {before:?} -> {after:?}");
                 assert_eq!(

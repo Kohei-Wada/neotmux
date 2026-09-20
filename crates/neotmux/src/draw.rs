@@ -46,7 +46,6 @@ pub(crate) fn color(c: PColor) -> Color {
         PColor::Default => Color::Reset,
         PColor::Idx(i) => Color::Indexed(i),
         PColor::Rgb(r, g, b) => Color::Rgb(r, g, b),
-        _ => Color::Reset,
     }
 }
 

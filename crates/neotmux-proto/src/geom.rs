@@ -14,8 +14,9 @@ impl Size {
 
 /// The orientation of a split, as §6's tree will read it. M1a only carries it across the
 /// ABI; nothing splits yet.
+/// Not `#[non_exhaustive]`: a split is along one axis or the other, a decision rather than a
+/// list waiting to grow.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
 pub enum SplitDir {
     Horizontal,
     Vertical,
@@ -44,8 +45,9 @@ impl fmt::Display for SplitDir {
 /// Where a neighbour is, and therefore which boundary a resize moves. A split's orientation
 /// answers to two of these: a vertical split's boundary is the one a left or right move
 /// touches.
+/// Not `#[non_exhaustive]`: four directions on a grid, and a fifth would have to break every
+/// match that walks them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
 pub enum Dir {
     Left,
     Right,
