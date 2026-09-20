@@ -75,6 +75,25 @@ fn colour_field(table: &Table, field: &'static str) -> mlua::Result<Color> {
 
 /// `line` has no background to paint, so a `bg` the caller supplied would be discarded.
 /// Say so instead.
+/// What a caller who names no glyph gets, unchanged from before `line` took one.
+const DEFAULT_LINE_GLYPH: char = '#';
+
+/// A line fills one cell per step, so its glyph has to be one character. Anything longer is
+/// refused rather than truncated: a caller who passed "->" meant something the renderer
+/// cannot draw.
+fn parse_glyph(glyph: Option<String>) -> mlua::Result<char> {
+    let Some(glyph) = glyph else {
+        return Ok(DEFAULT_LINE_GLYPH);
+    };
+    let mut chars = glyph.chars();
+    match (chars.next(), chars.next()) {
+        (Some(ch), None) => Ok(ch),
+        _ => Err(mlua::Error::RuntimeError(format!(
+            "line takes a single character to draw with, got {glyph:?}"
+        ))),
+    }
+}
+
 fn parse_fg_only(colours: Option<Table>) -> mlua::Result<Color> {
     let Some(table) = colours else {
         return Ok(Color::Default);
@@ -176,21 +195,24 @@ impl UserData for Ctx {
             "line",
             |_,
              this,
-             (pane, x1, y1, x2, y2, colours): (
+             (pane, x1, y1, x2, y2, colours, glyph): (
                 Option<u32>,
                 u16,
                 u16,
                 u16,
                 u16,
                 Option<Table>,
+                Option<String>,
             )| {
                 let fg = parse_fg_only(colours)?;
+                let glyph = parse_glyph(glyph)?;
                 this.buffers.record(
                     this.owner,
                     DrawCmd::Line {
                         pane: pane.map(PaneId::from),
                         from: (x1, y1),
                         to: (x2, y2),
+                        glyph,
                         fg,
                     },
                 );

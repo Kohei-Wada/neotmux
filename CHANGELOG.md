@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+### Panes you can see
+
+`borders`, a third shipped plugin, rules every gap between two panes with `│` and `─`.
+
+The host reserves the gap and the plugin draws in it, the same bargain as the status row:
+`neotmux.opt.pane_gutter` says how many cells to leave between panes, and the host never
+learns what anyone puts there. Without it a divider had nowhere to go but on top of a cell a
+shell was using — a vertical split of an 80-column terminal silently ate the 40th character
+of every line in the left pane. Still no adjacency API: with a gutter of `g` a pane's right
+neighbour starts at `r.x + r.w + g`, so `pane_rect` and `line` remain the whole story.
+
+`ctx:line` now takes an optional glyph, so the character is the plugin's choice rather than
+the host's. Omit it and you get the `#` it always drew.
+
+### A prefix you can change
+
+The shipped prefix is now `C-b`, with `v` splitting vertically, `-` horizontally and `o`
+walking to the next pane. Its command table is a field of the module rather than a file-local,
+so a user's `init.lua` can add, replace or drop a binding — `prefix.commands['%']` back to
+tmux's is one line — instead of only being allowed to move the prefix key.
+
 ## v0.1.0 — 2026-09-20
 
 The line at which a plugin author can exercise the ABI. **Not** the line at which neotmux is

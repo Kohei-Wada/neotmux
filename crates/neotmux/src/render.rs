@@ -49,9 +49,9 @@ pub fn layout(area: Rect, has_status: bool) -> (Rect, Rect) {
 /// `None` parks it nowhere, which hides it, and that is the answer whenever the focused pane
 /// has no visible cell to offer: its grid hides its own cursor, the cursor sits outside the
 /// rect the pane was given, or — §6's case — the terminal shrank until the focused pane could
-/// not be shown at all. The panes tile the surface exactly, so every other visible cell
-/// belongs to a pane that is *not* receiving the keys; a cursor blinking in one of those would
-/// say the keys are going somewhere they are not. Typing blind is the documented cost of a
+/// not be shown at all. The panes never overlap, so every other visible cell belongs to a pane
+/// that is *not* receiving the keys, or to the gutter between two of them; a cursor blinking
+/// in one of those would say the keys are going somewhere they are not. Typing blind is the documented cost of a
 /// terminal too small for the tree; lying about where the typing lands is not.
 pub fn cursor_position(area: Rect, grid: &GridSnapshot) -> Option<Position> {
     if grid.hide_cursor {

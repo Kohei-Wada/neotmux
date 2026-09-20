@@ -3,10 +3,21 @@ use std::rc::Rc;
 
 use mlua::{Lua, Table, Value};
 
+/// The widest gutter that is still a divider. The gutter is reserved at every split, and a
+/// divider is one cell; the only reason to ask for more is padding on each side of it, which
+/// needs three. Four is one past that and still far from eating the panes — on the smallest
+/// terminal anyone runs, 80x24, a horizontal split with a gutter of four leaves each pane ten
+/// rows. Beyond it the number is not a divider but a mistake (a pixel count, a colour), and is
+/// refused for the same reason `tick_overrun_limit = 0` is.
+pub const MAX_PANE_GUTTER: u16 = 4;
+
 #[derive(Debug, Clone)]
 pub struct Opts {
     pub tick_budget_ms: u64,
     pub tick_overrun_limit: u32,
+    /// Cells left between panes. The host reserves them; what goes in them is a plugin's
+    /// business and the host never learns.
+    pub pane_gutter: u16,
 }
 
 impl Default for Opts {
@@ -14,6 +25,7 @@ impl Default for Opts {
         Self {
             tick_budget_ms: 8,
             tick_overrun_limit: 5,
+            pane_gutter: 0,
         }
     }
 }
@@ -43,6 +55,16 @@ pub fn install(lua: &Lua, opts: Rc<RefCell<Opts>>) -> mlua::Result<Table> {
                         ));
                     }
                     opts.borrow_mut().tick_overrun_limit = value;
+                }
+                "pane_gutter" => {
+                    let value = lua.unpack::<u16>(value)?;
+                    if value > MAX_PANE_GUTTER {
+                        return Err(mlua::Error::RuntimeError(format!(
+                            "neotmux.opt.pane_gutter must be at most {MAX_PANE_GUTTER}; \
+                             a gutter is a divider between panes, not a margin"
+                        )));
+                    }
+                    opts.borrow_mut().pane_gutter = value;
                 }
                 other => {
                     return Err(mlua::Error::RuntimeError(format!(

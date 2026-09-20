@@ -8,4 +8,5 @@
 return {
   status = true,
   prefix = true,
+  borders = true,
 }

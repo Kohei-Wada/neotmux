@@ -40,6 +40,8 @@ pub enum DrawCmd {
         pane: Option<PaneId>,
         from: (u16, u16),
         to: (u16, u16),
+        /// One cell's worth: the renderer writes it into every cell of the line.
+        glyph: char,
         fg: Color,
     },
 }

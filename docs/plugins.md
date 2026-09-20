@@ -97,7 +97,8 @@ neotmux.on_tick(function(ctx)
   ctx:status('text', { fg = '#ffffff', bg = 1 })
   ctx:text(nil, x, y, 'text', { fg = 2 })      -- nil pane = the whole window
   ctx:rect(nil, x, y, w, h, { bg = '#202020' })
-  ctx:line(nil, x1, y1, x2, y2, { fg = 4 })    -- no bg: it paints single cells
+  ctx:line(nil, x1, y1, x2, y2, { fg = 4 }, '|') -- no bg: it paints single cells
+                                               -- the glyph is optional and defaults to '#'
   local r = ctx:pane_rect(pane_id)             -- { x = , y = , w = , h = } or nil
 end)
 ```
@@ -105,8 +106,17 @@ end)
 Colours are a palette index `0..255` or a `"#rrggbb"` string. Omit the table and you get the
 terminal's defaults.
 
+`ctx:line`'s glyph is one character: it fills one cell per step, so anything longer raises
+rather than being truncated.
+
 `ctx:size()` is the area available to the shell, so it shrinks by a row the moment any source
 contributes a status fragment. Read it every tick rather than caching it.
+
+`pane_gutter` is the same bargain as a status fragment, in the other direction: the host takes
+the cells away from the panes and has no idea what goes in them. With a gutter of `g`, a
+pane's right neighbour starts at `r.x + r.w + g` and the `g` columns from `r.x + r.w` belong
+to nobody — which is where `plugin.borders` puts its dividers. At `0`, the default, the panes
+tile the surface exactly.
 
 **`ctx:rect` with no colours clears the area.** It is not a no-op — default background is a
 colour like any other, and painting it is how you erase.
@@ -137,9 +147,9 @@ being told about.
 A terminal too small to hold the tree hides the panes that no longer fit rather than closing
 or shrinking them, and hiding a pane does not unfocus it: keys still go to it, so you are
 typing blind until the terminal grows back. The terminal cursor is hidden for as long as that
-lasts. It has nowhere honest to sit — the panes tile the surface exactly, so any visible cell
-belongs to a pane that is not getting the keys — and no cursor is a better answer than one
-pointing at the wrong pane.
+lasts. It has nowhere honest to sit — every other visible cell belongs to a pane that is not
+getting the keys, or to no pane at all — and no cursor is a better answer than one pointing at
+the wrong pane.
 
 ### Everything else
 
@@ -149,6 +159,7 @@ neotmux.notify(level, text)  -- 'info' | 'warn' | 'error'; shown on screen and l
 neotmux.quit()
 neotmux.opt.tick_budget_ms = 8     -- per source per frame; 0 turns the budget off
 neotmux.opt.tick_overrun_limit = 5 -- consecutive overruns before the tick is dropped; >= 1
+neotmux.opt.pane_gutter = 0        -- cells left between panes, for whoever draws there; <= 4
 neotmux.resubscribe(name)          -- give a dropped source its tick back; returns handles
 ```
 
@@ -292,12 +303,22 @@ a plugin that is a millisecond over on a loaded machine has not done anything wr
 None of this is a sandbox. Plugins are trusted (below); the budget is there so an *accident*
 costs one plugin one frame instead of costing you the program.
 
-## Turning a shipped default off
+## The shipped defaults
 
-neotmux ships two plugins in the runtime layer an install puts on the search path: `status`,
-the default status line, and `prefix`, a `C-a` prefix over `%`, `"` and `o`. Neither is a host
-feature — both are ordinary files making ordinary API calls, and the prefix is the only reason
-a fresh install can make a second pane at all.
+neotmux ships three plugins in the runtime layer an install puts on the search path:
+
+| plugin | what it does |
+|---|---|
+| `status` | the default status line |
+| `prefix` | a `C-b` prefix over `v`, `-` and `o` |
+| `borders` | a rule along every boundary between two panes |
+
+None of them is a host feature — all three are ordinary files making ordinary API calls, and
+the prefix is the only reason a fresh install can make a second pane at all. `C-b v` splits
+vertically (the panes end up side by side, because `pane.split('vertical')` divides the
+width), `C-b -` splits horizontally (one above the other), and `C-b o` focuses the next pane.
+
+### Turning one off
 
 Every layer's `init.lua` runs, earliest layer first, and the shipped layer is last — so your
 own `init.lua` can decide what the shipped ones do:
@@ -306,11 +327,56 @@ own `init.lua` can decide what the shipped ones do:
 -- ~/.config/neotmux/init.lua
 require('neotmux.defaults').status = false
 require('neotmux.defaults').prefix = false
+require('neotmux.defaults').borders = false
 ```
 
 That is a Lua module the runtime layer ships, not a host feature: neotmux has no idea the
 defaults table exists. Deleting the installed `lua/plugin/` directory works too, and leaves a
-multiplexer with no status line, no prefix and no error.
+multiplexer with no status line, no prefix, no borders and no error.
+
+### Changing what the prefix does
+
+`plugin.prefix` returns its key and its command table, and reads both when a key arrives, so
+assigning to either from your own `init.lua` takes effect:
+
+```lua
+-- ~/.config/neotmux/init.lua
+local prefix = require('plugin.prefix')
+prefix.key = 'C-a'                            -- rebind the prefix itself
+prefix.commands['%'] = prefix.commands['v']   -- tmux's muscle memory, alongside v and -
+prefix.commands['"'] = prefix.commands['-']
+prefix.commands['o'] = nil                    -- and one taken away
+prefix.commands['!'] = function()             -- and one of your own
+  neotmux.notify('info', 'panes: ' .. #neotmux.pane.list())
+end
+```
+
+A command is a function of no arguments, keyed by the key spec that runs it — the same specs
+`keymap.set` takes. The prefix swallows the key after itself whether or not the table has an
+entry for it, so a mistyped command never leaks a character into the shell.
+
+`require`ing it from your `init.lua` loads it there instead of later, which is fine: the
+shipped layer's `require` finds it already loaded. Do not do it *and* set
+`defaults.prefix = false` — the module is loaded either way, and the flag then only looks
+like it turned something off.
+
+### Changing what the borders look like
+
+`plugin.borders` returns `{ fg = 8, vertical = '│', horizontal = '─' }`, all read every tick:
+
+```lua
+local borders = require('plugin.borders')
+borders.fg = '#404040'
+borders.vertical = '|'      -- ASCII, if your font or terminal prefers it
+borders.horizontal = '-'
+```
+
+Each glyph is one character, because a divider is one cell: a terminal cell cannot be
+subdivided, so box drawing is as thin as a line gets.
+
+The plugin sets `neotmux.opt.pane_gutter = 1` and draws in the reserved column or row, so a
+border costs no pane a cell of its shell's output. Switch the plugin off and the gutter goes
+with it — the panes tile the surface again.
 
 ## Reloading
 

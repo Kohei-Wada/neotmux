@@ -81,6 +81,7 @@ fn draw_line(
     bound: PRect,
     from: (u16, u16),
     to: (u16, u16),
+    glyph: char,
     fg: PColor,
 ) {
     let colors = Colors {
@@ -97,7 +98,7 @@ fn draw_line(
     let (mut x, mut y) = (x0, y0);
     loop {
         if x >= 0 && y >= 0 {
-            draw_char(buf, area, bound, (x as u16, y as u16), '#', colors);
+            draw_char(buf, area, bound, (x as u16, y as u16), glyph, colors);
         }
         if x == x1 && y == y1 {
             break;
@@ -147,11 +148,17 @@ pub fn apply(frame: &mut Frame, area: Rect, cmds: &[DrawCmd], panes: &PaneRects)
                 };
                 draw_rect(buf, area, bound, *rect, Colors { fg: *fg, bg: *bg });
             }
-            DrawCmd::Line { pane, from, to, fg } => {
+            DrawCmd::Line {
+                pane,
+                from,
+                to,
+                glyph,
+                fg,
+            } => {
                 let Some(bound) = bounds(panes, area, *pane) else {
                     continue;
                 };
-                draw_line(buf, area, bound, *from, *to, *fg);
+                draw_line(buf, area, bound, *from, *to, *glyph, *fg);
             }
             // Non-exhaustive enum: an unknown future variant is silently skipped.
             _ => {}
@@ -277,12 +284,31 @@ mod tests {
     }
 
     fn line(from: (u16, u16), to: (u16, u16)) -> Vec<DrawCmd> {
+        glyph_line(from, to, '#')
+    }
+
+    fn glyph_line(from: (u16, u16), to: (u16, u16), glyph: char) -> Vec<DrawCmd> {
         vec![DrawCmd::Line {
             pane: None,
             from,
             to,
+            glyph,
             fg: Color::Default,
         }]
+    }
+
+    /// A box-drawing glyph is three bytes and one cell. Nothing on the path may measure it
+    /// in bytes: the cell holds the whole character and the next cell is the next step.
+    #[test]
+    fn a_multi_byte_glyph_occupies_one_cell_per_step() {
+        let cmds = glyph_line((1, 0), (3, 0), '\u{2500}');
+        let panes = PaneRects::new();
+        let buf = render((10, 2), |frame, area| apply(frame, area, &cmds, &panes));
+        for x in 1..=3 {
+            assert_eq!(buf[(x, 0)].symbol(), "\u{2500}", "x={x}");
+        }
+        assert_eq!(buf[(0, 0)].symbol(), " ");
+        assert_eq!(buf[(4, 0)].symbol(), " ");
     }
 
     #[test]

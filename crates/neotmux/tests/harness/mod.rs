@@ -175,6 +175,18 @@ impl Neotmux {
         self.parser.lock().unwrap().screen().contents()
     }
 
+    /// One cell of the reconstructed screen, so a test can say not just that something is on
+    /// screen but which column it is in. Empty for a cell the screen does not have.
+    pub fn cell(&self, row: u16, col: u16) -> String {
+        self.parser
+            .lock()
+            .unwrap()
+            .screen()
+            .cell(row, col)
+            .map(|cell| cell.contents().to_string())
+            .unwrap_or_default()
+    }
+
     pub fn wait_for_screen(&mut self, marker: &str, timeout: Duration) {
         let deadline = Instant::now() + timeout;
         loop {
