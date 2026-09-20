@@ -1000,8 +1000,8 @@ fn a_frame_applies_only_as_many_splits_as_it_can_afford() {
     );
 
     nt.send("\x06"); // C-f: 200 splits from one callback
-    let log = nt.wait_for_log("splits per frame", PATIENCE);
-    let refusal = line_with(&log, "splits per frame");
+    let log = nt.wait_for_log("new shells per frame", PATIENCE);
+    let refusal = line_with(&log, "new shells per frame");
     assert!(
         refusal.contains("plugin/flooder"),
         "the refusal did not name the source that asked: {refusal}"

@@ -2,7 +2,7 @@ use std::fs;
 
 use neotmux_core::proto::{Color, DrawCmd, Epoch, PaneId, Rect, Size};
 use neotmux_lua::runtime::Layers;
-use neotmux_lua::{KeyOutcome, LuaSubsystem};
+use neotmux_lua::{Geometry, KeyOutcome, LuaSubsystem};
 
 fn layer(files: &[(&str, &str)]) -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
@@ -27,9 +27,12 @@ fn frame(sub: &LuaSubsystem, rows: u16) {
     let rect = Rect::new(0, 0, 80, rows);
     sub.begin_frame(
         Epoch::new(size, vec![pane], Some(pane)),
-        size,
-        vec![(pane, rect)],
-        Some(pane),
+        Geometry {
+            size,
+            panes: vec![(pane, rect)],
+            focus: Some(pane),
+            ..Default::default()
+        },
     );
     sub.dispatch_tick();
 }

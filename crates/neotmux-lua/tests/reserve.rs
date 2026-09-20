@@ -4,8 +4,8 @@
 use std::fs;
 
 use neotmux_core::proto::{DrawCmd, Epoch, PaneId, Rect, Reserved, Size};
-use neotmux_lua::LuaSubsystem;
 use neotmux_lua::runtime::Layers;
+use neotmux_lua::{Geometry, LuaSubsystem};
 
 const SURFACE: Size = Size { rows: 24, cols: 80 };
 
@@ -34,9 +34,12 @@ fn frame(sub: &LuaSubsystem, applied: bool) {
     let rect = Rect::new(0, if applied { reserved.top } else { 0 }, 80, content.rows);
     sub.begin_frame(
         Epoch::new(content, vec![pane], Some(pane)),
-        content,
-        vec![(pane, rect)],
-        Some(pane),
+        Geometry {
+            size: content,
+            panes: vec![(pane, rect)],
+            focus: Some(pane),
+            ..Default::default()
+        },
     );
     sub.dispatch_tick();
 }

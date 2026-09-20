@@ -8,6 +8,6 @@ pub mod reserve;
 pub use draw::{DrawCmd, Epoch, Rect};
 pub use geom::{Size, SplitDir};
 pub use grid::{Color, GridSnapshot, SnapCell};
-pub use ids::PaneId;
+pub use ids::{PaneId, WorkspaceId};
 pub use paneinfo::PaneInfo;
 pub use reserve::{Edge, Reserved};

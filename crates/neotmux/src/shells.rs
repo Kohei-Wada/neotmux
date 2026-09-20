@@ -159,9 +159,14 @@ impl Shells {
         Ok(drained)
     }
 
-    pub fn snapshot(&mut self) {
-        for shell in self.shells.values_mut() {
-            shell.state.snapshot_into(&mut shell.grid);
+    /// Copies out the grid of each named pane. The panes being drawn, not every pane: a
+    /// hidden workspace's terminal goes on taking its child's output either way, and
+    /// snapshotting it would put every workspace on every frame's bill.
+    pub fn snapshot(&mut self, panes: impl Iterator<Item = PaneId>) {
+        for pane in panes {
+            if let Some(shell) = self.shells.get_mut(&pane) {
+                shell.state.snapshot_into(&mut shell.grid);
+            }
         }
     }
 
@@ -169,11 +174,6 @@ impl Shells {
     /// launched while it is busy. `None` for a pane that is not here, or whose child has gone.
     pub fn foreground(&self, pane: PaneId) -> Option<i32> {
         self.shells.get(&pane)?.pty.foreground()
-    }
-
-    /// The panes that are running, in pane order.
-    pub fn panes(&self) -> impl Iterator<Item = PaneId> + '_ {
-        self.shells.keys().copied()
     }
 
     pub fn grid(&self, pane: PaneId) -> Option<&GridSnapshot> {

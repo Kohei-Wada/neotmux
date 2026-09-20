@@ -11,6 +11,7 @@ mod render;
 mod shells;
 mod signals;
 mod tty;
+mod workspaces;
 
 use std::env;
 use std::path::{Path, PathBuf};
@@ -91,6 +92,29 @@ fn main() -> anyhow::Result<()> {
                     Level::Error,
                     &tag,
                     &format!("pane.focus({pane}) refused: no panes exist until the session starts"),
+                );
+            }
+            // Same at load time: the session's own first workspace is not there yet.
+            Op::WorkspaceCreate { workspace } => {
+                let tag = lua.sources().name(id).unwrap_or_else(|| id.to_string());
+                logging::log(
+                    Level::Error,
+                    &tag,
+                    &format!(
+                        "workspace.create() refused: {workspace} cannot be opened until the \
+                         session starts"
+                    ),
+                );
+            }
+            Op::WorkspaceFocus { workspace } => {
+                let tag = lua.sources().name(id).unwrap_or_else(|| id.to_string());
+                logging::log(
+                    Level::Error,
+                    &tag,
+                    &format!(
+                        "workspace.focus({workspace}) refused: no workspaces exist until the \
+                         session starts"
+                    ),
                 );
             }
         }

@@ -1,6 +1,6 @@
 use mlua::{Lua, LuaString, Table};
 
-use neotmux_core::proto::{PaneId, Size};
+use neotmux_core::proto::{PaneId, Size, WorkspaceId};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
@@ -9,6 +9,9 @@ pub enum Event {
     PaneOpened { pane: PaneId },
     PaneClosed { pane: PaneId },
     FocusChanged { pane: PaneId },
+    WorkspaceOpened { workspace: WorkspaceId },
+    WorkspaceClosed { workspace: WorkspaceId },
+    WorkspaceChanged { workspace: WorkspaceId },
 }
 
 impl Event {
@@ -19,6 +22,9 @@ impl Event {
             Event::PaneOpened { .. } => "pane_opened",
             Event::PaneClosed { .. } => "pane_closed",
             Event::FocusChanged { .. } => "focus_changed",
+            Event::WorkspaceOpened { .. } => "workspace_opened",
+            Event::WorkspaceClosed { .. } => "workspace_closed",
+            Event::WorkspaceChanged { .. } => "workspace_changed",
         }
     }
 
@@ -50,6 +56,11 @@ impl Event {
             | Event::PaneClosed { pane }
             | Event::FocusChanged { pane } => {
                 table.set("pane", pane.get())?;
+            }
+            Event::WorkspaceOpened { workspace }
+            | Event::WorkspaceClosed { workspace }
+            | Event::WorkspaceChanged { workspace } => {
+                table.set("workspace", workspace.get())?;
             }
         }
         Ok(table)

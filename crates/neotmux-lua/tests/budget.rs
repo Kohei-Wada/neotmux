@@ -1,10 +1,10 @@
 use std::fs;
 
 use neotmux_core::proto::{DrawCmd, Epoch, PaneId, Rect, Size};
-use neotmux_lua::LuaSubsystem;
 use neotmux_lua::ops::{Level, Op};
 use neotmux_lua::registry::KindTag;
 use neotmux_lua::runtime::Layers;
+use neotmux_lua::{Geometry, LuaSubsystem};
 
 fn built(files: &[(&str, &str)]) -> (tempfile::TempDir, LuaSubsystem) {
     let dir = tempfile::tempdir().unwrap();
@@ -23,9 +23,12 @@ fn frame(sub: &LuaSubsystem) {
     let pane = PaneId::from(1);
     sub.begin_frame(
         Epoch::new(size, vec![pane], Some(pane)),
-        size,
-        vec![(pane, Rect::new(0, 0, 80, 24))],
-        Some(pane),
+        Geometry {
+            size,
+            panes: vec![(pane, Rect::new(0, 0, 80, 24))],
+            focus: Some(pane),
+            ..Default::default()
+        },
     );
     sub.dispatch_tick();
 }
