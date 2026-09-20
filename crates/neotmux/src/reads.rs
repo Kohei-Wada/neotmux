@@ -6,11 +6,13 @@
 //! has a screen to come back to. So the read is a question and an answer on the same socket
 //! the frames come over.
 //!
-//! It is only ever asked from inside a tick, and the server is waiting for that tick's reply
-//! when it arrives, so the answer is the next thing on the wire rather than something to be
-//! picked out of a stream of frames. A read that fails answers `None`, which in Lua is the
-//! `nil` a pane that does not exist already gives: a session ending under a watcher's loop
-//! is not the caller's error, and neither is one ending under this.
+//! It can be asked from anywhere a plugin runs — a tick, an event, a key handler — and the
+//! server answers it wherever it is in its own frame. So the answer is not necessarily the
+//! next thing on the wire: a tick the server had already begun sending can arrive first, and
+//! that one is set aside for the loop whose message it is rather than dropped. A read that
+//! fails answers `None`, which in Lua is the `nil` a pane that does not exist already gives:
+//! a session ending under a watcher's loop is not the caller's error, and neither is one
+//! ending under this.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -49,20 +51,29 @@ impl RemotePanes {
         let mut link = self.link.borrow_mut();
         link.send(&wire::encode_to_server(&ToServer::Read(read)))
             .ok()?;
-        match wire::decode_to_client(&link.recv().ok()??).ok()? {
-            OwnedToClient::Reading(reading) => Some(reading),
-            // Nothing else can be in flight: the server is inside its wait for this tick's
-            // reply, and a read is the only thing it answers there.
-            _ => None,
+        loop {
+            let message = link.recv().ok()??;
+            match wire::decode_to_client(&message).ok()? {
+                OwnedToClient::Reading(reading) => return Some(reading),
+                // The frame loop's, not this call's: it goes back in the queue in the order
+                // it arrived, and the loop picks it up when the handler that asked returns.
+                _ => link.defer(message),
+            }
         }
     }
 
-    fn text(&self, read: Read) -> Option<Text> {
+    fn text(&self, pane: PaneId, read: Read) -> Option<Text> {
         match self.ask(read)? {
             Reading::Text(text) => text.map(|text| Text {
                 lines: text.lines,
                 wrapped: text.wrapped,
-                revision: text.revision,
+                // This frame's stamp, not the one the pane is at as the answer is written.
+                // The two are the same question asked at two instants, and a plugin that
+                // holds one and compares it against `pane.revision` — which is the whole of
+                // what the stamp is for — has to be comparing like with like. A pane fed
+                // since is not lost by this: its stamp moves in the next tick, and the
+                // comparison says so then.
+                revision: self.revision(pane).unwrap_or(text.revision),
             }),
             _ => None,
         }
@@ -83,12 +94,15 @@ impl PaneRead for RemotePanes {
     }
 
     fn content(&self, pane: PaneId, last: Option<usize>, want: Want) -> Option<Text> {
-        self.text(Read::Content {
+        self.text(
             pane,
-            last: last.map(|n| n as u64),
-            pad: pad(want),
-            wrapped: want.wrapped,
-        })
+            Read::Content {
+                pane,
+                last: last.map(|n| n as u64),
+                pad: pad(want),
+                wrapped: want.wrapped,
+            },
+        )
     }
 
     fn history_extent(&self, pane: PaneId) -> Option<History> {
@@ -102,13 +116,16 @@ impl PaneRead for RemotePanes {
     }
 
     fn history(&self, pane: PaneId, from: usize, count: usize, want: Want) -> Option<Text> {
-        self.text(Read::History {
+        self.text(
             pane,
-            from: from as u64,
-            count: count as u64,
-            pad: pad(want),
-            wrapped: want.wrapped,
-        })
+            Read::History {
+                pane,
+                from: from as u64,
+                count: count as u64,
+                pad: pad(want),
+                wrapped: want.wrapped,
+            },
+        )
     }
 
     fn freeze(&self, pane: PaneId) -> bool {

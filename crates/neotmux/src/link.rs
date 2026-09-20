@@ -6,6 +6,7 @@
 //! buffer, because a socket hands over whatever happens to have arrived rather than whatever
 //! was sent.
 
+use std::collections::VecDeque;
 use std::io::{self, Read as _, Write as _};
 use std::os::fd::{AsFd, BorrowedFd};
 use std::os::unix::net::UnixStream;
@@ -29,6 +30,9 @@ pub struct Link {
     /// How much of `inbox` has already been handed out, so a message is not copied to the
     /// front of the buffer for every read.
     taken: usize,
+    /// Messages read by somebody who was waiting for a different one, kept in the order they
+    /// arrived so that whoever is reading the connection in general still sees them in it.
+    stashed: VecDeque<Vec<u8>>,
 }
 
 impl Link {
@@ -43,6 +47,7 @@ impl Link {
             stream,
             inbox: Vec::new(),
             taken: 0,
+            stashed: VecDeque::new(),
         };
         link.stream.write_all(&wire::encode_hello())?;
         link.stream.flush()?;
@@ -71,9 +76,21 @@ impl Link {
         self.stream.flush()
     }
 
+    /// Puts a message back for whoever reads this connection next.
+    ///
+    /// A pane read is asked in the middle of a key handler, and what comes back first may be
+    /// the frame loop's own next message rather than the answer. Setting it aside here is
+    /// what keeps the loop from losing it, and keeps the order it arrived in.
+    pub fn defer(&mut self, message: Vec<u8>) {
+        self.stashed.push_back(message);
+    }
+
     /// The next whole message already in hand, without touching the socket. `None` means the
     /// rest of it has not arrived yet.
     pub fn take(&mut self) -> io::Result<Option<Vec<u8>>> {
+        if let Some(stashed) = self.stashed.pop_front() {
+            return Ok(Some(stashed));
+        }
         let pending = &self.inbox[self.taken..];
         if pending.len() < HEADER {
             return Ok(None);
@@ -210,6 +227,22 @@ mod tests {
         let (a, mut b) = pair();
         drop(a);
         assert_eq!(b.recv().expect("recv"), None);
+    }
+
+    /// A read asked in the middle of a key handler can be answered after the frame loop's
+    /// own next message. What it set aside has to come back in the order it arrived.
+    #[test]
+    fn a_deferred_message_comes_back_before_the_socket_is_read_again() {
+        let (mut a, mut b) = pair();
+        a.send(b"later").expect("send");
+        assert_eq!(b.recv().expect("recv").as_deref(), Some(&b"later"[..]));
+        b.defer(b"later".to_vec());
+        b.defer(b"and then".to_vec());
+        a.send(b"newest").expect("send");
+
+        assert_eq!(b.recv().expect("recv").as_deref(), Some(&b"later"[..]));
+        assert_eq!(b.recv().expect("recv").as_deref(), Some(&b"and then"[..]));
+        assert_eq!(b.recv().expect("recv").as_deref(), Some(&b"newest"[..]));
     }
 
     #[test]
