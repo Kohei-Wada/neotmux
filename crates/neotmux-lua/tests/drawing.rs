@@ -633,3 +633,149 @@ fn removing_one_of_two_tick_registrations_keeps_the_source_drawing() {
         "forgetting fired although the source still has a tick registration"
     );
 }
+
+// `neotmux.float` and its handle (Task 3, spec §2, §3, §7). Nothing draws into a float
+// yet (Task 4): these tests observe the grant and the handle's answers the way
+// `reserve.rs`'s tests do, by having the plugin write what it saw into its own frame
+// with `ctx:text`, read back through `lines`.
+
+#[test]
+fn a_grant_from_a_tick_answers_a_handle_and_no_message() {
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.floater')"),
+        (
+            "lua/plugin/floater.lua",
+            r#"
+            neotmux.on_tick(function(ctx)
+              local win, message = neotmux.float({ x = 2, y = 3, w = 8, h = 4 })
+              ctx:text(nil, 0, 0, tostring(win ~= nil) .. ':' .. tostring(message))
+            end)
+            return {}
+            "#,
+        ),
+    ]);
+    frame(&sub, 24);
+    assert_eq!(lines(&sub), vec![(0, "true:nil".to_string())]);
+}
+
+#[test]
+fn a_bad_grant_answers_nil_and_a_message_and_does_not_stop_a_good_grant() {
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.floater')"),
+        (
+            "lua/plugin/floater.lua",
+            r#"
+            neotmux.on_tick(function(ctx)
+              local row = 0
+              local function check(opts)
+                local win, message = neotmux.float(opts)
+                ctx:text(nil, 0, row, tostring(win == nil) .. ':' .. tostring(message ~= nil))
+                row = row + 1
+              end
+              check({ y = 0, w = 1, h = 1 })         -- missing x
+              check({ x = 0, y = 0, w = 1, h = 0 })  -- zero h
+              check({ x = -1, y = 0, w = 1, h = 1 }) -- negative x
+              check({ x = 0, y = 0, w = 1.5, h = 1 }) -- non-integer w
+              local win, message = neotmux.float({ x = 0, y = 0, w = 1, h = 1 })
+              ctx:text(nil, 0, row, tostring(win ~= nil) .. ':' .. tostring(message))
+            end)
+            return {}
+            "#,
+        ),
+    ]);
+    frame(&sub, 24);
+    assert_eq!(
+        lines(&sub),
+        vec![
+            (0, "true:true".to_string()),
+            (1, "true:true".to_string()),
+            (2, "true:true".to_string()),
+            (3, "true:true".to_string()),
+            (4, "true:nil".to_string()),
+        ],
+        "every bad grant should answer nil plus a message, and the well-formed grant \
+         after them should still succeed"
+    );
+}
+
+#[test]
+fn the_handles_move_to_and_resize_to_answer_true_or_nil_and_a_message() {
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.floater')"),
+        (
+            "lua/plugin/floater.lua",
+            r#"
+            neotmux.on_tick(function(ctx)
+              local win = neotmux.float({ x = 0, y = 0, w = 4, h = 4 })
+              local ok, err = win:move_to(3, 2)
+              ctx:text(nil, 0, 0, tostring(ok) .. ':' .. tostring(err))
+              local ok2, err2 = win:move_to(-1, 0)
+              ctx:text(nil, 0, 1, tostring(ok2 == nil) .. ':' .. tostring(err2 ~= nil))
+              local ok3, err3 = win:resize_to(5, 6)
+              ctx:text(nil, 0, 2, tostring(ok3) .. ':' .. tostring(err3))
+              local ok4, err4 = win:resize_to(0, 1)
+              ctx:text(nil, 0, 3, tostring(ok4 == nil) .. ':' .. tostring(err4 ~= nil))
+              win:remove()
+              win:remove()
+              ctx:text(nil, 0, 4, 'removed twice without raising')
+            end)
+            return {}
+            "#,
+        ),
+    ]);
+    frame(&sub, 24);
+    assert_eq!(
+        lines(&sub),
+        vec![
+            (0, "true:nil".to_string()),
+            (1, "true:true".to_string()),
+            (2, "true:nil".to_string()),
+            (3, "true:true".to_string()),
+            (4, "removed twice without raising".to_string()),
+        ]
+    );
+}
+
+/// Modelled on `subsystem.rs`'s `a_failed_loads_rollback_does_not_reach_a_callback_it_got
+/// _from_a_library`: the failing chunk's own float grant is rolled back by the require
+/// wrapper's `floats.remove_all_of` (mirroring what it already does for registrations and
+/// reservations), so a plugin that survives the load is unaffected — its own grant answers
+/// exactly as it would have with no failed load before it. Nothing draws into a float until
+/// Task 4, so what is observable here is the wiring, not a drawn leak; Task 4's ctx tests
+/// cover the draw-side of "a float the owner no longer holds is dropped".
+#[test]
+fn a_failed_loads_own_float_grant_does_not_survive_the_rollback() {
+    let dir = layer(&[
+        ("init.lua", "require('plugin.half')"),
+        (
+            "lua/plugin/lib.lua",
+            "local M = {} function M.tick(ctx) local win, message = \
+             neotmux.float({ x = 0, y = 0, w = 1, h = 1 }) ctx:text(nil, 0, 0, \
+             tostring(win ~= nil) .. ':' .. tostring(message)) end return M",
+        ),
+        (
+            "lua/plugin/half.lua",
+            r#"
+            local lib = require('plugin.lib')
+            neotmux.float({ x = 0, y = 0, w = 2, h = 2 })
+            neotmux.on_tick(lib.tick)
+            error('boom')
+            "#,
+        ),
+    ]);
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
+    let failures = sub.run_init();
+    assert_eq!(failures.len(), 1, "{failures:?}");
+
+    frame(&sub, 24);
+    assert_eq!(
+        lines(&sub),
+        vec![(0, "true:nil".to_string())],
+        "the surviving plugin's own grant should succeed exactly as it would with no prior \
+         failed grant"
+    );
+}

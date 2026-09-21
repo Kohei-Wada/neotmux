@@ -32,6 +32,7 @@ pub use api::keymap;
 use api::ctx::Ctx;
 use budget::{Budget, Outcome};
 use draw::Buffers;
+use float::Floats;
 use ops::{Op, OpBuffer};
 use overrun::Overrun;
 use paneinfo::PaneInfos;
@@ -69,6 +70,7 @@ pub struct LuaSubsystem {
     overrun: Rc<Overrun>,
     reservations: Rc<Reservations>,
     window_ids: Rc<WindowIds>,
+    floats: Rc<Floats>,
 }
 
 impl LuaSubsystem {
@@ -90,6 +92,7 @@ impl LuaSubsystem {
         let pane_info = Rc::new(RefCell::new(PaneInfos::new()));
         let reservations = Rc::new(Reservations::new());
         let window_ids = Rc::new(WindowIds::new());
+        let floats = Rc::new(Floats::new());
         let buffers = Rc::new(Buffers::new());
 
         let overrun = Rc::new(Overrun::new());
@@ -110,6 +113,7 @@ impl LuaSubsystem {
                 overrun: overrun.clone(),
                 reservations: reservations.clone(),
                 window_ids: window_ids.clone(),
+                floats: floats.clone(),
                 home,
             },
         )
@@ -131,6 +135,7 @@ impl LuaSubsystem {
             overrun,
             reservations,
             window_ids,
+            floats,
         })
     }
 
