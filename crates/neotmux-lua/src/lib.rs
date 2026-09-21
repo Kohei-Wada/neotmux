@@ -522,6 +522,14 @@ impl LuaSubsystem {
         &self.sources
     }
 
+    /// Every source's live floats, in grant order (spec §2, §3). An accessor like
+    /// `sources()`/`registry()`, for the host and for tests: nothing in `dispatch_tick`
+    /// reads through it yet — the ctx layer (Task 4) is the first production caller, when a
+    /// tick starts drawing into a float.
+    pub fn floats(&self) -> &Floats {
+        &self.floats
+    }
+
     pub fn opt(&self) -> Opts {
         self.opts.borrow().clone()
     }

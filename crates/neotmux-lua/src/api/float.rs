@@ -31,10 +31,12 @@ fn field(opts: &Table, name: &'static str, min: i64) -> mlua::Result<Result<u16,
 }
 
 /// `neotmux.float`'s handle: `move_to`, `resize_to` and `remove`, the shape `reserve`'s
-/// handle already carries (§3). `__id` is a private field — no method, so `pairs` and any
-/// plugin reading the handle never sees it as one of its verbs — that holds the raw
-/// `FloatId` the ctx layer (Task 4) reads back out to resolve `ctx:text(win, ...)` and
-/// `ctx:float_rect(win)` to the float this handle names.
+/// handle already carries (§3). `__id` is a private field — not part of the ABI, and
+/// plugins must not rely on it — used by the host's own drawing layer (the ctx layer,
+/// Task 4) to read the raw `FloatId` back out and resolve `ctx:text(win, ...)` and
+/// `ctx:float_rect(win)` to the float this handle names. The handle table is not sealed,
+/// so `pairs(win)` does enumerate it like any other field; privacy here is a convention,
+/// not an enforced boundary.
 fn handle(lua: &Lua, floats: Rc<Floats>, id: FloatId) -> mlua::Result<Table> {
     let handle = lua.create_table()?;
     handle.set("__id", lua.create_function(move |_, ()| Ok(id.0))?)?;

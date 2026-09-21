@@ -640,7 +640,7 @@ fn removing_one_of_two_tick_registrations_keeps_the_source_drawing() {
 // with `ctx:text`, read back through `lines`.
 
 #[test]
-fn a_grant_from_a_tick_answers_a_handle_and_no_message() {
+fn a_grant_from_a_tick_answers_a_handle_and_the_granted_rect_is_recorded() {
     let (_dir, sub) = built(&[
         ("init.lua", "require('plugin.floater')"),
         (
@@ -656,6 +656,22 @@ fn a_grant_from_a_tick_answers_a_handle_and_no_message() {
     ]);
     frame(&sub, 24);
     assert_eq!(lines(&sub), vec![(0, "true:nil".to_string())]);
+
+    // The plugin's own answer only proves the call did not raise; the rect itself is
+    // echoed back from the registry the grant wrote into, keyed by the plugin's source id.
+    let owner = sub
+        .sources()
+        .interned()
+        .into_iter()
+        .find(|(_, name)| name == "plugin/floater")
+        .map(|(id, _)| id)
+        .expect("the plugin should have been interned as a source");
+    let granted: Vec<Rect> = sub.floats().by_owner(owner).into_values().collect();
+    assert_eq!(
+        granted,
+        vec![Rect::new(2, 3, 8, 4)],
+        "the grant should have recorded exactly the rect it was given"
+    );
 }
 
 #[test]
@@ -777,5 +793,14 @@ fn a_failed_loads_own_float_grant_does_not_survive_the_rollback() {
         vec![(0, "true:nil".to_string())],
         "the surviving plugin's own grant should succeed exactly as it would with no prior \
          failed grant"
+    );
+    // The observable proof the reap happened: `half.lua`'s own grant (made at load time,
+    // before it errored) is gone, and the only live float is `lib.lua`'s, granted this
+    // frame by the tick that survived the rollback. Without `floats.remove_all_of(id)` in
+    // the require wrapper's failure branch this would be 2.
+    assert_eq!(
+        sub.floats().count(),
+        1,
+        "the failed load's own float grant should not have survived the rollback"
     );
 }
