@@ -38,19 +38,22 @@ status line shipped as a plugin rather than built in.
 
 Detach and attach are in. `C-b d` (or `neotmux.detach()`) leaves the session running and
 exits the client; running `neotmux` again finds it and attaches instead of starting a new
-one. `neotmux --kill` ends a session from outside, for the case where a rebuilt client can no
+one. `neotmux kill` ends a session from outside, for the case where a rebuilt client can no
 longer talk to it at all. A re-attach is a plugin restart: the panes, the shells, the layout
 and each pane's scrollback are the server's and survive; a plugin's own state — a copy
 register, a raised mode, a folded sidebar — is the client's and does not, and the plugin
-re-makes it when it loads. Multiple sessions, naming one, listing them, and two clients on one
-session at once are still out.
+re-makes it when it loads. More than one session is in: `neotmux work` starts it and a
+second `neotmux work` attaches to it, `ls` lists the running ones and `kill [name]` ends
+one of them. The name is a filename — letters, digits, `-` and `_`, none first. `neotmux
+--kill` was its old spelling for one session; it is `kill` now, and `kill [name]` for the
+named ones. Two clients on one session at once is still out.
 
 Copy mode is in, as a plugin: `C-b [` reads back over a pane's scrollback, selects a
 region and yanks it. What is still out is the pane's *own* view moving — the plugin
 draws the lines it wants seen over a grid the host never scrolls — and the system
 clipboard, which this ABI cannot reach, so a yank lands in a Lua register.
 
-Also out of v0.1: mouse, multiple sessions, a plugin manager, and tmux compatibility
+Also out of v0.1: mouse, a plugin manager, and tmux compatibility
 in any form.
 
 Writing one: `docs/plugins.md`, with three working plugins in `examples/`.

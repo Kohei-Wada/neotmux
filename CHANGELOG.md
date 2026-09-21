@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Sessions by name, and `kill` where `--kill` was
+
+`neotmux work` starts a session called `work` where nothing is running and attaches to
+it where one is; `ls` shows the running ones, one per line with the server's pid, and
+`kill [name]` ends one of them, `default` where no name is given — which is what a bare
+`kill` does, and what `--kill` used to be, and is no more. A name is letters, digits,
+`-` and `_` (none first), one to sixty-four characters, because it becomes a filename,
+and a name that would not is refused before anything is created. `C-b d` detaches to the
+same server it always did; running `neotmux work` again finds the session, as running
+`neotmux` again already found `default`. Nothing about the wire changed: the name is a
+path, and the socket was one file per session the day it was written.
+
 ### The Escape key, in every shape a terminal can send it
 
 A terminal that uses the `CSI u` keyboard encoding — kitty's protocol, which Ghostty and a
