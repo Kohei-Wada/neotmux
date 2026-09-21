@@ -1,5 +1,6 @@
 use std::fs;
 
+use neotmux_lua::KeyOutcome;
 use neotmux_lua::LuaSubsystem;
 use neotmux_lua::ops::Op;
 use neotmux_lua::registry::KindTag;
@@ -907,4 +908,256 @@ fn a_tick_overrun_limit_of_zero_is_rejected_at_assignment() {
     assert_eq!(failures.len(), 1, "{failures:?}");
     assert!(failures[0].message.contains("at least 1"), "{failures:?}");
     assert_eq!(sub.opt().tick_overrun_limit, 5, "the zero was kept anyway");
+}
+
+// Task 5: the owners of live floats are offered every key before the rest of the
+// plugin layer, topmost float first (spec §5). The loser of each key never logs;
+// the winner's `neotmux.log` line is what the tests assert on, exactly as the
+// registration-order tests in `keys.rs` do.
+
+/// `neotmux.float` fails without raising, so a grant the test cannot see would make the
+/// scenario silent — the plugin therefore raises on its own if it lost one. A macro so its
+/// body can be spliced with `concat!`, which only takes literals.
+macro_rules! float_grant {
+    () => {
+        "local win, message = neotmux.float({ x = 0, y = 0, w = 4, h = 4 })\n\
+         if win == nil then error('neotmux.float failed: ' .. tostring(message)) end\n"
+    };
+}
+
+#[test]
+fn a_float_owner_beats_earlier_on_key_registrations_and_without_a_float_registration_order_rules() {
+    let dir = layer(&[
+        ("init.lua", "require('plugin.a') require('plugin.b')"),
+        (
+            "lua/plugin/a.lua",
+            "neotmux.on_key(function(key) if key == 'x' then neotmux.log.info('a won') return true end end) return {}",
+        ),
+        (
+            "lua/plugin/b.lua",
+            concat!(
+                float_grant!(),
+                "neotmux.on_key(function(key) if key == 'x' then neotmux.log.info('b won') return true end end) return {}"
+            ),
+        ),
+    ]);
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
+    assert!(sub.run_init().is_empty());
+    assert_eq!(sub.dispatch_key("x"), KeyOutcome::Consumed);
+    let text = format!("{:?}", sub.drain_ops());
+    assert!(
+        text.contains("b won"),
+        "the later-registered float owner should have taken the key: {text}"
+    );
+    assert!(
+        !text.contains("a won"),
+        "the earlier on_key ran before the float owner: {text}"
+    );
+
+    // control: the same two plugins with no float at all — registration order rules, the
+    // canary the new ordering must reproduce.
+    let dir = layer(&[
+        ("init.lua", "require('plugin.a') require('plugin.b')"),
+        (
+            "lua/plugin/a.lua",
+            "neotmux.on_key(function(key) if key == 'x' then neotmux.log.info('a won') return true end end) return {}",
+        ),
+        (
+            "lua/plugin/b.lua",
+            "neotmux.on_key(function(key) if key == 'x' then neotmux.log.info('b won') return true end end) return {}",
+        ),
+    ]);
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
+    assert!(sub.run_init().is_empty());
+    assert_eq!(sub.dispatch_key("x"), KeyOutcome::Consumed);
+    let text = format!("{:?}", sub.drain_ops());
+    assert!(
+        text.contains("a won"),
+        "with no floats, the earlier on_key must win as it always has: {text}"
+    );
+    assert!(
+        !text.contains("b won"),
+        "the later on_key ran first: {text}"
+    );
+}
+
+#[test]
+fn removing_the_float_restores_registration_order() {
+    let dir = layer(&[
+        ("init.lua", "require('plugin.a') require('plugin.b')"),
+        (
+            "lua/plugin/a.lua",
+            "neotmux.on_key(function(key) if key == 'x' then neotmux.log.info('a won') return true end end) return {}",
+        ),
+        (
+            "lua/plugin/b.lua",
+            concat!(
+                float_grant!(),
+                "neotmux.on_key(function(key) if key == 'x' then win:remove() neotmux.log.info('b won') return true end end) return {}"
+            ),
+        ),
+    ]);
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
+    assert!(sub.run_init().is_empty());
+
+    assert_eq!(sub.dispatch_key("x"), KeyOutcome::Consumed);
+    let text = format!("{:?}", sub.drain_ops());
+    assert!(
+        text.contains("b won"),
+        "the holding float owner takes the first key: {text}"
+    );
+    assert!(!text.contains("a won"), "{text}");
+
+    // B's callback removed its float, so its owner is no longer offered first.
+    assert_eq!(sub.dispatch_key("x"), KeyOutcome::Consumed);
+    let text = format!("{:?}", sub.drain_ops());
+    assert!(
+        text.contains("a won"),
+        "the canary must be restored once B's float is gone: {text}"
+    );
+    assert!(
+        !text.contains("b won"),
+        "B was still offered the key after removing its float: {text}"
+    );
+}
+
+#[test]
+fn the_topmost_float_among_float_owners_wins() {
+    let dir = layer(&[
+        (
+            "init.lua",
+            "require('plugin.a') require('plugin.b') require('plugin.c')",
+        ),
+        (
+            "lua/plugin/a.lua",
+            "neotmux.on_key(function(key) if key == 'x' then neotmux.log.info('a won') return true end end) return {}",
+        ),
+        (
+            "lua/plugin/b.lua",
+            concat!(
+                float_grant!(),
+                "neotmux.on_key(function(key) if key == 'x' then neotmux.log.info('b won') return true end end) return {}"
+            ),
+        ),
+        (
+            "lua/plugin/c.lua",
+            concat!(
+                float_grant!(),
+                "neotmux.on_key(function(key) if key == 'x' then neotmux.log.info('c won') return true end end) return {}"
+            ),
+        ),
+    ]);
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
+    assert!(sub.run_init().is_empty());
+
+    // C's float is newer than B's, so C is offered first — A holds nothing and waits on
+    // its ordinary turn, which never comes.
+    assert_eq!(sub.dispatch_key("x"), KeyOutcome::Consumed);
+    let text = format!("{:?}", sub.drain_ops());
+    assert!(
+        text.contains("c won"),
+        "the owner of the newest float should take the key: {text}"
+    );
+    assert!(
+        !text.contains("b won"),
+        "an older float was offered first: {text}"
+    );
+    assert!(
+        !text.contains("a won"),
+        "a non-float owner beat both float owners: {text}"
+    );
+}
+
+#[test]
+fn a_float_without_an_on_key_steals_nothing() {
+    // F holds a float but registers no key callback, so it offers nothing on its turn and
+    // K wins exactly as it would with F not loaded at all.
+    let f = ("lua/plugin/f.lua", concat!(float_grant!(), "return {}"));
+    let k = (
+        "lua/plugin/k.lua",
+        "neotmux.on_key(function(key) if key == 'x' then neotmux.log.info('k won') return true end end) return {}",
+    );
+
+    let dir = layer(&[
+        ("init.lua", "require('plugin.f') require('plugin.k')"),
+        f,
+        k,
+    ]);
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
+    assert!(sub.run_init().is_empty());
+    assert_eq!(sub.dispatch_key("x"), KeyOutcome::Consumed);
+    let text = format!("{:?}", sub.drain_ops());
+    assert!(
+        text.contains("k won"),
+        "K should take the key over F's bare float: {text}"
+    );
+
+    // control: F not loaded at all — the same press, the same winner.
+    let dir = layer(&[("init.lua", "require('plugin.k')"), k]);
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
+    assert!(sub.run_init().is_empty());
+    assert_eq!(sub.dispatch_key("x"), KeyOutcome::Consumed);
+    let text = format!("{:?}", sub.drain_ops());
+    assert!(
+        text.contains("k won"),
+        "without F loaded at all, K takes the key: {text}"
+    );
+}
+
+#[test]
+fn a_float_owners_binding_still_waits_behind_every_on_key() {
+    let dir = layer(&[
+        ("init.lua", "require('plugin.f') require('plugin.k')"),
+        (
+            "lua/plugin/f.lua",
+            concat!(
+                float_grant!(),
+                "neotmux.keymap.set('x', function() neotmux.log.info('f binding ran') return true end) return {}"
+            ),
+        ),
+        (
+            "lua/plugin/k.lua",
+            "neotmux.on_key(function(key) if key == 'x' then neotmux.log.info('k won') return true end end) return {}",
+        ),
+    ]);
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
+    assert!(sub.run_init().is_empty());
+    assert_eq!(sub.dispatch_key("x"), KeyOutcome::Consumed);
+    let text = format!("{:?}", sub.drain_ops());
+    assert!(
+        text.contains("k won"),
+        "on_key callbacks always come before bindings, float or not: {text}"
+    );
+    assert!(
+        !text.contains("f binding ran"),
+        "F's binding ran although K's on_key consumed the key: {text}"
+    );
 }

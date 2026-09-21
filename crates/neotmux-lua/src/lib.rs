@@ -366,6 +366,9 @@ impl LuaSubsystem {
 
     /// Observers first, then the binding (§4.4): an `on_key` callback is the only way to see a
     /// key nobody has bound, which is what a prefix plugin needs to be modal.
+    ///
+    /// Among the observers, the owners holding a live float are offered the key before the
+    /// rest — topmost float first, registration order inside each owner (spec §5).
     pub fn dispatch_key(&self, spec: &str) -> KeyOutcome {
         let Ok(normalised) = keymap::normalise(spec) else {
             return KeyOutcome::Fallthrough;
@@ -377,28 +380,57 @@ impl LuaSubsystem {
         self.dispatch_binding(&normalised)
     }
 
-    /// Every `on_key` callback in registration order, stopping at the first that consumes.
+    /// Every `on_key` callback, stopping at the first that consumes: the float owners in
+    /// float order first, then everyone else in registration order. With no live floats the
+    /// order is exactly the plain registration order.
     fn offer_key(&self, normalised: &str) -> KeyOutcome {
-        for id in self.registry.snapshot(KindTag::Key) {
-            let Some(callback) = self.registry.callback(id) else {
-                continue;
-            };
-            let Some(owner) = self.registry.owner(id) else {
-                continue;
-            };
-            let Ok(func) = self.lua.registry_value::<Function>(&callback) else {
-                continue;
-            };
+        let float_owners: Vec<SourceId> = self.floats.owners_topmost_first();
 
-            match func.call::<Value>(normalised) {
-                Ok(Value::Boolean(true)) => return KeyOutcome::Consumed,
-                Ok(_) => continue,
-                Err(err) => {
-                    self.report(owner, &err);
+        for owner in &float_owners {
+            for id in self.registry.snapshot(KindTag::Key) {
+                if self.registry.owner(id) != Some(*owner) {
+                    continue;
+                }
+                if self.offer_one(id, normalised) {
+                    return KeyOutcome::Consumed;
                 }
             }
         }
+
+        for id in self.registry.snapshot(KindTag::Key) {
+            if let Some(owner) = self.registry.owner(id)
+                && float_owners.contains(&owner)
+            {
+                // already offered above, in float order
+                continue;
+            }
+            if self.offer_one(id, normalised) {
+                return KeyOutcome::Consumed;
+            }
+        }
         KeyOutcome::Fallthrough
+    }
+
+    /// One callback, its consume answer, its Lua errors.
+    fn offer_one(&self, id: RegistrationId, normalised: &str) -> bool {
+        let Some(callback) = self.registry.callback(id) else {
+            return false;
+        };
+        let Some(owner) = self.registry.owner(id) else {
+            return false;
+        };
+        let Ok(func) = self.lua.registry_value::<Function>(&callback) else {
+            return false;
+        };
+
+        match func.call::<Value>(normalised) {
+            Ok(Value::Boolean(true)) => true,
+            Ok(_) => false,
+            Err(err) => {
+                self.report(owner, &err);
+                false
+            }
+        }
     }
 
     fn dispatch_binding(&self, normalised: &str) -> KeyOutcome {
