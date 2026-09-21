@@ -65,6 +65,7 @@ Each of these returns a handle with one method, `handle:remove()`, which is idem
 | `neotmux.on_tick(fn)` | once per frame, with a `ctx` (below) |
 | `neotmux.on_event(name, fn)` | when that event fires, with a table of fields |
 | `neotmux.on_key(fn)` | for every key, before any binding; return `true` to consume it |
+| `neotmux.float({ x =, y =, w =, h = })` | nothing runs; the grant is two-valued — a handle, or `nil` plus a message (below) |
 | `neotmux.keymap.set(spec, fn)` | for that one key; return `true` to consume it |
 | `neotmux.reserve(edge, cells)` | nothing runs; it takes a band of the surface (below) |
 
@@ -105,8 +106,10 @@ neotmux.on_tick(function(ctx)
   ctx:tint(nil, x, y, w, h, { bg = 4 })        -- recolours, writes no glyph
   ctx:line(nil, x1, y1, x2, y2, { fg = 4 }, '|') -- no bg: it paints single cells
                                                -- the glyph is optional and defaults to '#'
+  ctx:text(win, x, y, 'text')               -- win = a float: its own coordinates, not the surface's
   local r = ctx:pane_rect(pane_id)             -- { x = , y = , w = , h = } or nil
   local band = ctx:reserved()                  -- your own band, or nil (below)
+  local float = ctx:float_rect(win)           -- your own float, or nil (below)
 end)
 ```
 
@@ -121,7 +124,11 @@ edges. Read it every tick rather than caching it.
 
 **Coordinates are the surface's.** A `nil` pane means the whole terminal, reserved bands
 included, and `ctx:pane_rect` answers in those same coordinates — a band at the top moves the
-panes down, so a pane's rect is never relative to anything but the terminal itself.
+panes down, so a pane's rect is never relative to anything but the terminal itself. A float is
+the one target with its own frame: `ctx:text(win, …)` and the rest of the draw verbs speak in
+float-local cells, `(0, 0)` at the float's own top-left, and a command that runs past the rect
+is clipped to the float and then to the surface — the float's own bounds, then the terminal,
+nothing in between.
 
 `pane_gutter` is the same bargain as a reserved band, in the other direction: the host takes
 the cells away from the panes and has no idea what goes in them. With a gutter of `g`, a
@@ -216,6 +223,65 @@ past that a band is not a margin on the panes but the layout. Asking for more th
 own bound, for zero, or for a name no edge has *raises* — those are typos. Losing the cells to
 a plugin that asked first returns `nil` plus a message instead, exactly as `keymap.set` does
 when it loses a key: you wrote a legal call and lost a race.
+
+### Floating a window
+
+```lua
+local win, message = neotmux.float({ x = 10, y = 5, w = 40, h = 12 })  -- surface coordinates
+win:move_to(20, 6)                                    -- the same float, elsewhere
+win:resize_to(50, 20)                                 -- the same float, a different size
+win:remove()                                          -- idempotent, like every other handle
+```
+
+**A float takes no cells.** The layout, `ctx:size()` and everything computed from them are
+untouched — a band is a claim on the surface, a float is a claim on nothing, which is the whole
+difference between the two. A float and a band may occupy the same cells: a float is an
+overlay, and what is drawn later is what is seen. The server never knows it exists — the panes,
+the shells, the layout and the focus are the server's, and a float is none of them.
+
+`move_to` and `resize_to` set the float where it is and how big it is, from the next frame —
+the same next-frame delay as the grant itself, and `resize` is not a verb here for the reason
+the band's section has: one verb for a delta and one verb for a size is a bug waiting to be
+typed. `win.__id` is the host's own seam — its drawing layer reads it through to resolve
+`ctx:text(win, …)` and `ctx:float_rect(win)` — and it is private, not part of the ABI, and
+nothing you are meant to name.
+
+`ctx:float_rect(win)` answers **your own** float as `{ x, y, w, h }` in surface coordinates, or
+`nil`, and a `nil` means *draw nothing into it this tick*: its draws are dropped and the frame
+keeps what it had, the same bargain `ctx:reserved()` makes for bands.
+
+**The host keeps one order, grant order, and it says the whole of the depth question.** A later
+float is drawn over an earlier one for as long as both exist, and the way back is the way every
+other reservation comes back: `remove` and a new grant, which makes it the newest. The drawn
+layers, bottom to top, are panes, bands, floats in grant order, notices.
+
+The grant takes effect on the **next** frame, like `reserve` and `pane.split`, so it may be made
+during `init.lua`: the grant is a pending rectangle until the first frame has a surface to sit
+on. A rectangle that stretches past the present surface is granted, not refused: the request is
+not mistaken, the surface was merely smaller, and the clipping already described is what keeps
+both honest.
+
+**The bargain is the same as `reserve`: the handle persists and the drawing does not.** Every
+tick, for as long as the float exists, you draw its whole content into it — immediate mode, and
+a float you stop drawing into keeps no content of its own, because it never had any.
+
+**On the keyboard it is one rule: the owners of live floats are offered every key before the
+rest of the plugin layer, the topmost float first.** A plugin that holds several floats sits
+once, at the position of its topmost one; the rest is the keyboard you already have, and a
+float declines a key the way every other callback does — returns nothing, and the key goes on.
+
+**A float dies with its owner, not with the frame.** An `unload` — or the unsubscription an
+over-budget plugin earns — takes the float with it, the same fate the owner's bands keep; a
+resize does not touch it, the rect stays where it was and only its clipping moves; and a detach
+is the owner going, so its floats go with the client, and a re-attach re-runs `init.lua` with
+them gone until the plugin that held one asks for it again. The panes, the shells, the session
+survive it all, because the float was never any of those.
+
+`neotmux.float` answers `nil` plus a message when the rect is not a rect — a missing key, a
+non-integer, a negative `x` or `y`, or a zero size — and records nothing, so a failed grant
+leaves the rest of the tick running; `move_to` and `resize_to` answer the same two ways and a
+bad answer changes nothing. `remove` does not answer at all, because it has nothing to lose: it
+is idempotent, the way every `remove` in this API is.
 
 ### Panes
 
@@ -679,6 +745,10 @@ function and call the library from inside it.
   is the union of what your callbacks drew, and half of it is not a frame.
 - **A key callback raises.** It is logged and treated as not consuming, so a broken handler
   cannot swallow your keyboard.
+- **A float grant or a handle call answers `nil` plus a message.** That is the answer, not a
+  break: `neotmux.float` recorded nothing, `move_to` and `resize_to` left the float where it is,
+  and the tick keeps running — there is no raised-error path for a rect that is not a rect. Only
+  `remove` is unanswerable, because it is already idempotent.
 - **`require` fails in `init.lua`.** That entry is skipped, anything it registered before
   failing is removed, and the rest of your config still loads. A `require` *inside* a plugin
   raises normally — your plugin's missing dependency is your plugin's error.

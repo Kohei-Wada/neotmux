@@ -24,16 +24,17 @@ Pre-release, and the plugin ABI is not stable yet.
 
 Working today: a shell running full-screen on a PTY, and a Lua layer that loads code from
 `$XDG_CONFIG_HOME/neotmux`, lets it register tick, event and keymap callbacks, reserve a band
-of the surface to draw in — rows at the top or bottom, columns at the left or right —
-draw into the frame, and log, with every registration and every API call attributed to the
-chunk it was written in, so a misbehaving one can be named.
+of the surface to draw in — rows at the top or bottom, columns at the left or right — and float
+a window over the panes, draw into the frame, and log, with every registration and every API
+call attributed to the chunk it was written in, so a misbehaving one can be named.
 
 ## Scope
 
 **v0.1** is the line at which you can write a plugin against the ABI. It is not the line at
 which neotmux is a daily driver. Getting there needs the per-frame instruction budget and the
-pane tree — splits, focus, resize, prefix key — plus `docs/plugins.md` and a default status
-line shipped as a plugin rather than built in.
+pane tree — splits, focus, resize, prefix key — plus the ability to float a window over
+the panes (`docs/plugins.md` has a section for it, next to the band's), and a default
+status line shipped as a plugin rather than built in.
 
 Detach and attach are in. `C-b d` (or `neotmux.detach()`) leaves the session running and
 exits the client; running `neotmux` again finds it and attaches instead of starting a new
