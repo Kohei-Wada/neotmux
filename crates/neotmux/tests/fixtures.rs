@@ -172,6 +172,14 @@ fn configured_reads_the_value_init_lua_mutated_on_the_config_holder() {
 }
 
 #[test]
+fn a_named_client_is_told_its_name_by_the_api() {
+    // Two sessions in the same isolation, so the assertion is about which one, not
+    // whether one is running.
+    let (nt, _init) = start("require('plugin.session_name')", "/bin/cat");
+    nt.wait_for_log("session_name default", PATIENCE);
+}
+
+#[test]
 fn remover_removes_twice_without_raising_and_its_callback_never_runs() {
     let (mut nt, _init) = start(
         "require('plugin.clock') require('plugin.remover')",
