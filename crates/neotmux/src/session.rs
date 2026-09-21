@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Instant;
 
@@ -89,11 +90,14 @@ impl Session {
         let (windows, first) = Windows::new(attach.first_window, surface);
         let terminals = Rc::new(PaneTerminals::new());
         let mut shells = Shells::new(waker, terminals.clone());
-        shells.open(
-            first,
-            PtyHandle::default_shell_command(),
-            pane_size(windows.rect(first), first)?,
-        )?;
+        // The session's own directory: the server is a grandchild of the directory neotmux
+        // was started from, and `start_dir` cannot be asked for it yet — there is no pane
+        // to point at. The pane that is about to be made is the session's first.
+        let mut cmd = PtyHandle::default_shell_command();
+        if let Ok(dir) = std::env::current_dir() {
+            cmd.cwd(dir);
+        }
+        shells.open(first, cmd, pane_size(windows.rect(first), first)?)?;
         let mut session = Self {
             surface,
             windows,
@@ -310,6 +314,10 @@ impl Session {
 
     fn apply_split(&mut self, tag: &str, dir: neotmux_proto::SplitDir) -> anyhow::Result<()> {
         let new = self.windows.take_pane_id();
+        // Read now, before `split`: `split` itself hands focus to `new` the moment the
+        // tree allows, and a pane with no shell to read would be answered for by the
+        // fallback, hiding the rule it is trying to say.
+        let start_dir = self.start_dir(self.windows.current().focus());
         if let Err(refused) = self.windows.current_mut().split(dir, new) {
             logging::log(
                 Level::Error,
@@ -320,8 +328,11 @@ impl Session {
         }
 
         let started = pane_size(self.windows.rect(new), new).and_then(|size| {
-            self.shells
-                .open(new, PtyHandle::default_shell_command(), size)
+            let mut cmd = PtyHandle::default_shell_command();
+            if let Some(dir) = start_dir.clone() {
+                cmd.cwd(dir);
+            }
+            self.shells.open(new, cmd, size)
         });
         if let Err(err) = started {
             // The tree already holds a pane with nothing running in it; undo it rather than
@@ -351,9 +362,13 @@ impl Session {
     /// order while `create()` alone leaves it running out of sight.
     fn apply_window_create(&mut self, tag: &str, window: WindowId) -> anyhow::Result<()> {
         let first = self.windows.create(window, self.surface);
+        let start_dir = self.start_dir(self.windows.current().focus());
         let started = pane_size(self.windows.rect(first), first).and_then(|size| {
-            self.shells
-                .open(first, PtyHandle::default_shell_command(), size)
+            let mut cmd = PtyHandle::default_shell_command();
+            if let Some(dir) = start_dir {
+                cmd.cwd(dir);
+            }
+            self.shells.open(first, cmd, size)
         });
         if let Err(err) = started {
             // A window whose only pane can never draw is worse than no window: undo it
@@ -455,6 +470,29 @@ impl Session {
             }
         });
         refreshed.then(|| self.pane_info.snapshot())
+    }
+
+    /// Where a new pane's shell begins, and why the answer must always be one. Portable-pty
+    /// does not inherit a working directory: an unset one becomes the user's home, so a
+    /// caller that leaves it unset is not saying "as you like", it is saying `$HOME`, and
+    /// that is the bug this exists to stop. The focused pane's own directory leads — the
+    /// foreground process, which is the shell while it is idle and the command it is
+    /// running otherwise — and the server's, which is where the client that started it
+    /// started it, is the answer when the pane does not exist (the first pane) or when its
+    /// directory no longer is one. That last case still arrives as `Some`: a pane that
+    /// left its directory behind answers `"<path> (deleted)"`, and it is the `is_dir` check
+    /// below — not `None` from `procinfo::cwd` — that filters it out. Remove it and a
+    /// deleted directory becomes a pane's starting point again, which is the whole reason
+    /// the rule is written down in two places now.
+    fn start_dir(&self, pane: Option<PaneId>) -> Option<PathBuf> {
+        if let Some(dir) = pane
+            .and_then(|pane| self.shells.foreground(pane))
+            .and_then(procinfo::cwd)
+            .filter(|dir| std::path::Path::new(dir).is_dir())
+        {
+            return Some(dir.into());
+        }
+        std::env::current_dir().ok()
     }
 
     /// Every pane's read stamp. Cheap to gather — it is a number per pane — and it travels

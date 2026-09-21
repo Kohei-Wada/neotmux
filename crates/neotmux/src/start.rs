@@ -113,6 +113,8 @@ fn open(stream: UnixStream) -> anyhow::Result<Rc<RefCell<Link>>> {
 /// say to a screen it does not own, and the log file is where it says it.
 fn spawn() -> anyhow::Result<()> {
     let exe = std::env::current_exe().context("find the neotmux binary")?;
+    // No `current_dir` on the server: its own directory is the startup directory, and
+    // every pane that is not told where to go from asks one of its children.
     let mut command = Command::new(exe);
     command.arg("--server");
     if let Some(log) = logged() {

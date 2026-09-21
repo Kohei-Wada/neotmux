@@ -20,6 +20,15 @@ fn start(init: &str, shell: &str) -> (Neotmux, tempfile::TempDir) {
     (nt, dir)
 }
 
+/// As `start`, but neotmux is launched from `cwd`: the tests that ask where a pane *begins*
+/// need a beginning they chose.
+fn start_in(init: &str, shell: &str, cwd: &Path) -> (Neotmux, tempfile::TempDir) {
+    let dir = harness::runtime(&[("init.lua", init)]);
+    let fixtures = harness::fixture_layer();
+    let nt = Neotmux::start_layered_in(&[dir.path(), &fixtures], shell, cwd);
+    (nt, dir)
+}
+
 /// The shipped layer behind a thin user layer, which is what an installed neotmux runs:
 /// every shipped default loads unless the user's own `init.lua` turns it off.
 fn start_shipped(init: &str, shell: &str) -> (Neotmux, tempfile::TempDir) {
@@ -1542,6 +1551,93 @@ fn a_panes_directory_follows_a_cd_in_it() {
     let log = nt.wait_for_log(&format!("cwd={}", target.display()), PATIENCE);
     assert!(
         line_with(&log, &format!("cwd={}", target.display())).contains("paneinfo 1"),
+        "{log}"
+    );
+}
+
+/// Where the first pane begins: the directory neotmux was started from, not the user's home
+/// — the one a person means when they drop a multiplexer into a checkout. The home
+/// directory is the isolation tempdir the harness hands the session, and it is *different*
+/// from `launch`, which is what makes the timeout below a failure rather than a flake.
+#[test]
+fn the_first_pane_begins_where_neotmux_was_started() {
+    let launch = tempfile::tempdir().expect("launch dir");
+    let home = std::fs::canonicalize(launch.path()).expect("canonical launch");
+    let (nt, _init) = start_in("require('plugin.paneinfo')", "bash", launch.path());
+
+    let log = nt.wait_for_log("paneinfo 1 command=bash", PATIENCE);
+    assert!(
+        line_with(&log, "paneinfo 1 command=bash").contains(&format!("cwd={}", home.display())),
+        "{log}"
+    );
+}
+
+/// Where a split begins: where the focused pane itself is, the way the
+/// `#{pane_current_path}` idiom means it — the pane's own directory, read from the process
+/// running in it, not the directory neotmux came from. The new pane is id 2 and the
+/// assertion is on *its* line: pane 1 already reports the target directory from the `cd`,
+/// so the pane number is what carries the claim.
+#[test]
+fn the_split_begins_in_the_focused_panes_directory() {
+    let launch = tempfile::tempdir().expect("launch dir");
+    let home = std::fs::canonicalize(launch.path()).expect("canonical launch");
+    let target = home.join("elsewhere");
+    std::fs::create_dir(&target).expect("subdir");
+
+    let (mut nt, _init) = start_in(
+        "require('plugin.paneinfo') require('plugin.splitter')",
+        "bash",
+        launch.path(),
+    );
+    nt.wait_for_log(
+        &format!("paneinfo 1 command=bash cwd={}", home.display()),
+        PATIENCE,
+    );
+
+    nt.send(&format!("cd {}\n", target.display()));
+    nt.wait_for_log(&format!("cwd={}", target.display()), PATIENCE);
+
+    nt.send("\x02"); // C-b: split
+    nt.wait_for_log("splitter pane_opened 2", PATIENCE);
+
+    let log = nt.wait_for_log("paneinfo 2 ", PATIENCE);
+    assert!(
+        line_with(&log, "paneinfo 2 ").contains(&format!("cwd={}", target.display())),
+        "{log}"
+    );
+}
+
+/// The split's fallback: the focused pane's directory is gone — deleted out from under it —
+/// so the only directory left to answer with is where neotmux was started. Not `$HOME`,
+/// which is what the un-pinned path silently chooses, and not an error, which would cost
+/// the split.
+#[test]
+fn the_split_whose_focused_pane_left_a_deleted_directory_begins_where_neotmux_was_started() {
+    let launch = tempfile::tempdir().expect("launch dir");
+    let home = std::fs::canonicalize(launch.path()).expect("canonical launch");
+    let vanished = home.join("vanished");
+    std::fs::create_dir(&vanished).expect("subdir");
+
+    let (mut nt, _init) = start_in(
+        "require('plugin.paneinfo') require('plugin.splitter')",
+        "bash",
+        launch.path(),
+    );
+    nt.wait_for_log(
+        &format!("paneinfo 1 command=bash cwd={}", home.display()),
+        PATIENCE,
+    );
+
+    nt.send(&format!("cd {}\n", vanished.display()));
+    nt.wait_for_log(&format!("cwd={}", vanished.display()), PATIENCE);
+    std::fs::remove_dir_all(&vanished).expect("delete out from under the pane");
+
+    nt.send("\x02"); // C-b: split
+    nt.wait_for_log("splitter pane_opened 2", PATIENCE);
+
+    let log = nt.wait_for_log("paneinfo 2 ", PATIENCE);
+    assert!(
+        line_with(&log, "paneinfo 2 ").contains(&format!("cwd={}", home.display())),
         "{log}"
     );
 }
