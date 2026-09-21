@@ -492,10 +492,18 @@ fn a_socket_a_dead_server_left_behind_is_replaced() {
     std::fs::create_dir_all(socket.parent().expect("a parent")).expect("create the directory");
     drop(UnixListener::bind(&socket).expect("bind a listener and drop it"));
     assert!(socket.exists());
-    assert!(
-        UnixStream::connect(&socket).is_err(),
-        "the stale socket still had something behind it"
-    );
+    // Waited for rather than asserted: a connection the listener never accepted is still
+    // queued on it as it closes, and the kernel answers out of that queue until it has torn
+    // it down — which under a loaded suite takes longer than the next line. The same wait
+    // `sock`'s own test makes, for the same reason.
+    let deadline = Instant::now() + PATIENCE;
+    while UnixStream::connect(&socket).is_ok() {
+        assert!(
+            Instant::now() < deadline,
+            "the stale socket still had something behind it"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
 
     let _client = started(runtime.path());
     assert!(
