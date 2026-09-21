@@ -115,3 +115,18 @@ fn pane_list_stays_the_shown_windows_panes() {
     publish(&sub);
     assert_eq!(ticked(&sub), vec!["list 1,3"]);
 }
+
+/// A client attaching to a running session is told what is there by geometry, and takes its
+/// window-id watermark from it — otherwise `window.create()` would name a window that exists.
+#[test]
+fn a_published_geometry_moves_the_window_id_counter_past_what_it_names() {
+    let (_dir, sub) = built("");
+    sub.republish_geometry(Geometry {
+        size: SIZE,
+        panes: vec![(pane(1), Rect::new(0, 0, 80, 24))],
+        focus: Some(pane(1)),
+        windows: vec![window(4, &[1])],
+        window: Some(WindowId::from(4)),
+    });
+    assert_eq!(sub.reserve_window_id(), WindowId::from(5));
+}

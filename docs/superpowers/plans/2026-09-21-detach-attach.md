@@ -753,6 +753,156 @@ git commit -m "kill: a way out that does not go through the protocol"
 
 ---
 
+### Task 7: `--help` and `--version`
+
+**Files:**
+- Modify: `crates/neotmux/src/main.rs` (`Cli`, `parse_args`, `main`, and its test module)
+
+**Interfaces:**
+- Consumes: Task 5's `--kill`, which is the flag that makes the CLI worth describing.
+- Produces: nothing other tasks depend on. Task 6 documents what this prints.
+
+Until now the command line was `--server` and `--log`, both of them things a user never types — one is how the binary starts its own other half, the other is for debugging. `--kill` is the first flag a person is meant to reach for, which is the moment a program owes them a way to ask what the flags are. Read `crates/neotmux/src/main.rs` as Task 5 left it rather than as this task imagines it.
+
+**The help text covers the command line and nothing else.** No keybindings: `C-b` and every key under it belong to `runtime/lua/plugin/prefix.lua` and can be rebound or removed in a line of config, so a help text that lists them is lying to anyone who did. `docs/plugins.md` and the README own that.
+
+- [ ] **Step 1: Write the failing tests**
+
+In `crates/neotmux/src/main.rs`'s test module, beside the existing `parse_args` tests:
+
+```rust
+    #[test]
+    fn the_help_and_version_flags_are_recognised_in_both_spellings() {
+        for spelling in ["--help", "-h"] {
+            let flag = parse_args(args(&[spelling]));
+            assert!(flag.help, "{spelling}");
+            assert!(flag.warnings.is_empty(), "{spelling}");
+        }
+        for spelling in ["--version", "-V"] {
+            let flag = parse_args(args(&[spelling]));
+            assert!(flag.version, "{spelling}");
+            assert!(flag.warnings.is_empty(), "{spelling}");
+        }
+    }
+
+    /// An unrecognised argument is still a warning rather than a refusal — but now there is
+    /// somewhere to send the person who typed it.
+    #[test]
+    fn an_unrecognised_argument_points_at_the_help() {
+        let flag = parse_args(args(&["--wat"]));
+        assert_eq!(flag.warnings.len(), 1);
+        assert!(flag.warnings[0].contains("--wat"), "{:?}", flag.warnings[0]);
+        assert!(
+            flag.warnings[0].contains("neotmux --help"),
+            "{:?}",
+            flag.warnings[0]
+        );
+    }
+
+    /// The version says both numbers: a client and a server from different commits refuse
+    /// each other by protocol number, and this is what the person reads next.
+    #[test]
+    fn the_version_line_carries_the_protocol_number_too() {
+        let said = version_line();
+        assert!(said.contains(env!("CARGO_PKG_VERSION")), "{said}");
+        assert!(
+            said.contains(&neotmux_proto::PROTOCOL_VERSION.to_string()),
+            "{said}"
+        );
+    }
+```
+
+- [ ] **Step 2: Run them and watch them fail**
+
+Run: `cargo test -p neotmux --bin neotmux`
+Expected: FAIL to compile — `Cli` has no `help` or `version` field and there is no `version_line`.
+
+- [ ] **Step 3: Implement**
+
+`Cli` gains `help: bool` and `version: bool`. `parse_args` gains the four spellings, and its unrecognised-argument arm gains the pointer:
+
+```rust
+            "--help" | "-h" => help = true,
+            "--version" | "-V" => version = true,
+            _ => warnings.push(format!(
+                "unrecognised argument '{arg}'; ignoring it — try 'neotmux --help'"
+            )),
+```
+
+and beside them:
+
+```rust
+/// Both numbers, because they fail in different ways: the first is what was installed, the
+/// second is what a client and a server have to agree on before they will talk at all.
+fn version_line() -> String {
+    format!(
+        "neotmux {} (protocol {})",
+        env!("CARGO_PKG_VERSION"),
+        neotmux_proto::PROTOCOL_VERSION
+    )
+}
+
+/// What the command line offers. The keys are not here: every one of them belongs to a
+/// plugin that can drop or rebind it, so `docs/plugins.md` is where they are written down.
+fn usage() -> String {
+    format!(
+        "\
+{}
+
+usage: neotmux [options]
+
+With no options, neotmux attaches to this session if it is running and starts it if it
+is not. C-b d leaves a session running; neotmux on its own brings you back to it.
+
+options:
+  --kill          end the running session and every shell in it
+  --log <path>    write the log somewhere other than the default
+  --help, -h      this text
+  --version, -V   the version, and the protocol number it speaks
+  --server        run the half that holds the session; started for you, not by you
+",
+        version_line()
+    )
+}
+```
+
+In `main`, before anything that touches the terminal or the socket — and before the `--kill` arm, so that `neotmux --help --kill` explains itself rather than killing a session:
+
+```rust
+    if cli.help {
+        print!("{}", usage());
+        return Ok(());
+    }
+    if cli.version {
+        println!("{}", version_line());
+        return Ok(());
+    }
+```
+
+- [ ] **Step 4: Run them and watch them pass**
+
+Run: `cargo test -p neotmux --bin neotmux`
+Expected: PASS, the pre-existing `parse_args` tests included.
+
+- [ ] **Step 5: See it with your own eyes**
+
+Run: `cargo run -p neotmux -- --help` and `cargo run -p neotmux -- --version`.
+Read what they print. A help text is read by people, so look at it as one — the alignment, the wrapping at 80 columns, and whether the first line answers "what is this". Fix what reads badly; that is the deliverable here, not the flags.
+
+- [ ] **Step 6: Run the whole suite**
+
+Run: `cargo test --workspace && cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings`
+Expected: all pass.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add crates/neotmux/src/main.rs
+git commit -m "cli: a way to ask what the flags are, and which protocol this one speaks"
+```
+
+---
+
 ### Task 6: Saying so — README, CHANGELOG, and the spec's roadmap
 
 **Files:**
@@ -799,4 +949,6 @@ Spec coverage, section by section:
 - §5 what a detach does not carry → documented in Task 4 step 12 and Task 6 step 2. There is no code for it: it is what happens when a process ends.
 - §6 `neotmux.detach()`, the protocol bump, the prefix key → Task 4. `--kill` and the pid in the lock → Task 5.
 - §7 error handling: a client dying mid-frame → Task 2's test plus the existing `the_server_outlives_a_client_that_disconnects`; a second client → the existing `a_second_client_is_refused_and_says_why`, kept passing in Task 2 step 5; a version mismatch → the existing `a_client_meeting_another_protocol_says_both_numbers_and_exits`; a stale pid → Task 5 step 3, where the lock decides.
+- `--help` / `--version` → Task 7, added after the plan was written: the CLI grew a
+  flag a person is meant to type, so it owes them a way to ask what the flags are.
 - §8 tests → one per task, named in the task that makes the behaviour true. The "status line after a re-attach" check in the spec's list is covered by Task 2's test, which asserts the session's content comes back rather than the bar's text; if that feels thin at review time, add it to Task 2 rather than carrying a task for it.

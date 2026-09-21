@@ -3,6 +3,8 @@ use std::time::{Duration, Instant};
 
 use portable_pty::{Child, CommandBuilder, PtySize, native_pty_system};
 
+mod session;
+
 struct ChildGuard(Box<dyn Child + Send + Sync>);
 
 impl Drop for ChildGuard {
@@ -44,6 +46,7 @@ fn a_flooding_child_does_not_starve_ctrl_c() {
         .expect("openpty");
 
     let isolation = tempfile::tempdir().expect("isolation dir");
+    let _end_session = session::EndsSession::new(isolation.path());
     let log = isolation.path().join("neotmux.log");
 
     let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_neotmux"));

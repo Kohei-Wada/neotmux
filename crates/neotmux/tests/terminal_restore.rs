@@ -6,6 +6,8 @@ use nix::sys::termios::{LocalFlags, Termios};
 use nix::unistd::Pid;
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 
+mod session;
+
 fn run_in_pty(env: &[(&str, &str)], input: &[u8]) -> (String, bool, Termios) {
     run_in_pty_sized(24, 80, env, input)
 }
@@ -26,6 +28,7 @@ fn run_in_pty_sized(
         .expect("openpty");
 
     let isolation = tempfile::tempdir().expect("isolation dir");
+    let _end_session = session::EndsSession::new(isolation.path());
     let log = isolation.path().join("neotmux.log");
 
     let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_neotmux"));
@@ -128,6 +131,7 @@ fn send_signal_and_capture(sig: Signal) -> (bool, Option<String>, Termios) {
         .expect("openpty");
 
     let isolation = tempfile::tempdir().expect("isolation dir");
+    let _end_session = session::EndsSession::new(isolation.path());
     let log = isolation.path().join("neotmux.log");
 
     let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_neotmux"));
@@ -354,6 +358,10 @@ struct AbandonedTerminal {
     master: Option<Box<dyn portable_pty::MasterPty + Send>>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
     pid: i32,
+    // Declared before `_isolation` so it drops first, while the directory it looks for a lock
+    // in still exists. Held for that lifetime only — nothing reads it back.
+    _end_session: session::EndsSession,
+    _isolation: tempfile::TempDir,
 }
 
 impl AbandonedTerminal {
@@ -385,6 +393,8 @@ impl AbandonedTerminal {
             master: Some(pair.master),
             child,
             pid,
+            _end_session: session::EndsSession::new(isolation.path()),
+            _isolation: isolation,
         }
     }
 

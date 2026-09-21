@@ -230,18 +230,48 @@ impl Session {
         self.apply_geometry()
     }
 
-    /// Every op the tick raised, applied in the order they were pushed (§4.6). Returns
-    /// whether one of them asked to quit.
+    /// A new client taking over a session that is already running. `Attach`'s fields are
+    /// values to apply here rather than arguments to build from: the terminal is this
+    /// client's, and so are the bands, the gutter and the subscriptions, because the Lua
+    /// layer that declared them is new.
+    ///
+    /// `first_window` is ignored — the windows already have ids.
+    pub fn adopt(&mut self, attach: &Attach) -> anyhow::Result<()> {
+        self.surface.size = clamp_to_min_grid(attach.size);
+        self.surface.reserved = attach.reserved;
+        self.surface.gutter = attach.gutter;
+        self.wants_pane_output = attach.wants_pane_output;
+        // What happened while nobody was looking is not news for a client that was not
+        // there: geometry is how a plugin learns what exists, events how it learns what
+        // changed, and everything here is the former.
+        self.steps.clear();
+        self.apply_geometry()?;
+        // `apply_geometry` raises `Resized`, but a client that was never told a previous size
+        // has nothing to be resized from (§4: "No events are replayed").
+        self.steps.retain(|step| !matches!(step, Step::Event(_)));
+        self.publish_geometry();
+        // Nothing this client has been shown is on its screen, so the first frame is not
+        // allowed to be "nothing changed".
+        self.last_overlay.clear();
+        self.last_notices.clear();
+        self.dirty = true;
+        Ok(())
+    }
+
+    /// Every op the tick raised, applied in the order they were pushed (§4.6). Returns which
+    /// end, if any, one of them asked for — the first one asked, since once the conversation
+    /// is over there is nothing left for a later op to change.
     ///
     /// `log` and `notify` are not here: they never leave the client, which is where the
     /// source that raised them is. A refusal does come back here, and is logged against
     /// whoever asked — the op is applied after the tick, so there is nobody left to answer.
-    fn apply_ops(&mut self, ops: &[(String, SessionOp)]) -> anyhow::Result<bool> {
-        let mut quit = false;
+    fn apply_ops(&mut self, ops: &[(String, SessionOp)]) -> anyhow::Result<Option<End>> {
+        let mut ended = None;
         let mut spawned = 0usize;
         for (tag, op) in ops {
             match op {
-                SessionOp::Quit => quit = true,
+                SessionOp::Quit => ended = ended.or(Some(End::Quit)),
+                SessionOp::Detach => ended = ended.or(Some(End::Detach)),
                 SessionOp::PaneSplit { dir } if spawned >= MAX_NEW_SHELLS_PER_FRAME => {
                     logging::log(
                         Level::Error,
@@ -275,7 +305,7 @@ impl Session {
                 SessionOp::WindowFocus { window } => self.apply_window_focus(tag, *window)?,
             }
         }
-        Ok(quit)
+        Ok(ended)
     }
 
     fn apply_split(&mut self, tag: &str, dir: neotmux_proto::SplitDir) -> anyhow::Result<()> {
@@ -563,11 +593,11 @@ impl Session {
     /// The frame is `None` when nothing changed and the last one still stands.
     pub fn advance(&mut self, tock: &Tock) -> anyhow::Result<Pass<'_>> {
         self.wants_pane_output = tock.wants_pane_output;
-        if self.apply_ops(&tock.ops)? {
+        if let Some(end) = self.apply_ops(&tock.ops)? {
             return Ok(Pass {
                 steps: std::mem::take(&mut self.steps),
                 frame: None,
-                end: Some(End::Quit),
+                end: Some(end),
             });
         }
 

@@ -6,18 +6,19 @@
 //! and the pane reads a plugin makes are answered in the one window where the server is
 //! already waiting for that client to speak.
 //!
-//! Its life is the session's, plus a little: when the client goes away the session is kept
-//! for [`LINGER`] so that a disconnect is not a crash and so the children are hung up on by
-//! the process that made them, rather than orphaned by one that was killed. Nothing attaches
-//! twice yet — that is detach/attach, the next milestone — so a second client is refused
-//! with a reason rather than left hanging in the backlog.
+//! Its life is the session's: when the client goes away the session is kept until its last
+//! shell exits, still reading its children, so a disconnect is not a crash. A client that
+//! arrives afterwards is shown that same session rather than given a new one; a client
+//! arriving while one is already attached is refused with a reason rather than left
+//! hanging in the backlog. Naming which client gets to look at a session at a time is as
+//! far as this file goes — that a session sits waiting at all is the rest of it.
 
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
 use neotmux_proto::Level;
-use neotmux_proto::msg::{Done, ToClient, ToServer};
+use neotmux_proto::msg::{Done, End, ToClient, ToServer};
 use neotmux_proto::wire;
 use std::os::fd::AsFd as _;
 
@@ -34,12 +35,6 @@ use crate::signals::ShutdownSignal;
 /// one-process loop used, for the same reason: it is a property of the loop rather than of
 /// whatever the wait happens to do.
 const FRAME: Duration = Duration::from_millis(16);
-
-/// How long a session outlives the client that was looking at it. Long enough that a client
-/// dying is not the same event as a session dying, short enough that a killed client does
-/// not leave a shell of somebody's running for ever. Detach and attach will make this a
-/// decision rather than a timeout.
-const LINGER: Duration = Duration::from_secs(3);
 
 /// How long a server with no session waits for the client that started it. It is the
 /// client's own patience: past that, nobody is coming and there is nothing to serve.
@@ -61,10 +56,6 @@ pub fn serve(listener: &UnixListener, shutdown: &ShutdownSignal) -> anyhow::Resu
         let Some(stream) = accept(listener, session.as_mut(), &wakeup, shutdown, born)? else {
             return Ok(());
         };
-        if session.is_some() {
-            turn_away(stream, BUSY);
-            continue;
-        }
         let mut link = match Link::open(stream) {
             Ok(link) => link,
             // A client built against another protocol, or one that hung up mid-handshake.
@@ -78,7 +69,7 @@ pub fn serve(listener: &UnixListener, shutdown: &ShutdownSignal) -> anyhow::Resu
                 continue;
             }
         };
-        let mut running = match attached(&mut link, &waker)? {
+        let mut running = match attached(&mut link, &waker, &mut session)? {
             Some(started) => started,
             None => continue,
         };
@@ -86,15 +77,15 @@ pub fn serve(listener: &UnixListener, shutdown: &ShutdownSignal) -> anyhow::Resu
         if over {
             return Ok(());
         }
-        // The client went, the session did not. It stays for LINGER, still reading its
-        // children, and the loop goes back to waiting for somebody to look at it.
+        // The client went, the session did not. It keeps reading its children for as long as
+        // it lives, and the loop goes back to waiting for somebody to look at it.
         running.forget_pane_output();
         session = Some(running);
     }
 }
 
 /// Waits for a client, running the session in the meantime so its children are not left
-/// talking into a pipe nobody empties. `None` means there will not be one: the linger ran
+/// talking into a pipe nobody empties. `None` means there will not be one: startup timed
 /// out, the session ended, or a signal arrived.
 fn accept(
     listener: &UnixListener,
@@ -103,18 +94,21 @@ fn accept(
     shutdown: &ShutdownSignal,
     born: Instant,
 ) -> anyhow::Result<Option<UnixStream>> {
+    // A session with a client to wait for waits for ever: that is what detach means. A
+    // server that never had one is not a session worth keeping, so `STARTUP` still applies.
     let give_up = match session {
-        Some(_) => Instant::now() + LINGER,
-        None => born + STARTUP,
+        Some(_) => None,
+        None => Some(born + STARTUP),
     };
     loop {
-        if shutdown.raised().is_some() || Instant::now() >= give_up {
+        if shutdown.raised().is_some() || give_up.is_some_and(|at| Instant::now() >= at) {
             return Ok(None);
         }
+        let frame_end = Instant::now() + FRAME;
         let ready = crate::tty::wait_on(
             std::os::fd::AsFd::as_fd(listener),
             session.is_some().then(|| wakeup.as_fd()),
-            give_up.min(Instant::now() + FRAME),
+            give_up.map_or(frame_end, |at| at.min(frame_end)),
         )
         .context("wait for a client")?;
         if let Some(session) = session.as_deref_mut() {
@@ -160,17 +154,60 @@ fn turn_away(mut stream: UnixStream, why: &str) {
     let _ = stream.flush();
 }
 
-/// Reads the client's opening message and starts the session it describes. `None` is a
-/// client that went away between connecting and saying what it wanted.
-fn attached(link: &mut Link, waker: &Waker) -> anyhow::Result<Option<Session>> {
-    let Some(message) = link.recv().context("read the client's first message")? else {
-        return Ok(None);
+/// The client's first message, applied. With a session in hand this adopts it; without one
+/// it builds it. `None` means no session came of this connection — the client went away,
+/// or said something that was not a usable `Attach` — and `session` is left exactly as it
+/// was found.
+///
+/// Nothing a client does to its own connection may end somebody's session: `session` is
+/// only taken once an `Attach` has actually been read and decoded, and every failure that
+/// is the connection's own — a hangup, an unreadable message, a message that is not an
+/// `Attach` — returns `Ok(None)` rather than propagating an error. An error from here
+/// still ends `serve`, so only failures that are genuinely the server's own — `adopt` or
+/// `Session::new` failing to lay out or spawn a shell — are left as `?`.
+fn attached(
+    link: &mut Link,
+    waker: &Waker,
+    session: &mut Option<Session>,
+) -> anyhow::Result<Option<Session>> {
+    let message = match link.recv() {
+        Ok(Some(message)) => message,
+        Ok(None) => return Ok(None),
+        Err(err) => {
+            logging::log(
+                Level::Warn,
+                "neotmux-server",
+                &format!("a client's first message could not be read: {err}"),
+            );
+            return Ok(None);
+        }
     };
-    let attach = match wire::decode_to_server(&message).context("decode the attach")? {
-        ToServer::Attach(attach) => attach,
-        other => anyhow::bail!("a client's first message was {other:?} rather than an attach"),
+    let attach = match wire::decode_to_server(&message) {
+        Ok(ToServer::Attach(attach)) => attach,
+        Ok(other) => {
+            logging::log(
+                Level::Warn,
+                "neotmux-server",
+                &format!("a client's first message was {other:?} rather than an attach"),
+            );
+            return Ok(None);
+        }
+        Err(err) => {
+            logging::log(
+                Level::Warn,
+                "neotmux-server",
+                &format!("a client's first message could not be decoded: {err}"),
+            );
+            return Ok(None);
+        }
     };
-    Ok(Some(Session::new(&attach, waker.clone())?))
+    Ok(Some(match session.take() {
+        Some(mut session) => {
+            session.adopt(&attach)?;
+            session
+        }
+        None => Session::new(&attach, waker.clone())?,
+    }))
 }
 
 /// One client's whole conversation. `true` means the session is over and so is this process.
@@ -211,10 +248,13 @@ fn converse(
         drop(done);
         drop(pass);
         let delivered = link.send(&encoded).is_ok();
-        // Quit and Eof are both the session ending, and the session is all this process is
-        // for.
-        if end.is_some() {
-            return Ok(true);
+        // Quit and Eof are the session ending, and the session is all this process is for.
+        // A detach is the client ending: the session stays, and the loop goes back to
+        // waiting for somebody to look at it.
+        match end {
+            Some(End::Quit) | Some(End::Eof) => return Ok(true),
+            Some(End::Detach) => return Ok(false),
+            None => {}
         }
         if !delivered {
             return Ok(false);
@@ -253,10 +293,24 @@ fn converse(
 }
 
 /// Everything the client has already sent, applied. `false` means it sent something only the
-/// tick loop should see, or went away.
+/// tick loop should see, went away, or sent something that would not decode at all — that
+/// last one is a client's own doing and, like a hangup, costs its connection and nothing
+/// else (`attached`'s rule, extended past the handshake: nothing a client does to its own
+/// connection may end somebody's session).
 fn apply_pending(link: &mut Link, session: &mut Session) -> anyhow::Result<bool> {
     while let Some(message) = link.take()? {
-        match wire::decode_to_server(&message).context("decode a client message")? {
+        let decoded = match wire::decode_to_server(&message) {
+            Ok(decoded) => decoded,
+            Err(err) => {
+                logging::log(
+                    Level::Warn,
+                    "neotmux-server",
+                    &format!("an attached client sent something that would not decode: {err}"),
+                );
+                return Ok(false);
+            }
+        };
+        match decoded {
             ToServer::Key(key) => session.key(key)?,
             ToServer::Resize(size) => session.resize(size)?,
             ToServer::Read(read) => {
@@ -291,7 +345,18 @@ fn await_tock(
         let Some(message) = link.recv()? else {
             return Ok(None);
         };
-        match wire::decode_to_server(&message).context("decode a client message")? {
+        let decoded = match wire::decode_to_server(&message) {
+            Ok(decoded) => decoded,
+            Err(err) => {
+                logging::log(
+                    Level::Warn,
+                    "neotmux-server",
+                    &format!("an attached client sent something that would not decode: {err}"),
+                );
+                return Ok(None);
+            }
+        };
+        match decoded {
             ToServer::Tock(tock) => return Ok(Some(tock)),
             ToServer::Key(key) => session.key(key)?,
             ToServer::Resize(size) => session.resize(size)?,

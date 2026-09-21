@@ -8,6 +8,8 @@ use std::time::{Duration, Instant};
 
 use portable_pty::{Child, CommandBuilder, PtySize, native_pty_system};
 
+mod session;
+
 /// Four kibibytes: four times the bufferful one readable edge used to hand over.
 const PASTE: usize = 4096;
 
@@ -61,6 +63,7 @@ fn a_four_kibibyte_paste_arrives_whole_without_a_second_keystroke() {
         .expect("openpty");
 
     let isolation = tempfile::tempdir().expect("isolation dir");
+    let _end_session = session::EndsSession::new(isolation.path());
     // An empty runtime layer: no status bar and no keymap, so every pasted byte falls
     // through to the pane rather than into a binding.
     let runtime = tempfile::tempdir().expect("runtime dir");

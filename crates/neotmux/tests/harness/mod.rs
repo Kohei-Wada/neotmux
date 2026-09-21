@@ -6,6 +6,8 @@ use std::time::{Duration, Instant};
 
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 
+use crate::session;
+
 /// The env/args every neotmux test invocation needs: an isolated HOME,
 /// XDG_CONFIG_HOME and XDG_RUNTIME_DIR (so the binary never touches the
 /// developer's own config, and never shares a session with the test running
@@ -72,6 +74,10 @@ pub struct Neotmux {
     master: Box<dyn MasterPty + Send>,
     parser: Arc<Mutex<vt100::Parser>>,
     byte_rx: mpsc::Receiver<usize>,
+    // Declared before `_isolation` so it drops first: fields drop in declaration order, and
+    // ending the session needs the isolation dir to still be there. Held for that lifetime
+    // only — nothing reads it back.
+    _end_session: session::EndsSession,
     _isolation: tempfile::TempDir,
 }
 
@@ -164,6 +170,7 @@ impl Neotmux {
             master: pair.master,
             parser,
             byte_rx,
+            _end_session: session::EndsSession::new(isolation.path()),
             _isolation: isolation,
         };
         nt.wait_until_raw();

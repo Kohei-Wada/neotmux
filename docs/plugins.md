@@ -565,6 +565,7 @@ and keeps it across every switch.
 neotmux.log.info(text)    -- also .warn, .error
 neotmux.notify(level, text)  -- 'info' | 'warn' | 'error'; shown on screen and logged
 neotmux.quit()
+neotmux.detach()          -- leave the session running and let go of this terminal
 neotmux.opt.tick_budget_ms = 8     -- per source per frame; 0 turns the budget off
 neotmux.opt.tick_overrun_limit = 5 -- consecutive overruns before the tick is dropped; >= 1
 neotmux.opt.pane_gutter = 0        -- cells left between panes, for whoever draws there; <= 4
@@ -573,6 +574,11 @@ neotmux.width(text)                -- how many columns `text` takes on a pane's 
 neotmux.clipboard.set(text)        -- written? — true, or false and why not
 neotmux.home                       -- `$HOME` as the host read it, or nil; read-only
 ```
+
+A detach ends the client's conversation, not the session: the panes, the shells and each
+pane's scrollback are the server's, and stay. Every plugin's own state is the client's, and
+does not — the copy register, a raised mode, a fold, and the reservations, which the plugin
+re-makes at load. Re-attaching is a plugin restart, in those words.
 
 `neotmux.width` is the one measurement everything that takes a column agrees on. `#text` is
 bytes and `utf8.len(text)` is characters, and neither is a column: a wide character is one

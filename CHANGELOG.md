@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+### A session outlives the client, on purpose and by accident
+
+The three-second linger that used to end a session shortly after its client left is gone. A
+session now ends only when its last shell exits, a plugin calls `neotmux.quit()`, or the
+server is signalled — whether the client left on purpose or its terminal just went away.
+
+`C-b d` (or `neotmux.detach()` from a plugin) is the purposeful case: the client leaves and
+exits 0, and the server keeps the session and goes back to waiting. Running `neotmux` again
+finds that session and is shown it — `Session::adopt` refits it to the new terminal, the new
+client's plugins declare their own bands and gutter again, and the geometry it publishes is
+how those plugins learn what is already there. A window id counter now takes its watermark
+from that published geometry too, so a re-attached client cannot mint an id that already
+exists.
+
+`neotmux --kill` ends a session from outside the protocol, for the one case that needs it: a
+rebuilt client meeting a server that refuses its handshake, with no message either side will
+accept. It goes by the pid the server writes into the lock file it holds while running, and it
+refuses to signal unless that lock is actually held and `/proc/<pid>/comm` says the pid really
+is a neotmux — a stale or recycled pid is not enough. With nothing running it says so and
+exits non-zero. `neotmux --help` and `neotmux --version` are new alongside it; `--version`
+prints the protocol number beside the package version, since that is the number a person needs
+after reading a refusal.
+
+Two things worth knowing. `PROTOCOL_VERSION` is now 3, so a client and a server built from
+different commits refuse each other by name and number, the same as before. And a re-attach is
+a plugin restart, not a resume: the panes, the shells, the layout and each pane's scrollback
+are the server's and come back as they were, but a plugin's own state — a copy register, a
+raised mode, a folded sidebar, and every reservation — is the client's, dies with it, and is
+re-made from scratch when the plugin loads again.
+
 ### Two processes, one socket
 
 Neotmux is now a server that holds the session and a client that holds the terminal, talking
@@ -23,12 +53,12 @@ that and sends back the picture. Keys that no plugin bound, resizes, and the pan
 client's terminal in the process that runs the plugin — the same terminal ratatui draws on,
 which is what the call always claimed.
 
-Nothing about using neotmux changed. Two things are worth knowing. A session outlives the
-client that was looking at it by a few seconds rather than dying with it, which is the shape
-detach and attach need; while it has a client, a second one is turned away with a reason
-rather than left waiting. And `PROTOCOL_VERSION` is 2: a client and a server built from
+Two things about this split are still worth knowing: while a session has a client, a second one
+is turned away with a reason rather than left waiting; and a client and a server built from
 different commits refuse each other by name and number rather than trying to survive it, so
-replacing the binary under a running session means restarting it.
+replacing the binary under a running session means restarting it. "Nothing about using neotmux
+changed" no longer holds either: `C-b d`, `neotmux --kill`, `--help` and `--version` are also
+new.
 
 ### Pasting more than 1024 bytes
 

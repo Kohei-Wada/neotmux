@@ -5,6 +5,8 @@ use std::time::{Duration, Instant};
 
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 
+mod session;
+
 const IDLE_BYTE_BOUND: usize = 64;
 
 #[test]
@@ -19,6 +21,7 @@ fn produces_no_output_while_idle() {
         .expect("openpty");
 
     let isolation = tempfile::tempdir().expect("isolation dir");
+    let _end_session = session::EndsSession::new(isolation.path());
     let log = isolation.path().join("neotmux.log");
 
     let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_neotmux"));
@@ -172,6 +175,7 @@ fn idle_cpu(plugins: &[(&str, &str)], window: Duration) -> f64 {
         .expect("openpty");
 
     let isolation = tempfile::tempdir().expect("isolation dir");
+    let _end_session = session::EndsSession::new(isolation.path());
     let runtime = tempfile::tempdir().expect("runtime dir");
     for (path, body) in plugins {
         let full = runtime.path().join(path);

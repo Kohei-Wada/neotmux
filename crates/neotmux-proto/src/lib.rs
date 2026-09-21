@@ -39,4 +39,6 @@ pub use wire::WireError;
 /// - 2: the frame stopped being the only thing on the wire. A tick, its reply, the ops, the
 ///   events, the geometry and the pane reads all cross now, because the Lua layer runs in
 ///   the client (§11, M3). A renderer needed every one of them.
-pub const PROTOCOL_VERSION: u32 = 2;
+/// - 3: `SessionOp::Detach` and `End::Detach`, so a client can leave without ending the
+///   session. A renderer needed both.
+pub const PROTOCOL_VERSION: u32 = 3;

@@ -215,6 +215,11 @@ impl LuaSubsystem {
     /// buffers' own and is not touched here: the tick has already committed under it, and
     /// moving it mid-frame would throw that commit away.
     pub fn republish_geometry(&self, geometry: Geometry) {
+        // Ids the host is naming that this counter did not hand out: a client attaching to a
+        // session that was already running learns the watermark here and nowhere else.
+        for window in &geometry.windows {
+            self.window_ids.seen(window.id);
+        }
         *self.geometry.borrow_mut() = geometry;
     }
 

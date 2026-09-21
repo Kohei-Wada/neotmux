@@ -7,6 +7,7 @@ use crate::source::SourceId;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Op {
     Quit,
+    Detach,
     Notify { level: Level, text: String },
     Log { level: Level, text: String },
     PaneSplit { dir: SplitDir },

@@ -653,6 +653,7 @@ const OP_PANE_FOCUS: u8 = 2;
 const OP_PANE_RESIZE: u8 = 3;
 const OP_WINDOW_CREATE: u8 = 4;
 const OP_WINDOW_FOCUS: u8 = 5;
+const OP_DETACH: u8 = 6;
 
 const SPLIT_HORIZONTAL: u8 = 0;
 const SPLIT_VERTICAL: u8 = 1;
@@ -678,6 +679,7 @@ const READING_FROZEN: u8 = 4;
 
 const END_QUIT: u8 = 0;
 const END_EOF: u8 = 1;
+const END_DETACH: u8 = 2;
 
 pub fn encode_to_server(msg: &ToServer) -> Vec<u8> {
     let mut w = Writer::new();
@@ -942,6 +944,7 @@ impl Writer {
     fn op(&mut self, v: &SessionOp) {
         match v {
             SessionOp::Quit => self.u8(OP_QUIT),
+            SessionOp::Detach => self.u8(OP_DETACH),
             SessionOp::PaneSplit { dir } => {
                 self.u8(OP_PANE_SPLIT);
                 self.split_dir(*dir);
@@ -1117,6 +1120,7 @@ impl Writer {
                 self.u8(match end {
                     End::Quit => END_QUIT,
                     End::Eof => END_EOF,
+                    End::Detach => END_DETACH,
                 });
             }
         }
@@ -1321,6 +1325,7 @@ impl Reader<'_> {
     fn op(&mut self) -> Result<SessionOp, WireError> {
         Ok(match self.u8()? {
             OP_QUIT => SessionOp::Quit,
+            OP_DETACH => SessionOp::Detach,
             OP_PANE_SPLIT => SessionOp::PaneSplit {
                 dir: self.split_dir()?,
             },
@@ -1447,6 +1452,7 @@ impl Reader<'_> {
             Some(match self.u8()? {
                 END_QUIT => End::Quit,
                 END_EOF => End::Eof,
+                END_DETACH => End::Detach,
                 _ => return Err(WireError::Malformed("end discriminant")),
             })
         } else {
@@ -2068,6 +2074,7 @@ mod tests {
         let tock = Tock {
             ops: vec![
                 ("plugin/prefix".to_string(), SessionOp::Quit),
+                ("plugin/prefix".to_string(), SessionOp::Detach),
                 (
                     "plugin/prefix".to_string(),
                     SessionOp::PaneSplit {
@@ -2149,7 +2156,7 @@ mod tests {
             }))
         );
 
-        for end in [None, Some(End::Quit), Some(End::Eof)] {
+        for end in [None, Some(End::Quit), Some(End::Eof), Some(End::Detach)] {
             let done = crate::msg::Done {
                 steps: Vec::new(),
                 frame: None,

@@ -4,6 +4,8 @@ use std::time::{Duration, Instant};
 
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 
+mod session;
+
 // ratatui::init() requires a real tty, so this drives the binary through a PTY
 // rather than with inherited stdio (see terminal_restore.rs's harness).
 fn run_neotmux(runtime_dir: &Path, log: &Path) {
@@ -17,6 +19,7 @@ fn run_neotmux(runtime_dir: &Path, log: &Path) {
         .expect("openpty");
 
     let home = tempfile::tempdir().expect("isolated home");
+    let _end_session = session::EndsSession::new(home.path());
 
     let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_neotmux"));
     cmd.arg("--log");
@@ -153,6 +156,7 @@ fn an_init_time_quit_exits_before_entering_the_alternate_screen() {
 
     let log = dir.path().join("neotmux.log");
     let home = tempfile::tempdir().expect("isolated home");
+    let _end_session = session::EndsSession::new(home.path());
 
     let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_neotmux"));
     cmd.arg("--log");
