@@ -10,9 +10,10 @@ use std::path::Path;
 /// this way.
 pub(crate) fn end_session(runtime_dir: &Path) {
     let runtime_dir = runtime_dir.to_owned();
-    let Ok(paths) = neotmux::sock::Paths::resolve(&move |key| {
-        (key == "XDG_RUNTIME_DIR").then(|| runtime_dir.clone().into_os_string())
-    }) else {
+    let Ok(paths) = neotmux::sock::Paths::resolve(
+        &move |key| (key == "XDG_RUNTIME_DIR").then(|| runtime_dir.clone().into_os_string()),
+        neotmux::sock::DEFAULT_SESSION,
+    ) else {
         return;
     };
     if let Ok(neotmux::sock::Holder::Pid(pid)) = neotmux::sock::holder(&paths) {

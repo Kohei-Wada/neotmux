@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use anyhow::Context as _;
 
 use neotmux::link::Link;
-use neotmux::sock::{self, Lock, Paths};
+use neotmux::sock::{self, DEFAULT_SESSION, Lock, Paths};
 
 use crate::server;
 use crate::signals::ShutdownSignal;
@@ -31,7 +31,7 @@ const START_TIMEOUT: Duration = Duration::from_secs(10);
 /// clients starting at the same instant will both have tried, and the loser has nothing to
 /// report — its client is about to connect to the winner.
 pub fn serve() -> anyhow::Result<()> {
-    let paths = Paths::resolve(&|key| std::env::var_os(key))?;
+    let paths = Paths::resolve(&|key| std::env::var_os(key), DEFAULT_SESSION)?;
     let Some(_lock) = Lock::take(&paths)? else {
         return Ok(());
     };
@@ -69,7 +69,7 @@ pub struct Starting {
 
 /// Finds this session's server, or starts one, and returns without waiting for it.
 pub fn begin() -> anyhow::Result<Starting> {
-    let paths = Paths::resolve(&|key| std::env::var_os(key))?;
+    let paths = Paths::resolve(&|key| std::env::var_os(key), DEFAULT_SESSION)?;
     let connected = sock::connect(&paths.socket)?;
     if connected.is_none() {
         spawn()?;

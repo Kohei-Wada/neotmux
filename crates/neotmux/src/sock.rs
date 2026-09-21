@@ -21,8 +21,33 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Context as _;
 
-/// The only session name there is until more than one session is a thing.
-const DEFAULT_SESSION: &str = "default";
+/// The only default there is. A client that was not told a name is holding this one.
+pub const DEFAULT_SESSION: &str = "default";
+
+/// What a session name may be. It becomes a filename, so the law is the filesystem's
+/// and the argv's at once: one to sixty-four of `[A-Za-z0-9_-]`, and the first is not
+/// `-`, because an argument that looks like a flag is not a name the parser can tell it
+/// apart from one.
+pub fn validate_session_name(name: &str) -> Result<(), String> {
+    let bytes = name.as_bytes();
+    if bytes.is_empty() || bytes.len() > 64 {
+        return Err(format!(
+            "session name '{name}' is not one to sixty-four characters long"
+        ));
+    }
+    if bytes[0] == b'-' {
+        return Err(format!("session name '{name}' may not start with '-'"));
+    }
+    if !bytes
+        .iter()
+        .all(|b| b.is_ascii_alphanumeric() || *b == b'-' || *b == b'_')
+    {
+        return Err(format!(
+            "session name '{name}' may only use letters, digits, '-' and '_'"
+        ));
+    }
+    Ok(())
+}
 
 const DIR_MODE: u32 = 0o700;
 const SOCKET_MODE: u32 = 0o600;
@@ -34,14 +59,23 @@ pub struct Paths {
 }
 
 impl Paths {
-    pub fn resolve(env: &dyn Fn(&str) -> Option<std::ffi::OsString>) -> anyhow::Result<Self> {
+    pub fn resolve(
+        env: &dyn Fn(&str) -> Option<std::ffi::OsString>,
+        name: &str,
+    ) -> anyhow::Result<Self> {
         let dir = runtime_dir(env);
         make_dir(&dir).with_context(|| format!("prepare {}", dir.display()))?;
         Ok(Self {
-            socket: dir.join(format!("{DEFAULT_SESSION}.sock")),
-            lock: dir.join(format!("{DEFAULT_SESSION}.lock")),
+            socket: dir.join(format!("{name}.sock")),
+            lock: dir.join(format!("{name}.lock")),
         })
     }
+}
+
+/// Where a session's files live, whatever the name is. `ls` needs the directory rather
+/// than one name.
+pub fn socket_dir(env: &dyn Fn(&str) -> Option<std::ffi::OsString>) -> PathBuf {
+    runtime_dir(env)
 }
 
 fn runtime_dir(env: &dyn Fn(&str) -> Option<std::ffi::OsString>) -> PathBuf {
@@ -225,6 +259,31 @@ mod tests {
     fn env(value: Option<&str>) -> impl Fn(&str) -> Option<std::ffi::OsString> + use<> {
         let value = value.map(std::ffi::OsString::from);
         move |key| (key == "XDG_RUNTIME_DIR").then(|| value.clone()).flatten()
+    }
+
+    #[test]
+    fn a_name_is_a_lawful_filename_and_nothing_more() {
+        for name in ["work", "default", "a", "a-b_c9", &"x".repeat(64)] {
+            assert!(validate_session_name(name).is_ok(), "{name}");
+        }
+        for name in ["", &"x".repeat(65), "a:b", "a/b", "a b", "-lead", "a..b"] {
+            assert!(
+                validate_session_name(name).is_err(),
+                "{name} should be refused"
+            );
+        }
+    }
+
+    #[test]
+    fn resolve_builds_paths_for_the_name_asked_for() {
+        // `resolve` prepares the directory as its first act, so the test needs a path it
+        // can actually create rather than one it cannot.
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path().to_path_buf();
+        let paths =
+            Paths::resolve(&env(Some(dir.to_str().expect("utf8"))), "work").expect("resolve");
+        assert_eq!(paths.socket, dir.join("neotmux/work.sock"));
+        assert_eq!(paths.lock, dir.join("neotmux/work.lock"));
     }
 
     #[test]

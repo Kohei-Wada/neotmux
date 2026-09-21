@@ -162,7 +162,8 @@ fn main() -> anyhow::Result<()> {
 /// built against another version is refused by the handshake, and the session it cannot
 /// speak to would otherwise be unreachable and immortal.
 fn kill() -> anyhow::Result<()> {
-    let paths = neotmux::sock::Paths::resolve(&|key| env::var_os(key))?;
+    let paths =
+        neotmux::sock::Paths::resolve(&|key| env::var_os(key), neotmux::sock::DEFAULT_SESSION)?;
     let pid = match neotmux::sock::holder(&paths)? {
         neotmux::sock::Holder::Nobody => anyhow::bail!("no neotmux session is running"),
         neotmux::sock::Holder::Unconfirmed => anyhow::bail!(
