@@ -333,6 +333,60 @@ fn a_second_client_is_shown_the_session_the_first_one_left() {
     second.wait_for_output("still-here-after-the-detach");
 }
 
+/// A float, unlike the text under it on the pane, is the *client's* state: it goes away
+/// with the client, and the client that attaches again builds it anew over the same
+/// surviving session. The probe announces its float every tick while it is alive, so one
+/// new line from the second client — the log outlives client 1 and already holds the old
+/// ones — is the proof of the reattach.
+#[test]
+fn a_reattached_client_builds_the_same_float_again() {
+    let runtime = TestRuntime::new();
+    // A layer of this test's own, so the probe reaches only this test's two clients and its
+    // log lines land only in this test's own log — never in a `shipped_layer()` other
+    // sessions' plugins share.
+    let layer = layer_with(&[
+        ("init.lua", "require('plugin.float_probe')"),
+        (
+            "lua/plugin/float_probe.lua",
+            include_str!("fixtures/lua/plugin/float_probe.lua"),
+        ),
+    ]);
+
+    // Client 1, with the probe: its float is announced every frame.
+    let mut first = Client::start_with_prefix_and_layer(runtime.path(), "/bin/cat", layer.path());
+    wait_for_socket(&socket_in(runtime.path()));
+    wait_for_log(runtime.path(), "float 4,3 12x4");
+
+    // The seam: the server outlives the client, and client 1's text stays on the shared pane.
+    first.send("still-under-the-float\r");
+    first.wait_for_output("still-under-the-float");
+    first.kill();
+    drop(first);
+
+    // Client 2, same probe: the plugin layer re-runs from scratch and the float comes back
+    // over the same session. The log is shared, so the point is a *new* announcement.
+    let second = Client::start_with_prefix_and_layer(runtime.path(), "/bin/cat", layer.path());
+    wait_for_socket(&socket_in(runtime.path()));
+    let marker = "float 4,3 12x4";
+    let already = log_text(runtime.path()).matches(marker).count();
+    let deadline = Instant::now() + PATIENCE;
+    loop {
+        let seen = log_text(runtime.path());
+        if seen.matches(marker).count() > already {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the reattached client never announced the float again:\n{seen}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+
+    // And what the session had been holding in the meantime: client 1's text is still on
+    // the shared pane, under the new float.
+    second.wait_for_output("still-under-the-float");
+}
+
 /// A connection that greets and hangs up before saying anything must not cost the session
 /// that was sitting there waiting: this is not a client, so it is never `attached`, and
 /// the detached session's shell must still be there for the client that comes next.
