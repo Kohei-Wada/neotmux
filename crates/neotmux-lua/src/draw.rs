@@ -12,13 +12,18 @@ pub struct Committed {
     pub cmds: Vec<DrawCmd>,
 }
 
+/// One source's float scratch/commit: every float it drew this tick, in recording
+/// order. Named so `Inner`'s maps don't spell out the nested tuple-of-vec-of-tuple
+/// shape at every use (and so clippy's `type_complexity` lint has nothing to flag).
+type FloatEntries = Vec<(FloatId, Vec<DrawCmd>)>;
+
 #[derive(Default)]
 struct Inner {
     epoch: Epoch,
     scratch: BTreeMap<SourceId, Committed>,
     committed: BTreeMap<SourceId, Committed>,
-    scratch_f: BTreeMap<SourceId, Vec<(FloatId, Vec<DrawCmd>)>>,
-    committed_f: BTreeMap<SourceId, (Epoch, Vec<(FloatId, Vec<DrawCmd>)>)>,
+    scratch_f: BTreeMap<SourceId, FloatEntries>,
+    committed_f: BTreeMap<SourceId, (Epoch, FloatEntries)>,
 }
 
 #[derive(Default)]
@@ -49,9 +54,9 @@ impl Buffers {
     /// Only a live scratch is visible to its owner for the rest of the tick, same as
     /// `record` — floats just live in a separate, per-owner ordered list because their
     /// assembly order is by float id across all owners, not by source.
-    pub fn record_float(&self, owner: &SourceId, id: FloatId, cmds: Vec<DrawCmd>) {
+    pub fn record_float(&self, owner: SourceId, id: FloatId, cmds: Vec<DrawCmd>) {
         let mut inner = self.inner.borrow_mut();
-        inner.scratch_f.entry(*owner).or_default().push((id, cmds));
+        inner.scratch_f.entry(owner).or_default().push((id, cmds));
     }
 
     pub fn commit(&self, owner: SourceId) {
@@ -297,7 +302,7 @@ mod tests {
         let a = sources.intern("a");
         let buffers = Buffers::new();
         buffers.begin(epoch(24));
-        buffers.record_float(&a, FloatId(1), vec![text("hi")]);
+        buffers.record_float(a, FloatId(1), vec![text("hi")]);
         buffers.commit(a);
         let mut expected = BTreeMap::new();
         expected.insert(FloatId(1), vec![text("hi")]);
@@ -311,11 +316,11 @@ mod tests {
         let buffers = Buffers::new();
 
         buffers.begin(epoch(24));
-        buffers.record_float(&a, FloatId(1), vec![text("good")]);
+        buffers.record_float(a, FloatId(1), vec![text("good")]);
         buffers.commit(a);
 
         buffers.begin(epoch(24));
-        buffers.record_float(&a, FloatId(1), vec![text("half-written")]);
+        buffers.record_float(a, FloatId(1), vec![text("half-written")]);
         buffers.discard(a);
 
         let mut expected = BTreeMap::new();
@@ -330,7 +335,7 @@ mod tests {
         let buffers = Buffers::new();
 
         buffers.begin(epoch(24));
-        buffers.record_float(&a, FloatId(1), vec![text("hi")]);
+        buffers.record_float(a, FloatId(1), vec![text("hi")]);
         buffers.commit(a);
 
         let mut expected = BTreeMap::new();
@@ -348,7 +353,7 @@ mod tests {
         let buffers = Buffers::new();
         buffers.begin(epoch(24));
         buffers.record(a, text("hi"));
-        buffers.record_float(&a, FloatId(1), vec![text("float")]);
+        buffers.record_float(a, FloatId(1), vec![text("float")]);
         buffers.commit(a);
         buffers.forget(a);
         assert!(buffers.applicable().is_empty());
@@ -362,8 +367,8 @@ mod tests {
         let b = sources.intern("b");
         let buffers = Buffers::new();
         buffers.begin(epoch(24));
-        buffers.record_float(&b, FloatId(2), vec![text("b's float")]);
-        buffers.record_float(&a, FloatId(1), vec![text("a's float")]);
+        buffers.record_float(b, FloatId(2), vec![text("b's float")]);
+        buffers.record_float(a, FloatId(1), vec![text("a's float")]);
         buffers.commit(b);
         buffers.commit(a);
         let ids: Vec<FloatId> = buffers.applicable_floats().into_keys().collect();
