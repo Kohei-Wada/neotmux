@@ -113,22 +113,12 @@ impl Neotmux {
     }
 
     /// Started from a directory of the caller's choosing — the point of the tests that
-    /// ask where the first pane begins. `dir` is the runtime layer, as before.
-    pub fn start_in_cwd(dir: &tempfile::TempDir, shell: &str, cwd: &Path) -> Self {
-        Self::start_layered_in(&[dir.path()], shell, cwd)
-    }
-
+    /// ask where a pane begins. `layers` are the runtime layers, as before.
     pub fn start_layered_in(layers: &[&Path], shell: &str, cwd: &Path) -> Self {
         Self::start_sized_in(layers, shell, ROWS, COLS, cwd)
     }
 
-    pub fn start_sized_in(
-        layers: &[&Path],
-        shell: &str,
-        rows: u16,
-        cols: u16,
-        cwd: &Path,
-    ) -> Self {
+    pub fn start_sized_in(layers: &[&Path], shell: &str, rows: u16, cols: u16, cwd: &Path) -> Self {
         let runtime = layers
             .iter()
             .map(|p| p.to_string_lossy().into_owned())
@@ -149,14 +139,7 @@ impl Neotmux {
     /// binary. Pointing the tests at the source tree instead is what let an install ship a
     /// layer that errored on every start.
     pub fn start_installed(prefix: &Path, shell: &str) -> Self {
-        Self::spawn(
-            &prefix.join("bin/neotmux"),
-            None,
-            shell,
-            ROWS,
-            COLS,
-            None,
-        )
+        Self::spawn(&prefix.join("bin/neotmux"), None, shell, ROWS, COLS, None)
     }
 
     fn spawn(

@@ -1563,12 +1563,11 @@ fn a_panes_directory_follows_a_cd_in_it() {
 fn the_first_pane_begins_where_neotmux_was_started() {
     let launch = tempfile::tempdir().expect("launch dir");
     let home = std::fs::canonicalize(launch.path()).expect("canonical launch");
-    let (mut nt, _init) = start_in("require('plugin.paneinfo')", "bash", launch.path());
+    let (nt, _init) = start_in("require('plugin.paneinfo')", "bash", launch.path());
 
     let log = nt.wait_for_log("paneinfo 1 command=bash", PATIENCE);
     assert!(
-        line_with(&log, "paneinfo 1 command=bash")
-            .contains(&format!("cwd={}", home.display())),
+        line_with(&log, "paneinfo 1 command=bash").contains(&format!("cwd={}", home.display())),
         "{log}"
     );
 }

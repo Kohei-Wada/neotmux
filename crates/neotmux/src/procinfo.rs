@@ -27,7 +27,10 @@ pub(crate) fn command(pid: i32) -> Option<String> {
     (!name.is_empty()).then(|| name.to_string())
 }
 
-fn cwd(pid: i32) -> Option<String> {
+/// The process's working directory: `/proc/<pid>/cwd`, `None` when the process is gone.
+/// A deleted directory is the same answer — the link cannot be read — which is what a
+/// caller asking "where is it, live, right now" wants to hear.
+pub(crate) fn cwd(pid: i32) -> Option<String> {
     let path = fs::read_link(format!("/proc/{pid}/cwd")).ok()?;
     Some(path.to_string_lossy().into_owned())
 }
