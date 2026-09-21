@@ -452,6 +452,17 @@ mod tests {
         assert_eq!(place(&text(5, 0, "x"), &float()), Vec::new());
     }
 
+    /// An empty text is an empty intersection: it places to nothing, because a `Text`
+    /// command carrying no characters is a command the renderer would have nothing to paint.
+    #[test]
+    fn an_empty_text_places_to_nothing() {
+        let placed = place(&text(0, 0, ""), &float());
+        assert!(
+            placed.is_empty(),
+            "a text with an empty intersection must place to zero commands, not a command \\n         carrying nothing: {placed:?}"
+        );
+    }
+
     #[test]
     fn text_starting_at_y_equal_h_is_empty() {
         assert_eq!(place(&text(0, 3, "x"), &float()), Vec::new());
@@ -569,6 +580,33 @@ mod tests {
                 },
             ],
             "only the steps that stayed inside the float remain"
+        );
+    }
+
+    /// A `from == to` line is the zero-length limit of the same line: exactly one step, one
+    /// paint at `from` — neither zero (a line is a paint, like every other command) nor two
+    /// (there is no second step to take). Inside the float the convex fast path keeps it a
+    /// single `Line` sitting on that one cell.
+    #[test]
+    fn a_line_with_from_equal_to_yields_exactly_one_step() {
+        // (3, 1) is inside the float, so the fast path applies; the one step is the cell at
+        // `from`, offset into surface coordinates.
+        let placed = place(&line_cmd((3, 1), (3, 1)), &float());
+        assert_eq!(
+            placed.len(),
+            1,
+            "a zero-length line is one step, not zero and not two: {placed:?}"
+        );
+        assert_eq!(
+            placed[0],
+            DrawCmd::Line {
+                pane: None,
+                from: (6, 3),
+                to: (6, 3),
+                glyph: '#',
+                fg: Color::Default,
+            },
+            "the one step paints exactly the cell at `from`, offset: {placed:?}"
         );
     }
 }

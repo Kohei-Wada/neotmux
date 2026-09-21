@@ -242,7 +242,10 @@ the shells, the layout and the focus are the server's, and a float is none of th
 `move_to` and `resize_to` set the float where it is and how big it is, from the next frame —
 the same next-frame delay as the grant itself — and they answer the same two ways the band's
 handle does: `true`, or `nil` plus a message. `resize` is not a verb here for the reason the
-band's section has: one verb for a delta and one verb for a size is a bug waiting to be typed. `win.__id` is the host's own seam — its drawing layer reads it through to resolve
+band's section has: one verb for a delta and one verb for a size is a bug waiting to be
+typed.
+
+`win.__id` is the host's own seam — its drawing layer reads it through to resolve
 `ctx:text(win, …)` and `ctx:float_rect(win)` — and it is private, not part of the ABI, and
 nothing you are meant to name.
 

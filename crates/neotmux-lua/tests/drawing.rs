@@ -716,6 +716,52 @@ fn a_bad_grant_answers_nil_and_a_message_and_does_not_stop_a_good_grant() {
 }
 
 #[test]
+fn a_grant_whose_extent_reaches_past_the_surface_coordinates_answers_nil() {
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.floater')"),
+        (
+            "lua/plugin/floater.lua",
+            r#"
+            neotmux.on_tick(function(ctx)
+              local row = 0
+              local function check(x, y, w, h, label)
+                local win, message = neotmux.float({ x = x, y = y, w = w, h = h })
+                ctx:text(nil, 0, row, label .. ':' .. tostring(win == nil) .. ':' .. tostring(message ~= nil))
+                row = row + 1
+              end
+              check(65534, 0, 65535, 1, 'x+w')   -- 65534 + 65535 reaches past 65535
+              check(0, 65534, 1, 65535, 'y+h')   -- the same, on the other axis
+              local win, message = neotmux.float({ x = 98, y = 20, w = 8, h = 4 })
+              ctx:text(nil, 0, row, 'past-the-surface:' .. tostring(win ~= nil) .. ':' .. tostring(message ~= nil))
+              row = row + 1
+              local win2 = neotmux.float({ x = 0, y = 0, w = 4, h = 2 })
+              ctx:text(nil, 0, row, 'good-after:' .. tostring(win2 ~= nil))
+            end)
+            return {}
+            "#,
+        ),
+    ]);
+    frame(&sub, 24);
+    assert_eq!(
+        lines(&sub),
+        vec![
+            (0, "x+w:true:true".to_string()),
+            (1, "y+h:true:true".to_string()),
+            (2, "past-the-surface:true:false".to_string()),
+            (3, "good-after:true".to_string()),
+        ],
+        "a rect whose right or bottom edge reaches past the u16 surface coordinate space \
+         (65534 + 65535) must answer nil plus a message whose substance is 'reach past the \
+         surface's coordinates' — refused, not an overflow panic; `false` on the \
+         past-the-surface row is the nil second answer of a successful grant (a success \
+         pair is handle-plus-nil, so the `message ~= nil` flag reads false); a rect that \
+         merely reaches past the surface's present edge stays granted, and the good grant \
+         after the bad ones still works: {:?}",
+        lines(&sub)
+    );
+}
+
+#[test]
 fn the_handles_move_to_and_resize_to_answer_true_or_nil_and_a_message() {
     let (_dir, sub) = built(&[
         ("init.lua", "require('plugin.floater')"),
@@ -807,10 +853,10 @@ fn a_failed_loads_own_float_grant_does_not_survive_the_rollback() {
 }
 
 // Task 4: drawing into a float, and the layering it produces (spec §4). `ctx.floats` is
-// captured once per callback, before that callback runs (matching `band`), so a float
-// granted or removed inside a callback is invisible to that same callback's own draws —
-// every test below grants (or removes) in one tick and draws in another, the shape a real
-// plugin's own `on_tick` closure takes.
+// captured once per callback, before that callback runs (matching `band`): so a float
+// granted inside a callback is invisible to that same callback's own draws — it lands on
+// the next frame — while a `remove` inside a callback only reaches the callbacks that run
+// after it, the one it runs in keeps drawing into the float.
 
 /// One tick's worth of `neotmux.log.info` lines, in emission order.
 fn log_lines(sub: &LuaSubsystem) -> Vec<String> {
@@ -1047,6 +1093,52 @@ fn a_draw_into_a_float_the_source_no_longer_owns_is_dropped() {
         "the first callback's own draw, made while it still owned the float, arrives; \
          the second callback's ctx captured the float list after the first callback \
          removed it, so its draw into the same handle is silently dropped"
+    );
+}
+
+/// The capture is per callback, not per frame, and it is taken *before* the callback runs:
+/// a `remove` inside a callback cannot reach a draw the same callback makes — the one it
+/// runs in keeps holding the float it was handed — and it reaches every callback that comes
+/// after it. `a_draw_into_a_float_the_source_no_longer_owns_is_dropped` pins the second
+/// half across two callbacks; this one pins the first half inside one callback.
+#[test]
+fn a_remove_inside_a_callback_keeps_the_callback_own_draws_in_that_one_frame_only() {
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.floater')"),
+        (
+            "lua/plugin/floater.lua",
+            r#"
+            local win = neotmux.float({ x = 0, y = 0, w = 10, h = 4 })
+            neotmux.on_tick(function(ctx)
+              ctx:text(win, 0, 0, 'before')
+              win:remove()
+              ctx:text(win, 2, 1, 's')
+            end)
+            return {}
+            "#,
+        ),
+    ]);
+    frame(&sub, 24);
+    let placed: Vec<(u16, u16, String)> = sub
+        .frame_output()
+        .into_iter()
+        .filter_map(|c| match c {
+            DrawCmd::Text { x, y, text, .. } => Some((x, y, text)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        placed,
+        vec![(0, 0, "before".to_string()), (2, 1, "s".to_string())],
+        "the callback's ctx was captured before it ran, so its draw after the remove still \
+         lands this frame, at the float's own coordinates: {placed:?}"
+    );
+    frame(&sub, 24);
+    assert!(
+        sub.frame_output().is_empty(),
+        "the remove reaches the next frame's capture of the same callback, so the frame \
+         it draws in is dropped: {:?}",
+        sub.frame_output()
     );
 }
 

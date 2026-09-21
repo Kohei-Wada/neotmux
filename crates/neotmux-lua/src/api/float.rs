@@ -119,6 +119,21 @@ pub(crate) fn install(
             Err(message) => return Ok((Value::Nil, Value::String(lua.create_string(&message)?))),
         };
 
+        // The extent is bounded as a whole, in a wider type than its parts: a rect whose
+        // right or bottom edge would fall past the u16 surface coordinate space (say
+        // `x = 65534, w = 65535`) is not merely off the surface — the offsetting of a draw
+        // into it could name no cell — so it is refused, while a rect that only reaches
+        // past the surface's present edge (spec §7) stays granted and clipped.
+        for (sum, label) in [
+            (u32::from(x) + u32::from(w), "neotmux.float's `x` and `w`"),
+            (u32::from(y) + u32::from(h), "neotmux.float's `y` and `h`"),
+        ] {
+            if sum > u32::from(u16::MAX) {
+                let message = format!("{label} together reach past the surface's coordinates");
+                return Ok((Value::Nil, Value::String(lua.create_string(&message)?)));
+            }
+        }
+
         let owner = source::caller(lua, &sources);
         let id = floats.add(owner, Rect::new(x, y, w, h));
         Ok((Value::Table(handle(lua, floats.clone(), id)?), Value::Nil))
