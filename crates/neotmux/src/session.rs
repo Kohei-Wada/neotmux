@@ -559,8 +559,39 @@ impl Session {
         true
     }
 
-    /// What this frame shows. Producing it is the session's work; putting it on a screen is
-    /// not, and nothing below this line knows what kind of screen there is.
+    /// The session's picture with a client's overlay and notices on it. The overlay and
+    /// notices are the client's, passed in because they are this client's and the last
+    /// ones sent are not necessarily this client's; the panes and the rects are the
+    /// session's, as everything else about the picture is.
+    #[allow(dead_code)] // Task 3's frame loop consumes this; strip the allow then.
+    pub fn frame_with<'a>(&'a mut self, overlay: &'a [DrawCmd], notices: Vec<Notice>) -> Frame<'a> {
+        // The shown window's panes only, for the reason `frame` already gives.
+        let shown: Vec<PaneId> = self.windows.current().rects.keys().copied().collect();
+        self.shells.snapshot(shown.into_iter());
+        self.dirty = false;
+
+        let layout = self.windows.current();
+        Frame {
+            size: self.surface.size,
+            panes: layout
+                .showable()
+                .filter_map(|(pane, rect)| {
+                    Some(PaneFrame {
+                        pane,
+                        rect,
+                        grid: self.shells.grid(pane)?,
+                    })
+                })
+                .collect(),
+            rects: &layout.rects,
+            cursor: layout.focus(),
+            overlay,
+            notices,
+        }
+    }
+
+    /// The single-client picture: the overlay is the session's own record, the one the
+    /// passing tock just committed, rather than a buffer the caller owns.
     fn frame(&mut self, notices: Vec<Notice>) -> Frame<'_> {
         // The shown window's panes only: a hidden pane's terminal goes on taking its
         // child's output, but copying its grid out for a frame nobody draws it in would put
@@ -590,6 +621,45 @@ impl Session {
         }
     }
 
+    /// What applying a tock did to the session: the shared part, ops and geometry and
+    /// the end, in the order they were asked. Not the picture — the picture is the
+    /// caller's to make of this, with the overlay and notices the caller knows to be
+    /// this client's own, and this is the whole of why a tock with two clients is a
+    /// tock with one.
+    pub fn apply(&mut self, tock: &Tock) -> anyhow::Result<Apply> {
+        if let Some(end) = self.apply_ops(&tock.ops)? {
+            return Ok(Apply {
+                steps: std::mem::take(&mut self.steps),
+                end: Some(end),
+            });
+        }
+        let reserved_changed = self.reserved_changed(tock.reserved);
+        let gutter_changed = self.gutter_changed(tock.gutter);
+        if reserved_changed || gutter_changed {
+            self.apply_geometry()?;
+        }
+        let eof = self.ended;
+        Ok(Apply {
+            steps: std::mem::take(&mut self.steps),
+            end: eof.then_some(End::Eof),
+        })
+    }
+
+    /// Whether the session changed in the way a frame is for, whatever the client's own
+    /// overlay is about to add on top. A client decides whether to force one; the
+    /// session only answers this half.
+    #[allow(dead_code)] // Task 3's frame loop consumes this; strip the allow then.
+    pub fn is_dirty(&self) -> bool {
+        self.dirty
+    }
+
+    /// The one subscription that is the session's and not a client's: the pipe is the
+    /// session's, and a client asking for it is a client asking for the session to keep
+    /// reading it. The server holds the OR of who is asking, and this is how it says so.
+    pub fn wants_output(&mut self, wanted: bool) {
+        self.wants_pane_output = wanted;
+    }
+
     /// Keeps the session running with nobody looking at it: the children go on being read,
     /// so one that fills its pipe is not blocked by a client that closed its terminal.
     /// `true` means the last of them is gone and the session is over.
@@ -606,7 +676,7 @@ impl Session {
     /// Without this an unattached session would go on copying every pane's output into a
     /// record no client has asked for.
     pub fn forget_pane_output(&mut self) {
-        self.wants_pane_output = false;
+        self.wants_output(false);
         self.steps
             .retain(|step| !matches!(step, Step::Event(Event::PaneOutput { .. })));
     }
@@ -630,46 +700,50 @@ impl Session {
     /// The second half: what the tick asked for, applied, and the frame that came of it.
     /// The frame is `None` when nothing changed and the last one still stands.
     pub fn advance(&mut self, tock: &Tock) -> anyhow::Result<Pass<'_>> {
-        self.wants_pane_output = tock.wants_pane_output;
-        if let Some(end) = self.apply_ops(&tock.ops)? {
-            return Ok(Pass {
-                steps: std::mem::take(&mut self.steps),
+        self.wants_output(tock.wants_pane_output);
+        let application = self.apply(tock)?;
+        // The picture this tock asked for is committed before the end is looked at, on
+        // every path but an ops-Quit (which the original also skipped it on), so the
+        // last frame a leaving session shows is this tock's one, and not the one before.
+        if application.end != Some(End::Quit) {
+            if tock.overlay != self.last_overlay {
+                self.dirty = true;
+            }
+            self.last_overlay.clone_from(&tock.overlay);
+            if tock.notices != self.last_notices {
+                self.dirty = true;
+            }
+            self.last_notices.clone_from(&tock.notices);
+        }
+        match application.end {
+            // The original forced this last frame (`if self.dirty || eof`); folding the
+            // `Eof` into `apply`'s `end` must keep the frame too, not only the end.
+            Some(End::Eof) => {
+                let frame = Some(self.frame(tock.notices.clone()));
+                Ok(Pass {
+                    steps: application.steps,
+                    frame,
+                    end: Some(End::Eof),
+                })
+            }
+            Some(end) => Ok(Pass {
+                steps: application.steps,
                 frame: None,
                 end: Some(end),
-            });
+            }),
+            None => {
+                let frame = if self.dirty {
+                    Some(self.frame(tock.notices.clone()))
+                } else {
+                    None
+                };
+                Ok(Pass {
+                    steps: application.steps,
+                    frame,
+                    end: None,
+                })
+            }
         }
-
-        // After the frame's output is in hand, never before: both of these change the size of
-        // the surface, and this frame's buffers were committed against the old one.
-        let reserved_changed = self.reserved_changed(tock.reserved);
-        let gutter_changed = self.gutter_changed(tock.gutter);
-        if reserved_changed || gutter_changed {
-            self.apply_geometry()?;
-        }
-
-        if tock.overlay != self.last_overlay {
-            self.dirty = true;
-        }
-        self.last_overlay.clone_from(&tock.overlay);
-        // The frame a notification expires in is the only thing that can stop it being
-        // drawn: without it the last picture the client was given still has it in.
-        if tock.notices != self.last_notices {
-            self.dirty = true;
-        }
-        self.last_notices.clone_from(&tock.notices);
-
-        let eof = self.ended;
-        let steps = std::mem::take(&mut self.steps);
-        let frame = if self.dirty || eof {
-            Some(self.frame(tock.notices.clone()))
-        } else {
-            None
-        };
-        Ok(Pass {
-            steps,
-            frame,
-            end: eof.then_some(End::Eof),
-        })
     }
 }
 
@@ -682,6 +756,16 @@ pub struct Pass<'a> {
     /// The frame to show, if this pass changed anything.
     pub frame: Option<Frame<'a>>,
     /// Why the session is over, if it is.
+    pub end: Option<End>,
+}
+
+/// What one tock did to a session, without the picture it is shown in.
+pub struct Apply {
+    /// What applying the tock's ops did to the session, in order, for the reason `Pass`
+    /// already gives it.
+    pub steps: Vec<Step>,
+    /// Why the session is over, if it is: a `Quit` a client's op raised, or an `Eof` the
+    /// last of its shells just went.
     pub end: Option<End>,
 }
 /// A pane with no rect is a bug in the layout, not a 0x0 pane: spawning a PTY at the default

@@ -277,3 +277,70 @@ fn the_frame_that_takes_an_expired_notice_off_the_screen_is_produced() {
         shown.notices
     );
 }
+
+/// The split in one test: the part a tock does to a session, which is the part shared,
+/// and the part it is shown in, which is the part the server makes per client. Two
+/// tocks, one session, both applies, both frames.
+#[test]
+fn two_applies_are_two_stops_on_the_way_to_two_frames() {
+    let (_dir, _wakeup, mut session, _plugins) = halves(&[("init.lua", "")]);
+
+    // A tock with no ops is a clean apply — see the application assertions below — and
+    // there is no field on the apply for the picture, which is what the split is, the
+    // picture not being the apply's to know about.
+    let tock = neotmux_proto::msg::Tock {
+        ops: Vec::new(),
+        overlay: Vec::new(),
+        notices: Vec::new(),
+        reserved: neotmux_proto::Reserved::default(),
+        gutter: 0,
+        wants_pane_output: false,
+    };
+    // A fresh session hands out with its own steps already queued (`Session::new`:
+    // the initial `Bands` and `Geometry`), so the first apply carries those and says
+    // nothing about the tock. What the split is: the tock with no ops ADDS nothing —
+    // the second apply of it carries empty steps and no end, which is the whole of
+    // "a clean apply", and the picture is not among the things it can carry.
+    let first = session.apply(&tock).expect("apply");
+    assert!(first.end.is_none());
+    let second = session.apply(&tock).expect("apply");
+    assert!(
+        second.steps.is_empty(),
+        "a tock with no ops adds no steps of its own"
+    );
+    assert!(second.end.is_none());
+
+    // `frame_with` takes the overlay and notices as its own: two calls, one session, the
+    // same panes and size — the picture is the caller's, not the session's, and is the
+    // whole of how two clients see the one it is in. A frame borrows the session it reads
+    // off, so each one is asked for, read, and let go before the next is.
+    let overlay: Vec<neotmux_proto::DrawCmd> = Vec::new();
+    let first = session.frame_with(&overlay, Vec::new());
+    let first_size = first.size;
+    let first_panes: Vec<_> = first.panes.iter().map(|pane| pane.pane).collect();
+    drop(first);
+
+    let second = session.frame_with(&overlay, Vec::new());
+    let second_size = second.size;
+    let second_panes: Vec<_> = second.panes.iter().map(|pane| pane.pane).collect();
+    drop(second);
+
+    assert_eq!(first_size, second_size, "the same session, both frames");
+    assert_eq!(
+        first_panes.len(),
+        second_panes.len(),
+        "the session's panes, both times"
+    );
+    for pane in first_panes {
+        assert!(
+            second_panes.contains(&pane),
+            "{pane:?} in the first, not the second"
+        );
+    }
+
+    // `wants_output` is the whole of the server's question of it: the session holds what
+    // it is told, the OR being the server's to keep, not the session's to keep.
+    session.wants_output(true);
+    session.wants_output(false);
+    let _ = session.is_dirty();
+}
