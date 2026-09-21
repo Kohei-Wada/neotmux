@@ -108,6 +108,39 @@ impl Neotmux {
             shell,
             rows,
             cols,
+            None,
+        )
+    }
+
+    /// Started from a directory of the caller's choosing — the point of the tests that
+    /// ask where the first pane begins. `dir` is the runtime layer, as before.
+    pub fn start_in_cwd(dir: &tempfile::TempDir, shell: &str, cwd: &Path) -> Self {
+        Self::start_layered_in(&[dir.path()], shell, cwd)
+    }
+
+    pub fn start_layered_in(layers: &[&Path], shell: &str, cwd: &Path) -> Self {
+        Self::start_sized_in(layers, shell, ROWS, COLS, cwd)
+    }
+
+    pub fn start_sized_in(
+        layers: &[&Path],
+        shell: &str,
+        rows: u16,
+        cols: u16,
+        cwd: &Path,
+    ) -> Self {
+        let runtime = layers
+            .iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join(":");
+        Self::spawn(
+            env!("CARGO_BIN_EXE_neotmux").as_ref(),
+            Some(runtime),
+            shell,
+            rows,
+            cols,
+            Some(cwd),
         )
     }
 
@@ -116,10 +149,24 @@ impl Neotmux {
     /// binary. Pointing the tests at the source tree instead is what let an install ship a
     /// layer that errored on every start.
     pub fn start_installed(prefix: &Path, shell: &str) -> Self {
-        Self::spawn(&prefix.join("bin/neotmux"), None, shell, ROWS, COLS)
+        Self::spawn(
+            &prefix.join("bin/neotmux"),
+            None,
+            shell,
+            ROWS,
+            COLS,
+            None,
+        )
     }
 
-    fn spawn(exe: &Path, runtime: Option<String>, shell: &str, rows: u16, cols: u16) -> Self {
+    fn spawn(
+        exe: &Path,
+        runtime: Option<String>,
+        shell: &str,
+        rows: u16,
+        cols: u16,
+        cwd: Option<&Path>,
+    ) -> Self {
         let pair = native_pty_system()
             .openpty(PtySize {
                 rows,
@@ -135,6 +182,12 @@ impl Neotmux {
         let mut cmd = base_command(exe, &log, isolation.path());
         if let Some(runtime) = runtime {
             cmd.env("NEOTMUX_RUNTIME", runtime);
+        }
+        // The client's directory is the server's: the server is this client's grandchild
+        // with nothing between them that touches `chdir`, so `env::current_dir` in the
+        // server is the directory the test says neotmux was started from.
+        if let Some(cwd) = cwd {
+            cmd.cwd(cwd);
         }
         cmd.env("SHELL", resolve_shell(shell));
 
