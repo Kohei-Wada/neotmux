@@ -13,19 +13,17 @@ fn fg(level: Level) -> Color {
     }
 }
 
-/// Draws a frame's notifications over the top-right of the surface, one to a row, newest
-/// first. A host surface: a source's own draw buffer cannot carry a notification about the
+/// Draws a frame's notifications over the bottom-right of the surface, one to a row,
+/// newest at the bottom edge, stacked up from there. A host surface: a source's own draw buffer cannot carry a notification about the
 /// Lua layer itself failing.
 pub fn render(frame: &mut Frame, area: Rect, notices: &[Notice]) {
     if area.width == 0 || area.height == 0 {
         return;
     }
     let buf = frame.buffer_mut();
-    for (row, item) in notices.iter().enumerate() {
-        let row = row as u16;
-        if row >= area.height {
-            break;
-        }
+    let shown = notices.len().min(usize::from(area.height));
+    for (row, item) in notices.iter().take(shown).enumerate() {
+        let row = area.height - 1 - row as u16;
         let line = format!("{}: {}", item.tag, item.text);
         let start = line.chars().count().min(usize::from(area.width));
         let text: String = line.chars().take(start).collect();
@@ -62,12 +60,29 @@ mod tests {
     }
 
     #[test]
-    fn a_pushed_notification_is_drawn_top_right() {
+    fn a_pushed_notification_is_drawn_bottom_right() {
         let mut n = Notifications::new();
         n.push(Level::Info, "clock", "hi");
         let buf = draw(&n);
-        let line: String = (0..10).map(|x| buf[(x, 0)].symbol().to_string()).collect();
+        let line: String = (0..10).map(|x| buf[(x, 2)].symbol().to_string()).collect();
         assert!(line.trim_end().ends_with("clock: hi"), "{line:?}");
+        // not on the top rows
+        for y in 0..2 {
+            assert_eq!(buf[(5, y)].symbol(), " ", "row {y}");
+        }
+    }
+
+    #[test]
+    fn stacked_notifications_grow_upward_from_the_bottom() {
+        let mut n = Notifications::new();
+        n.push(Level::Info, "clock", "old");
+        n.push(Level::Info, "clock", "new");
+        let buf = draw(&n);
+        let bottom: String = (0..10).map(|x| buf[(x, 2)].symbol().to_string()).collect();
+        let above: String = (0..10).map(|x| buf[(x, 1)].symbol().to_string()).collect();
+        assert!(bottom.trim_end().ends_with("clock: new"), "{bottom:?}");
+        assert!(above.trim_end().ends_with("clock: old"), "{above:?}");
+        assert_eq!(buf[(5, 0)].symbol(), " ", "the top row is untouched");
     }
 
     #[test]
@@ -87,7 +102,7 @@ mod tests {
         n.push(Level::Info, "clock", "hi");
         n.expire(Instant::now());
         let buf = draw(&n);
-        let line: String = (0..10).map(|x| buf[(x, 0)].symbol().to_string()).collect();
+        let line: String = (0..10).map(|x| buf[(x, 2)].symbol().to_string()).collect();
         assert!(line.trim_end().ends_with("clock: hi"), "{line:?}");
     }
 }
