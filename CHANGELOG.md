@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### A pane begins where it is asked to begin
+
+A new pane's shell used to start in the user's home directory, wherever neotmux was run from
+and whatever the pane it split from was in: the working directory was never named, and the
+library neotmux forks through turns an unset one into `$HOME` rather than leaving it
+inherited. Now the first pane begins in the directory neotmux was started from — the
+multiplexer behaves like every other terminal a hand can drop it into — and a split, and a
+new window, begin in the focused pane's own directory, the read the status bar already uses
+for `#{pane_current_path}`-style answers, from the process the pane is running. When that
+directory has been deleted out from under the pane, the answer is the startup directory
+rather than the home one, and the split still happens.
+
+The decision, in one place: the shell neotmux starts is still a login shell (the `-` argv0
+the spawner's default uses), and there is still no way for a plugin opening a pane to choose
+the directory — both known, and neither changed by this.
+
 ### A session outlives the client, on purpose and by accident
 
 The three-second linger that used to end a session shortly after its client left is gone. A
