@@ -96,6 +96,65 @@ impl Terminal {
     }
 }
 
+/// What a wait over any number of slots found. The index is the slot's position in the
+/// slice it was waited over, because a hangup on one of three is not a hangup and the
+/// caller is the one that knows which slot was which.
+#[allow(dead_code)] // Task 3's frame loop consumes this; strip the allow then.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Any {
+    /// Slot `i` has something to read, or something it wants read.
+    Ready(usize),
+    /// Slot `i` is gone: `POLLHUP`, `POLLERR` and `POLLNVAL` are all the kernel saying the
+    /// same thing about a slot that will give no more, and they are all looked at first,
+    /// for the reason `wait_on` already gives.
+    HangUp(usize),
+    /// The deadline passed with nothing on any of them.
+    Idle,
+}
+
+/// Waits over any number of slots for the first that has something, and says which one.
+/// `wait_on` is its two-slot shape, the whole reason a second one exists at all; three
+/// is the attached clients, the door and the panes, which is the shape that has grown.
+#[allow(dead_code)] // Task 3's frame loop consumes this; strip the allow then.
+pub fn wait_any(slot_fds: &[BorrowedFd<'_>], deadline: Instant) -> io::Result<Any> {
+    loop {
+        let mut watched: Vec<PollFd> = slot_fds
+            .iter()
+            .map(|fd| PollFd::new(*fd, PollFlags::POLLIN))
+            .collect();
+        match poll(
+            &mut watched,
+            timeout(deadline.saturating_duration_since(Instant::now())),
+        ) {
+            Ok(0) => return Ok(Any::Idle),
+            Ok(_) => {
+                let gone = PollFlags::POLLHUP | PollFlags::POLLERR | PollFlags::POLLNVAL;
+                for (slot, watched) in watched.iter().enumerate() {
+                    let revents = watched.revents().unwrap_or_else(PollFlags::empty);
+                    if revents.intersects(gone) {
+                        return Ok(Any::HangUp(slot));
+                    }
+                }
+                for (slot, watched) in watched.iter().enumerate() {
+                    if watched
+                        .revents()
+                        .unwrap_or_else(PollFlags::empty)
+                        .contains(PollFlags::POLLIN)
+                    {
+                        return Ok(Any::Ready(slot));
+                    }
+                }
+            }
+            Err(Errno::EINTR) => {
+                if Instant::now() >= deadline {
+                    return Ok(Any::Idle);
+                }
+            }
+            Err(err) => return Err(err.into()),
+        }
+    }
+}
+
 /// Waits until `first` or `second` has something to read, `first` goes away, or `deadline`
 /// passes. A wait cut short by a signal is retried, so the deadline is the only thing that
 /// ends it early — the caller checks for a raised signal on its own terms.
@@ -412,5 +471,54 @@ mod tests {
         assert_eq!(timeout(Duration::from_micros(1)), PollTimeout::from(1u16));
         assert_eq!(timeout(Duration::ZERO), PollTimeout::ZERO);
         assert_eq!(timeout(Duration::from_millis(16)), PollTimeout::from(16u16));
+    }
+
+    #[test]
+    fn the_quiet_slots_are_idle_until_the_deadline() {
+        let (_master, slave) = pty_pair();
+        let started = Instant::now();
+        let ready = wait_any(&[slave.as_fd()], started + Duration::from_millis(30)).expect("wait");
+        assert_eq!(ready, Any::Idle);
+        assert!(
+            started.elapsed() >= Duration::from_millis(25),
+            "returned after {:?}, well before the deadline",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn the_slot_that_has_data_is_named_and_not_guessed() {
+        let (master0, slave0) = pty_pair();
+        let (_master1, slave1) = pty_pair();
+        nix::unistd::write(master0.as_fd(), b"x\n").expect("write slot 0");
+
+        let ready = wait_any(
+            &[slave0.as_fd(), slave1.as_fd()],
+            Instant::now() + Duration::from_secs(5),
+        )
+        .expect("wait");
+        assert_eq!(
+            ready,
+            Any::Ready(0),
+            "the slot that was written is the one that is ready"
+        );
+    }
+
+    #[test]
+    fn a_slot_that_went_away_is_named_and_which_one() {
+        let (_master0, slave0) = pty_pair();
+        let (master1, slave1) = pty_pair();
+        drop(master1); // the slot-1 peer, specifically, is gone
+
+        let ready = wait_any(
+            &[slave0.as_fd(), slave1.as_fd()],
+            Instant::now() + Duration::from_secs(5),
+        )
+        .expect("wait");
+        assert_eq!(
+            ready,
+            Any::HangUp(1),
+            "POLLHUP on slot 1 is named as slot 1"
+        );
     }
 }
