@@ -1,6 +1,7 @@
 pub mod api;
 pub mod budget;
 pub mod draw;
+mod float;
 pub mod ops;
 pub mod overrun;
 mod paneinfo;

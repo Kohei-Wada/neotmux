@@ -783,6 +783,7 @@ dependencies = [
  "neotmux-proto",
  "neotmux-term",
  "tempfile",
+ "unicode-width",
 ]
 
 [[package]]
