@@ -1,3 +1,8 @@
+//! The harness is a fixture library shared by every test crate that starts a client, and
+//! each crate uses a different slice of it, so an item dead in one crate is live in
+//! another and the allow is structural, not a waiver.
+#![allow(dead_code)]
+
 use std::io::{Read, Write as _};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
