@@ -49,6 +49,10 @@ pub(crate) struct Shared {
     pub(crate) floats: Rc<Floats>,
     /// `$HOME` as the host read it, absent where the process had none.
     pub(crate) home: Option<String>,
+    /// Which session this client is in, as the host knows it. Beside `home` in kind:
+    /// a fact about the process rather than about a pane, and nothing in the Lua layer
+    /// could set it.
+    pub(crate) session_name: String,
 }
 
 pub(crate) fn make_handle(
@@ -189,6 +193,7 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
         window_ids,
         floats,
         home,
+        session_name,
     } = shared;
     let neotmux = lua.create_table()?;
 
@@ -283,6 +288,13 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
     // Absent, not "", where there was no `HOME` — the same answer the rest of the ABI gives.
     if let Some(home) = home {
         neotmux.set("home", home)?;
+    }
+
+    {
+        let name = session_name.clone();
+        let session_name =
+            lua.create_function(move |_lua, (): ()| Ok::<String, mlua::Error>(name.clone()))?;
+        neotmux.set("session_name", session_name)?;
     }
 
     {

@@ -75,6 +75,14 @@ pub struct LuaSubsystem {
 
 impl LuaSubsystem {
     pub fn build(layers: Layers, panes: Rc<dyn PaneRead>) -> anyhow::Result<Self> {
+        Self::build_named("default", layers, panes)
+    }
+
+    pub fn build_named(
+        session_name: impl Into<String>,
+        layers: Layers,
+        panes: Rc<dyn PaneRead>,
+    ) -> anyhow::Result<Self> {
         let lua = vm::new_vm().map_err(|err| anyhow::anyhow!("{err:#}"))?;
         runtime::install(&lua, &layers).map_err(|err| anyhow::anyhow!("{err:#}"))?;
         let home = layers
@@ -115,6 +123,7 @@ impl LuaSubsystem {
                 window_ids: window_ids.clone(),
                 floats: floats.clone(),
                 home,
+                session_name: session_name.into(),
             },
         )
         .map_err(|err| anyhow::anyhow!("{err:#}"))?;
