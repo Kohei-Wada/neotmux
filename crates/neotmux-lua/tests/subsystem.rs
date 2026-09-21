@@ -1085,6 +1085,104 @@ fn the_topmost_float_among_float_owners_wins() {
 }
 
 #[test]
+fn a_declining_topmost_hands_the_key_to_the_lower_float_owner() {
+    // A decline from the topmost passes the key to the lower float owner, ahead of
+    // registration order; a decline from both float owners falls to it. The two sentences
+    // the canary exists to pin (spec `## 8. Tests`): "declining hands the key to the lower
+    // one; both declining falls to the registration order."
+    let top = (
+        "lua/plugin/top.lua",
+        concat!(
+            float_grant!(),
+            "neotmux.on_key(function(key) if key == 'x' then neotmux.log.info('top asked') return false end end) return {}"
+        ),
+    );
+    let lower_consuming = (
+        "lua/plugin/lower.lua",
+        concat!(
+            float_grant!(),
+            "neotmux.on_key(function(key) if key == 'x' then neotmux.log.info('lower won') return true end end) return {}"
+        ),
+    );
+    let lower_declining = (
+        "lua/plugin/lower.lua",
+        concat!(
+            float_grant!(),
+            "neotmux.on_key(function(key) if key == 'x' then neotmux.log.info('lower asked') return false end end) return {}"
+        ),
+    );
+    let a = (
+        "lua/plugin/a.lua",
+        "neotmux.on_key(function(key) if key == 'x' then neotmux.log.info('a won') return true end end) return {}",
+    );
+
+    // A registers first, LOWER second, TOP last: TOP's float is the newest, so on the
+    // keyboard TOP is asked first, LOWER second and A last — registration order alone would
+    // have given A the key, which is what makes the handoff visible.
+    let dir = layer(&[
+        (
+            "init.lua",
+            "require('plugin.a') require('plugin.lower') require('plugin.top')",
+        ),
+        a,
+        lower_consuming,
+        top,
+    ]);
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
+    assert!(sub.run_init().is_empty());
+    assert_eq!(sub.dispatch_key("x"), KeyOutcome::Consumed);
+    let text = format!("{:?}", sub.drain_ops());
+    assert!(
+        text.contains("lower won"),
+        "the declined topmost should hand the key to the lower float owner: {text}"
+    );
+    assert!(
+        text.contains("top asked"),
+        "the newest float should have been asked first and declined: {text}"
+    );
+    assert!(
+        !text.contains("a won"),
+        "a non-float owner stole the key off a float owner: {text}"
+    );
+
+    // Both float owners decline: registration order decides, and the two float owners were
+    // still offered before it — topmost first.
+    let dir = layer(&[
+        (
+            "init.lua",
+            "require('plugin.a') require('plugin.lower') require('plugin.top')",
+        ),
+        a,
+        lower_declining,
+        top,
+    ]);
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
+    assert!(sub.run_init().is_empty());
+    assert_eq!(sub.dispatch_key("x"), KeyOutcome::Consumed);
+    let text = format!("{:?}", sub.drain_ops());
+    assert!(
+        text.contains("a won"),
+        "both float owners declining should fall to registration order: {text}"
+    );
+    assert!(
+        text.contains("top asked") && text.contains("lower asked"),
+        "both float owners should have been offered the key first, topmost first: {text}"
+    );
+    assert!(
+        !text.contains("lower won"),
+        "a float owner reported consuming the key it declined: {text}"
+    );
+}
+
+#[test]
 fn a_float_without_an_on_key_steals_nothing() {
     // F holds a float but registers no key callback, so it offers nothing on its turn and
     // K wins exactly as it would with F not loaded at all.

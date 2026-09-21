@@ -915,6 +915,59 @@ fn a_float_off_the_surface_edge_still_arrives_whole() {
 }
 
 #[test]
+fn a_shrink_from_inside_a_tick_clips_the_next_frame_draw() {
+    // `resize_to` inside a tick lands on the next frame (the ctx snapshot the draws take on is
+    // this tick's rect), so the tick's own draw still goes out at the old width, and the next
+    // one is clipped to the new one — the band's `resize_to` bargain, held for a float too.
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.floater')"),
+        (
+            "lua/plugin/floater.lua",
+            r#"
+            local win, message = neotmux.float({ x = 1, y = 1, w = 8, h = 4 })
+            if win == nil then error('neotmux.float failed: ' .. tostring(message)) end
+            neotmux.on_tick(function(ctx)
+              ctx:text(win, 0, 0, 'abcdefghijkl')
+              local ok, err = win:resize_to(4, 4)
+              assert(ok, 'resize_to failed: ' .. tostring(err))
+            end)
+            return {}
+            "#,
+        ),
+    ]);
+    frame(&sub, 24);
+    let wide: Vec<String> = sub
+        .frame_output()
+        .into_iter()
+        .filter_map(|c| match c {
+            DrawCmd::Text { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        wide,
+        vec!["abcdefgh".to_string()],
+        "the tick's own draw must be clipped to the 8-wide rect it started in: a shrink \
+         issued in the same tick is next frame's problem, not this draw's: {wide:?}"
+    );
+    frame(&sub, 24);
+    let narrow: Vec<String> = sub
+        .frame_output()
+        .into_iter()
+        .filter_map(|c| match c {
+            DrawCmd::Text { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        narrow,
+        vec!["abcd".to_string()],
+        "the next frame's draw of the same 12 characters is clipped to the new 4-wide rect: \
+         {narrow:?}"
+    );
+}
+
+#[test]
 fn grant_order_not_draw_order_decides_the_float_z_order() {
     let (_dir, sub) = built(&[
         ("init.lua", "require('plugin.a') require('plugin.b')"),
