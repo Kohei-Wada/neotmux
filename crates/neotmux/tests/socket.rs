@@ -648,17 +648,17 @@ fn kill_ends_a_session_nobody_is_attached_to() {
     drop(client);
 
     let status = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
-        .arg("--kill")
+        .arg("kill")
         .env("XDG_RUNTIME_DIR", runtime.path())
         .env("HOME", runtime.path())
         .status()
-        .expect("run --kill");
+        .expect("run kill");
     assert!(status.success());
 
     let socket = socket_in(runtime.path());
     let deadline = Instant::now() + PATIENCE;
     while UnixStream::connect(&socket).is_ok() {
-        assert!(Instant::now() < deadline, "the session outlived --kill");
+        assert!(Instant::now() < deadline, "the session outlived kill");
         std::thread::sleep(Duration::from_millis(20));
     }
 }
@@ -775,12 +775,15 @@ fn a_resized_handler_on_reattach_does_not_mint_a_window_id_that_already_exists()
 fn kill_with_nothing_running_says_so_and_fails() {
     let runtime = TestRuntime::new();
     let out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
-        .arg("--kill")
+        .arg("kill")
         .env("XDG_RUNTIME_DIR", runtime.path())
         .env("HOME", runtime.path())
         .output()
-        .expect("run --kill");
+        .expect("run kill");
     assert!(!out.status.success());
     let said = String::from_utf8_lossy(&out.stderr);
-    assert!(said.contains("no neotmux session is running"), "{said}");
+    assert!(
+        said.contains("neotmux session 'default' is not running"),
+        "{said}"
+    );
 }
