@@ -255,12 +255,12 @@ fn main() -> anyhow::Result<()> {
     }
 
     if cli.server {
-        return start::serve();
+        return start::serve(cli.session);
     }
     match cli.action {
         Action::Ls => list_sessions(),
         Action::Kill => kill_session(cli.session_name()?),
-        Action::Attach => client(),
+        Action::Attach => client(cli.session.clone()),
     }
 }
 
@@ -324,21 +324,24 @@ fn list_sessions() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn client() -> anyhow::Result<()> {
+fn client(session: Option<String>) -> anyhow::Result<()> {
     // First, and before the socket: until the terminal is in raw mode the line discipline is
     // answering the keyboard, and starting a server is not fast.
     let _raw = RawMode::enter();
 
     // Started here and waited for below: a server is a fork and an exec, and loading the
     // plugins is the other slow thing a client does. Neither waits for the other.
-    let starting = start::begin()?;
+    let starting = start::begin(session.clone())?;
 
     let exe_dir = env::current_exe()
         .ok()
         .and_then(|path| path.parent().map(Path::to_path_buf));
     let layers = Layers::resolve(&|key| env::var_os(key), exe_dir.as_deref());
     let panes = std::rc::Rc::new(reads::RemotePanes::new());
-    let lua = LuaSubsystem::build(layers, panes.clone())?;
+    // The session the client was started under, default taken: the Lua layer is told it
+    // as a fact it could not otherwise know (`neotmux.session_name()`).
+    let name = session.unwrap_or_else(|| neotmux::sock::DEFAULT_SESSION.to_string());
+    let lua = LuaSubsystem::build_named(name, layers, panes.clone())?;
     let mut plugins = Plugins::new(lua);
     for failure in plugins.lua().run_init() {
         logging::log(Level::Warn, &failure.source, &failure.message);
