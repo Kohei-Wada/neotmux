@@ -28,8 +28,10 @@ pub(crate) fn command(pid: i32) -> Option<String> {
 }
 
 /// The process's working directory: `/proc/<pid>/cwd`, `None` when the process is gone.
-/// A deleted directory is the same answer — the link cannot be read — which is what a
-/// caller asking "where is it, live, right now" wants to hear.
+/// A deleted directory is a different answer: the link still reads, but as `"<path> (deleted)"` —
+/// a string no one can open. It is the caller's job to reject that (`Session::start_dir`'s
+/// `is_dir` check does exactly that), and it is that check, not a `None` here, that keeps a
+/// deleted directory from becoming a pane's starting point.
 pub(crate) fn cwd(pid: i32) -> Option<String> {
     let path = fs::read_link(format!("/proc/{pid}/cwd")).ok()?;
     Some(path.to_string_lossy().into_owned())

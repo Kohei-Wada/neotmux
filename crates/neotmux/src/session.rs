@@ -365,7 +365,7 @@ impl Session {
         let start_dir = self.start_dir(self.windows.current().focus());
         let started = pane_size(self.windows.rect(first), first).and_then(|size| {
             let mut cmd = PtyHandle::default_shell_command();
-            if let Some(dir) = start_dir.clone() {
+            if let Some(dir) = start_dir {
                 cmd.cwd(dir);
             }
             self.shells.open(first, cmd, size)
@@ -478,10 +478,12 @@ impl Session {
     /// that is the bug this exists to stop. The focused pane's own directory leads — the
     /// foreground process, which is the shell while it is idle and the command it is
     /// running otherwise — and the server's, which is where the client that started it
-    /// started it, is the answer when the pane's directory is gone or the pane does not
-    /// exist (the first pane). A directory the pane left behind answers as the fallback,
-    /// because `foreground` is the same question the status bar asks and this is the
-    /// second place it is spent on a real directory.
+    /// started it, is the answer when the pane does not exist (the first pane) or when its
+    /// directory no longer is one. That last case still arrives as `Some`: a pane that
+    /// left its directory behind answers `"<path> (deleted)"`, and it is the `is_dir` check
+    /// below — not `None` from `procinfo::cwd` — that filters it out. Remove it and a
+    /// deleted directory becomes a pane's starting point again, which is the whole reason
+    /// the rule is written down in two places now.
     fn start_dir(&self, pane: Option<PaneId>) -> Option<PathBuf> {
         if let Some(dir) = pane
             .and_then(|pane| self.shells.foreground(pane))
