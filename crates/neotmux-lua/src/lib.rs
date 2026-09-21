@@ -78,6 +78,8 @@ impl LuaSubsystem {
         Self::build_named("default", layers, panes)
     }
 
+    /// The named half of `build`, which passes the default: `neotmux.session_name()` is
+    /// the one that answers whichever of the two the client was started with.
     pub fn build_named(
         session_name: impl Into<String>,
         layers: Layers,

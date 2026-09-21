@@ -44,7 +44,7 @@ and each pane's scrollback are the server's and survive; a plugin's own state �
 register, a raised mode, a folded sidebar — is the client's and does not, and the plugin
 re-makes it when it loads. More than one session is in: `neotmux work` starts it and a
 second `neotmux work` attaches to it, `ls` lists the running ones and `kill [name]` ends
-one of them. The name is a filename — letters, digits, `-` and `_`, none first. `neotmux
+one of them. The name is a filename — one to sixty-four characters of letters, digits, `-` and `_`, none first. `neotmux
 --kill` was its old spelling for one session; it is `kill` now, and `kill [name]` for the
 named ones. Two clients on one session at once is still out.
 

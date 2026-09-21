@@ -175,6 +175,39 @@ fn kill_work_leaves_default_running_and_vica_versa() {
         !out.lines().any(|l| l.starts_with("work")),
         "work is gone: {out:?}"
     );
+    let (code, said) = kill(&rt, Some("default"));
+    assert_eq!(
+        code, 0,
+        "default goes too, and the test is done with it: {said:?}"
+    );
+    wait_for_gone(&rt, "default");
+
+    // The other way, on a fresh pair, because the state it is caught in is the one where
+    // both are alive: a `kill default` that signalled `work`'s pid dies on that
+    // assertion, and not quietly after `work` had already been the one that died.
+    let a = Neotmux::start_named_on(rt.dir.path(), "work", &layer, "/bin/cat");
+    let b = Neotmux::start_named_on(rt.dir.path(), "default", &layer, "/bin/cat");
+    let (_a, _b) = (a, b); // both held until the end, the way the first pair was
+    up(&rt, "work");
+    up(&rt, "default");
+
+    let (code, said) = kill(&rt, Some("default"));
+    assert_eq!(code, 0, "kill default: {said:?}");
+    wait_for_gone(&rt, "default");
+
+    let (code, out, err) = ls(&rt);
+    assert_eq!(code, 0, "work is still running: {out:?} {err:?}");
+    assert!(
+        out.lines().any(|l| l.starts_with("work")),
+        "work survived kill default: {out:?}"
+    );
+    assert!(
+        !out.lines().any(|l| l.starts_with("default")),
+        "default is gone: {out:?}"
+    );
+    let (code, said) = kill(&rt, Some("work"));
+    assert_eq!(code, 0, "and the pair's work goes with the pair: {said:?}");
+    wait_for_gone(&rt, "work");
 }
 
 #[test]

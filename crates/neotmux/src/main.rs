@@ -47,11 +47,10 @@ struct Cli {
 
 impl Cli {
     /// The name as the command will run under, default taken.
-    fn session_name(&self) -> anyhow::Result<&str> {
+    fn session_name(&self) -> &str {
         self.session
             .as_deref()
-            .or(Some(neotmux::sock::DEFAULT_SESSION))
-            .ok_or_else(|| anyhow::anyhow!("no session"))
+            .unwrap_or(neotmux::sock::DEFAULT_SESSION)
     }
 }
 
@@ -259,7 +258,7 @@ fn main() -> anyhow::Result<()> {
     }
     match cli.action {
         Action::Ls => list_sessions(),
-        Action::Kill => kill_session(cli.session_name()?),
+        Action::Kill => kill_session(cli.session_name()),
         Action::Attach => client(cli.session.clone()),
     }
 }
@@ -274,7 +273,7 @@ fn kill_session(name: &str) -> anyhow::Result<()> {
             anyhow::bail!("neotmux session '{name}' is not running")
         }
         neotmux::sock::Holder::Unconfirmed => anyhow::bail!(
-            "session '{name}''s lock is held, but its pid could not be confirmed; refusing to signal it"
+            "session '{name}'s lock is held, but its pid could not be confirmed; refusing to signal it"
         ),
         neotmux::sock::Holder::Pid(pid) => pid,
     };
@@ -454,7 +453,7 @@ mod tests {
         let cli = parse_args(args(&[]));
         assert!(matches!(cli.action, Action::Attach));
         assert!(cli.session.is_none());
-        assert!(cli.session_name().unwrap() == "default");
+        assert!(cli.session_name() == "default");
         assert!(cli.warnings.is_empty());
     }
 

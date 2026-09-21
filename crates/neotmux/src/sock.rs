@@ -59,6 +59,9 @@ pub struct Paths {
 }
 
 impl Paths {
+    /// The socket and lock a client and its server agree on for the one name.
+    /// Callers must pass a name `validate_session_name` accepts: the CLI edge is where
+    /// the law is enforced, and this only composes the file names, without re-checking.
     pub fn resolve(
         env: &dyn Fn(&str) -> Option<std::ffi::OsString>,
         name: &str,

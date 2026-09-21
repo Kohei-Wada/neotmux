@@ -173,8 +173,8 @@ fn configured_reads_the_value_init_lua_mutated_on_the_config_holder() {
 
 #[test]
 fn a_named_client_is_told_its_name_by_the_api() {
-    // Two sessions in the same isolation, so the assertion is about which one, not
-    // whether one is running.
+    // One unnamed client: `neotmux.session_name()` must answer `default`; the named case
+    // is the one the sessions tests cover.
     let (nt, _init) = start("require('plugin.session_name')", "/bin/cat");
     nt.wait_for_log("session_name default", PATIENCE);
 }
