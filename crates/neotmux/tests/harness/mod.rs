@@ -79,11 +79,15 @@ pub struct Neotmux {
     master: Box<dyn MasterPty + Send>,
     parser: Arc<Mutex<vt100::Parser>>,
     byte_rx: mpsc::Receiver<usize>,
-    // Declared before `_isolation` so it drops first: fields drop in declaration order, and
+    // Declared before `_dir_keep` so it drops first: fields drop in declaration order, and
     // ending the session needs the isolation dir to still be there. Held for that lifetime
     // only — nothing reads it back.
     _end_session: session::EndsSession,
-    _isolation: tempfile::TempDir,
+    _isolation: PathBuf,
+    // Owns the isolation dir when this harness made it (`spawn`); `None` when a test lent us
+    // one it keeps alive (`start_named_on`). Declared after `_end_session` so the dir is only
+    // released once the session behind it is already ended.
+    _dir_keep: Option<tempfile::TempDir>,
 }
 
 impl Neotmux {
@@ -155,15 +159,6 @@ impl Neotmux {
         cols: u16,
         cwd: Option<&Path>,
     ) -> Self {
-        let pair = native_pty_system()
-            .openpty(PtySize {
-                rows,
-                cols,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
-            .expect("openpty");
-
         let isolation = tempfile::tempdir().expect("isolation dir");
         let log = isolation.path().join("neotmux.log");
 
@@ -178,6 +173,34 @@ impl Neotmux {
             cmd.cwd(cwd);
         }
         cmd.env("SHELL", resolve_shell(shell));
+
+        // We made the isolation dir, so we are the one who must keep it alive past the
+        // client's drop: `spawn_with` holds it in `_dir_keep` for exactly that.
+        let isolation_path = isolation.path().to_owned();
+        Self::spawn_with(cmd, &isolation_path, &log, Some(isolation), rows, cols)
+    }
+
+    /// The tail of starting a client, with the command and the isolation dir handed in:
+    /// opens the pty, spawns it, wires the reader thread and the parser, and builds the
+    /// `Neotmux`. `spawn` (we made the dir) and `start_named_on` (a test lent it to us and
+    /// keeps it alive) both end here; `keep` is `Some` in the first case and `None` in the
+    /// second, and it is what lets a dir we own outlive the client it is holding.
+    fn spawn_with(
+        cmd: CommandBuilder,
+        isolation: &Path,
+        log: &Path,
+        keep: Option<tempfile::TempDir>,
+        rows: u16,
+        cols: u16,
+    ) -> Self {
+        let pair = native_pty_system()
+            .openpty(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .expect("openpty");
 
         let child = pair.slave.spawn_command(cmd).expect("spawn");
         drop(pair.slave);
@@ -205,14 +228,15 @@ impl Neotmux {
         });
 
         let nt = Self {
-            log,
+            log: log.to_owned(),
             child,
             writer,
             master: pair.master,
             parser,
             byte_rx,
-            _end_session: session::EndsSession::new(isolation.path()),
-            _isolation: isolation,
+            _end_session: session::EndsSession::new(isolation),
+            _isolation: isolation.to_owned(),
+            _dir_keep: keep,
         };
         nt.wait_until_raw();
         nt
@@ -364,6 +388,38 @@ impl Neotmux {
     pub fn screen_after(&mut self, duration: Duration) -> String {
         std::thread::sleep(duration);
         self.screen_contents()
+    }
+
+    /// Ends this client and waits for it to exit, the way `socket.rs`'s `Client::kill`
+    /// does, on the harness side, because the tests that kill a client are the ones
+    /// `sessions.rs` and `two-clients` run.
+    pub fn kill(&mut self) {
+        let _ = self.child.kill();
+        self.exited_cleanly(Duration::from_secs(10));
+    }
+
+    /// A client into a runtime directory the test holds: `ls` is a connect-probe of that
+    /// directory and `kill [name]` signals into it, so the test has to point at the same
+    /// one the client was using, and the one that is not its own is this. The test owns
+    /// the directory and keeps it alive; this borrows it.
+    pub fn start_named_on(
+        runtime: &Path,
+        session: &str,
+        layer: &tempfile::TempDir,
+        shell: &str,
+    ) -> Self {
+        let exe = Path::new(env!("CARGO_BIN_EXE_neotmux"));
+        let log = runtime.join(format!("neotmux-{session}.log"));
+        let mut cmd = base_command(exe, &log, runtime);
+        cmd.env(
+            "NEOTMUX_RUNTIME",
+            layer.path().to_string_lossy().into_owned(),
+        );
+        cmd.arg(session);
+        cmd.env("SHELL", resolve_shell(shell));
+        // The test owns `runtime` and keeps it alive after this client is gone, so there
+        // is nothing for us to keep: `keep` is `None`.
+        Self::spawn_with(cmd, runtime, &log, None, ROWS, COLS)
     }
 
     pub fn settle(&mut self, duration: Duration) {
