@@ -25,6 +25,26 @@ fn bounded(value: Value, label: &str, min: i64) -> Result<u16, String> {
     u16::try_from(i).map_err(|_| format!("{label} is too large: {i}"))
 }
 
+/// The pair, not just each part, is bounded, in a wider type than the parts: a
+/// coordinate and an extent that each fit u16 can still name a cell that does not
+/// exist (65534 + 2), so the pair is checked against the u16 surface coordinate space
+/// — at a grant, and at every `move_to`/`resize_to`, where one half of the pair is
+/// the float's current other half. A rect that merely reaches past the surface's
+/// present edge (spec §7) stays legal: it is granted and clipped.
+fn pair_within_surface(
+    origin: u16,
+    extent: u16,
+    origin_label: &str,
+    extent_label: &str,
+) -> Result<(), String> {
+    if u32::from(origin) + u32::from(extent) > u32::from(u16::MAX) {
+        return Err(format!(
+            "{origin_label} and {extent_label} together reach past the surface's coordinates"
+        ));
+    }
+    Ok(())
+}
+
 fn field(opts: &Table, name: &'static str, min: i64) -> mlua::Result<Result<u16, String>> {
     let value: Value = opts.get(name)?;
     Ok(bounded(value, &format!("neotmux.float's `{name}`"), min))
@@ -49,6 +69,23 @@ fn handle(lua: &Lua, floats: Rc<Floats>, id: FloatId) -> mlua::Result<Table> {
                 bounded(y, "handle:move_to's y", 0),
             ) {
                 (Ok(x), Ok(y)) => {
+                    // A move legal field by field can still reach past the surface coordinate
+                    // space once the float's own size is added — bound the pair against the
+                    // current rect, as the grant bound does, and move nothing on a refusal.
+                    if let Some(rect) = floats.rect(id)
+                        && let Err(message) =
+                            pair_within_surface(x, rect.w, "handle:move_to's x", "the float's w")
+                                .and_then(|()| {
+                                    pair_within_surface(
+                                        y,
+                                        rect.h,
+                                        "handle:move_to's y",
+                                        "the float's h",
+                                    )
+                                })
+                    {
+                        return Ok((Value::Nil, Value::String(lua.create_string(&message)?)));
+                    }
                     floats.move_to(id, x, y);
                     Ok((Value::Boolean(true), Value::Nil))
                 }
@@ -68,6 +105,23 @@ fn handle(lua: &Lua, floats: Rc<Floats>, id: FloatId) -> mlua::Result<Table> {
                 bounded(h, "handle:resize_to's h", 1),
             ) {
                 (Ok(w), Ok(h)) => {
+                    // A size legal field by field can still reach past the surface coordinate
+                    // space once the float's own origin is added — bound the pair against the
+                    // current rect, and resize nothing on a refusal.
+                    if let Some(rect) = floats.rect(id)
+                        && let Err(message) =
+                            pair_within_surface(rect.x, w, "the float's x", "handle:resize_to's w")
+                                .and_then(|()| {
+                                    pair_within_surface(
+                                        rect.y,
+                                        h,
+                                        "the float's y",
+                                        "handle:resize_to's h",
+                                    )
+                                })
+                    {
+                        return Ok((Value::Nil, Value::String(lua.create_string(&message)?)));
+                    }
                     floats.resize(id, w, h);
                     Ok((Value::Boolean(true), Value::Nil))
                 }
@@ -90,12 +144,15 @@ fn handle(lua: &Lua, floats: Rc<Floats>, id: FloatId) -> mlua::Result<Table> {
 
 /// `neotmux.float({ x =, y =, w =, h = })`: a free rectangle in surface coordinates,
 /// owed to nothing (spec §1, §2). A rect that stretches past the surface is granted and
-/// clipped later, not refused here — only the four fields themselves are checked.
+/// clipped later, not refused here: the fields are checked, and so is their extent as a
+/// whole — `move_to` and `resize_to` bound their new half against the float's current
+/// other half the same way.
 ///
-/// The failures are all §7's: a missing key, a non-integer, a negative `x`/`y`, or a
-/// zero `w`/`h` are programming errors a caller can recover from, so — the `reserve`
-/// convention — nothing raises and nothing is recorded; the grant answers `nil` plus a
-/// message instead.
+/// The failures are all §7's: a missing key, a non-integer, a negative `x`/`y`, a zero
+/// `w`/`h`, or an extent that reaches past the surface coordinate space, are
+/// programming errors a caller can recover from, so — the `reserve` convention —
+/// nothing raises and nothing is recorded; the grant answers `nil` plus a message
+/// instead.
 pub(crate) fn install(
     lua: &Lua,
     sources: Rc<Sources>,
@@ -119,19 +176,17 @@ pub(crate) fn install(
             Err(message) => return Ok((Value::Nil, Value::String(lua.create_string(&message)?))),
         };
 
-        // The extent is bounded as a whole, in a wider type than its parts: a rect whose
-        // right or bottom edge would fall past the u16 surface coordinate space (say
-        // `x = 65534, w = 65535`) is not merely off the surface — the offsetting of a draw
-        // into it could name no cell — so it is refused, while a rect that only reaches
-        // past the surface's present edge (spec §7) stays granted and clipped.
-        for (sum, label) in [
-            (u32::from(x) + u32::from(w), "neotmux.float's `x` and `w`"),
-            (u32::from(y) + u32::from(h), "neotmux.float's `y` and `h`"),
-        ] {
-            if sum > u32::from(u16::MAX) {
-                let message = format!("{label} together reach past the surface's coordinates");
-                return Ok((Value::Nil, Value::String(lua.create_string(&message)?)));
-            }
+        // The extent is bounded as a whole, in a wider type than its parts (see
+        // `pair_within_surface`): a rect whose right or bottom edge would fall past the
+        // u16 surface coordinate space (say `x = 65534, w = 65535`) is refused, while a
+        // rect that only reaches past the surface's present edge (spec §7) stays
+        // granted and clipped.
+        if let Err(message) =
+            pair_within_surface(x, w, "neotmux.float's `x`", "neotmux.float's `w`").and_then(|()| {
+                pair_within_surface(y, h, "neotmux.float's `y`", "neotmux.float's `h")
+            })
+        {
+            return Ok((Value::Nil, Value::String(lua.create_string(&message)?)));
         }
 
         let owner = source::caller(lua, &sources);

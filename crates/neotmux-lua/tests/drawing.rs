@@ -799,6 +799,111 @@ fn the_handles_move_to_and_resize_to_answer_true_or_nil_and_a_message() {
     );
 }
 
+/// The extent bound applies to the handle too, not just the grant: a move or resize that
+/// is legal field by field can still reach past the u16 surface coordinate space once the
+/// float's other half is added (65534 + a width of 4, 2 + a height of 65535) — those answer
+/// `nil` plus a message (substance: "together reach past the surface's coordinates") and
+/// move nothing; a legal move in between and afterwards still lands, read the rect back
+/// with `ctx:float_rect`.
+#[test]
+fn a_move_or_resize_reaching_past_the_surface_coordinates_answers_nil_and_moves_nothing() {
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.floater')"),
+        (
+            "lua/plugin/floater.lua",
+            r#"
+            local win, message = neotmux.float({ x = 0, y = 0, w = 4, h = 4 })
+            if win == nil then error('neotmux.float failed: ' .. tostring(message)) end
+            neotmux.on_tick(function(ctx)
+              local row = 0
+              local function put(ok, err) ctx:text(nil, 0, row, tostring(ok) .. ':' .. tostring(err ~= nil)) row = row + 1 end
+              local m1, e1 = win:move_to(65534, 0)      -- 65534 + 4 reaches past 65535
+              put(m1 == nil, e1)
+              local m2, e2 = win:move_to(0, 65535)      -- 65535 + 4, the other axis
+              put(m2 == nil, e2)
+              local m3, e3 = win:move_to(2, 2)          -- legal: 2 + 4 fits on both axes
+              put(m3 ~= nil, e3)
+              local m4, e4 = win:resize_to(65535, 4)    -- from x = 2: 2 + 65535 reaches past
+              put(m4 == nil, e4)
+              local m5, e5 = win:resize_to(4, 65535)    -- from y = 2: 2 + 65535 reaches past
+              put(m5 == nil, e5)
+            end)
+            neotmux.on_tick(function(ctx)
+              local r = ctx:float_rect(win)
+              if r then ctx:text(nil, 0, 0, r.x .. ',' .. r.y .. ',' .. r.w .. ',' .. r.h) end
+            end)
+            return {}
+            "#,
+        ),
+    ]);
+    let expected = vec![
+        (0, "true:true".to_string()),
+        (1, "true:true".to_string()),
+        (2, "true:false".to_string()),
+        (3, "true:true".to_string()),
+        (4, "true:true".to_string()),
+        (0, "2,2,4,4".to_string()),
+    ];
+    frame(&sub, 24);
+    assert_eq!(
+        lines(&sub),
+        expected,
+        "a refused move or resize must answer nil plus a message whose substance is '\\n\
+         together reach past the surface's coordinates' and change nothing, the legal move\\n\
+         answers true, and the rect read back is the legal move's (2,2) at the original\\n\
+         size: {:?}",
+        lines(&sub)
+    );
+    frame(&sub, 24);
+    assert_eq!(
+        lines(&sub),
+        expected,
+        "and it must stay refused, not start landing on later frames: {:?}",
+        lines(&sub)
+    );
+}
+
+/// The spec's past-the-surface clause stays true through mutation, not just grant: a
+/// `move_to` or `resize_to` that is off the 80x24 surface but inside the u16 extent still
+/// answers `true` and lands.
+#[test]
+fn a_legal_move_and_resize_past_the_surface_still_land() {
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.floater')"),
+        (
+            "lua/plugin/floater.lua",
+            r#"
+            local win, message = neotmux.float({ x = 2, y = 3, w = 8, h = 4 })
+            if win == nil then error('neotmux.float failed: ' .. tostring(message)) end
+            neotmux.on_tick(function(ctx)
+              local m1, e1 = win:move_to(200, 80)        -- past the surface, inside the space
+              ctx:text(nil, 0, 0, 'move:' .. tostring(m1 ~= nil) .. ':' .. tostring(e1 ~= nil))
+              local m2, e2 = win:resize_to(4000, 4000)  -- from (200, 80): both pairs fit
+              ctx:text(nil, 0, 1, 'resize:' .. tostring(m2 ~= nil) .. ':' .. tostring(e2 ~= nil))
+            end)
+            neotmux.on_tick(function(ctx)
+              local r = ctx:float_rect(win)
+              if r then ctx:text(nil, 0, 2, r.x .. ',' .. r.y .. ',' .. r.w .. ',' .. r.h) end
+            end)
+            return {}
+            "#,
+        ),
+    ]);
+    frame(&sub, 24);
+    assert_eq!(
+        lines(&sub),
+        vec![
+            (0, "move:true:false".to_string()),
+            (1, "resize:true:false".to_string()),
+            (2, "200,80,4000,4000".to_string()),
+        ],
+        "a move or resize that is merely off the surface's edge stays legal: the answers \
+         are the true-plus-nil pairs, and both mutations land where they were asked: \
+         {:?}",
+        lines(&sub)
+    );
+}
+
 /// Modelled on `subsystem.rs`'s `a_failed_loads_rollback_does_not_reach_a_callback_it_got
 /// _from_a_library`: the failing chunk's own float grant is rolled back by the require
 /// wrapper's `floats.remove_all_of` (mirroring what it already does for registrations and
