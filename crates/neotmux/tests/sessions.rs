@@ -120,6 +120,12 @@ fn a_named_session_starts_and_ls_shows_only_what_is_running() {
         !out.lines().any(|l| l.starts_with("default")),
         "default was never started in this test's dir: {out:?}"
     );
+
+    // The test ends the session it started: `Runtime`'s drop ends only the default one, and
+    // a live server is what this test is about, not what it may leave behind.
+    let (code, said) = kill(&rt, Some("work"));
+    assert_eq!(code, 0, "kill work: {said:?}");
+    wait_for_gone(&rt, "work");
 }
 
 #[test]
@@ -137,6 +143,12 @@ fn a_second_client_of_the_same_name_gets_the_first_client_s_pane() {
     second.wait_for_screen("hello-two", Duration::from_secs(10));
     // And the second one is not handed a fresh session: a fresh one would be an empty
     // shell that has never seen `hello-two`, which is to say this wait would never end.
+
+    // And the test takes the session home with it, the way `a_named_session_starts_...`
+    // does: both clients are gone here, and `Runtime`'s drop ends only the default one.
+    let (code, said) = kill(&rt, Some("work"));
+    assert_eq!(code, 0, "kill work: {said:?}");
+    wait_for_gone(&rt, "work");
 }
 
 #[test]
