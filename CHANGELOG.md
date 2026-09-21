@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### The Escape key, in every shape a terminal can send it
+
+A terminal that uses the `CSI u` keyboard encoding — kitty's protocol, which Ghostty and a
+few others speak — sends a plain Escape as `CSI 27 u` and a plain `a` as `CSI 97 u`. The
+input decoder recognised no `u`, and its rule for well-formed sequences with no key is to
+consume them whole, so those keys were silently dropped: a `ctl-[` that never reaches the
+program. Now the `u` form is read back — the first parameter is the key's Unicode codepoint,
+the second a modifier mask — and the key is delivered exactly like any other. Every other
+form is untouched, and a codepoint with no key is still swallowed rather than typed.
+
 ### A pane begins where it is asked to begin
 
 A new pane's shell used to start in the user's home directory, wherever neotmux was run from
