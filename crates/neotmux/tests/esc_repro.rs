@@ -41,7 +41,11 @@ finally:
     )
     .unwrap();
     let shell = dir.path().join("probe.sh");
-    std::fs::write(&shell, "#!/bin/sh\nexec /usr/bin/python3 PROBE\n".replace("PROBE", &probe.to_string_lossy())).unwrap();
+    std::fs::write(
+        &shell,
+        "#!/bin/sh\nexec /usr/bin/python3 PROBE\n".replace("PROBE", &probe.to_string_lossy()),
+    )
+    .unwrap();
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o755)).unwrap();
     Neotmux::start_with_shell(dir, shell.to_str().unwrap())

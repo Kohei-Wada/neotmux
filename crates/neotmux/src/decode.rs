@@ -229,7 +229,9 @@ fn key_from_codepoint(cp: u16) -> Option<KeyCode> {
         0x2191 => Some(KeyCode::Up),
         0x2192 => Some(KeyCode::Right),
         0x2193 => Some(KeyCode::Down),
-        _ => char::from_u32(u32::from(cp)).filter(|c| !c.is_control()).map(KeyCode::Char),
+        _ => char::from_u32(u32::from(cp))
+            .filter(|c| !c.is_control())
+            .map(KeyCode::Char),
     }
 }
 
@@ -383,10 +385,7 @@ mod tests {
             one(b"\x1b[97;2u"),
             Key::new(KeyCode::Char('a'), Modifiers::ALT)
         );
-        assert_eq!(
-            one(b"\x1b[27;4u"),
-            Key::new(KeyCode::Esc, Modifiers::CTRL)
-        );
+        assert_eq!(one(b"\x1b[27;4u"), Key::new(KeyCode::Esc, Modifiers::CTRL));
     }
 
     /// A named key by its protocol codepoint: Up = U+2191 = 8593.
@@ -402,10 +401,7 @@ mod tests {
         // codepoint 5 (ENQ) maps to nothing
         assert_eq!(decode(b"\x1b[5u"), vec![]);
         // a key really following it survives
-        assert_eq!(
-            decode(b"\x1b[5ua"),
-            vec![Key::plain(KeyCode::Char('a'))]
-        );
+        assert_eq!(decode(b"\x1b[5ua"), vec![Key::plain(KeyCode::Char('a'))]);
     }
 
     /// The `u`-form is a real key, alongside every other form it can arrive as — the
@@ -415,7 +411,10 @@ mod tests {
     fn a_csi_u_key_round_trips_to_its_conventional_bytes() {
         use crate::input::encode_key;
         assert_eq!(encode_key(one(b"\x1b[27u")).as_deref(), Some(&[0x1b][..]));
-        assert_eq!(encode_key(one(b"\x1b[97u")).as_deref(), Some(b"a".as_slice()));
+        assert_eq!(
+            encode_key(one(b"\x1b[97u")).as_deref(),
+            Some(b"a".as_slice())
+        );
     }
 
     #[test]
