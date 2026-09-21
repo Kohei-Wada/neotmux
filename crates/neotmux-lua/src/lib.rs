@@ -278,6 +278,7 @@ impl LuaSubsystem {
                         geometry.size,
                         geometry.panes.clone(),
                         self.reservations.band(owner),
+                        self.floats.by_owner(owner),
                     )
                 };
 
@@ -490,7 +491,11 @@ impl LuaSubsystem {
     }
 
     pub fn frame_output(&self) -> Vec<DrawCmd> {
-        self.buffers.applicable()
+        let mut out = self.buffers.applicable();
+        for cmds in self.buffers.applicable_floats().into_values() {
+            out.extend(cmds);
+        }
+        out
     }
 
     /// What every source has been granted, per edge. Whether the terminal can afford it is

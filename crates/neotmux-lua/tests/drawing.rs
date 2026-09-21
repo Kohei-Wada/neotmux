@@ -1,5 +1,6 @@
 use std::fs;
 
+use neotmux_lua::ops::Op;
 use neotmux_lua::runtime::Layers;
 use neotmux_lua::{KeyOutcome, LuaSubsystem};
 use neotmux_proto::{Color, DrawCmd, Epoch, Geometry, PaneId, Rect, Size};
@@ -802,5 +803,253 @@ fn a_failed_loads_own_float_grant_does_not_survive_the_rollback() {
         sub.floats().count(),
         1,
         "the failed load's own float grant should not have survived the rollback"
+    );
+}
+
+// Task 4: drawing into a float, and the layering it produces (spec §4). `ctx.floats` is
+// captured once per callback, before that callback runs (matching `band`), so a float
+// granted or removed inside a callback is invisible to that same callback's own draws —
+// every test below grants (or removes) in one tick and draws in another, the shape a real
+// plugin's own `on_tick` closure takes.
+
+/// One tick's worth of `neotmux.log.info` lines, in emission order.
+fn log_lines(sub: &LuaSubsystem) -> Vec<String> {
+    sub.drain_ops()
+        .into_iter()
+        .filter_map(|(_, op)| match op {
+            Op::Log { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_draw_into_a_float_is_offset_and_clipped_per_verb() {
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.floater')"),
+        (
+            "lua/plugin/floater.lua",
+            r#"
+            local win
+            neotmux.on_tick(function(ctx)
+              if win == nil then
+                win = neotmux.float({ x = 3, y = 2, w = 8, h = 4 })
+                return
+              end
+              ctx:text(win, 1, 1, 'abcdefghij')
+              ctx:rect(win, 1, 1, 10, 10, { fg = 1, bg = 2 })
+              ctx:tint(win, 1, 1, 10, 10, { fg = 3 })
+              ctx:line(win, 1, 1, 3, 1)
+            end)
+            return {}
+            "#,
+        ),
+    ]);
+    frame(&sub, 24); // grants the float; nothing drawn yet, ctx.floats did not see it
+    frame(&sub, 24); // ctx.floats now carries it, so this tick's four draws all land
+    assert_eq!(
+        sub.frame_output(),
+        vec![
+            DrawCmd::Text {
+                pane: None,
+                x: 4,
+                y: 3,
+                text: "abcdefg".to_string(),
+                fg: Color::Default,
+                bg: Color::Default,
+            },
+            DrawCmd::Rect {
+                pane: None,
+                rect: Rect::new(4, 3, 7, 3),
+                fg: Color::Idx(1),
+                bg: Color::Idx(2),
+            },
+            DrawCmd::Tint {
+                pane: None,
+                rect: Rect::new(4, 3, 7, 3),
+                fg: Some(Color::Idx(3)),
+                bg: None,
+            },
+            DrawCmd::Line {
+                pane: None,
+                from: (4, 3),
+                to: (6, 3),
+                glyph: '#',
+                fg: Color::Default,
+            },
+        ],
+        "each command lands offset by the float's origin (3, 2); the text, which would \
+         read 10 columns wide at local x=1 against an 8-wide float, is truncated to the \
+         cap of 7, not silently dropped or left full-length"
+    );
+}
+
+#[test]
+fn a_float_off_the_surface_edge_still_arrives_whole() {
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.floater')"),
+        (
+            "lua/plugin/floater.lua",
+            r#"
+            local win = neotmux.float({ x = 98, y = 20, w = 8, h = 4 })
+            neotmux.on_tick(function(ctx) ctx:text(win, 0, 0, 'hi') end)
+            return {}
+            "#,
+        ),
+    ]);
+    frame(&sub, 24);
+    assert_eq!(
+        sub.frame_output(),
+        vec![DrawCmd::Text {
+            pane: None,
+            x: 98,
+            y: 20,
+            text: "hi".to_string(),
+            fg: Color::Default,
+            bg: Color::Default,
+        }],
+        "only the float-local clip runs host-side; the command arrives whole even though \
+         (98, 20) falls outside the 80x24 surface -- clipping to the surface is the \
+         renderer's job, not this layer's"
+    );
+}
+
+#[test]
+fn grant_order_not_draw_order_decides_the_float_z_order() {
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.a') require('plugin.b')"),
+        (
+            "lua/plugin/a.lua",
+            r#"
+            local win
+            neotmux.on_tick(function(ctx)
+              if win == nil then
+                win = neotmux.float({ x = 0, y = 0, w = 4, h = 1 })
+                return
+              end
+              ctx:text(win, 0, 0, 'A')
+            end)
+            return {}
+            "#,
+        ),
+        (
+            "lua/plugin/b.lua",
+            r#"
+            local win = neotmux.float({ x = 0, y = 0, w = 4, h = 1 })
+            neotmux.on_tick(function(ctx) ctx:text(win, 0, 0, 'B') end)
+            return {}
+            "#,
+        ),
+    ]);
+    frame(&sub, 24);
+    frame(&sub, 24);
+    let texts: Vec<String> = sub
+        .frame_output()
+        .into_iter()
+        .filter_map(|c| match c {
+            DrawCmd::Text { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        texts,
+        vec!["B".to_string(), "A".to_string()],
+        "b.lua grants its float while loading, before any tick runs, so it gets the \
+         smaller float id even though a.lua loaded first and its tick is dispatched \
+         first every frame; z-order follows grant (float id) order, not dispatch order"
+    );
+}
+
+#[test]
+fn a_draw_into_a_float_the_source_no_longer_owns_is_dropped() {
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.floater')"),
+        (
+            "lua/plugin/floater.lua",
+            r#"
+            local win = neotmux.float({ x = 0, y = 0, w = 10, h = 4 })
+            neotmux.on_tick(function(ctx)
+              ctx:text(win, 0, 0, 'first')
+              win:remove()
+            end)
+            neotmux.on_tick(function(ctx)
+              ctx:text(win, 0, 1, 'second')
+            end)
+            return {}
+            "#,
+        ),
+    ]);
+    frame(&sub, 24);
+    let texts: Vec<String> = sub
+        .frame_output()
+        .into_iter()
+        .filter_map(|c| match c {
+            DrawCmd::Text { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        texts,
+        vec!["first".to_string()],
+        "the first callback's own draw, made while it still owned the float, arrives; \
+         the second callback's ctx captured the float list after the first callback \
+         removed it, so its draw into the same handle is silently dropped"
+    );
+}
+
+#[test]
+fn ctx_float_rect_reports_the_live_rect_and_nil_once_removed() {
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.floater')"),
+        (
+            "lua/plugin/floater.lua",
+            r#"
+            local win = neotmux.float({ x = 3, y = 2, w = 8, h = 4 })
+            local removed = false
+            neotmux.on_tick(function(ctx)
+              local r = ctx:float_rect(win)
+              if r then
+                neotmux.log.info(r.x .. ',' .. r.y .. ',' .. r.w .. ',' .. r.h)
+              else
+                neotmux.log.info('nil')
+              end
+              if not removed then
+                win:remove()
+                removed = true
+              end
+            end)
+            return {}
+            "#,
+        ),
+    ]);
+    frame(&sub, 24);
+    assert_eq!(log_lines(&sub), vec!["3,2,8,4".to_string()]);
+    frame(&sub, 24);
+    assert_eq!(log_lines(&sub), vec!["nil".to_string()]);
+}
+
+#[test]
+fn ctx_float_rect_refuses_a_pane_or_nil_target() {
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.floater')"),
+        (
+            "lua/plugin/floater.lua",
+            r#"
+            neotmux.on_tick(function(ctx)
+              local ok = pcall(function() return ctx:float_rect(nil) end)
+              neotmux.log.info('nil:' .. tostring(ok))
+              local ok2 = pcall(function() return ctx:float_rect(1) end)
+              neotmux.log.info('pane:' .. tostring(ok2))
+            end)
+            return {}
+            "#,
+        ),
+    ]);
+    frame(&sub, 24);
+    assert_eq!(
+        log_lines(&sub),
+        vec!["nil:false".to_string(), "pane:false".to_string()],
+        "float_rect answers only for a float handle; neither nil nor a pane number should \
+         be accepted"
     );
 }

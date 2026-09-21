@@ -105,16 +105,19 @@ impl Buffers {
     /// Every float committed under the frame this `begin` opened, from any owner, sorted
     /// by `FloatId` so the caller extends in grant order. Same epoch discipline as
     /// `applicable`: a buffer left over from an earlier frame is replayed only while its
-    /// epoch still matches.
+    /// epoch still matches. A float drawn into by more than one call in the same tick
+    /// (one `ctx:text`, another `ctx:rect`, both naming the same handle) keeps every
+    /// call's output, in recording order — the same union `applicable` gives a source's
+    /// own commands, just keyed by float id instead of by owner.
     pub fn applicable_floats(&self) -> BTreeMap<FloatId, Vec<DrawCmd>> {
         let inner = self.inner.borrow();
-        let mut floats = BTreeMap::new();
+        let mut floats: BTreeMap<FloatId, Vec<DrawCmd>> = BTreeMap::new();
         for (epoch, entries) in inner.committed_f.values() {
             if !epoch.matches(&inner.epoch) {
                 continue;
             }
             for (id, cmds) in entries {
-                floats.insert(*id, cmds.clone());
+                floats.entry(*id).or_default().extend(cmds.iter().cloned());
             }
         }
         floats
@@ -373,5 +376,23 @@ mod tests {
         buffers.commit(a);
         let ids: Vec<FloatId> = buffers.applicable_floats().into_keys().collect();
         assert_eq!(ids, vec![FloatId(1), FloatId(2)]);
+    }
+
+    #[test]
+    fn multiple_draws_into_the_same_float_in_one_tick_all_survive_in_order() {
+        let sources = Sources::new();
+        let a = sources.intern("a");
+        let buffers = Buffers::new();
+        buffers.begin(epoch(24));
+        buffers.record_float(a, FloatId(1), vec![text("first")]);
+        buffers.record_float(a, FloatId(1), vec![text("second")]);
+        buffers.commit(a);
+        let mut expected = BTreeMap::new();
+        expected.insert(FloatId(1), vec![text("first"), text("second")]);
+        assert_eq!(
+            buffers.applicable_floats(),
+            expected,
+            "a second draw into the same float this tick should add to the first, not replace it"
+        );
     }
 }

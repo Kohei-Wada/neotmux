@@ -1,11 +1,13 @@
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
-use mlua::{Table, UserData, UserDataMethods, Value};
+use mlua::{Function, Table, UserData, UserDataMethods, Value};
 
 use neotmux_proto::{Color, DrawCmd, PaneId, Rect, Size};
 
 use crate::api::rect;
 use crate::draw::Buffers;
+use crate::float::FloatId;
 use crate::source::SourceId;
 
 /// Scope-bound: created fresh inside `Lua::scope` for one dispatch and dies with it.
@@ -17,6 +19,10 @@ pub struct Ctx {
     /// This source's own band, in surface coordinates. Per source: two sources reserving the
     /// same edge get different bands, and a source that reserved nothing gets none.
     band: Option<Rect>,
+    /// This source's live floats, as of this tick. Captured per callback, not per frame:
+    /// a `move_to`/`resize_to` issued inside a tick takes effect on the next frame, so the
+    /// draws this tick saw clip against the rect they started with (matches `band`).
+    floats: BTreeMap<FloatId, Rect>,
 }
 
 impl Ctx {
@@ -26,6 +32,7 @@ impl Ctx {
         size: Size,
         panes: Vec<(PaneId, Rect)>,
         band: Option<Rect>,
+        floats: BTreeMap<FloatId, Rect>,
     ) -> Self {
         Self {
             owner,
@@ -33,6 +40,7 @@ impl Ctx {
             size,
             panes,
             band,
+            floats,
         }
     }
 
@@ -41,6 +49,42 @@ impl Ctx {
             .iter()
             .find(|(pane, _)| *pane == id)
             .map(|(_, rect)| *rect)
+    }
+}
+
+/// What the first argument to a drawing method names: nothing (the surface), a pane, or a
+/// float handle (`neotmux.float`'s table, read back through its private `__id`).
+enum Target {
+    Surface,
+    Pane(u32),
+    Float(FloatId),
+}
+
+fn resolve(target: &Value) -> mlua::Result<Target> {
+    match target {
+        Value::Nil => Ok(Target::Surface),
+        Value::Integer(i) => Ok(Target::Pane(*i as u32)),
+        Value::Table(table) => {
+            let id_fn: Function = table.get("__id")?;
+            let id: u32 = id_fn.call(())?;
+            Ok(Target::Float(FloatId(id)))
+        }
+        other => Err(mlua::Error::RuntimeError(format!(
+            "a pane, a float, or nil is expected, not {}",
+            other.type_name()
+        ))),
+    }
+}
+
+/// `ctx:float_rect`'s target is always a float: a plain number or nil is a type error here,
+/// not a pane or the surface — those have no `float_rect` question to answer.
+fn resolve_float(target: &Value) -> mlua::Result<FloatId> {
+    match resolve(target)? {
+        Target::Float(id) => Ok(id),
+        _ => Err(mlua::Error::RuntimeError(format!(
+            "float_rect takes a float handle, not {}",
+            target.type_name()
+        ))),
     }
 }
 
@@ -174,79 +218,149 @@ impl UserData for Ctx {
 
         methods.add_method(
             "text",
-            |_,
-             this,
-             (pane, x, y, text, colours): (
-                Option<u32>,
-                u16,
-                u16,
-                String,
-                Option<Table>,
-            )| {
+            |_, this, (target, x, y, text, colours): (Value, u16, u16, String, Option<Table>)| {
                 let (fg, bg) = parse_colours(colours)?;
-                this.buffers.record(
-                    this.owner,
-                    DrawCmd::Text {
-                        pane: pane.map(PaneId::from),
-                        x,
-                        y,
-                        text,
-                        fg,
-                        bg,
-                    },
-                );
+                match resolve(&target)? {
+                    Target::Surface => {
+                        this.buffers.record(
+                            this.owner,
+                            DrawCmd::Text {
+                                pane: None,
+                                x,
+                                y,
+                                text,
+                                fg,
+                                bg,
+                            },
+                        );
+                    }
+                    Target::Pane(pane) => {
+                        this.buffers.record(
+                            this.owner,
+                            DrawCmd::Text {
+                                pane: Some(PaneId::from(pane)),
+                                x,
+                                y,
+                                text,
+                                fg,
+                                bg,
+                            },
+                        );
+                    }
+                    Target::Float(id) => {
+                        let cmd = DrawCmd::Text {
+                            pane: None,
+                            x,
+                            y,
+                            text,
+                            fg,
+                            bg,
+                        };
+                        if let Some(rect) = this.floats.get(&id) {
+                            this.buffers.record_float(
+                                this.owner,
+                                id,
+                                crate::float::place(&cmd, rect),
+                            );
+                        }
+                    }
+                }
                 Ok(())
             },
         );
 
         methods.add_method(
             "rect",
-            |_,
-             this,
-             (pane, x, y, w, h, colours): (
-                Option<u32>,
-                u16,
-                u16,
-                u16,
-                u16,
-                Option<Table>,
-            )| {
+            |_, this, (target, x, y, w, h, colours): (Value, u16, u16, u16, u16, Option<Table>)| {
                 let (fg, bg) = parse_colours(colours)?;
-                this.buffers.record(
-                    this.owner,
-                    DrawCmd::Rect {
-                        pane: pane.map(PaneId::from),
-                        rect: Rect::new(x, y, w, h),
-                        fg,
-                        bg,
-                    },
-                );
+                let rect = Rect::new(x, y, w, h);
+                match resolve(&target)? {
+                    Target::Surface => {
+                        this.buffers.record(
+                            this.owner,
+                            DrawCmd::Rect {
+                                pane: None,
+                                rect,
+                                fg,
+                                bg,
+                            },
+                        );
+                    }
+                    Target::Pane(pane) => {
+                        this.buffers.record(
+                            this.owner,
+                            DrawCmd::Rect {
+                                pane: Some(PaneId::from(pane)),
+                                rect,
+                                fg,
+                                bg,
+                            },
+                        );
+                    }
+                    Target::Float(id) => {
+                        let cmd = DrawCmd::Rect {
+                            pane: None,
+                            rect,
+                            fg,
+                            bg,
+                        };
+                        if let Some(float) = this.floats.get(&id) {
+                            this.buffers.record_float(
+                                this.owner,
+                                id,
+                                crate::float::place(&cmd, float),
+                            );
+                        }
+                    }
+                }
                 Ok(())
             },
         );
 
         methods.add_method(
             "tint",
-            |_,
-             this,
-             (pane, x, y, w, h, colours): (
-                Option<u32>,
-                u16,
-                u16,
-                u16,
-                u16,
-                Option<Table>,
-            )| {
+            |_, this, (target, x, y, w, h, colours): (Value, u16, u16, u16, u16, Option<Table>)| {
                 let (fg, bg) = parse_tint_colours(colours)?;
-                this.buffers.record(
-                    this.owner,
-                    DrawCmd::Tint {
-                        pane: pane.map(PaneId::from),
-                        rect: Rect::new(x, y, w, h),
-                        fg,
-                        bg,
-                    },
-                );
+                let rect = Rect::new(x, y, w, h);
+                match resolve(&target)? {
+                    Target::Surface => {
+                        this.buffers.record(
+                            this.owner,
+                            DrawCmd::Tint {
+                                pane: None,
+                                rect,
+                                fg,
+                                bg,
+                            },
+                        );
+                    }
+                    Target::Pane(pane) => {
+                        this.buffers.record(
+                            this.owner,
+                            DrawCmd::Tint {
+                                pane: Some(PaneId::from(pane)),
+                                rect,
+                                fg,
+                                bg,
+                            },
+                        );
+                    }
+                    Target::Float(id) => {
+                        let cmd = DrawCmd::Tint {
+                            pane: None,
+                            rect,
+                            fg,
+                            bg,
+                        };
+                        if let Some(float) = this.floats.get(&id) {
+                            this.buffers.record_float(
+                                this.owner,
+                                id,
+                                crate::float::place(&cmd, float),
+                            );
+                        }
+                    }
+                }
                 Ok(())
             },
         );
@@ -255,8 +369,8 @@ impl UserData for Ctx {
             "line",
             |_,
              this,
-             (pane, x1, y1, x2, y2, colours, glyph): (
-                Option<u32>,
+             (target, x1, y1, x2, y2, colours, glyph): (
+                Value,
                 u16,
                 u16,
                 u16,
@@ -266,18 +380,58 @@ impl UserData for Ctx {
             )| {
                 let fg = parse_fg_only(colours)?;
                 let glyph = parse_glyph(glyph)?;
-                this.buffers.record(
-                    this.owner,
-                    DrawCmd::Line {
-                        pane: pane.map(PaneId::from),
-                        from: (x1, y1),
-                        to: (x2, y2),
-                        glyph,
-                        fg,
-                    },
-                );
+                match resolve(&target)? {
+                    Target::Surface => {
+                        this.buffers.record(
+                            this.owner,
+                            DrawCmd::Line {
+                                pane: None,
+                                from: (x1, y1),
+                                to: (x2, y2),
+                                glyph,
+                                fg,
+                            },
+                        );
+                    }
+                    Target::Pane(pane) => {
+                        this.buffers.record(
+                            this.owner,
+                            DrawCmd::Line {
+                                pane: Some(PaneId::from(pane)),
+                                from: (x1, y1),
+                                to: (x2, y2),
+                                glyph,
+                                fg,
+                            },
+                        );
+                    }
+                    Target::Float(id) => {
+                        let cmd = DrawCmd::Line {
+                            pane: None,
+                            from: (x1, y1),
+                            to: (x2, y2),
+                            glyph,
+                            fg,
+                        };
+                        if let Some(float) = this.floats.get(&id) {
+                            this.buffers.record_float(
+                                this.owner,
+                                id,
+                                crate::float::place(&cmd, float),
+                            );
+                        }
+                    }
+                }
                 Ok(())
             },
         );
+
+        methods.add_method("float_rect", |lua, this, target: Value| {
+            let id = resolve_float(&target)?;
+            match this.floats.get(&id) {
+                Some(rect) => Ok(Value::Table(rect::to_table(lua, *rect)?)),
+                None => Ok(Value::Nil),
+            }
+        });
     }
 }
