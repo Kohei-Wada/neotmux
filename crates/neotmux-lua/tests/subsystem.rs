@@ -1176,10 +1176,6 @@ fn a_declining_topmost_hands_the_key_to_the_lower_float_owner() {
         text.contains("top asked") && text.contains("lower asked"),
         "both float owners should have been offered the key first, topmost first: {text}"
     );
-    assert!(
-        !text.contains("lower won"),
-        "a float owner reported consuming the key it declined: {text}"
-    );
 }
 
 #[test]

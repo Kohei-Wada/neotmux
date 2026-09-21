@@ -240,15 +240,14 @@ overlay, and what is drawn later is what is seen. The server never knows it exis
 the shells, the layout and the focus are the server's, and a float is none of them.
 
 `move_to` and `resize_to` set the float where it is and how big it is, from the next frame —
-the same next-frame delay as the grant itself, and `resize` is not a verb here for the reason
-the band's section has: one verb for a delta and one verb for a size is a bug waiting to be
-typed. `win.__id` is the host's own seam — its drawing layer reads it through to resolve
+the same next-frame delay as the grant itself — and they answer the same two ways the band's
+handle does: `true`, or `nil` plus a message. `resize` is not a verb here for the reason the
+band's section has: one verb for a delta and one verb for a size is a bug waiting to be typed. `win.__id` is the host's own seam — its drawing layer reads it through to resolve
 `ctx:text(win, …)` and `ctx:float_rect(win)` — and it is private, not part of the ABI, and
 nothing you are meant to name.
 
 `ctx:float_rect(win)` answers **your own** float as `{ x, y, w, h }` in surface coordinates, or
-`nil`, and a `nil` means *draw nothing into it this tick*: its draws are dropped and the frame
-keeps what it had, the same bargain `ctx:reserved()` makes for bands.
+`nil`, and a `nil` means *draw nothing into it this tick*: its draws are dropped.
 
 **The host keeps one order, grant order, and it says the whole of the depth question.** A later
 float is drawn over an earlier one for as long as both exist, and the way back is the way every
