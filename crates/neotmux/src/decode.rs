@@ -178,6 +178,20 @@ fn csi(bytes: &[u8]) -> Step {
         // Shift-Tab's own sequence carries no modifier parameter, and saying it is shifted
         // would make it a different key from the `BackTab` the rest of the program binds.
         b'Z' => return Step::Key(Key::plain(KeyCode::BackTab), used),
+        // kitty / xterm `CSI u` keyboard encoding: parameter 0 is a Unicode codepoint, 1 a
+        // kitty modifier mask. A bare Escape arrives as `CSI 27 u`, which the catch-all below
+        // used to swallow outright — the key never reached the pane.
+        b'u' => {
+            let Some(&codepoint) = params.first() else {
+                return Step::Skip(used);
+            };
+            let mask = params.get(1).copied().unwrap_or(0);
+            let mods = Modifiers::from_param(mask + 1); // kitty mask +1 == xterm parameter
+            let Some(code) = key_from_codepoint(codepoint) else {
+                return Step::Skip(used);
+            };
+            return Step::Key(Key::new(code, mods), used);
+        }
         b'~' => match param(0) {
             1 | 7 => KeyCode::Home,
             2 => KeyCode::Insert,
@@ -198,6 +212,25 @@ fn csi(bytes: &[u8]) -> Step {
         _ => return Step::Skip(used),
     };
     Step::Key(Key::new(code, mods), used)
+}
+
+/// `CSI u` (kitty / xterm keyboard protocol) names a key by its Unicode codepoint: ordinary
+/// characters are their own codepoint (`CSI 97 u` = `a`), named keys use the codepoint the
+/// protocol assigns (Escape = 27, arrows = the arrow glyphs). A codepoint with no key yields
+/// `None`, so the sequence is consumed and dropped rather than leaking bytes.
+fn key_from_codepoint(cp: u16) -> Option<KeyCode> {
+    match cp {
+        0x09 => Some(KeyCode::Tab),
+        0x0d => Some(KeyCode::Enter),
+        0x1b => Some(KeyCode::Esc),
+        0x08 => Some(KeyCode::Backspace),
+        0x7f => Some(KeyCode::Delete),
+        0x2190 => Some(KeyCode::Left),
+        0x2191 => Some(KeyCode::Up),
+        0x2192 => Some(KeyCode::Right),
+        0x2193 => Some(KeyCode::Down),
+        _ => char::from_u32(u32::from(cp)).filter(|c| !c.is_control()).map(KeyCode::Char),
+    }
 }
 
 fn params(raw: &[u8]) -> Option<Vec<u16>> {
@@ -325,6 +358,64 @@ mod tests {
         assert_eq!(one(b"\x1b[A"), Key::plain(KeyCode::Up));
         assert_eq!(one(b"\x1bOP"), Key::plain(KeyCode::F(1)));
         assert_eq!(one(b"\x1b[3~"), Key::plain(KeyCode::Delete));
+    }
+
+    /// `CSI u` (the kitty / xterm keyboard protocol) names a key by its Unicode codepoint
+    // (decimal in the parameter bytes, like every other `CSI` parameter). A bare `27` is
+    // Escape; the reported "ctl-[ never arrives" bug was this whole sequence being dropped.
+    #[test]
+    fn a_csi_u_escape_decodes_to_the_escape_key() {
+        assert_eq!(one(b"\x1b[27u"), Key::plain(KeyCode::Esc));
+    }
+
+    #[test]
+    fn a_csi_u_character_decodes_to_that_character() {
+        assert_eq!(one(b"\x1b[97u"), Key::plain(KeyCode::Char('a')));
+        // `あ` is U+3042 = 12354.
+        assert_eq!(one(b"\x1b[12354u"), Key::plain(KeyCode::Char('あ')));
+    }
+
+    /// The second parameter is the kitty modifier mask; alt is bit 2. A plain character has
+    /// no modifier parameter at all.
+    #[test]
+    fn a_csi_u_modification_is_read_back() {
+        assert_eq!(
+            one(b"\x1b[97;2u"),
+            Key::new(KeyCode::Char('a'), Modifiers::ALT)
+        );
+        assert_eq!(
+            one(b"\x1b[27;4u"),
+            Key::new(KeyCode::Esc, Modifiers::CTRL)
+        );
+    }
+
+    /// A named key by its protocol codepoint: Up = U+2191 = 8593.
+    #[test]
+    fn a_csi_u_arrow_decodes_to_the_named_key() {
+        assert_eq!(one(b"\x1b[8593u"), Key::plain(KeyCode::Up));
+    }
+
+    /// A codepoint with no key (a control we don't name) is still consumed whole, so its
+    /// tail never leaks into the next keystroke.
+    #[test]
+    fn a_csi_u_with_no_key_is_dropped_whole() {
+        // codepoint 5 (ENQ) maps to nothing
+        assert_eq!(decode(b"\x1b[5u"), vec![]);
+        // a key really following it survives
+        assert_eq!(
+            decode(b"\x1b[5ua"),
+            vec![Key::plain(KeyCode::Char('a'))]
+        );
+    }
+
+    /// The `u`-form is a real key, alongside every other form it can arrive as — the
+    /// round-trip holds: decode then encode comes back to the bytes a terminal would send
+    /// for that key.
+    #[test]
+    fn a_csi_u_key_round_trips_to_its_conventional_bytes() {
+        use crate::input::encode_key;
+        assert_eq!(encode_key(one(b"\x1b[27u")).as_deref(), Some(&[0x1b][..]));
+        assert_eq!(encode_key(one(b"\x1b[97u")).as_deref(), Some(b"a".as_slice()));
     }
 
     #[test]
