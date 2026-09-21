@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 
 use neotmux_proto::{DrawCmd, Epoch};
 
+use crate::float::FloatId;
 use crate::source::SourceId;
 
 #[derive(Debug, Clone, Default)]
@@ -16,6 +17,8 @@ struct Inner {
     epoch: Epoch,
     scratch: BTreeMap<SourceId, Committed>,
     committed: BTreeMap<SourceId, Committed>,
+    scratch_f: BTreeMap<SourceId, Vec<(FloatId, Vec<DrawCmd>)>>,
+    committed_f: BTreeMap<SourceId, (Epoch, Vec<(FloatId, Vec<DrawCmd>)>)>,
 }
 
 #[derive(Default)]
@@ -35,11 +38,20 @@ impl Buffers {
         let mut inner = self.inner.borrow_mut();
         inner.epoch = epoch;
         inner.scratch.clear();
+        inner.scratch_f.clear();
     }
 
     pub fn record(&self, owner: SourceId, cmd: DrawCmd) {
         let mut inner = self.inner.borrow_mut();
         inner.scratch.entry(owner).or_default().cmds.push(cmd);
+    }
+
+    /// Only a live scratch is visible to its owner for the rest of the tick, same as
+    /// `record` — floats just live in a separate, per-owner ordered list because their
+    /// assembly order is by float id across all owners, not by source.
+    pub fn record_float(&self, owner: &SourceId, id: FloatId, cmds: Vec<DrawCmd>) {
+        let mut inner = self.inner.borrow_mut();
+        inner.scratch_f.entry(*owner).or_default().push((id, cmds));
     }
 
     pub fn commit(&self, owner: SourceId) {
@@ -50,18 +62,25 @@ impl Buffers {
         // That also covers a source forgotten mid-tick: re-inserting an empty entry and
         // skipping it are indistinguishable to `applicable`, so the cheaper one wins.
         let mut entry = inner.scratch.remove(&owner).unwrap_or_default();
-        entry.epoch = epoch;
+        entry.epoch = epoch.clone();
         inner.committed.insert(owner, entry);
+
+        let floats = inner.scratch_f.remove(&owner).unwrap_or_default();
+        inner.committed_f.insert(owner, (epoch, floats));
     }
 
     pub fn discard(&self, owner: SourceId) {
-        self.inner.borrow_mut().scratch.remove(&owner);
+        let mut inner = self.inner.borrow_mut();
+        inner.scratch.remove(&owner);
+        inner.scratch_f.remove(&owner);
     }
 
     pub fn forget(&self, owner: SourceId) {
         let mut inner = self.inner.borrow_mut();
         inner.scratch.remove(&owner);
         inner.committed.remove(&owner);
+        inner.scratch_f.remove(&owner);
+        inner.committed_f.remove(&owner);
     }
 
     /// Everything committed under the frame this `begin` opened. A buffer left over from an
@@ -76,6 +95,24 @@ impl Buffers {
             cmds.extend(entry.cmds.iter().cloned());
         }
         cmds
+    }
+
+    /// Every float committed under the frame this `begin` opened, from any owner, sorted
+    /// by `FloatId` so the caller extends in grant order. Same epoch discipline as
+    /// `applicable`: a buffer left over from an earlier frame is replayed only while its
+    /// epoch still matches.
+    pub fn applicable_floats(&self) -> BTreeMap<FloatId, Vec<DrawCmd>> {
+        let inner = self.inner.borrow();
+        let mut floats = BTreeMap::new();
+        for (epoch, entries) in inner.committed_f.values() {
+            if !epoch.matches(&inner.epoch) {
+                continue;
+            }
+            for (id, cmds) in entries {
+                floats.insert(*id, cmds.clone());
+            }
+        }
+        floats
     }
 }
 
@@ -252,5 +289,84 @@ mod tests {
         buffers.commit(a);
         let cmds = buffers.applicable();
         assert_eq!(cmds, vec![text("fresh")]);
+    }
+
+    #[test]
+    fn a_committed_float_is_applicable_under_the_same_epoch() {
+        let sources = Sources::new();
+        let a = sources.intern("a");
+        let buffers = Buffers::new();
+        buffers.begin(epoch(24));
+        buffers.record_float(&a, FloatId(1), vec![text("hi")]);
+        buffers.commit(a);
+        let mut expected = BTreeMap::new();
+        expected.insert(FloatId(1), vec![text("hi")]);
+        assert_eq!(buffers.applicable_floats(), expected);
+    }
+
+    #[test]
+    fn a_float_recorded_on_a_discarded_frame_does_not_appear() {
+        let sources = Sources::new();
+        let a = sources.intern("a");
+        let buffers = Buffers::new();
+
+        buffers.begin(epoch(24));
+        buffers.record_float(&a, FloatId(1), vec![text("good")]);
+        buffers.commit(a);
+
+        buffers.begin(epoch(24));
+        buffers.record_float(&a, FloatId(1), vec![text("half-written")]);
+        buffers.discard(a);
+
+        let mut expected = BTreeMap::new();
+        expected.insert(FloatId(1), vec![text("good")]);
+        assert_eq!(buffers.applicable_floats(), expected);
+    }
+
+    #[test]
+    fn committed_float_output_stops_replaying_once_the_epoch_changes() {
+        let sources = Sources::new();
+        let a = sources.intern("a");
+        let buffers = Buffers::new();
+
+        buffers.begin(epoch(24));
+        buffers.record_float(&a, FloatId(1), vec![text("hi")]);
+        buffers.commit(a);
+
+        let mut expected = BTreeMap::new();
+        expected.insert(FloatId(1), vec![text("hi")]);
+        assert_eq!(buffers.applicable_floats(), expected);
+
+        buffers.begin(epoch(25));
+        assert!(buffers.applicable_floats().is_empty());
+    }
+
+    #[test]
+    fn forget_drops_both_the_surface_and_float_buffers() {
+        let sources = Sources::new();
+        let a = sources.intern("a");
+        let buffers = Buffers::new();
+        buffers.begin(epoch(24));
+        buffers.record(a, text("hi"));
+        buffers.record_float(&a, FloatId(1), vec![text("float")]);
+        buffers.commit(a);
+        buffers.forget(a);
+        assert!(buffers.applicable().is_empty());
+        assert!(buffers.applicable_floats().is_empty());
+    }
+
+    #[test]
+    fn floats_are_returned_sorted_by_float_id_regardless_of_recording_order() {
+        let sources = Sources::new();
+        let a = sources.intern("a");
+        let b = sources.intern("b");
+        let buffers = Buffers::new();
+        buffers.begin(epoch(24));
+        buffers.record_float(&b, FloatId(2), vec![text("b's float")]);
+        buffers.record_float(&a, FloatId(1), vec![text("a's float")]);
+        buffers.commit(b);
+        buffers.commit(a);
+        let ids: Vec<FloatId> = buffers.applicable_floats().into_keys().collect();
+        assert_eq!(ids, vec![FloatId(1), FloatId(2)]);
     }
 }
