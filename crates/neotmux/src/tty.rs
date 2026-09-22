@@ -99,7 +99,6 @@ impl Terminal {
 /// What a wait over any number of slots found. The index is the slot's position in the
 /// slice it was waited over, because a hangup on one of three is not a hangup and the
 /// caller is the one that knows which slot was which.
-#[allow(dead_code)] // Task 3's frame loop consumes this; strip the allow then.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Any {
     /// Slot `i` has something to read, or something it wants read.
@@ -115,15 +114,39 @@ pub enum Any {
 /// Waits over any number of slots for the first that has something, and says which one.
 /// `wait_on` is its two-slot shape, the whole reason a second one exists at all; three
 /// is the attached clients, the door and the panes, which is the shape that has grown.
-#[allow(dead_code)] // Task 3's frame loop consumes this; strip the allow then.
 pub fn wait_any(slot_fds: &[BorrowedFd<'_>], deadline: Instant) -> io::Result<Any> {
-    loop {
+    // The wait itself is the same no matter the count; this only decides where the slots
+    // live. A frame waits over one or two clients plus the door and the panes, and that is
+    // small, so the common case stays on the stack rather than paying a heap round per
+    // wait: the client's tick budget is wall clock, and an allocation between ticks is
+    // the very thing the spinner test exists to catch.
+    const MAX_ON_STACK: usize = 16;
+    let n = slot_fds.len();
+    if n == 0 {
+        return Ok(Any::Idle);
+    }
+    if n <= MAX_ON_STACK {
+        let mut stack = [PollFd::new(slot_fds[0], PollFlags::POLLIN); MAX_ON_STACK];
+        for (slot, fd) in stack.iter_mut().zip(slot_fds) {
+            *slot = PollFd::new(*fd, PollFlags::POLLIN);
+        }
+        poll_one(&mut stack[..n], deadline)
+    } else {
         let mut watched: Vec<PollFd> = slot_fds
             .iter()
             .map(|fd| PollFd::new(*fd, PollFlags::POLLIN))
             .collect();
+        poll_one(&mut watched, deadline)
+    }
+}
+
+/// One wait over slots already laid out: the deadline, `EINTR`, and the slot that came
+/// ready, in the hangup-before-ready order. Whether the slots are on the stack or the heap
+/// is the caller's; by the time we are here they are the same.
+fn poll_one(watched: &mut [PollFd], deadline: Instant) -> io::Result<Any> {
+    loop {
         match poll(
-            &mut watched,
+            watched,
             timeout(deadline.saturating_duration_since(Instant::now())),
         ) {
             Ok(0) => return Ok(Any::Idle),

@@ -299,21 +299,24 @@ fn a_session_with_nobody_looking_at_it_outlives_the_old_linger() {
     assert_eq!(hello, wire::encode_hello());
 }
 
-/// Accepted and refused, rather than left in the backlog. One client, because the whole
-/// frame is a conversation with one Lua layer: two would each tick the same session, each
-/// believing the ops it raised were the only ones. Sharing a session is detach and attach's
-/// problem, not the split's.
+/// Accepted and attached, rather than refused: the whole of what the second client used
+/// to be turned away for is now being let in, and what it gets for that is the session.
 #[test]
-fn a_second_client_is_refused_and_says_why() {
+fn a_second_client_is_attached_side_by_side_with_the_first() {
     let runtime = TestRuntime::new();
-    let _first = started(runtime.path());
+    let _first = started(runtime.path()); // attached, holding the session while this runs
 
-    let mut second = Client::start(runtime.path(), "/bin/cat");
-    let said = second.wait_for_output("already has a client");
-    let status = second.wait_for_exit();
+    // The second connection is greeted, adopts the session, and is shown a frame of it —
+    // the first it owes, because no one has looked since the last one it did.
+    let mut second = greeted(&socket_in(runtime.path()));
+    send_message(
+        &mut second,
+        &neotmux_proto::wire::encode_to_server(&neotmux_proto::ToServer::Attach(an_attach())),
+    );
+    let got = read_message(&mut second);
     assert!(
-        !status.success(),
-        "a refused client exited successfully: {said:?}"
+        matches!(got, OwnedToClient::Tick(_)),
+        "the second client is shown the session, not refused it: {got:?}"
     );
 }
 
@@ -451,6 +454,20 @@ fn an_attach() -> neotmux_proto::msg::Attach {
         gutter: 0,
         wants_pane_output: false,
     }
+}
+
+/// One message off a raw link: four length bytes, then the body, then `wire` says what it is.
+fn read_message(stream: &mut UnixStream) -> OwnedToClient {
+    let mut len = [0u8; 4];
+    stream
+        .read_exact(&mut len)
+        .expect("the server owes a length");
+    let n = u32::from_le_bytes(len) as usize;
+    let mut body = vec![0u8; n];
+    stream
+        .read_exact(&mut body)
+        .expect("the server owes the body");
+    neotmux_proto::wire::decode_to_client(&body).expect("the server's message decodes")
 }
 
 /// A connection whose first message is not an `Attach` — one meant for a live conversation,
@@ -608,35 +625,23 @@ fn a_session_over_the_socket_still_carries_a_keystroke_to_its_shell_and_back() {
     let _client = started(runtime.path());
 }
 
-/// A client speaking the protocol, but hanging up instead of attaching. The server goes back
-/// to waiting rather than falling over, and the next client gets its session.
+/// Greeted and hung up on without an attach, a connection is dropped, not refused — and
+/// neither of those touches the session it found, which is the rule that did not change.
 #[test]
 fn a_client_that_greets_and_leaves_without_attaching_costs_nothing() {
     let runtime = TestRuntime::new();
-    let client = started(runtime.path());
+    let mut first = started(runtime.path()); // holding the session the whole way
 
     for _ in 0..3 {
-        let mut stream = UnixStream::connect(socket_in(runtime.path())).expect("connect");
-        stream.write_all(&wire::encode_hello()).expect("greet");
-        let mut hello = [0u8; HELLO_LEN];
-        stream.read_exact(&mut hello).expect("be greeted");
-        // A session is already running, so this one is refused — and then hangs up.
-        let mut refusal = Vec::new();
-        let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
-        let _ = stream.read_to_end(&mut refusal);
-        assert!(!refusal.is_empty(), "the refusal never came");
-        let message = &refusal[4..];
-        assert!(
-            matches!(
-                wire::decode_to_client(message),
-                Ok(OwnedToClient::Refused(_))
-            ),
-            "a second client was answered with something other than a refusal"
-        );
+        // A client that is greeted and then closes its end before it could send an attach.
+        // It is dropped, quietly: there is no longer a refusal to answer it with.
+        let _stream = greeted(&socket_in(runtime.path()));
+        // the stream hangs up at the end of this iteration, before it could attach
     }
 
-    // Still the same session, still talking to its shell.
-    drop(client);
+    // The session survived each of them, and the first client is still talking to it.
+    first.send("still-here\r");
+    first.wait_for_output("still-here");
 }
 
 /// The way out of an immortal session, and the one that does not go through the protocol.

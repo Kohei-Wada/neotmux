@@ -563,9 +563,10 @@ impl Session {
     /// notices are the client's, passed in because they are this client's and the last
     /// ones sent are not necessarily this client's; the panes and the rects are the
     /// session's, as everything else about the picture is.
-    #[allow(dead_code)] // Task 3's frame loop consumes this; strip the allow then.
     pub fn frame_with<'a>(&'a mut self, overlay: &'a [DrawCmd], notices: Vec<Notice>) -> Frame<'a> {
-        // The shown window's panes only, for the reason `frame` already gives.
+        // The shown window's panes only: a hidden pane's terminal goes on taking its child's
+        // output, but copying its grid into a frame nobody draws it in would bill every
+        // window onto every frame.
         let shown: Vec<PaneId> = self.windows.current().rects.keys().copied().collect();
         self.shells.snapshot(shown.into_iter());
         self.dirty = false;
@@ -591,7 +592,9 @@ impl Session {
     }
 
     /// The single-client picture: the overlay is the session's own record, the one the
-    /// passing tock just committed, rather than a buffer the caller owns.
+    /// passing tock just committed, rather than a buffer the caller owns. `advance`
+    /// reads it from the session, so the frame borrows `self` — not the tock — which is
+    /// why `advance` can return it and the server's `frame_with` cannot.
     fn frame(&mut self, notices: Vec<Notice>) -> Frame<'_> {
         // The shown window's panes only: a hidden pane's terminal goes on taking its
         // child's output, but copying its grid out for a frame nobody draws it in would put
@@ -648,7 +651,6 @@ impl Session {
     /// Whether the session changed in the way a frame is for, whatever the client's own
     /// overlay is about to add on top. A client decides whether to force one; the
     /// session only answers this half.
-    #[allow(dead_code)] // Task 3's frame loop consumes this; strip the allow then.
     pub fn is_dirty(&self) -> bool {
         self.dirty
     }
