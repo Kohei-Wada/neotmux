@@ -136,6 +136,10 @@ The resolution itself never runs Lua. `neotmux.command` writes the name into a t
 holds in Rust, so "is this name registered" is a lookup on a `BTreeMap`, answerable while the
 VM is mid-tick, parked, or in whatever state a raising `init.lua` left it.
 
+The one exception is written in `2026-09-24-writes-pass-a-hook-design.md`: a write to a pane
+that a registered hook did not pass is refused, and a hook that fails is a hook that did not
+pass it. A guardrail that fails open is useless exactly when something is wrong.
+
 **When Lua fails, the built-in answers.** If the handler raises, overruns its budget, or the
 frame does not answer within the connection's patience, and the name is also a host command,
 the host command runs and the connection is told what it did. If there is no built-in by that
