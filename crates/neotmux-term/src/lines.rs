@@ -177,4 +177,23 @@ mod tests {
         let lines = lines(2, 8, b"one\r\ntwo\r\nthree\r\n", None);
         assert_eq!(lines, vec!["three", ""]);
     }
+
+    /// The property the width rule exists for: whatever the rule says a string is wide,
+    /// the grid `vt100` builds from that string is that many columns wide.
+    fn grid_width(text: &str) -> usize {
+        let mut parser = vt100::Parser::new(1, 200, 0);
+        parser.process(text.as_bytes());
+        usize::from(parser.screen().cursor_position().1)
+    }
+
+    #[test]
+    fn what_this_measures_is_where_the_grid_leaves_the_cursor() {
+        for text in ["hello", "\u{3042}\u{3044}", "a\u{3042}b", "e\u{0301}x", ""] {
+            assert_eq!(
+                neotmux_proto::width::of_str(text),
+                grid_width(text),
+                "measuring {text:?}"
+            );
+        }
+    }
 }

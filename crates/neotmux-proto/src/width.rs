@@ -11,6 +11,9 @@
 //! because `vt100` appends it to the cell before it rather than giving it one. A control
 //! character below U+0100 adds nothing either, because `vt100` refuses to draw one at all;
 //! a tab never reaches a cell, it moves the cursor, so it has no width here.
+//!
+//! The test that checks this rule against `vt100`'s own grid lives in `neotmux-term`'s
+//! `lines.rs`, because the claim is about `vt100` and this crate does not depend on it.
 
 use unicode_width::UnicodeWidthChar as _;
 
@@ -65,11 +68,31 @@ mod tests {
     }
 
     #[test]
-    fn a_wide_character_is_two_columns_and_a_combining_mark_is_none() {
-        assert_eq!(of_char('あ'), 2);
-        assert_eq!(of_char('a'), 1);
-        assert_eq!(of_char('\u{0301}'), 0); // combining acute
-        assert_eq!(of_char('\u{1b}'), 0); // ESC, a control below U+0100
-        assert_eq!(of_str("aあ"), 3);
+    fn ascii_is_one_column_a_character() {
+        assert_eq!(of_str("hello"), 5);
+    }
+
+    #[test]
+    fn a_wide_character_is_two_columns() {
+        assert_eq!(of_str("\u{3042}"), 2);
+        assert_eq!(of_str("a\u{3042}b"), 4);
+    }
+
+    #[test]
+    fn a_combining_mark_adds_nothing() {
+        assert_eq!(of_str("e\u{0301}"), 1);
+    }
+
+    /// A tab moves the cursor rather than filling a cell, so it is not a column of text.
+    #[test]
+    fn a_control_character_adds_nothing() {
+        assert_eq!(of_str("\t"), 0);
+        assert_eq!(of_str("a\tb"), 2);
+        assert_eq!(of_str("\x07"), 0);
+    }
+
+    #[test]
+    fn an_empty_string_is_no_columns_at_all() {
+        assert_eq!(of_str(""), 0);
     }
 }
