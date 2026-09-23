@@ -28,6 +28,9 @@ pub struct Notifications {
     items: Vec<Notification>,
     transcript: VecDeque<String>,
     dropped: usize,
+    /// Everything ever pushed, the dropped included. A client's mark is one of these, so a
+    /// mark stays meaningful after the cap has thrown the line it pointed at away.
+    pushed: usize,
 }
 
 impl Notifications {
@@ -37,6 +40,7 @@ impl Notifications {
 
     pub fn push(&mut self, level: Level, tag: &str, text: &str) {
         self.transcript.push_back(format!("{tag}: {text}"));
+        self.pushed += 1;
         if self.transcript.len() > MAX_TRANSCRIPT {
             self.transcript.pop_front();
             self.dropped += 1;
@@ -76,6 +80,20 @@ impl Notifications {
         }
     }
 
+    /// Where the transcript is now: what a client attaching takes, and gives back on its
+    /// way out.
+    pub fn mark(&self) -> usize {
+        self.pushed
+    }
+
+    /// Everything raised since `mark`, as `flush` would write it, without the `neotmux: `
+    /// each line is printed behind.
+    pub fn since(&self, mark: usize) -> Vec<String> {
+        let oldest = self.pushed - self.transcript.len();
+        let from = mark.saturating_sub(oldest);
+        self.transcript.iter().skip(from).cloned().collect()
+    }
+
     pub fn expire(&mut self, now: Instant) {
         self.items
             .retain(|item| now.duration_since(item.created) < TTL);
@@ -113,6 +131,33 @@ mod tests {
             String::from_utf8(out).unwrap(),
             "neotmux: clock: hi\nneotmux: clock: bye\n"
         );
+    }
+
+    #[test]
+    fn a_mark_replays_only_what_was_raised_after_it() {
+        let mut n = Notifications::new();
+        n.push(Level::Info, "a", "one");
+        let mark = n.mark();
+        n.push(Level::Info, "b", "two");
+        assert_eq!(n.since(mark), vec!["b: two".to_string()]);
+        assert_eq!(
+            n.since(0),
+            vec!["a: one".to_string(), "b: two".to_string()],
+            "a mark of zero is the whole of it"
+        );
+    }
+
+    /// A mark older than the oldest line still held is not an index into nothing: what is
+    /// left of the transcript is what that client is told.
+    #[test]
+    fn a_mark_the_cap_has_overtaken_replays_what_is_left() {
+        let mut n = Notifications::new();
+        for i in 0..MAX_TRANSCRIPT + 3 {
+            n.push(Level::Info, "loud", &format!("line {i}"));
+        }
+        let lines = n.since(0);
+        assert_eq!(lines.len(), MAX_TRANSCRIPT);
+        assert_eq!(lines[0], "loud: line 3");
     }
 
     #[test]
