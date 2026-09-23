@@ -183,6 +183,17 @@ impl Session {
         rows
     }
 
+    /// Bytes into a pane's shell, as though they had been typed at it. `false` is a pane this
+    /// session does not hold, which is the caller's cue to ask another one: pane ids are the
+    /// server's, not a session's.
+    pub fn write_to_pane(&mut self, pane: PaneId, bytes: &[u8]) -> anyhow::Result<bool> {
+        if !self.windows.all_panes().any(|held| held == pane) {
+            return Ok(false);
+        }
+        self.shells.write(pane, bytes)?;
+        Ok(true)
+    }
+
     fn lay_out_reservations(&mut self) {
         self.steps.push(Step::Bands {
             surface: self.surface.size,

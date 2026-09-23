@@ -123,6 +123,12 @@ impl Sessions {
         names
     }
 
+    /// Every session's id. Pane ids are the server's, not a session's, so finding one pane
+    /// means walking every session rather than asking the one a command was addressed to.
+    pub(crate) fn ids(&self) -> Vec<SessionId> {
+        self.live.keys().copied().collect()
+    }
+
     pub(crate) fn get_mut(&mut self, id: SessionId) -> Option<&mut Session> {
         self.live.get_mut(&id).map(|held| &mut held.session)
     }

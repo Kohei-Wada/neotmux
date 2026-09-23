@@ -1344,3 +1344,58 @@ fn new_refuses_a_name_the_server_would_not_hold() {
     let said = String::from_utf8_lossy(&out.stderr);
     assert!(said.contains("may not start with '-'"), "{said}");
 }
+
+/// The row of the herdr table, in one test: an agent writes into a pane it did not open and
+/// reads back what the shell printed.
+#[test]
+fn send_reaches_the_pane_and_capture_reads_it_back() {
+    let runtime = TestRuntime::new();
+    let client = Client::start(runtime.path(), "/bin/cat");
+    wait_for_socket(&socket_in(runtime.path()));
+
+    let sent = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .args(["send", "%1", "from-outside", "--enter"])
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run send");
+    assert!(
+        sent.status.success(),
+        "{}",
+        String::from_utf8_lossy(&sent.stderr)
+    );
+
+    let deadline = Instant::now() + PATIENCE;
+    let seen = loop {
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+            .args(["capture", "%1"])
+            .env("XDG_RUNTIME_DIR", runtime.path())
+            .env("HOME", runtime.path())
+            .output()
+            .expect("run capture");
+        let text = String::from_utf8_lossy(&out.stdout).to_string();
+        if text.contains("from-outside") {
+            break text;
+        }
+        assert!(Instant::now() < deadline, "capture never saw it: {text:?}");
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    drop(client);
+    assert!(seen.contains("from-outside"), "{seen}");
+}
+
+#[test]
+fn send_to_a_pane_that_is_not_there_fails() {
+    let runtime = TestRuntime::new();
+    let client = started(runtime.path());
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .args(["send", "%99", "nothing"])
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run send");
+    drop(client);
+    assert!(!out.status.success());
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(said.contains("no pane %99"), "{said}");
+}

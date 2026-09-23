@@ -10,7 +10,7 @@
 
 use std::rc::Rc;
 
-use neotmux_proto::Size;
+use neotmux_proto::{PaneId, Size, Want};
 use neotmux_term::terminals::PaneTerminals;
 use neotmux_term::wakeup::Waker;
 
@@ -49,7 +49,7 @@ impl Ran {
 }
 
 /// Every name the host answers. The CLI reads it to tell a command from a session name.
-pub const NAMES: &[&str] = &["new", "rename", "windows", "panes"];
+pub const NAMES: &[&str] = &["new", "rename", "windows", "panes", "send", "capture"];
 
 pub fn unknown(name: &str) -> Ran {
     Ran::failed(format!("unknown command '{name}'"))
@@ -70,6 +70,8 @@ pub fn run(name: &str, args: &[String], session: Option<&str>, ctx: &mut Ctx<'_>
         "rename" => rename(args, ctx),
         "windows" => windows(session, ctx),
         "panes" => panes(session, ctx),
+        "send" => send(args, ctx),
+        "capture" => capture(args, ctx),
         other => unknown(other),
     }
 }
@@ -175,6 +177,85 @@ fn panes(session: Option<&str>, ctx: &mut Ctx<'_>) -> Ran {
             })
             .collect(),
     )
+}
+
+/// `%4`, the way a pane is written everywhere else. A bare number is taken too: a caller that
+/// has the id out of a `panes` line should not have to remember the sigil.
+fn pane_id(word: &str) -> Option<PaneId> {
+    word.trim_start_matches('%')
+        .parse::<u32>()
+        .ok()
+        .map(PaneId::from)
+}
+
+fn send(args: &[String], ctx: &mut Ctx<'_>) -> Ran {
+    let Some((first, rest)) = args.split_first() else {
+        return Ran::failed("usage: neotmux send <pane> <text> [--enter]");
+    };
+    let Some(pane) = pane_id(first) else {
+        return Ran::failed(format!("'{first}' is not a pane id"));
+    };
+    let enter = rest.iter().any(|arg| arg == "--enter");
+    let text = rest
+        .iter()
+        .filter(|arg| *arg != "--enter")
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut bytes = text.into_bytes();
+    if enter {
+        bytes.push(b'\r');
+    }
+    // Pane ids are the server's, so the pane is looked for in every session rather than in the
+    // one `-t` named — which is why `send` takes no `-t` at all.
+    for id in ctx.sessions.ids() {
+        let Some(session) = ctx.sessions.get_mut(id) else {
+            continue;
+        };
+        match session.write_to_pane(pane, &bytes) {
+            Ok(true) => return Ran::ok(Vec::new()),
+            Ok(false) => continue,
+            Err(err) => return Ran::failed(format!("could not write to %{}: {err:#}", pane.get())),
+        }
+    }
+    Ran::failed(format!("no pane %{}", pane.get()))
+}
+
+fn capture(args: &[String], ctx: &mut Ctx<'_>) -> Ran {
+    let Some(first) = args.first() else {
+        return Ran::failed("usage: neotmux capture <pane> [--lines N]");
+    };
+    let Some(pane) = pane_id(first) else {
+        return Ran::failed(format!("'{first}' is not a pane id"));
+    };
+    let back = match args.iter().position(|arg| arg == "--lines") {
+        Some(at) => match args.get(at + 1).and_then(|n| n.parse::<usize>().ok()) {
+            Some(n) => Some(n),
+            None => return Ran::failed("--lines takes a number"),
+        },
+        None => None,
+    };
+    let want = Want::default();
+    let Some(visible) = ctx.terminals.content(pane, None, want) else {
+        return Ran::failed(format!("no pane %{}", pane.get()));
+    };
+    let Some(count) = back else {
+        return Ran::ok(visible.lines);
+    };
+    // `--lines N` is the last N lines of everything the pane has: its history, then what is on
+    // it now. A pane that has scrolled nothing answers with what it has.
+    let extent = ctx.terminals.history_extent(pane).unwrap_or_default();
+    let wanted_history = count.saturating_sub(visible.lines.len());
+    let from = usize::try_from(extent.len)
+        .unwrap_or(usize::MAX)
+        .saturating_sub(wanted_history);
+    let mut lines = match ctx.terminals.history(pane, from, wanted_history, want) {
+        Some(history) => history.lines,
+        None => Vec::new(),
+    };
+    lines.extend(visible.lines);
+    let cut = lines.len().saturating_sub(count);
+    Ran::ok(lines.split_off(cut))
 }
 
 #[cfg(test)]

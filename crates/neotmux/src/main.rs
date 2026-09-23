@@ -215,6 +215,10 @@ commands:
                       the session's windows, one per line
   neotmux panes [-t name]
                       the session's panes, one per line
+  neotmux send <pane> <text> [--enter]
+                      write text into that pane's shell
+  neotmux capture <pane> [--lines N]
+                      what that pane is showing, oldest line first
 
 options:
   --log <path>    write the log somewhere other than the default
