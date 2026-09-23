@@ -244,6 +244,10 @@ argues is the correction and not the cost.
 
 ## 9. The command surface (shape only, not built here)
 
+Superseded by `2026-09-23-the-command-surface-design.md`, which draws a line this section does
+not: the commands that control the server are the host's and work without the Lua layer, and
+everything else is a plugin's.
+
 The reason to write this down now is that it is the payoff, and a design that made it awkward
 would be the wrong design.
 
