@@ -1832,3 +1832,35 @@ fn a_plugin_can_write_into_a_pane() {
     client.wait_for_output("typed-by-a-plugin");
     drop(client);
 }
+
+/// The whole path for `pane.mode`, with a real shell on a real pty: the session reads the
+/// master's line discipline every frame and the Lua layer answers out of it. `/bin/cat` reads
+/// lines and echoes them, which is the cooked case an input plugin may take over.
+#[test]
+fn a_plugin_reads_the_line_discipline_of_a_real_pane() {
+    let runtime = TestRuntime::new();
+    let layer = layer_with(&[(
+        "init.lua",
+        "local said = false
+         neotmux.on_tick(function()
+           if said then return end
+           local pane = neotmux.pane.current()
+           if not pane then return end
+           local mode = neotmux.pane.mode(pane)
+           local at = neotmux.pane.cursor(pane)
+           if not mode or mode.canonical == nil or not at then return end
+           said = true
+           neotmux.log.info('mode canonical=' .. tostring(mode.canonical)
+             .. ' echo=' .. tostring(mode.echo)
+             .. ' alternate=' .. tostring(mode.alternate)
+             .. ' cursor=' .. at.x .. ',' .. at.y)
+         end)",
+    )]);
+
+    let client = Client::start_with(runtime.path(), "/bin/cat", 24, 80, &[layer.path()]);
+    wait_for_log(
+        runtime.path(),
+        "mode canonical=true echo=true alternate=false cursor=0,0",
+    );
+    drop(client);
+}

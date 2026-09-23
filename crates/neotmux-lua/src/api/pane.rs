@@ -8,7 +8,7 @@ use neotmux_proto::{Dir, Geometry, PaneId, SplitDir};
 
 use crate::api::rect;
 use crate::ops::{Op, OpBuffer};
-use crate::paneinfo::PaneInfos;
+use crate::paneinfo::{PaneInfos, PaneTtys};
 use crate::source::{self, Sources};
 
 /// A count a caller gave in Lua, where the only wrong value is a negative one: that is a
@@ -71,6 +71,7 @@ pub(crate) fn install(
     ops: Rc<OpBuffer>,
     geometry: Rc<RefCell<Geometry>>,
     pane_info: Rc<RefCell<PaneInfos>>,
+    pane_tty: Rc<RefCell<PaneTtys>>,
     terminals: Rc<dyn PaneRead>,
 ) -> mlua::Result<Table> {
     let pane = lua.create_table()?;
@@ -293,6 +294,50 @@ pub(crate) fn install(
             Ok(())
         })?;
         pane.set("resize", resize)?;
+    }
+
+    {
+        // Where the program put the cursor, out of the frame's own tty snapshot. `visible` is
+        // whether it is showing: a hidden cursor is still somewhere, and a plugin drawing a
+        // hint on it wants to know both.
+        let tty = pane_tty.clone();
+        let cursor = lua.create_function(move |lua, pane: u32| {
+            match tty.borrow().get(&PaneId::from(pane)) {
+                Some(tty) => {
+                    let table = lua.create_table()?;
+                    table.set("x", tty.cursor.1)?;
+                    table.set("y", tty.cursor.0)?;
+                    table.set("visible", tty.cursor_visible)?;
+                    Ok(Value::Table(table))
+                }
+                None => Ok(Value::Nil),
+            }
+        })?;
+        pane.set("cursor", cursor)?;
+    }
+
+    {
+        // What the pane's program has done to the terminal. `canonical` and `echo` are the
+        // tty's own flags and are absent — not false — where the host could not read them:
+        // a plugin that cannot tell a password prompt from a shell must do nothing rather
+        // than something.
+        let tty = pane_tty.clone();
+        let mode = lua.create_function(move |lua, pane: u32| {
+            match tty.borrow().get(&PaneId::from(pane)) {
+                Some(tty) => {
+                    let table = lua.create_table()?;
+                    table.set("alternate", tty.alternate)?;
+                    table.set("application_cursor", tty.application_cursor)?;
+                    if let Some(line) = tty.line {
+                        table.set("canonical", line.canonical)?;
+                        table.set("echo", line.echo)?;
+                    }
+                    Ok(Value::Table(table))
+                }
+                None => Ok(Value::Nil),
+            }
+        })?;
+        pane.set("mode", mode)?;
     }
 
     {

@@ -6,7 +6,7 @@ use std::time::Instant;
 use anyhow::Context as _;
 use neotmux_proto::msg::{End, SessionOp, Step, Tick, Tock};
 use neotmux_proto::{
-    DrawCmd, Event, Geometry, Level, PaneId, PaneInfo, Rect as PRect, Reserved, Size,
+    DrawCmd, Event, Geometry, Level, PaneId, PaneInfo, PaneTty, Rect as PRect, Reserved, Size,
     Window as LuaWindow, WindowId,
 };
 use neotmux_term::pty::PtyHandle;
@@ -553,6 +553,21 @@ impl Session {
     /// result to Lua. Reading `/proc` for every pane on every frame is the syscall storm this
     /// exists to avoid, so most frames do nothing here.
     ///
+    /// Where every pane's cursor is and what mode its program has the terminal in, read now.
+    /// Unlike `pane_info` this is not on a cadence: both halves are cheap — a field off the
+    /// parser and one `tcgetattr` — and a plugin answering a keystroke needs this frame's
+    /// answer rather than the one from a second ago.
+    fn pane_tty(&self) -> BTreeMap<PaneId, PaneTty> {
+        self.windows
+            .all_panes()
+            .filter_map(|pane| {
+                let mut tty = self.terminals.screen_tty(pane)?;
+                tty.line = self.shells.line_mode(pane);
+                Some((pane, tty))
+            })
+            .collect()
+    }
+
     /// Every pane the session holds, hidden windows included: what a pane in the window you
     /// are not looking at is running is exactly the question a sidebar exists to answer, and
     /// the cadence rather than the number of panes is what bounds the bill.
@@ -747,11 +762,13 @@ impl Session {
             self.ended = true;
         }
         let pane_info = self.refresh_pane_info();
+        let pane_tty = self.pane_tty();
         Ok(Tick {
             steps: std::mem::take(&mut self.steps),
             epoch: self.windows.current().epoch(),
             geometry: self.geometry(),
             pane_info,
+            pane_tty,
             revisions: self.revisions(),
         })
     }

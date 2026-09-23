@@ -62,3 +62,57 @@ fn writing_to_the_pty_reaches_the_child() {
 
     pty.wait().expect("wait");
 }
+
+/// The claim `pane.mode` rests on: `tcgetattr` on the **master** answers for the slave, so the
+/// host can tell a program that reads lines from one that edits for itself without touching
+/// the child. Three states, one pty, driven by `stty` in the child itself.
+///
+/// Read after the child has answered, never before: the flags are the child's, and a child
+/// that has not run yet has not set them.
+#[test]
+fn the_master_answers_for_the_slave_s_line_discipline() {
+    let size = Size { rows: 24, cols: 80 };
+    let mut cmd = CommandBuilder::new("sh");
+    // Cooked, then a password prompt's shape, then raw — each announced once it is in force.
+    cmd.args([
+        "-c",
+        "stty icanon echo; echo COOKED; sleep 0.4; \
+         stty icanon -echo; echo SECRET; sleep 0.4; \
+         stty -icanon -echo; echo RAW; sleep 0.4",
+    ]);
+    let (_wakeup, waker) = wakeup().expect("wakeup");
+    let pty = PtyHandle::spawn(cmd, size, waker).expect("spawn");
+
+    let mut seen = String::new();
+    let mut modes = Vec::new();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while modes.len() < 3 && Instant::now() < deadline {
+        match pty.output().recv_timeout(Duration::from_millis(250)) {
+            Ok(PtyEvent::Output(bytes)) => {
+                seen.push_str(&String::from_utf8_lossy(&bytes));
+                for marker in ["COOKED", "SECRET", "RAW"] {
+                    if seen.contains(marker) && !modes.iter().any(|(at, _)| *at == marker) {
+                        modes.push((marker, pty.line_mode().expect("the master answered")));
+                    }
+                }
+            }
+            Ok(PtyEvent::Eof) => break,
+            Ok(PtyEvent::Error(e)) => panic!("pty read failed: {e}"),
+            Err(_) => continue,
+        }
+    }
+
+    let flags: Vec<(&str, bool, bool)> = modes
+        .iter()
+        .map(|(at, mode)| (*at, mode.canonical, mode.echo))
+        .collect();
+    assert_eq!(
+        flags,
+        vec![
+            ("COOKED", true, true),
+            ("SECRET", true, false),
+            ("RAW", false, false),
+        ],
+        "{seen:?}"
+    );
+}

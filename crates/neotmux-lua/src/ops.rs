@@ -138,6 +138,7 @@ mod tests {
         OpBuffer::new(Rc::new(Ambient::new(
             Rc::new(RefCell::new(Geometry::default())),
             Rc::new(RefCell::new(Default::default())),
+            Rc::new(RefCell::new(Default::default())),
         )))
     }
 

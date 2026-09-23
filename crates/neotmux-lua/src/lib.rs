@@ -26,7 +26,8 @@ use mlua::{Function, Lua, Value};
 use neotmux_proto::frame::Notice;
 use neotmux_proto::read::PaneRead;
 use neotmux_proto::{
-    DrawCmd, Epoch, Event, Geometry, Level, PaneId, PaneInfo, Reserved, SessionId, Size, WindowId,
+    DrawCmd, Epoch, Event, Geometry, Level, PaneId, PaneInfo, PaneTty, Reserved, SessionId, Size,
+    WindowId,
 };
 
 pub use api::Opts;
@@ -40,7 +41,7 @@ use draw::Buffers;
 use float::Floats;
 use ops::{Op, OpBuffer};
 use overrun::Overrun;
-use paneinfo::PaneInfos;
+use paneinfo::{PaneInfos, PaneTtys};
 use registry::{Kind, KindTag, RegistrationId, Registry};
 use reserve::Reservations;
 use runtime::Layers;
@@ -71,6 +72,7 @@ pub struct LuaSubsystem {
     buffers: Rc<Buffers>,
     geometry: Rc<RefCell<Geometry>>,
     pane_info: Rc<RefCell<PaneInfos>>,
+    pane_tty: Rc<RefCell<PaneTtys>>,
     /// The notifications the host's surface is showing, as of this frame.
     notices: Rc<RefCell<Vec<Notice>>>,
     /// Which session the work in hand is for, and what the others are holding meanwhile.
@@ -109,9 +111,14 @@ impl LuaSubsystem {
         let load_failures = Rc::new(RefCell::new(Vec::new()));
         let geometry = Rc::new(RefCell::new(Geometry::default()));
         let pane_info = Rc::new(RefCell::new(PaneInfos::new()));
+        let pane_tty = Rc::new(RefCell::new(PaneTtys::new()));
         let notices = Rc::new(RefCell::new(Vec::new()));
         // Before the op buffer, which reads the bound session at every push.
-        let ambient = Rc::new(Ambient::new(geometry.clone(), pane_info.clone()));
+        let ambient = Rc::new(Ambient::new(
+            geometry.clone(),
+            pane_info.clone(),
+            pane_tty.clone(),
+        ));
         let ops = Rc::new(OpBuffer::new(Rc::clone(&ambient)));
         let reservations = Rc::new(Reservations::new());
         let window_ids = Rc::new(WindowIds::new());
@@ -133,6 +140,7 @@ impl LuaSubsystem {
                 load_failures: load_failures.clone(),
                 geometry: geometry.clone(),
                 pane_info: pane_info.clone(),
+                pane_tty: pane_tty.clone(),
                 notices: notices.clone(),
                 panes,
                 clipboard,
@@ -158,6 +166,7 @@ impl LuaSubsystem {
             buffers,
             geometry,
             pane_info,
+            pane_tty,
             notices,
             ambient,
             budget,
@@ -293,6 +302,13 @@ impl LuaSubsystem {
     pub fn publish_pane_info(&self, session: SessionId, info: BTreeMap<PaneId, PaneInfo>) {
         let _bound = self.ambient.bind(session);
         *self.pane_info.borrow_mut() = info;
+    }
+
+    /// Where every pane's cursor is and what mode its program has the terminal in, as of the
+    /// frame about to be ticked.
+    pub fn publish_pane_tty(&self, session: SessionId, tty: BTreeMap<PaneId, PaneTty>) {
+        let _bound = self.ambient.bind(session);
+        *self.pane_tty.borrow_mut() = tty;
     }
 
     /// The unit of commit is the source, not the callback: a source's frame is the union of

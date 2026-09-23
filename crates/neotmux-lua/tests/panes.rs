@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -6,6 +7,7 @@ use neotmux_lua::runtime::Layers;
 use neotmux_lua::{KeyOutcome, LuaSubsystem};
 use neotmux_proto::geometry::Window;
 use neotmux_proto::{Dir, Epoch, Geometry, PaneId, Rect, SessionId, Size, WindowId};
+use neotmux_proto::{LineMode, PaneTty};
 
 mod support;
 
@@ -468,5 +470,93 @@ fn a_send_from_a_tick_that_raises_is_discarded_with_the_rest_of_its_frame() {
             .iter()
             .any(|(_, op)| matches!(op, Op::PaneSend { .. })),
         "a raising tick's send survived it"
+    );
+}
+
+/// Where the cursor is and what the program has done to the terminal: published with the
+/// frame, read from a tick like anything else about a pane.
+#[test]
+fn the_cursor_and_the_mode_are_this_frame_s() {
+    let (_dir, sub) = built(&[(
+        "init.lua",
+        "neotmux.on_tick(function()
+           local at = neotmux.pane.cursor(1)
+           local mode = neotmux.pane.mode(1)
+           neotmux.log.info(at.x .. ',' .. at.y .. ' visible=' .. tostring(at.visible)
+             .. ' canonical=' .. tostring(mode.canonical)
+             .. ' echo=' .. tostring(mode.echo)
+             .. ' alternate=' .. tostring(mode.alternate))
+         end)",
+    )]);
+    side_by_side(&sub);
+    sub.publish_pane_tty(
+        support::one(),
+        BTreeMap::from([(
+            PaneId::from(1),
+            PaneTty {
+                cursor: (4, 12),
+                cursor_visible: true,
+                alternate: false,
+                application_cursor: false,
+                line: Some(LineMode {
+                    canonical: true,
+                    echo: true,
+                }),
+            },
+        )]),
+    );
+    sub.dispatch_tick(support::one());
+    assert_eq!(
+        logged(&sub, Some(support::one())),
+        vec!["12,4 visible=true canonical=true echo=true alternate=false".to_string()]
+    );
+}
+
+/// A pane whose master would not answer is a pane whose line discipline is *unknown*, and
+/// unknown is absent rather than false: a plugin that cannot tell a password prompt from a
+/// shell must do nothing rather than something.
+#[test]
+fn a_mode_the_host_could_not_read_leaves_the_flags_out_rather_than_guessing() {
+    let (_dir, sub) = built(&[(
+        "init.lua",
+        "neotmux.on_tick(function()
+           local mode = neotmux.pane.mode(1)
+           neotmux.log.info('canonical=' .. tostring(mode.canonical)
+             .. ' alternate=' .. tostring(mode.alternate))
+         end)",
+    )]);
+    side_by_side(&sub);
+    sub.publish_pane_tty(
+        support::one(),
+        BTreeMap::from([(
+            PaneId::from(1),
+            PaneTty {
+                alternate: true,
+                ..PaneTty::default()
+            },
+        )]),
+    );
+    sub.dispatch_tick(support::one());
+    assert_eq!(
+        logged(&sub, Some(support::one())),
+        vec!["canonical=nil alternate=true".to_string()]
+    );
+}
+
+/// A pane the frame said nothing about — one that has just closed — answers nil rather than
+/// a table of defaults that reads as fact.
+#[test]
+fn a_pane_the_frame_did_not_describe_has_no_cursor_and_no_mode() {
+    let (_dir, sub) = built(&[(
+        "init.lua",
+        "neotmux.on_tick(function()
+           neotmux.log.info(tostring(neotmux.pane.cursor(1)) .. ' ' .. tostring(neotmux.pane.mode(1)))
+         end)",
+    )]);
+    side_by_side(&sub);
+    sub.dispatch_tick(support::one());
+    assert_eq!(
+        logged(&sub, Some(support::one())),
+        vec!["nil nil".to_string()]
     );
 }

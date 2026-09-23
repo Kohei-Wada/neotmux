@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 
 use neotmux_proto::read::{Extent, Lines, PaneRead, Want};
-use neotmux_proto::{GridSnapshot, PaneId, Size};
+use neotmux_proto::{GridSnapshot, PaneId, PaneTty, Size};
 
 use crate::query::Queries;
 use crate::state::TermState;
@@ -98,6 +98,21 @@ impl PaneTerminals {
             .borrow()
             .get(&pane)
             .is_some_and(|t| t.state.application_cursor())
+    }
+
+    /// The half of [`PaneTty`] the screen knows: where the cursor is, whether it is showing,
+    /// and what the program has switched on. The line discipline is the pty's half, and the
+    /// caller that has both puts them together.
+    pub fn screen_tty(&self, pane: PaneId) -> Option<PaneTty> {
+        let panes = self.panes.borrow();
+        let terminal = panes.get(&pane)?;
+        Some(PaneTty {
+            cursor: terminal.state.cursor(),
+            cursor_visible: terminal.state.cursor_visible(),
+            alternate: terminal.state.alternate_screen(),
+            application_cursor: terminal.state.application_cursor(),
+            line: None,
+        })
     }
 
     pub fn snapshot_into(&self, pane: PaneId, out: &mut GridSnapshot) {

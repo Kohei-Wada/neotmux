@@ -23,7 +23,7 @@ use crate::draw::Buffers;
 use crate::float::Floats;
 use crate::ops::{Op, OpBuffer};
 use crate::overrun::Overrun;
-use crate::paneinfo::PaneInfos;
+use crate::paneinfo::{PaneInfos, PaneTtys};
 use crate::registry::{Kind, KindTag, RegistrationId, Registry};
 use crate::reserve::Reservations;
 use crate::source::{self, SourceId, Sources};
@@ -43,6 +43,7 @@ pub(crate) struct Shared {
     pub(crate) load_failures: Rc<RefCell<Vec<LoadFailure>>>,
     pub(crate) geometry: Rc<RefCell<Geometry>>,
     pub(crate) pane_info: Rc<RefCell<PaneInfos>>,
+    pub(crate) pane_tty: Rc<RefCell<PaneTtys>>,
     pub(crate) notices: Rc<RefCell<Vec<neotmux_proto::frame::Notice>>>,
     pub(crate) panes: Rc<dyn PaneRead>,
     pub(crate) clipboard: Rc<dyn crate::clipboard::Clipboard>,
@@ -190,6 +191,7 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
         load_failures,
         geometry,
         pane_info,
+        pane_tty,
         notices,
         panes,
         clipboard,
@@ -263,6 +265,7 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
             ops.clone(),
             geometry.clone(),
             pane_info,
+            pane_tty,
             panes,
         )?;
         let pane = seal(lua, pane, "neotmux.pane")?;

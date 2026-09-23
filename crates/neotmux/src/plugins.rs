@@ -89,6 +89,7 @@ impl Plugins {
         if let Some(info) = tick.pane_info {
             self.lua.publish_pane_info(session, info);
         }
+        self.lua.publish_pane_tty(session, tick.pane_tty);
         self.lua.begin_frame(session, tick.epoch, tick.geometry);
         // Before the tick, so a plugin drawing the surface draws what is on it now.
         self.notifications.expire(Instant::now());

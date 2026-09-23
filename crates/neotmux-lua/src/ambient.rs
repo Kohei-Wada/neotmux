@@ -12,19 +12,21 @@ use std::rc::Rc;
 
 use neotmux_proto::{Geometry, SessionId};
 
-use crate::paneinfo::PaneInfos;
+use crate::paneinfo::{PaneInfos, PaneTtys};
 
 /// What one session is holding while some other session is the one bound.
 #[derive(Default)]
 struct Parked {
     geometry: Geometry,
     pane_info: PaneInfos,
+    pane_tty: PaneTtys,
 }
 
 pub struct Ambient {
     /// The cells the API's closures hold. Whatever is in them belongs to `current`.
     geometry: Rc<RefCell<Geometry>>,
     pane_info: Rc<RefCell<PaneInfos>>,
+    pane_tty: Rc<RefCell<PaneTtys>>,
     current: Cell<Option<SessionId>>,
     parked: RefCell<BTreeMap<SessionId, Parked>>,
     /// What each session is called. Set once, by the host, when it makes one.
@@ -32,10 +34,15 @@ pub struct Ambient {
 }
 
 impl Ambient {
-    pub fn new(geometry: Rc<RefCell<Geometry>>, pane_info: Rc<RefCell<PaneInfos>>) -> Self {
+    pub fn new(
+        geometry: Rc<RefCell<Geometry>>,
+        pane_info: Rc<RefCell<PaneInfos>>,
+        pane_tty: Rc<RefCell<PaneTtys>>,
+    ) -> Self {
         Self {
             geometry,
             pane_info,
+            pane_tty,
             current: Cell::new(None),
             parked: RefCell::new(BTreeMap::new()),
             names: RefCell::new(BTreeMap::new()),
@@ -99,6 +106,7 @@ impl Ambient {
         let mut held = Parked::default();
         std::mem::swap(&mut held.geometry, &mut self.geometry.borrow_mut());
         std::mem::swap(&mut held.pane_info, &mut self.pane_info.borrow_mut());
+        std::mem::swap(&mut held.pane_tty, &mut self.pane_tty.borrow_mut());
         if let Some(was) = was {
             parked.insert(was, held);
         }
@@ -107,6 +115,7 @@ impl Ambient {
         {
             std::mem::swap(&mut theirs.geometry, &mut self.geometry.borrow_mut());
             std::mem::swap(&mut theirs.pane_info, &mut self.pane_info.borrow_mut());
+            std::mem::swap(&mut theirs.pane_tty, &mut self.pane_tty.borrow_mut());
         }
     }
 }
@@ -135,7 +144,11 @@ mod tests {
     fn ambient() -> (Ambient, Rc<RefCell<Geometry>>) {
         let geometry = Rc::new(RefCell::new(Geometry::default()));
         let pane_info = Rc::new(RefCell::new(PaneInfos::new()));
-        (Ambient::new(geometry.clone(), pane_info), geometry)
+        let pane_tty = Rc::new(RefCell::new(PaneTtys::new()));
+        (
+            Ambient::new(geometry.clone(), pane_info, pane_tty),
+            geometry,
+        )
     }
 
     fn sized(rows: u16) -> Geometry {

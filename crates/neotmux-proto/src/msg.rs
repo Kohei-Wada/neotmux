@@ -15,7 +15,8 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    Dir, DrawCmd, Epoch, Event, Geometry, PaneId, PaneInfo, Reserved, Size, SplitDir, WindowId,
+    Dir, DrawCmd, Epoch, Event, Geometry, PaneId, PaneInfo, PaneTty, Reserved, Size, SplitDir,
+    WindowId,
 };
 
 /// What the client tells the server when it takes the session over: how big its terminal is,
@@ -54,6 +55,10 @@ pub struct Tick {
     /// What every pane is running, when the host's own cadence says it is time to resample.
     /// `None` on the frames in between, which is most of them.
     pub pane_info: Option<BTreeMap<PaneId, PaneInfo>>,
+    /// Where every pane's cursor is and what mode its program has the terminal in, as of this
+    /// frame. Not optional the way `pane_info` is: it is cheap enough to send every time, and
+    /// a plugin answering a keystroke cannot use a stale one.
+    pub pane_tty: BTreeMap<PaneId, PaneTty>,
     /// Every pane's read stamp, as of this frame.
     ///
     /// It travels with the frame rather than being asked for, because it is the cheap half

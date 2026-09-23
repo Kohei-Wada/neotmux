@@ -15,5 +15,6 @@ repository.workspace = true
 neotmux-proto.workspace = true
 anyhow.workspace = true
 base64.workspace = true
+libc.workspace = true
 portable-pty.workspace = true
 vt100.workspace = true

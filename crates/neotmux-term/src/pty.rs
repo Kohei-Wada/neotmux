@@ -3,7 +3,7 @@ use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 use std::thread;
 
 use anyhow::Context as _;
-use neotmux_proto::Size;
+use neotmux_proto::{LineMode, Size};
 use portable_pty::{Child, ExitStatus, MasterPty, PtySize, native_pty_system};
 
 use crate::wakeup::Waker;
@@ -117,6 +117,27 @@ impl PtyHandle {
     /// `None` everywhere else, which is the same answer a dead child gives.
     pub fn foreground(&self) -> Option<i32> {
         self.master.process_group_leader()
+    }
+
+    /// The slave's `ICANON` and `ECHO`, read from the master: on Linux `tcgetattr` on the
+    /// master answers for the slave, so the child is never touched and nothing is sent to it.
+    /// `None` is a master that would not answer — no fd to ask on, or a platform where the
+    /// question does not mean this — and it stays `None` rather than becoming a guess.
+    pub fn line_mode(&self) -> Option<LineMode> {
+        let fd = self.master.as_raw_fd()?;
+        let mut termios = std::mem::MaybeUninit::<libc::termios>::zeroed();
+        // Safety: `fd` is the master this handle owns and outlives the call, and `tcgetattr`
+        // either fills the struct or reports why it did not.
+        let read = unsafe { libc::tcgetattr(fd, termios.as_mut_ptr()) };
+        if read != 0 {
+            return None;
+        }
+        // Safety: `tcgetattr` answered 0, so it wrote the struct.
+        let termios = unsafe { termios.assume_init() };
+        Some(LineMode {
+            canonical: termios.c_lflag & libc::ICANON != 0,
+            echo: termios.c_lflag & libc::ECHO != 0,
+        })
     }
 
     pub fn wait(&mut self) -> io::Result<ExitStatus> {

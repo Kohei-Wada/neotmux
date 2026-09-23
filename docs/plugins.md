@@ -318,6 +318,8 @@ neotmux.pane.list()      -- { id, ... }, in layout order
 neotmux.pane.current()   -- id, or nil
 neotmux.pane.rect(id)    -- { x = , y = , w = , h = }, or nil
 neotmux.pane.info(id)    -- { command = ..., cwd = ... }, or nil
+neotmux.pane.cursor(id)  -- { x = , y = , visible = }, or nil
+neotmux.pane.mode(id)    -- { canonical = , echo = , alternate = , application_cursor = }, or nil
 neotmux.pane.revision(id)     -- a number that moves when the pane is fed, or nil
 neotmux.pane.content(id, opts) -- { line, ... }, revision, wrapped — or nil, nil, nil
 neotmux.pane.history(id)      -- how many lines are above the screen, how many fell off
@@ -342,6 +344,32 @@ now, which closes the gap when a neighbour goes. `list()` is in layout order, so
 is the index in it, and finding it is a loop over the list you already have. The shipped bar
 does exactly that in `status/position.lua`. Use an id for anything you look a pane up by, and
 a position for anything you print.
+
+`cursor` and `mode` are what a plugin on the input side needs and could only guess at before:
+where the program put the cursor, and what it has told the tty to do with a line as it is
+typed. Both are published with the frame rather than asked for, so they cost a plugin nothing
+to read every tick and describe the pane as of this frame — the same bargain `revisions` makes.
+
+`canonical` and `echo` are the tty's own `ICANON` and `ECHO`, read from the pty master, which
+on Linux answers for the slave without the child being touched. The three states worth telling
+apart:
+
+| canonical | echo | what is happening |
+| --- | --- | --- |
+| true | true | a program with no line editor of its own is reading a line — a plugin may take over |
+| true | false | a password prompt — **never touch it** |
+| false | false | the program edits for itself (readline, vim, less) |
+
+They are **absent rather than false** where the host could not read them: a plugin that cannot
+tell a password prompt from a shell must do nothing rather than something, so write
+`if mode.canonical == nil then return end` and mean it. `alternate` says a full-screen program
+has the pane; `application_cursor` is DECCKM, which is how an arrow key is encoded when it is
+sent.
+
+A cursor is where the *program* put it, which is where typing appears only when the program is
+the one reading the line — `mode` is what says whether it is. `visible` is whether the program
+is showing it; a hidden cursor is still somewhere. Both answer `nil` for a pane this frame said
+nothing about, which is a pane that has closed.
 
 `send` writes text into a pane's shell, as though it had been typed there — the in-process half
 of `neotmux send`. The bytes go as written: no key names, and nothing wrapped in a bracketed

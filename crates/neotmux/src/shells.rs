@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use anyhow::Context as _;
-use neotmux_proto::{GridSnapshot, PaneId, Rect as PRect, Size};
+use neotmux_proto::{GridSnapshot, LineMode, PaneId, Rect as PRect, Size};
 use neotmux_term::pty::{CommandBuilder, PtyEvent, PtyHandle};
 use neotmux_term::terminals::PaneTerminals;
 use neotmux_term::wakeup::Waker;
@@ -98,6 +98,12 @@ impl Shells {
     /// How many panes are running, which is what "was that the last one?" asks.
     pub fn len(&self) -> usize {
         self.shells.len()
+    }
+
+    /// What the pane's program has told its tty to do with a line. `None` for a pane this
+    /// session does not hold, and for one whose master would not answer.
+    pub fn line_mode(&self, pane: PaneId) -> Option<LineMode> {
+        self.shells.get(&pane)?.pty.line_mode()
     }
 
     pub fn write(&mut self, pane: PaneId, bytes: &[u8]) -> anyhow::Result<()> {

@@ -152,6 +152,16 @@ impl TermState {
         self.parser.screen().cursor_position()
     }
 
+    pub fn cursor_visible(&self) -> bool {
+        !self.parser.screen().hide_cursor()
+    }
+
+    /// Whether a full-screen program has the pane: the alternate screen is the one thing a
+    /// pane's program says about itself that needs no guessing.
+    pub fn alternate_screen(&self) -> bool {
+        self.parser.screen().alternate_screen()
+    }
+
     /// What the pane is showing, as plain-text lines (`crate::lines`). `last` bounds the work
     /// to the bottom of the screen rather than trimming an answer that was built in full.
     pub fn lines(&self, last: Option<usize>, trailing: Trailing) -> Vec<String> {

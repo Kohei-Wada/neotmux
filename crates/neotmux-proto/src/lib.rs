@@ -25,7 +25,7 @@ pub use ids::{PaneId, SessionId, WindowId};
 pub use keys::{Key, KeyCode, Modifiers};
 pub use level::Level;
 pub use msg::{OwnedToClient, ToClient, ToServer};
-pub use paneinfo::PaneInfo;
+pub use paneinfo::{LineMode, PaneInfo, PaneTty};
 pub use panerects::PaneRects;
 pub use read::{Extent, Lines, PaneRead, Trailing, Want};
 pub use reserve::{Axis, Edge, Reserved};
@@ -44,4 +44,4 @@ pub use wire::WireError;
 ///   the client (§11, M3). A renderer needed every one of them.
 /// - 3: `SessionOp::Detach` and `End::Detach`, so a client can leave without ending the
 ///   session. A renderer needed both.
-pub const PROTOCOL_VERSION: u32 = 10;
+pub const PROTOCOL_VERSION: u32 = 11;

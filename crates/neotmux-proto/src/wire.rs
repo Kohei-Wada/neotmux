@@ -22,8 +22,9 @@ use crate::msg::{
 };
 use crate::read::{Extent, Lines, Trailing, Want};
 use crate::{
-    Color, Dir, DrawCmd, Edge, Epoch, Event, Geometry, GridSnapshot, PROTOCOL_VERSION, PaneId,
-    PaneInfo, PaneRects, Rect, Reserved, Size, SnapCell, SplitDir, Window, WindowId,
+    Color, Dir, DrawCmd, Edge, Epoch, Event, Geometry, GridSnapshot, LineMode, PROTOCOL_VERSION,
+    PaneId, PaneInfo, PaneRects, PaneTty, Rect, Reserved, Size, SnapCell, SplitDir, Window,
+    WindowId,
 };
 
 /// The length of the handshake, which is the one message with a fixed size.
@@ -1004,6 +1005,23 @@ impl Writer {
                 self.pane_info(info);
             }
         }
+        self.len(v.pane_tty.len());
+        for (pane, tty) in &v.pane_tty {
+            self.u32(pane.get());
+            self.u16(tty.cursor.0);
+            self.u16(tty.cursor.1);
+            self.bool(tty.cursor_visible);
+            self.bool(tty.alternate);
+            self.bool(tty.application_cursor);
+            match &tty.line {
+                None => self.bool(false),
+                Some(line) => {
+                    self.bool(true);
+                    self.bool(line.canonical);
+                    self.bool(line.echo);
+                }
+            }
+        }
         self.len(v.revisions.len());
         for (pane, revision) in &v.revisions {
             self.u32(pane.get());
@@ -1380,6 +1398,32 @@ impl Reader<'_> {
         } else {
             None
         };
+        let mut pane_tty = BTreeMap::new();
+        for _ in 0..self.len()? {
+            let pane = self.pane()?;
+            let cursor = (self.u16()?, self.u16()?);
+            let cursor_visible = self.bool()?;
+            let alternate = self.bool()?;
+            let application_cursor = self.bool()?;
+            let line = if self.bool()? {
+                Some(LineMode {
+                    canonical: self.bool()?,
+                    echo: self.bool()?,
+                })
+            } else {
+                None
+            };
+            pane_tty.insert(
+                pane,
+                PaneTty {
+                    cursor,
+                    cursor_visible,
+                    alternate,
+                    application_cursor,
+                    line,
+                },
+            );
+        }
         let mut revisions = BTreeMap::new();
         for _ in 0..self.len()? {
             revisions.insert(self.pane()?, self.u64()?);
@@ -1389,6 +1433,7 @@ impl Reader<'_> {
             epoch,
             geometry,
             pane_info,
+            pane_tty,
             revisions,
         })
     }
@@ -2149,6 +2194,22 @@ mod tests {
             ),
             geometry: geometry_of(),
             revisions: BTreeMap::from([(PaneId::from(1), 7), (PaneId::from(2), 0)]),
+            pane_tty: BTreeMap::from([
+                (
+                    PaneId::from(1),
+                    PaneTty {
+                        cursor: (3, 7),
+                        cursor_visible: true,
+                        alternate: false,
+                        application_cursor: true,
+                        line: Some(LineMode {
+                            canonical: true,
+                            echo: false,
+                        }),
+                    },
+                ),
+                (PaneId::from(2), PaneTty::default()),
+            ]),
             pane_info: Some(BTreeMap::from([
                 (
                     PaneId::from(1),
@@ -2171,6 +2232,7 @@ mod tests {
             epoch: Epoch::default(),
             geometry: Geometry::default(),
             pane_info: None,
+            pane_tty: BTreeMap::new(),
             revisions: BTreeMap::new(),
         };
         let bytes = encode_to_client(&ToClient::Tick(&tick));
