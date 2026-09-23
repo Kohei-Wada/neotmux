@@ -528,9 +528,15 @@ fn frame_tock(stream: &mut UnixStream, wants: bool, reserved: neotmux_proto::Res
 }
 
 /// The done of a shared frame: the frame's last word to this client, owed after every
-/// tock it is for has been given, and so it is the last thing a shared round gives.
+/// tock it is for has been given, and so it is the last thing a shared round gives. The
+/// word is checked, the same way `frame_tick` checks its one: a done that reads as
+/// something else is the one a shared round is not over, and the round that is read past
+/// it is the one that is not the one the test thought it was in.
 fn frame_done(stream: &mut UnixStream) {
-    let _done = read_message(stream);
+    match read_message(stream) {
+        neotmux_proto::OwnedToClient::Done(_) => {}
+        other => panic!("the frame ended with {other:?}, not a done"),
+    }
 }
 
 /// One whole frame for a raw client, in the order it is owed: the tick, its tock, the
@@ -987,9 +993,10 @@ fn a_read_is_answered_on_the_link_that_asked_it_only() {
     frame_tock(&mut a, false, neotmux_proto::Reserved::default());
     frame_tock(&mut b, false, neotmux_proto::Reserved::default());
 
-    // A's question, on A's link, in this very round: the round is still waiting on its
-    // tocks when it lands, and so the answer is owed on coming, on A's link, and on no
-    // other.
+    // A's question, on A's link, in this very round: the two of them are done with their
+    // tocks when it lands, and so the answer is owed on A's link, and on no other, for
+    // the one that is asking is the one it is owed to, in whatever wait the round is in
+    // at the time.
     send_message(
         &mut a,
         &neotmux_proto::wire::encode_to_server(&neotmux_proto::msg::ToServer::Read(
@@ -998,13 +1005,19 @@ fn a_read_is_answered_on_the_link_that_asked_it_only() {
             },
         )),
     );
-    let got_a = read_message(&mut a);
+    let got_a = match read_message(&mut a) {
+        neotmux_proto::OwnedToClient::Reading(reading) => reading,
+        // The round's done landed first — the answer is owed right after it, on the
+        // same link, for the two of them are the same round.
+        neotmux_proto::OwnedToClient::Done(_) => match read_message(&mut a) {
+            neotmux_proto::OwnedToClient::Reading(reading) => reading,
+            bad => panic!("A's question is answered right after the round's done: {bad:?}"),
+        },
+        other => panic!("A's question is answered on A's link, and on no other one: {other:?}"),
+    };
     assert!(
-        matches!(
-            got_a,
-            neotmux_proto::OwnedToClient::Reading(neotmux_proto::msg::Reading::Revision(Some(_)))
-        ),
-        "A's question is answered on A's link: {got_a:?}"
+        matches!(got_a, neotmux_proto::msg::Reading::Revision(Some(_))),
+        "A's question is answered, with the revision it asked for: {got_a:?}"
     );
     frame_done(&mut a);
     frame_done(&mut b);
@@ -1156,9 +1169,10 @@ fn the_last_client_to_attach_is_the_one_the_session_is_told() {
     frame_done(&mut b);
 
     // And the ticks are saying it: the round B came in on, and the one A was in, for
-    // the two of them were in the same round, and so they were told it together, and
-    // the bands B's attach said are the bands in it, and the surface it was laid out
-    // against is the one A's geometry is telling too, the same one.
+    // the two of them were in the same round, and so they were told it together — the
+    // bands B's attach said are the bands in it, and the surface is the one that band
+    // takes the session's rows to, 24 the one the client attached with, 23 the one with
+    // the band in it, and not the one it was without the band.
     assert!(
         tick_b.steps.iter().any(|step| {
             matches!(
@@ -1169,7 +1183,8 @@ fn the_last_client_to_attach_is_the_one_the_session_is_told() {
         "the bands B's attach said are the bands the session keeps: {tick_b:?}"
     );
     assert_eq!(
-        tick_a.geometry.size.rows, tick_b.geometry.size.rows,
-        "both clients are told the same surface, the one B's attach said: {tick_a:?}"
+        tick_a.geometry.size.rows, 23,
+        "the surface is the one with the band in it, the 24 rows the client attached
+         with minus the one B reserved: {tick_a:?}"
     );
 }
