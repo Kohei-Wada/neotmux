@@ -470,6 +470,96 @@ fn read_message(stream: &mut UnixStream) -> OwnedToClient {
     neotmux_proto::wire::decode_to_client(&body).expect("the server's message decodes")
 }
 
+/// A raw client into the session: the greet, the attach with the one it is, and the first
+/// round it is owed — a round the client is in alone: the only raw one owed its tock, and
+/// the real clients in it answer themselves, and so this one takes it whole. The tock it
+/// sends carries its own words — the wants and the reserved it attached with.
+fn raw_client(attach: neotmux_proto::msg::Attach, runtime: &TestRuntime) -> UnixStream {
+    let reserved = attach.reserved;
+    let wants = attach.wants_pane_output;
+    let mut stream = raw_attach(attach, runtime);
+    let _tick = frame_tick(&mut stream);
+    frame_tock(&mut stream, wants, reserved);
+    frame_done(&mut stream);
+    stream
+}
+
+/// The greet and the attach only — the first round left for the caller to drive, because
+/// that round is shared with the raw clients already in it: a frame waits for every tock
+/// it is owed, and the ones in it have to answer in turn, one after the other, before
+/// any of them takes its done.
+fn raw_attach(attach: neotmux_proto::msg::Attach, runtime: &TestRuntime) -> UnixStream {
+    let mut stream = greeted(&socket_in(runtime.path()));
+    send_message(
+        &mut stream,
+        &neotmux_proto::wire::encode_to_server(&neotmux_proto::msg::ToServer::Attach(attach)),
+    );
+    stream
+}
+
+/// The half the server owes a raw client in a shared frame: the tick, whatever the frame
+/// is for — and none of the done, because the done is owed only after every tock the
+/// frame is for has been given. That is why the ones in a shared frame give their tocks
+/// first, one after the other, and take their dones last.
+fn frame_tick(stream: &mut UnixStream) -> neotmux_proto::msg::Tick {
+    match read_message(stream) {
+        neotmux_proto::OwnedToClient::Tick(tick) => tick,
+        other => panic!("the frame began with {other:?}, not a tick"),
+    }
+}
+
+/// The half a raw client owes a shared frame: the tock, with this client's words in it —
+/// the wants and the reserved are this client's, and the server keeps them per client:
+/// the wants OR into the session's, the reserved is the last to say it, in attach order,
+/// so a client that asks for either says so in every tock it sends.
+fn frame_tock(stream: &mut UnixStream, wants: bool, reserved: neotmux_proto::Reserved) {
+    let tock = neotmux_proto::msg::Tock {
+        ops: Vec::new(),
+        overlay: Vec::new(),
+        notices: Vec::new(),
+        reserved,
+        gutter: 0,
+        wants_pane_output: wants,
+    };
+    send_message(
+        stream,
+        &neotmux_proto::wire::encode_to_server(&neotmux_proto::msg::ToServer::Tock(tock)),
+    );
+}
+
+/// The done of a shared frame: the frame's last word to this client, owed after every
+/// tock it is for has been given, and so it is the last thing a shared round gives.
+fn frame_done(stream: &mut UnixStream) {
+    let _done = read_message(stream);
+}
+
+/// One whole frame for a raw client, in the order it is owed: the tick, its tock, the
+/// done — a round the client is in alone, the only raw one owed its tock, and the real
+/// clients in it answer themselves. `wants` and `reserved` are this client's words for
+/// the frame: the wants OR into the session's, the reserved is the last to say it, in
+/// attach order.
+fn frame_once(
+    stream: &mut UnixStream,
+    wants: bool,
+    reserved: neotmux_proto::Reserved,
+) -> neotmux_proto::msg::Tick {
+    let tick = frame_tick(stream);
+    frame_tock(stream, wants, reserved);
+    frame_done(stream);
+    tick
+}
+
+/// A key to the focused pane, the way a client that is not in a mode gives one: the one
+/// its plugins did not consume, and so the session's.
+fn type_key(stream: &mut UnixStream, ch: char) {
+    send_message(
+        stream,
+        &neotmux_proto::wire::encode_to_server(&neotmux_proto::msg::ToServer::Key(
+            neotmux_proto::Key::plain(neotmux_proto::KeyCode::Char(ch)),
+        )),
+    );
+}
+
 /// A connection whose first message is not an `Attach` — one meant for a live conversation,
 /// or bytes that do not decode as a message at all — must not end the detached session it
 /// found, and must not take the server itself down with it.
@@ -790,5 +880,296 @@ fn kill_with_nothing_running_says_so_and_fails() {
     assert!(
         said.contains("neotmux session 'default' is not running"),
         "{said}"
+    );
+}
+
+/// Two terminals in the session, and a word typed on one that the other has typed
+/// nothing: the one the first's plugins did not consume, the one the second sees — the
+/// whole of the feature in one sentence. The shell is `cat`, so the word is the pane's
+/// own, and the pane is the session's, and the other client is looking at that pane.
+/// The marker is one token, because the screen it is looked for in is redrawn with cursor
+/// moves between the words of whatever the client has been told.
+#[test]
+fn a_key_typed_on_one_client_is_seen_on_the_other() {
+    let runtime = TestRuntime::new();
+    let mut a = Client::start(runtime.path(), "/bin/cat");
+    wait_for_socket(&socket_in(runtime.path()));
+    a.send("the-round-trip-is\r");
+    a.wait_for_output("the-round-trip-is");
+
+    let mut b = Client::start(runtime.path(), "/bin/cat");
+    b.wait_for_output("the-round-trip-is");
+
+    a.send("typed-on-a\r");
+    b.wait_for_output("typed-on-a");
+    // In the other direction, because the Review Focus says whichever client: the key
+    // one of them types is the session's, and the session is both of theirs.
+    b.send("typed-on-b\r");
+    a.wait_for_output("typed-on-b");
+}
+
+/// One of two goes, and the other is left with the session, because the session is the
+/// server's and not either client's. The one that went is gone, and the one that stayed
+/// is not told the difference between "the other went" and "nothing happened" — its
+/// screen still holds the one that went left behind, and the one it types goes to the
+/// same pane.
+#[test]
+fn a_client_going_costs_the_other_nothing() {
+    let runtime = TestRuntime::new();
+    let mut a = Client::start(runtime.path(), "/bin/cat");
+    let mut b = Client::start(runtime.path(), "/bin/cat");
+
+    a.send("before-a-goes\r");
+    b.wait_for_output("before-a-goes");
+    a.kill();
+    drop(a);
+
+    // The one that is left is looking at the same pane the one that went last typed
+    // into, and the one it types is the one that is, the same way the
+    // `a_second_client_is_shown_the_session_the_first_one_left` test already proves,
+    // for a client that leaves on purpose.
+    b.wait_for_output("before-a-goes");
+    b.send("still-here\r");
+    b.wait_for_output("still-here");
+
+    // And the session itself is out: a connect that is answered is the server itself
+    // saying so.
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let mut answered = false;
+    while Instant::now() < deadline && !answered {
+        if let Ok(mut stream) = UnixStream::connect(socket_in(runtime.path())) {
+            let mut hello = [0u8; neotmux_proto::wire::HELLO_LEN];
+            if stream
+                .write_all(&neotmux_proto::wire::encode_hello())
+                .is_ok()
+                && stream.read_exact(&mut hello).is_ok()
+            {
+                answered = true;
+            }
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        answered,
+        "the session outlives the client that went, and its socket still answers"
+    );
+}
+
+/// A question one client asks about a pane is answered on that client's link, and on no
+/// other: the `Read` and the `Reading` are the two ends of the same question, and the
+/// other client had not asked it. The one that is not answered is not refused an error;
+/// it is simply not told, which is to say it is never, for the reason it was never
+/// asked.
+#[test]
+fn a_read_is_answered_on_the_link_that_asked_it_only() {
+    let runtime = TestRuntime::new();
+    let _session = started(runtime.path());
+
+    let mut a = raw_client(
+        neotmux_proto::msg::Attach {
+            wants_pane_output: false,
+            ..an_attach()
+        },
+        &runtime,
+    );
+    // B's first round is the one the two of them share, and so it is driven in turn: a
+    // frame waits for every tock it is owed, and the one that is not answered is the
+    // round that does not finish.
+    let mut b = raw_attach(
+        neotmux_proto::msg::Attach {
+            wants_pane_output: false,
+            ..an_attach()
+        },
+        &runtime,
+    );
+    let _tick_a = frame_tick(&mut a);
+    let _tick_b = frame_tick(&mut b);
+    frame_tock(&mut a, false, neotmux_proto::Reserved::default());
+    frame_tock(&mut b, false, neotmux_proto::Reserved::default());
+
+    // A's question, on A's link, in this very round: the round is still waiting on its
+    // tocks when it lands, and so the answer is owed on coming, on A's link, and on no
+    // other.
+    send_message(
+        &mut a,
+        &neotmux_proto::wire::encode_to_server(&neotmux_proto::msg::ToServer::Read(
+            neotmux_proto::msg::Read::Revision {
+                pane: neotmux_proto::PaneId::from(1),
+            },
+        )),
+    );
+    let got_a = read_message(&mut a);
+    assert!(
+        matches!(
+            got_a,
+            neotmux_proto::OwnedToClient::Reading(neotmux_proto::msg::Reading::Revision(Some(_)))
+        ),
+        "A's question is answered on A's link: {got_a:?}"
+    );
+    frame_done(&mut a);
+    frame_done(&mut b);
+
+    // Whatever B is told on its own link from here on may be a tick or a done of the
+    // frames the session keeps going — the session is alive, and the frames come — but
+    // it must not be a `Reading`, for the question was asked on A's link and on no
+    // other.
+    b.set_read_timeout(Some(Duration::from_millis(300)))
+        .expect("b takes a patience");
+    let mut len = [0u8; 4];
+    use std::io::Read;
+    for _ in 0..8 {
+        match b.read_exact(&mut len) {
+            Ok(_) => {
+                let mut body = vec![0u8; usize::try_from(u32::from_le_bytes(len)).unwrap()];
+                b.read_exact(&mut body).expect("b owes a body");
+                let message =
+                    neotmux_proto::wire::decode_to_client(&body).expect("b's message decodes");
+                assert!(
+                    !matches!(message, neotmux_proto::OwnedToClient::Reading(_)),
+                    "the link that did not ask was answered: {message:?}"
+                );
+            }
+            Err(err)
+                if err.kind().eq(&std::io::ErrorKind::WouldBlock)
+                    || err.kind().eq(&std::io::ErrorKind::TimedOut) =>
+            {
+                break;
+            }
+            Err(_) => break,
+        }
+    }
+}
+
+/// `wants_pane_output` is the OR of the attached clients, and not the last one to say
+/// so: the client that asks is the one that keeps the pane delivered while it is in it,
+/// and the one that does not ask does not stop the one that does, and the delivery
+/// stops with the last one that asked, and not with one before it.
+#[test]
+fn wants_is_the_or_of_the_clients_and_not_the_last_to_say_so() {
+    let runtime = TestRuntime::new();
+    let _session = started(runtime.path());
+
+    let mut a = raw_client(
+        neotmux_proto::msg::Attach {
+            wants_pane_output: true,
+            ..an_attach()
+        },
+        &runtime,
+    );
+    // The round B comes in on is the one the two of them share, and so it is driven in
+    // turn, the tocks first and the dones last: A says the word it attached with, and B
+    // says the word it did not.
+    let mut b = raw_attach(
+        neotmux_proto::msg::Attach {
+            wants_pane_output: false,
+            ..an_attach()
+        },
+        &runtime,
+    );
+    let _tick_a = frame_tick(&mut a);
+    frame_tock(&mut a, true, neotmux_proto::Reserved::default());
+    let _tick_b = frame_tick(&mut b);
+    frame_tock(&mut b, false, neotmux_proto::Reserved::default());
+    frame_done(&mut a);
+    frame_done(&mut b);
+
+    // A says a word, and the one it says it on is A: the echo of it lands in some
+    // round's tick, and the rounds are the ones the two of them share, and so they are
+    // driven in turn, round after round, until the one it lands in arrives: A's `wants`
+    // is in the OR while A is in it, and B's `false` did not win, which is the one a
+    // last-`Tock`-wins shape can say and the OR cannot.
+    type_key(&mut a, 'w');
+    let deadline = Instant::now() + PATIENCE;
+    let mut tick_a = frame_tick(&mut a);
+    loop {
+        frame_tock(&mut a, true, neotmux_proto::Reserved::default());
+        let _tick_b = frame_tick(&mut b);
+        frame_tock(&mut b, false, neotmux_proto::Reserved::default());
+        frame_done(&mut a);
+        frame_done(&mut b);
+        if tick_a.steps.iter().any(|step| {
+            matches!(
+                step,
+                neotmux_proto::msg::Step::Event(neotmux_proto::Event::PaneOutput { .. })
+            )
+        }) {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the word A typed never reached a tick while A was asking: {tick_a:?}"
+        );
+        tick_a = frame_tick(&mut a);
+    }
+
+    // A goes, and the last one asking goes with it: the OR is the empty set now, and A's
+    // `true` is not the last word in it, and B's `false` is not the first.
+    drop(a);
+    type_key(&mut b, 'w');
+    let tick_b_after = frame_once(&mut b, false, neotmux_proto::Reserved::default());
+    assert!(
+        !tick_b_after.steps.iter().any(|step| matches!(
+            step,
+            neotmux_proto::msg::Step::Event(neotmux_proto::Event::PaneOutput { .. })
+        )),
+        "the last client that asked went with A, and the delivery went with it: {tick_b_after:?}"
+    );
+}
+
+/// The last client to attach is the one the session is told to be: the bands B reserves
+/// are the bands the session keeps, the surface it is laid out against, and A is looking
+/// at the same one, which is to say the geometry A has been told is the one B's tock
+/// said, and not the one it did.
+#[test]
+fn the_last_client_to_attach_is_the_one_the_session_is_told() {
+    let runtime = TestRuntime::new();
+    let _session = started(runtime.path());
+
+    let mut a = raw_client(
+        neotmux_proto::msg::Attach {
+            wants_pane_output: false,
+            ..an_attach()
+        },
+        &runtime,
+    );
+    let band = neotmux_proto::Reserved::horizontal(0, 1); // one row, from the bottom
+    let mut b = raw_attach(
+        neotmux_proto::msg::Attach {
+            reserved: band,
+            ..an_attach()
+        },
+        &runtime,
+    );
+
+    // The round B comes in on is the one the two of them share, and so it is driven in
+    // turn, the tocks first and the dones last: A says the word it attached with, and B
+    // says the word it did not. B is after A in it, and so the band is the word the
+    // session keeps: the reserved is the last to say it, in attach order — and it is
+    // said at the attach, before the round begins, and so it is in the round's ticks,
+    // the ones the session tells to everybody, and not in the tocks, because B does
+    // not change it, and only the changed is told.
+    let tick_a = frame_tick(&mut a);
+    let tick_b = frame_tick(&mut b);
+    frame_tock(&mut a, false, neotmux_proto::Reserved::default());
+    frame_tock(&mut b, false, band);
+    frame_done(&mut a);
+    frame_done(&mut b);
+
+    // And the ticks are saying it: the round B came in on, and the one A was in, for
+    // the two of them were in the same round, and so they were told it together, and
+    // the bands B's attach said are the bands in it, and the surface it was laid out
+    // against is the one A's geometry is telling too, the same one.
+    assert!(
+        tick_b.steps.iter().any(|step| {
+            matches!(
+                step,
+                neotmux_proto::msg::Step::Bands { applied, .. } if *applied == band
+            )
+        }),
+        "the bands B's attach said are the bands the session keeps: {tick_b:?}"
+    );
+    assert_eq!(
+        tick_a.geometry.size.rows, tick_b.geometry.size.rows,
+        "both clients are told the same surface, the one B's attach said: {tick_a:?}"
     );
 }
