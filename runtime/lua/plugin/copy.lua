@@ -155,7 +155,7 @@ M.commands = {
     -- than whatever the pane has printed since.
     M.register = selection.text(first, last, function(line)
       return snapshot.line(mode.buffer, line)
-    end)
+    end, neotmux.width)
     mode.anchor = nil
     local count = last.line - first.line + 1
     -- The register is a fact; the clipboard is not. `clipboard.set` returning true says the
