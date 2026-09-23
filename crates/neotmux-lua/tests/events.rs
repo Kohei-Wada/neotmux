@@ -31,11 +31,14 @@ fn a_subscriber_sees_the_payload_of_pane_output() {
         ),
     ]);
     assert!(sub.run_init().is_empty());
-    sub.dispatch_event(&Event::PaneOutput {
-        pane: PaneId::from(1),
-        bytes: b"hello".to_vec(),
-    });
-    let ops = sub.drain_ops();
+    sub.dispatch_event(
+        support::one(),
+        &Event::PaneOutput {
+            pane: PaneId::from(1),
+            bytes: b"hello".to_vec(),
+        },
+    );
+    let ops = sub.drain_ops(Some(support::one()));
     assert!(format!("{ops:?}").contains("saw hello"), "{ops:?}");
 }
 
@@ -49,13 +52,16 @@ fn resized_carries_the_new_size() {
         ),
     ]);
     assert!(sub.run_init().is_empty());
-    sub.dispatch_event(&Event::Resized {
-        size: Size {
-            rows: 30,
-            cols: 100,
+    sub.dispatch_event(
+        support::one(),
+        &Event::Resized {
+            size: Size {
+                rows: 30,
+                cols: 100,
+            },
         },
-    });
-    assert!(format!("{:?}", sub.drain_ops()).contains("30x100"));
+    );
+    assert!(format!("{:?}", sub.drain_ops(Some(support::one()))).contains("30x100"));
 }
 
 #[test]
@@ -72,10 +78,13 @@ fn every_subscriber_runs_even_when_one_raises() {
         ),
     ]);
     assert!(sub.run_init().is_empty());
-    sub.dispatch_event(&Event::Resized {
-        size: Size { rows: 1, cols: 1 },
-    });
-    let text = format!("{:?}", sub.drain_ops());
+    sub.dispatch_event(
+        support::one(),
+        &Event::Resized {
+            size: Size { rows: 1, cols: 1 },
+        },
+    );
+    let text = format!("{:?}", sub.drain_ops(Some(support::one())));
     assert!(text.contains("still here"), "{text}");
     assert!(
         text.contains("boom"),
@@ -93,10 +102,13 @@ fn a_subscriber_to_another_event_is_not_called() {
         ),
     ]);
     assert!(sub.run_init().is_empty());
-    sub.dispatch_event(&Event::Resized {
-        size: Size { rows: 1, cols: 1 },
-    });
-    assert!(sub.drain_ops().is_empty());
+    sub.dispatch_event(
+        support::one(),
+        &Event::Resized {
+            size: Size { rows: 1, cols: 1 },
+        },
+    );
+    assert!(sub.drain_ops(Some(support::one())).is_empty());
 }
 
 #[test]
@@ -116,11 +128,14 @@ fn a_subscriber_mutating_the_payload_does_not_affect_the_next_subscriber() {
         ),
     ]);
     assert!(sub.run_init().is_empty());
-    sub.dispatch_event(&Event::PaneOutput {
-        pane: PaneId::from(1),
-        bytes: b"hello".to_vec(),
-    });
-    let text = format!("{:?}", sub.drain_ops());
+    sub.dispatch_event(
+        support::one(),
+        &Event::PaneOutput {
+            pane: PaneId::from(1),
+            bytes: b"hello".to_vec(),
+        },
+    );
+    let text = format!("{:?}", sub.drain_ops(Some(support::one())));
     assert!(text.contains("saw hello pane=1"), "{text}");
 }
 
@@ -141,10 +156,13 @@ fn subscribers_run_in_registration_order() {
         ),
     ]);
     assert!(sub.run_init().is_empty());
-    sub.dispatch_event(&Event::Resized {
-        size: Size { rows: 1, cols: 1 },
-    });
-    let text = format!("{:?}", sub.drain_ops());
+    sub.dispatch_event(
+        support::one(),
+        &Event::Resized {
+            size: Size { rows: 1, cols: 1 },
+        },
+    );
+    let text = format!("{:?}", sub.drain_ops(Some(support::one())));
     let first_idx = text.find("first").expect("first should have run");
     let second_idx = text.find("second").expect("second should have run");
     assert!(first_idx < second_idx, "{text}");

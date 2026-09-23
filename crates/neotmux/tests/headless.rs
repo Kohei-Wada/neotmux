@@ -16,10 +16,16 @@ use neotmux_proto::Level;
 use neotmux_proto::frame::{Frame, Notice};
 use neotmux_proto::keys::{Key, KeyCode};
 use neotmux_proto::msg::End;
-use neotmux_proto::{DrawCmd, Reserved, Size, WindowId};
+use neotmux_proto::{DrawCmd, Reserved, SessionId, Size, WindowId};
 use neotmux_term::wakeup::{Wakeup, wakeup};
 
 const SURFACE: Size = Size { rows: 10, cols: 40 };
+
+/// The one session these two halves are. They are about a session rather than about which of
+/// them it is, and the server holds one.
+fn one() -> SessionId {
+    SessionId::from(1)
+}
 /// Long enough for a shell to start and answer on a loaded machine; a passing run takes a
 /// small fraction of it.
 const PATIENCE: Duration = Duration::from_secs(20);
@@ -54,13 +60,20 @@ fn halves(files: &[(&str, &str)]) -> (tempfile::TempDir, Wakeup, Session, Plugin
     )
     .expect("build the Lua subsystem");
     assert!(lua.run_init().is_empty(), "the layer failed to load");
-    (dir, wakeup, session, Plugins::new(lua))
+    let mut plugins = Plugins::new(lua);
+    // What the server does the moment the load is over. A load's ops belong to no session —
+    // there was not one yet — so this is the one drain that takes them.
+    assert!(
+        !plugins.drain_load_ops(),
+        "the layer asked to quit while loading"
+    );
+    (dir, wakeup, session, plugins)
 }
 
 /// A key as the client would offer it: to the plugins first, and on to the focused pane only
 /// if nobody wanted it.
 fn key(session: &mut Session, plugins: &Plugins, key: Key) {
-    if plugins.key(key) == KeyOutcome::Fallthrough {
+    if plugins.key(one(), key) == KeyOutcome::Fallthrough {
         session.key(key).expect("key");
     }
 }
@@ -96,11 +109,11 @@ fn screen(frame: &Frame) -> String {
 /// that cross the socket in the real thing.
 fn frame<'a>(session: &'a mut Session, plugins: &mut Plugins) -> neotmux::session::Pass<'a> {
     let tick = session.tick().expect("tick");
-    let tock = plugins.respond(tick);
+    let tock = plugins.respond(one(), tick);
     let mut pass = session.advance(&tock).expect("advance");
     // What the ops did, told to the plugins before anything else happens — the same round
     // the client keeps its keyboard out of.
-    plugins.catch_up(std::mem::take(&mut pass.steps));
+    plugins.catch_up(one(), std::mem::take(&mut pass.steps));
     pass
 }
 
@@ -173,8 +186,8 @@ fn a_frame_carries_what_the_sources_drew_and_what_they_notified() {
              return {}",
         ),
     ]);
-    // `notify` ran at load time, so its op is waiting where a client's own startup drain
-    // would have taken it; the first frame takes it instead.
+    // `notify` ran at load time, so the startup drain in `halves` took it — into the
+    // notification surface, which is where a notice comes from whatever raised it.
     let pass = frame(&mut session, &mut plugins);
     let frame = pass.frame.expect("a frame");
 
@@ -225,10 +238,10 @@ fn frame_showing<'a>(
     notices: Vec<Notice>,
 ) -> neotmux::session::Pass<'a> {
     let tick = session.tick().expect("tick");
-    let mut tock = plugins.respond(tick);
+    let mut tock = plugins.respond(one(), tick);
     tock.notices = notices;
     let mut pass = session.advance(&tock).expect("advance");
-    plugins.catch_up(std::mem::take(&mut pass.steps));
+    plugins.catch_up(one(), std::mem::take(&mut pass.steps));
     pass
 }
 

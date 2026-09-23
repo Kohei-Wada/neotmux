@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use neotmux_lua::ops::Op;
 use neotmux_lua::runtime::Layers;
 use neotmux_lua::{KeyOutcome, LuaSubsystem};
-use neotmux_proto::{Dir, Epoch, Geometry, PaneId, Rect, Size};
+use neotmux_proto::{Dir, Epoch, Geometry, PaneId, Rect, SessionId, Size};
 
 mod support;
 
@@ -25,9 +25,10 @@ fn built(files: &[(&str, &str)]) -> (tempfile::TempDir, LuaSubsystem) {
 }
 
 /// Two side-by-side panes on an 80x24 surface, the second focused.
-fn publish(sub: &LuaSubsystem, panes: Vec<(PaneId, Rect)>, focus: PaneId) {
+fn publish(sub: &LuaSubsystem, session: SessionId, panes: Vec<(PaneId, Rect)>, focus: PaneId) {
     let size = Size { rows: 24, cols: 80 };
     sub.begin_frame(
+        session,
         Epoch::new(size, panes.iter().map(|(id, _)| *id).collect(), Some(focus)),
         Geometry {
             size,
@@ -41,6 +42,7 @@ fn publish(sub: &LuaSubsystem, panes: Vec<(PaneId, Rect)>, focus: PaneId) {
 fn side_by_side(sub: &LuaSubsystem) {
     publish(
         sub,
+        support::one(),
         vec![
             (PaneId::from(1), Rect::new(0, 0, 40, 24)),
             (PaneId::from(2), Rect::new(40, 0, 40, 24)),
@@ -49,8 +51,8 @@ fn side_by_side(sub: &LuaSubsystem) {
     );
 }
 
-fn logged(sub: &LuaSubsystem) -> Vec<String> {
-    sub.drain_ops()
+fn logged(sub: &LuaSubsystem, session: Option<SessionId>) -> Vec<String> {
+    sub.drain_ops(session)
         .into_iter()
         .filter_map(|(_, op)| match op {
             Op::Log { text, .. } => Some(text),
@@ -86,10 +88,10 @@ fn a_pane_rect_read_from_a_key_handler_matches_the_one_read_from_a_tick() {
         ),
     ]);
     side_by_side(&sub);
-    sub.dispatch_key("C-x");
-    sub.dispatch_tick();
+    sub.dispatch_key(support::one(), "C-x");
+    sub.dispatch_tick(support::one());
 
-    let lines = logged(&sub);
+    let lines = logged(&sub, Some(support::one()));
     assert_eq!(
         lines,
         vec!["key 40,0,40,24", "tick 40,0,40,24"],
@@ -111,8 +113,8 @@ fn a_pane_nobody_has_has_no_rect() {
         ),
     ]);
     side_by_side(&sub);
-    sub.dispatch_key("C-x");
-    assert_eq!(logged(&sub), vec!["key nil"]);
+    sub.dispatch_key(support::one(), "C-x");
+    assert_eq!(logged(&sub, Some(support::one())), vec!["key nil"]);
 }
 
 /// A resize is an op like a split: queued from wherever it was asked for, applied after the
@@ -128,8 +130,12 @@ fn a_resize_is_queued_as_an_op_with_the_direction_and_the_cells() {
         ),
     ]);
     side_by_side(&sub);
-    sub.dispatch_key("C-x");
-    let ops: Vec<Op> = sub.drain_ops().into_iter().map(|(_, op)| op).collect();
+    sub.dispatch_key(support::one(), "C-x");
+    let ops: Vec<Op> = sub
+        .drain_ops(Some(support::one()))
+        .into_iter()
+        .map(|(_, op)| op)
+        .collect();
     assert_eq!(
         ops,
         vec![Op::PaneResize {
@@ -157,8 +163,8 @@ fn a_malformed_resize_raises_and_queues_nothing() {
         ),
     ]);
     side_by_side(&sub);
-    sub.dispatch_key("C-x");
-    let lines = logged(&sub);
+    sub.dispatch_key(support::one(), "C-x");
+    let lines = logged(&sub, Some(support::one()));
     assert_eq!(lines.len(), 3, "{lines:?}");
     assert!(
         lines[0].starts_with("false") && lines[0].contains("unknown direction 'sideways'"),
@@ -193,7 +199,10 @@ fn with_prefix() -> (tempfile::TempDir, LuaSubsystem) {
 }
 
 fn ops(sub: &LuaSubsystem) -> Vec<Op> {
-    sub.drain_ops().into_iter().map(|(_, op)| op).collect()
+    sub.drain_ops(Some(support::one()))
+        .into_iter()
+        .map(|(_, op)| op)
+        .collect()
 }
 
 /// A tall pane on the left, and two of unequal height stacked on the right. Pressing `l`
@@ -204,6 +213,7 @@ fn directional_focus_picks_the_pane_facing_most_of_the_edge() {
     let (_d, sub) = with_prefix();
     publish(
         &sub,
+        support::one(),
         vec![
             (PaneId::from(1), Rect::new(0, 0, 40, 24)),
             (PaneId::from(2), Rect::new(41, 0, 39, 4)),
@@ -212,8 +222,8 @@ fn directional_focus_picks_the_pane_facing_most_of_the_edge() {
         PaneId::from(1),
     );
 
-    sub.dispatch_key("C-b");
-    sub.dispatch_key("l");
+    sub.dispatch_key(support::one(), "C-b");
+    sub.dispatch_key(support::one(), "l");
     assert_eq!(
         ops(&sub),
         vec![Op::PaneFocus {
@@ -230,15 +240,15 @@ fn there_is_nothing_past_the_edge_of_the_window() {
     side_by_side(&sub);
     // Pane 2 is the right-hand one: nothing is to its right, above it or below it.
     for key in ["l", "j", "k"] {
-        sub.dispatch_key("C-b");
-        assert_eq!(sub.dispatch_key(key), KeyOutcome::Consumed);
+        sub.dispatch_key(support::one(), "C-b");
+        assert_eq!(sub.dispatch_key(support::one(), key), KeyOutcome::Consumed);
         assert!(
             ops(&sub).is_empty(),
             "{key} from the right-hand pane focused something"
         );
     }
-    sub.dispatch_key("C-b");
-    sub.dispatch_key("h");
+    sub.dispatch_key(support::one(), "C-b");
+    sub.dispatch_key(support::one(), "h");
     assert_eq!(
         ops(&sub),
         vec![Op::PaneFocus {
@@ -255,12 +265,12 @@ fn resize_mode_adjusts_until_a_key_that_is_not_an_adjustment() {
     let (_d, sub) = with_prefix();
     side_by_side(&sub);
 
-    sub.dispatch_key("C-b");
-    sub.dispatch_key("r");
+    sub.dispatch_key(support::one(), "C-b");
+    sub.dispatch_key(support::one(), "r");
     assert!(ops(&sub).is_empty(), "entering the mode is not an op");
 
     for key in ["Left", "h", "Up"] {
-        assert_eq!(sub.dispatch_key(key), KeyOutcome::Consumed);
+        assert_eq!(sub.dispatch_key(support::one(), key), KeyOutcome::Consumed);
     }
     assert_eq!(
         ops(&sub),
@@ -280,11 +290,67 @@ fn resize_mode_adjusts_until_a_key_that_is_not_an_adjustment() {
         ]
     );
 
-    assert_eq!(sub.dispatch_key("Esc"), KeyOutcome::Consumed);
     assert_eq!(
-        sub.dispatch_key("x"),
+        sub.dispatch_key(support::one(), "Esc"),
+        KeyOutcome::Consumed
+    );
+    assert_eq!(
+        sub.dispatch_key(support::one(), "x"),
         KeyOutcome::Fallthrough,
         "the mode outlived the key that left it"
     );
     assert!(ops(&sub).is_empty());
+}
+
+/// One Lua layer, two sessions: what a tick reads is the geometry of the session whose tick
+/// it is, and what it raises belongs to that session. Nothing in the program makes a second
+/// session yet — the layer is where the shape is proved first.
+#[test]
+fn a_tick_reads_and_raises_against_the_session_it_is_for() {
+    let (_dir, sub) = built(&[(
+        "init.lua",
+        "neotmux.on_tick(function() neotmux.log.info('panes ' .. #neotmux.pane.list()) end)",
+    )]);
+    let one = support::one();
+    let two = SessionId::from(2);
+    let wide = vec![
+        (PaneId::from(1), Rect::new(0, 0, 40, 24)),
+        (PaneId::from(2), Rect::new(40, 0, 40, 24)),
+    ];
+    let lone = vec![(PaneId::from(3), Rect::new(0, 0, 80, 24))];
+
+    publish(&sub, one, wide.clone(), PaneId::from(2));
+    sub.dispatch_tick(one);
+    publish(&sub, two, lone, PaneId::from(3));
+    sub.dispatch_tick(two);
+    publish(&sub, one, wide, PaneId::from(2));
+    sub.dispatch_tick(one);
+
+    assert_eq!(
+        logged(&sub, Some(one)),
+        vec!["panes 2".to_string(), "panes 2".to_string()],
+        "session one's ticks saw session two's geometry, or its ops went to the wrong session"
+    );
+    assert_eq!(logged(&sub, Some(two)), vec!["panes 1".to_string()]);
+}
+
+/// A load happens before any session does. What it reads is an empty geometry rather than
+/// some session's — there is not one yet — and what it raises belongs to no session, which is
+/// the case `drain_ops(None)` exists for and the one `Plugins::drain_load_ops` asks.
+#[test]
+fn a_config_load_runs_with_no_session_bound() {
+    let (_dir, sub) = built(&[(
+        "init.lua",
+        "neotmux.log.info('panes at load ' .. #neotmux.pane.list())",
+    )]);
+
+    assert_eq!(
+        logged(&sub, None),
+        vec!["panes at load 0".to_string()],
+        "a load was handed a session's geometry, or its ops were filed under one"
+    );
+    assert!(
+        logged(&sub, Some(support::one())).is_empty(),
+        "an op raised before any session existed was filed under a session"
+    );
 }

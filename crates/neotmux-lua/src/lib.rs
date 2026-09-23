@@ -1,3 +1,4 @@
+mod ambient;
 pub mod api;
 pub mod budget;
 pub mod clipboard;
@@ -24,12 +25,13 @@ use mlua::{Function, Lua, Value};
 
 use neotmux_proto::read::PaneRead;
 use neotmux_proto::{
-    DrawCmd, Epoch, Event, Geometry, Level, PaneId, PaneInfo, Reserved, Size, WindowId,
+    DrawCmd, Epoch, Event, Geometry, Level, PaneId, PaneInfo, Reserved, SessionId, Size, WindowId,
 };
 
 pub use api::Opts;
 pub use api::keymap;
 
+use ambient::Ambient;
 use api::ctx::Ctx;
 use budget::{Budget, Outcome};
 use clipboard::Clipboard;
@@ -68,6 +70,8 @@ pub struct LuaSubsystem {
     buffers: Rc<Buffers>,
     geometry: Rc<RefCell<Geometry>>,
     pane_info: Rc<RefCell<PaneInfos>>,
+    /// Which session the work in hand is for, and what the others are holding meanwhile.
+    ambient: Rc<Ambient>,
     budget: Rc<Budget>,
     overrun: Rc<Overrun>,
     reservations: Rc<Reservations>,
@@ -98,11 +102,13 @@ impl LuaSubsystem {
         source::install_loader(&lua, sources.clone()).map_err(|err| anyhow::anyhow!("{err:#}"))?;
 
         let registry = Rc::new(Registry::new());
-        let ops = Rc::new(OpBuffer::new());
         let opts = Rc::new(RefCell::new(Opts::default()));
         let load_failures = Rc::new(RefCell::new(Vec::new()));
         let geometry = Rc::new(RefCell::new(Geometry::default()));
         let pane_info = Rc::new(RefCell::new(PaneInfos::new()));
+        // Before the op buffer, which reads the bound session at every push.
+        let ambient = Rc::new(Ambient::new(geometry.clone(), pane_info.clone()));
+        let ops = Rc::new(OpBuffer::new(Rc::clone(&ambient)));
         let reservations = Rc::new(Reservations::new());
         let window_ids = Rc::new(WindowIds::new());
         let floats = Rc::new(Floats::new());
@@ -147,6 +153,7 @@ impl LuaSubsystem {
             buffers,
             geometry,
             pane_info,
+            ambient,
             budget,
             overrun,
             reservations,
@@ -249,16 +256,17 @@ impl LuaSubsystem {
         self.window_ids.take()
     }
 
-    pub fn begin_frame(&self, epoch: Epoch, geometry: Geometry) {
+    pub fn begin_frame(&self, session: SessionId, epoch: Epoch, geometry: Geometry) {
         self.buffers.begin(epoch);
-        self.republish_geometry(geometry);
+        self.republish_geometry(session, geometry);
     }
 
     /// The layout changed part-way through a frame. What Lua sees catches up at once, so an
     /// event dispatched after it describes the tree as it is. The frame's epoch is the
     /// buffers' own and is not touched here: the tick has already committed under it, and
     /// moving it mid-frame would throw that commit away.
-    pub fn republish_geometry(&self, geometry: Geometry) {
+    pub fn republish_geometry(&self, session: SessionId, geometry: Geometry) {
+        let _bound = self.ambient.bind(session);
         // Ids the host is naming that this counter did not hand out: a client attaching to a
         // session that was already running learns the watermark here and nowhere else.
         for window in &geometry.windows {
@@ -269,7 +277,8 @@ impl LuaSubsystem {
 
     /// What every pane is running, as the host last sampled it. Published on the host's own
     /// cadence rather than per frame: a plugin asks every tick, and the answer is a syscall.
-    pub fn publish_pane_info(&self, info: BTreeMap<PaneId, PaneInfo>) {
+    pub fn publish_pane_info(&self, session: SessionId, info: BTreeMap<PaneId, PaneInfo>) {
+        let _bound = self.ambient.bind(session);
         *self.pane_info.borrow_mut() = info;
     }
 
@@ -277,7 +286,8 @@ impl LuaSubsystem {
     /// what all its tick callbacks drew, and a partial union is not a frame. Committing after
     /// each callback would make the second one's commit replace the first one's entry, so the
     /// first's drawing would never render.
-    pub fn dispatch_tick(&self) {
+    pub fn dispatch_tick(&self, session: SessionId) {
+        let _bound = self.ambient.bind(session);
         // The hook is armed for this frame only: with `LUA_MASKCOUNT` set Lua 5.4 traps on
         // every instruction, so an always-armed hook would halve key and event dispatch too.
         if let Err(err) = Budget::arm(&self.lua, &self.budget) {
@@ -433,10 +443,11 @@ impl LuaSubsystem {
         value
     }
 
-    pub fn dispatch_key(&self, spec: &str) -> KeyOutcome {
+    pub fn dispatch_key(&self, session: SessionId, spec: &str) -> KeyOutcome {
         let Ok(normalised) = keymap::normalise(spec) else {
             return KeyOutcome::Fallthrough;
         };
+        let _bound = self.ambient.bind(session);
 
         self.measured(|| {
             if self.offer_key(&normalised) == KeyOutcome::Consumed {
@@ -523,7 +534,8 @@ impl LuaSubsystem {
         }
     }
 
-    pub fn dispatch_event(&self, event: &Event) {
+    pub fn dispatch_event(&self, session: SessionId, event: &Event) {
+        let _bound = self.ambient.bind(session);
         let subscribers: Vec<_> = self
             .registry
             .snapshot(KindTag::Event)
@@ -613,12 +625,21 @@ impl LuaSubsystem {
     /// a tick changes what `reserved()` reports, but not the bands this frame is being drawn
     /// against — the same discipline `pane.split` follows, and what keeps a reservation from
     /// invalidating the epoch of a frame already being composed.
-    pub fn lay_out_reservations(&self, surface: Size, applied: Reserved) {
+    pub fn lay_out_reservations(&self, session: SessionId, surface: Size, applied: Reserved) {
+        let _bound = self.ambient.bind(session);
         self.reservations.lay_out(surface, applied);
     }
 
-    pub fn drain_ops(&self) -> Vec<(SourceId, Op)> {
-        self.ops.drain()
+    /// What was raised for this session, taken out. `None` is the load path: an op raised
+    /// before any session existed belongs to none of them.
+    pub fn drain_ops(&self, session: Option<SessionId>) -> Vec<(SourceId, Op)> {
+        self.ops.drain_for(session)
+    }
+
+    /// A session is over: what it was holding is not kept for a session that will never ask
+    /// for it again.
+    pub fn forget_session(&self, session: SessionId) {
+        self.ambient.forget(session);
     }
 
     pub fn registry(&self) -> &Registry {

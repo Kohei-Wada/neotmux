@@ -67,6 +67,7 @@ fn built_named(
     .unwrap();
     assert!(sub.run_init().is_empty());
     sub.begin_frame(
+        support::one(),
         Epoch::new(SIZE, vec![pane()], Some(pane())),
         Geometry {
             size: SIZE,
@@ -90,7 +91,7 @@ fn scrolled(sub: &Built) {
 
 fn keys(sub: &LuaSubsystem, specs: &[&str]) {
     for spec in specs {
-        sub.dispatch_key(spec);
+        sub.dispatch_key(support::one(), spec);
     }
 }
 
@@ -99,12 +100,12 @@ fn enter(sub: &LuaSubsystem) {
 }
 
 fn frame(sub: &LuaSubsystem) -> Vec<DrawCmd> {
-    sub.dispatch_tick();
+    sub.dispatch_tick(support::one());
     sub.frame_output()
 }
 
 fn logged(sub: &LuaSubsystem) -> Vec<String> {
-    sub.drain_ops()
+    sub.drain_ops(Some(support::one()))
         .into_iter()
         .filter_map(|(_, op)| match op {
             Op::Log { text, .. } | Op::Notify { text, .. } => Some(text),
@@ -282,7 +283,7 @@ fn yanking_puts_the_selected_text_in_the_register() {
     enter(&sub);
     // To the top of the history, select `one` and the two lines under it.
     keys(&sub, &["g", " ", "j", "j", "l", "l", "l", "l", "y"]);
-    sub.dispatch_tick();
+    sub.dispatch_tick(support::one());
     keys(&sub, &["C-b", "R"]);
     let said = logged(&sub);
     assert!(
@@ -305,7 +306,7 @@ fn a_yank_reads_across_the_boundary_between_the_history_and_the_screen() {
     scrolled(&sub);
     enter(&sub);
     keys(&sub, &["g", "j", "j", "j", " ", "j", "l", "l", "l", "y"]);
-    sub.dispatch_tick();
+    sub.dispatch_tick(support::one());
     keys(&sub, &["C-b", "R"]);
     let said = logged(&sub);
     assert!(
@@ -319,12 +320,21 @@ fn a_yank_reads_across_the_boundary_between_the_history_and_the_screen() {
 fn the_mode_swallows_its_keys_and_gives_them_back_on_the_way_out() {
     let (_dir, sub) = built("");
     scrolled(&sub);
-    assert_eq!(sub.dispatch_key("j"), KeyOutcome::Fallthrough);
+    assert_eq!(
+        sub.dispatch_key(support::one(), "j"),
+        KeyOutcome::Fallthrough
+    );
     enter(&sub);
-    assert_eq!(sub.dispatch_key("j"), KeyOutcome::Consumed);
-    assert_eq!(sub.dispatch_key("z"), KeyOutcome::Consumed);
-    assert_eq!(sub.dispatch_key("Esc"), KeyOutcome::Consumed);
-    assert_eq!(sub.dispatch_key("j"), KeyOutcome::Fallthrough);
+    assert_eq!(sub.dispatch_key(support::one(), "j"), KeyOutcome::Consumed);
+    assert_eq!(sub.dispatch_key(support::one(), "z"), KeyOutcome::Consumed);
+    assert_eq!(
+        sub.dispatch_key(support::one(), "Esc"),
+        KeyOutcome::Consumed
+    );
+    assert_eq!(
+        sub.dispatch_key(support::one(), "j"),
+        KeyOutcome::Fallthrough
+    );
     assert!(frame(&sub).is_empty(), "the mode kept drawing after Esc");
 }
 
@@ -334,8 +344,11 @@ fn q_leaves_the_mode() {
     let (_dir, sub) = built("");
     scrolled(&sub);
     enter(&sub);
-    assert_eq!(sub.dispatch_key("q"), KeyOutcome::Consumed);
-    assert_eq!(sub.dispatch_key("q"), KeyOutcome::Fallthrough);
+    assert_eq!(sub.dispatch_key(support::one(), "q"), KeyOutcome::Consumed);
+    assert_eq!(
+        sub.dispatch_key(support::one(), "q"),
+        KeyOutcome::Fallthrough
+    );
 }
 
 /// What a scrolled frame costs, stated rather than guessed: one erase and one text command
@@ -381,7 +394,7 @@ fn what_the_pane_prints_after_the_mode_opens_is_not_in_the_buffer() {
     );
 
     keys(&sub, &["G", " ", "l", "l", "y"]);
-    sub.dispatch_tick();
+    sub.dispatch_tick(support::one());
     keys(&sub, &["C-b", "R"]);
     let said = logged(&sub);
     assert!(
@@ -414,7 +427,7 @@ fn a_selection_survives_its_anchor_scrolling_off_the_view() {
     scrolled(&sub);
     enter(&sub);
     keys(&sub, &["g", " ", "G", "l", "l", "y"]);
-    sub.dispatch_tick();
+    sub.dispatch_tick(support::one());
     keys(&sub, &["C-b", "R"]);
     let said = logged(&sub);
     assert!(
@@ -468,8 +481,11 @@ fn a_pane_closing_under_the_mode_leaves_it() {
     let (_dir, sub) = built("");
     scrolled(&sub);
     enter(&sub);
-    sub.dispatch_event(&Event::PaneClosed { pane: pane() });
-    assert_eq!(sub.dispatch_key("j"), KeyOutcome::Fallthrough);
+    sub.dispatch_event(support::one(), &Event::PaneClosed { pane: pane() });
+    assert_eq!(
+        sub.dispatch_key(support::one(), "j"),
+        KeyOutcome::Fallthrough
+    );
 }
 
 /// One line in one file: the default goes off the way the other five do.
@@ -478,7 +494,10 @@ fn a_user_config_can_switch_copy_mode_off() {
     let (_dir, sub) = built("defaults.copy = false\n");
     scrolled(&sub);
     enter(&sub);
-    assert_eq!(sub.dispatch_key("j"), KeyOutcome::Fallthrough);
+    assert_eq!(
+        sub.dispatch_key(support::one(), "j"),
+        KeyOutcome::Fallthrough
+    );
     assert!(frame(&sub).is_empty());
 }
 

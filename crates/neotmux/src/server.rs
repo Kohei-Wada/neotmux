@@ -13,6 +13,7 @@
 //! difference being the one the other is not in. Which clients get to look at a session
 //! is as far as this file goes; that a session sits waiting at all is the rest of it.
 
+use std::collections::BTreeMap;
 use std::os::fd::AsFd as _;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::rc::Rc;
@@ -21,9 +22,9 @@ use std::time::{Duration, Instant};
 use anyhow::Context as _;
 use neotmux_lua::runtime::Layers;
 use neotmux_lua::{KeyOutcome, LuaSubsystem};
-use neotmux_proto::Level;
 use neotmux_proto::msg::{Attach, Done, End, ToClient, ToServer};
 use neotmux_proto::wire;
+use neotmux_proto::{Level, SessionId};
 
 use neotmux_term::terminals::PaneTerminals;
 use neotmux_term::wakeup::{Waker, Wakeup, wakeup};
@@ -67,6 +68,9 @@ const GRACE: Duration = Duration::from_millis(10);
 /// is shown the same one and there is nothing per client to compare it against.
 struct Attached {
     link: Link,
+    /// The session this client is looking at. There is one today; a client will be able to
+    /// move between them without its connection being touched.
+    session: SessionId,
     /// Where the session's transcript was when this client attached: what it is told on its
     /// way out is what was raised while it was here.
     mark: usize,
@@ -74,6 +78,25 @@ struct Attached {
     /// slot is still a slot the wait is waiting over, and dropping it out from under a wait
     /// is what this flag prevents.
     gone: bool,
+}
+
+/// Every session this server holds, and the ids still to come.
+///
+/// One entry today — the map is the shape the rest of them go in, and everything that used to
+/// say "the session" says "this one" through it.
+#[derive(Default)]
+struct Sessions {
+    live: BTreeMap<SessionId, Session>,
+    next: u32,
+}
+
+impl Sessions {
+    /// The id a new session takes. Never recycled, so an id names one session for the whole
+    /// life of the server.
+    fn mint(&mut self) -> SessionId {
+        self.next += 1;
+        SessionId::from(self.next)
+    }
 }
 
 /// What the server holds for the whole of its life, as against what one frame has: the
@@ -126,7 +149,7 @@ pub fn serve(name: &str, listener: &UnixListener, shutdown: &ShutdownSignal) -> 
         return nothing_to_serve(&serving, &plugins);
     }
 
-    let mut session: Option<Session> = None;
+    let mut sessions = Sessions::default();
     let mut clients: Vec<Attached> = Vec::new();
     // Connections that have arrived and not yet said what they are. They outlive the call
     // that took them in: a connection half-way through its handshake when a frame starts is
@@ -144,14 +167,14 @@ pub fn serve(name: &str, listener: &UnixListener, shutdown: &ShutdownSignal) -> 
             &mut clients,
             &mut pending,
             &mut plugins,
-            &mut session,
+            &mut sessions,
             &serving,
             born,
         )? {
             return Ok(());
         }
         if frame(
-            &mut session,
+            &mut sessions,
             &mut plugins,
             &clip,
             &mut clients,
@@ -224,14 +247,14 @@ fn await_client(
     clients: &mut Vec<Attached>,
     pending: &mut Vec<Pending>,
     plugins: &mut Plugins,
-    session: &mut Option<Session>,
+    sessions: &mut Sessions,
     serving: &Serving<'_>,
     born: Instant,
 ) -> anyhow::Result<bool> {
     if serving.shutdown.raised().is_some() {
         return Ok(false);
     }
-    if session.is_some() {
+    if !sessions.live.is_empty() {
         return Ok(true);
     }
     if Instant::now() >= born + STARTUP {
@@ -240,8 +263,8 @@ fn await_client(
     // The door, looked at every pass rather than only on a ready listener: a connection taken
     // in on an earlier pass is still half-way through its handshake, and a poll answers for
     // the listener, not for it. Nothing here waits.
-    door(pending, clients, plugins, session, serving)?;
-    if session.is_none() {
+    door(pending, clients, plugins, sessions, serving)?;
+    if sessions.live.is_empty() {
         let until = (born + STARTUP).min(Instant::now() + FRAME);
         crate::tty::wait_on(std::os::fd::AsFd::as_fd(serving.listener), None, until)
             .context("wait for a client")?;
@@ -406,7 +429,7 @@ fn door(
     pending: &mut Vec<Pending>,
     clients: &mut Vec<Attached>,
     plugins: &mut Plugins,
-    session: &mut Option<Session>,
+    sessions: &mut Sessions,
     serving: &Serving<'_>,
 ) -> anyhow::Result<bool> {
     while let Some(stream) = taken(serving.listener)? {
@@ -435,7 +458,7 @@ fn door(
                     one.link,
                     &attach,
                     plugins,
-                    session,
+                    sessions,
                     serving.terminals,
                     serving.waker,
                 )?);
@@ -453,7 +476,7 @@ fn admit(
     link: Link,
     attach: &Attach,
     plugins: &Plugins,
-    session: &mut Option<Session>,
+    sessions: &mut Sessions,
     terminals: &Rc<PaneTerminals>,
     waker: &Waker,
 ) -> anyhow::Result<Attached> {
@@ -466,17 +489,23 @@ fn admit(
         gutter: lua.opt().pane_gutter,
         wants_pane_output: lua.has_subscriber("pane_output"),
     };
-    match session.as_mut() {
-        Some(session) => session.adopt(&setup)?,
-        None => {
-            // Assign through the parameter: a fresh `let session` would shadow the
-            // `&mut Option<Session>` with an owned `Session` and `*session` could not
-            // dereference it.
-            *session = Some(Session::new(&setup, waker.clone(), terminals.clone())?);
+    // Whichever one is there, which is the only one there is. The attach will name it.
+    let session = match sessions.live.iter_mut().next() {
+        Some((id, session)) => {
+            session.adopt(&setup)?;
+            *id
         }
-    }
+        None => {
+            let id = sessions.mint();
+            sessions
+                .live
+                .insert(id, Session::new(&setup, waker.clone(), terminals.clone())?);
+            id
+        }
+    };
     Ok(Attached {
         link,
+        session,
         mark: plugins.notifications().mark(),
         gone: false,
     })
@@ -573,7 +602,7 @@ fn next_message(client: &mut Attached) -> Option<Vec<u8>> {
 /// `true` is the server being over — the session ending on a `Quit` or its last shell — and
 /// `false` is the frame being over, the session going on with however many clients are left.
 fn frame(
-    session: &mut Option<Session>,
+    sessions: &mut Sessions,
     plugins: &mut Plugins,
     clip: &Clip,
     clients: &mut Vec<Attached>,
@@ -583,73 +612,95 @@ fn frame(
     // The door is looked at once a frame rather than polled on every wait: a client that
     // arrived while the previous frame was still running is adopted here, before the tick,
     // so it is in the frame it arrived in.
-    door(pending, clients, plugins, session, serving)?;
+    door(pending, clients, plugins, sessions, serving)?;
     clip.attached(clients.len());
 
-    let Some(live_session) = session.as_mut() else {
+    if sessions.live.is_empty() {
         clients.retain(|client| !client.gone);
         return Ok(false);
-    };
+    }
 
-    // The whole of what used to be four messages: the session says what happened, the Lua
-    // layer answers, the session applies that, and the picture comes of it.
-    let tick = live_session.tick()?;
-    let tock = plugins.respond(tick);
-    let Pass { steps, frame, end } = live_session.advance(&tock)?;
-    let picture = (frame.is_some() || end.is_some()).then(|| {
-        wire::encode_to_client(&ToClient::Done(&Done {
-            // Nothing on the client has to be caught up any more: the steps go to a Lua
-            // layer in this process, below.
-            steps: Vec::new(),
-            frame: frame.as_ref(),
-            end,
-        }))
-    });
-    drop(frame);
+    // Every session, in id order, whether or not anybody is attached to it: a session nobody
+    // is looking at running its plugins is what putting them here bought. There is one of
+    // them today, so this is one pass.
+    let ids: Vec<SessionId> = sessions.live.keys().copied().collect();
+    let mut over = false;
+    for id in ids {
+        let Some(live) = sessions.live.get_mut(&id) else {
+            continue;
+        };
 
-    let yanked: Vec<Vec<u8>> = clip
-        .take()
-        .iter()
-        .map(|text| wire::encode_to_client(&ToClient::Clip(text)))
-        .collect();
+        // The whole of what used to be four messages: the session says what happened, the Lua
+        // layer answers, the session applies that, and the picture comes of it.
+        let tick = live.tick()?;
+        let tock = plugins.respond(id, tick);
+        let Pass { steps, frame, end } = live.advance(&tock)?;
+        let picture = (frame.is_some() || end.is_some()).then(|| {
+            wire::encode_to_client(&ToClient::Done(&Done {
+                // Nothing on the client has to be caught up any more: the steps go to a Lua
+                // layer in this process, below.
+                steps: Vec::new(),
+                frame: frame.as_ref(),
+                end,
+            }))
+        });
+        drop(frame);
 
-    for client in clients.iter_mut().filter(|client| !client.gone) {
-        for bytes in &yanked {
-            if client.link.send(bytes).is_err() {
-                client.gone = true;
+        // Taken after this session's tick, so a yank belongs to the session whose plugin
+        // raised it and reaches the clients looking at that one.
+        let yanked: Vec<Vec<u8>> = clip
+            .take()
+            .iter()
+            .map(|text| wire::encode_to_client(&ToClient::Clip(text)))
+            .collect();
+
+        for client in clients
+            .iter_mut()
+            .filter(|client| !client.gone && client.session == id)
+        {
+            for bytes in &yanked {
+                if client.link.send(bytes).is_err() {
+                    client.gone = true;
+                }
             }
-        }
-        // Before the frame that carries the end, so a client that reads its end and stops
-        // reading has already been told what to say on its way out.
-        if end.is_some() && !client.gone {
-            let lines = plugins.notifications().since(client.mark);
-            if client
-                .link
-                .send(&wire::encode_to_client(&ToClient::Bye(&lines)))
-                .is_err()
+            // Before the frame that carries the end, so a client that reads its end and stops
+            // reading has already been told what to say on its way out.
+            if end.is_some() && !client.gone {
+                let lines = plugins.notifications().since(client.mark);
+                if client
+                    .link
+                    .send(&wire::encode_to_client(&ToClient::Bye(&lines)))
+                    .is_err()
+                {
+                    client.gone = true;
+                }
+            }
+            if let Some(bytes) = &picture
+                && !client.gone
+                && client.link.send(bytes).is_err()
             {
                 client.gone = true;
             }
         }
-        if let Some(bytes) = &picture
-            && !client.gone
-            && client.link.send(bytes).is_err()
-        {
-            client.gone = true;
+        plugins.catch_up(id, steps);
+        clients.retain(|client| !client.gone);
+
+        match end {
+            // The session is kept and its clients leave: with one Lua layer there is no client
+            // the op belongs to more than another.
+            Some(End::Detach) => clients.retain(|client| client.session != id),
+            Some(_) => {
+                // What it was holding goes with it, so a server that outlives a session does
+                // not keep its geometry parked for a session that will never ask again.
+                plugins.lua().forget_session(id);
+                sessions.live.remove(&id);
+                over = true;
+            }
+            None => {}
         }
     }
-    plugins.catch_up(steps);
-    clients.retain(|client| !client.gone);
-
-    match end {
-        // The session is kept and every client leaves: with one Lua layer there is no client
-        // the op belongs to more than another.
-        Some(End::Detach) => {
-            clients.clear();
-            return Ok(false);
-        }
-        Some(_) => return Ok(true),
-        None => {}
+    if over {
+        return Ok(true);
     }
 
     // The rest of the frame's time belongs to whatever the clients have to say and to the
@@ -667,7 +718,7 @@ fn frame(
         // buffer already, and waiting for it is waiting for a message that has arrived.
         for i in 0..clients.len() {
             if !clients[i].gone {
-                deliver(clients, i, session, plugins);
+                deliver(clients, i, sessions, plugins);
             }
         }
         if Instant::now() >= frame_end {
@@ -680,7 +731,7 @@ fn frame(
             crate::tty::Any::Ready(slot) => match live.get(slot).copied() {
                 Some(i) => {
                     if still_reading(&mut clients[i]) {
-                        deliver(clients, i, session, plugins);
+                        deliver(clients, i, sessions, plugins);
                     }
                 }
                 // The panes: their output is the cue to start the next frame.
@@ -704,34 +755,31 @@ fn frame(
 /// Everything one client has already sent, acted on. A client that sends something the
 /// session cannot act on out here loses its connection and nothing else: letting it out of
 /// here would end the session, and with it every other client's shells.
-fn deliver(
-    clients: &mut [Attached],
-    i: usize,
-    session: &mut Option<Session>,
-    plugins: &mut Plugins,
-) {
+fn deliver(clients: &mut [Attached], i: usize, sessions: &mut Sessions, plugins: &mut Plugins) {
+    // Everything this client says is about the session it is looking at.
+    let which = clients[i].session;
     while let Some(message) = next_message(&mut clients[i]) {
         match wire::decode_to_server(&message) {
             Ok(ToServer::Key(key)) => {
                 // Offered to the plugins first and passed on only if nobody wanted it: which
                 // pane an unbound key belongs to is the session's to know, and both halves
                 // are here now.
-                if plugins.key(key) == KeyOutcome::Fallthrough
-                    && let Some(session) = session.as_mut()
+                if plugins.key(which, key) == KeyOutcome::Fallthrough
+                    && let Some(session) = sessions.live.get_mut(&which)
                     && session.key(key).is_err()
                 {
                     clients[i].gone = true;
                 }
             }
             Ok(ToServer::Resize(size)) => {
-                if let Some(session) = session.as_mut()
+                if let Some(session) = sessions.live.get_mut(&which)
                     && session.resize(size).is_err()
                 {
                     clients[i].gone = true;
                 }
             }
             Ok(ToServer::Read(read)) => {
-                if let Some(session) = session.as_mut() {
+                if let Some(session) = sessions.live.get_mut(&which) {
                     let reading = reads::answer(session.terminals().as_ref(), read);
                     if clients[i]
                         .link

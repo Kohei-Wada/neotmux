@@ -28,6 +28,7 @@ fn frame(sub: &LuaSubsystem) {
     let size = Size { rows: 24, cols: 80 };
     let pane = PaneId::from(1);
     sub.begin_frame(
+        support::one(),
         Epoch::new(size, vec![pane], Some(pane)),
         Geometry {
             size,
@@ -36,7 +37,7 @@ fn frame(sub: &LuaSubsystem) {
             ..Default::default()
         },
     );
-    sub.dispatch_tick();
+    sub.dispatch_tick(support::one());
 }
 
 fn texts(sub: &LuaSubsystem) -> Vec<String> {
@@ -56,7 +57,7 @@ fn logs(sub: &LuaSubsystem) -> Vec<String> {
 /// The source a log op is attributed to, beside its text. Attribution lives in the op, not in
 /// the text, so a test that cares which source was blamed has to read it here.
 fn logged(sub: &LuaSubsystem) -> Vec<(String, String)> {
-    sub.drain_ops()
+    sub.drain_ops(Some(support::one()))
         .into_iter()
         .filter_map(|(owner, op)| match op {
             Op::Log { text, .. } => Some((sub.sources().name(owner).unwrap_or_default(), text)),
@@ -108,7 +109,7 @@ fn an_overrunning_tick_is_named_and_loses_its_frame() {
     assert_eq!(overruns[0].0, "plugin/spinner", "{overruns:?}");
 
     // Without this the only symptom of a tick that was not cut off is a suite that hangs.
-    sub.dispatch_key("C-p");
+    sub.dispatch_key(support::one(), "C-p");
     assert_eq!(
         notifications(&sub),
         vec!["false".to_string()],
@@ -167,7 +168,7 @@ fn an_overrun_is_reported_at_error_level() {
     frame(&sub);
 
     let levels: Vec<Level> = sub
-        .drain_ops()
+        .drain_ops(Some(support::one()))
         .into_iter()
         .filter_map(|(_, op)| match op {
             Op::Log { level, .. } => Some(level),
@@ -178,7 +179,7 @@ fn an_overrun_is_reported_at_error_level() {
 }
 
 fn notifications(sub: &LuaSubsystem) -> Vec<String> {
-    sub.drain_ops()
+    sub.drain_ops(Some(support::one()))
         .into_iter()
         .filter_map(|(_, op)| match op {
             Op::Notify { text, .. } => Some(text),
@@ -240,7 +241,7 @@ fn a_repeat_offender_loses_its_tick_and_keeps_everything_else() {
         .collect();
     assert_eq!(notes.len(), 1, "{notes:?}");
     assert_eq!(
-        sub.dispatch_key("C-x"),
+        sub.dispatch_key(support::one(), "C-x"),
         neotmux_lua::KeyOutcome::Consumed,
         "the unsubscribe took the keymap too"
     );
@@ -339,9 +340,9 @@ fn resubscribe_restores_a_removed_tick_and_it_draws_again() {
         frame(&sub);
     }
     assert!(tick_owners(&sub).is_empty());
-    sub.drain_ops();
+    sub.drain_ops(Some(support::one()));
 
-    sub.dispatch_key("C-r");
+    sub.dispatch_key(support::one(), "C-r");
     assert_eq!(notifications(&sub), vec!["1".to_string()]);
 
     frame(&sub);
@@ -365,7 +366,7 @@ fn resubscribe_for_a_name_that_was_never_removed_is_nil() {
         ),
     ]);
 
-    sub.dispatch_key("C-r");
+    sub.dispatch_key(support::one(), "C-r");
 
     assert_eq!(notifications(&sub), vec!["nil nil".to_string()]);
     assert_eq!(tick_owners(&sub), vec!["plugin/rescuer".to_string()]);
@@ -395,7 +396,7 @@ fn a_restored_tick_is_dropped_again_if_it_keeps_overrunning() {
         frame(&sub);
     }
     assert!(tick_owners(&sub).is_empty());
-    sub.dispatch_key("C-r");
+    sub.dispatch_key(support::one(), "C-r");
     assert_eq!(tick_owners(&sub), vec!["plugin/spinner".to_string()]);
 
     frame(&sub);
@@ -466,12 +467,12 @@ fn registering_a_tick_again_drops_what_was_parked_for_that_source() {
 
     frame(&sub);
     assert!(tick_owners(&sub).is_empty());
-    sub.drain_ops();
+    sub.drain_ops(Some(support::one()));
 
-    sub.dispatch_key("C-l");
+    sub.dispatch_key(support::one(), "C-l");
     assert_eq!(tick_owners(&sub), vec!["plugin/spinner".to_string()]);
 
-    sub.dispatch_key("C-r");
+    sub.dispatch_key(support::one(), "C-r");
     assert_eq!(notifications(&sub), vec!["nil".to_string()]);
     assert_eq!(
         tick_owners(&sub),
@@ -532,9 +533,9 @@ fn resubscribe_restores_the_first_source_interned_under_a_shared_name() {
 
     frame(&sub);
     assert!(tick_owners(&sub).is_empty());
-    sub.drain_ops();
+    sub.drain_ops(Some(support::one()));
 
-    sub.dispatch_key("C-r");
+    sub.dispatch_key(support::one(), "C-r");
     assert_eq!(notifications(&sub), vec!["1".to_string()]);
 
     frame(&sub);
@@ -631,7 +632,7 @@ fn a_long_c_call_is_reported_by_name_though_it_ran_to_completion() {
     );
 
     // The distinguishing fact: nothing was interrupted, the tick ran its C call to the end.
-    sub.dispatch_key("C-p");
+    sub.dispatch_key(support::one(), "C-p");
     assert_eq!(notifications(&sub), vec!["8388608".to_string()]);
 }
 
@@ -664,9 +665,9 @@ fn a_long_c_call_every_frame_parks_the_source_and_resubscribe_brings_it_back() {
         frame(&sub);
     }
     assert!(tick_owners(&sub).is_empty(), "{:?}", tick_owners(&sub));
-    sub.drain_ops();
+    sub.drain_ops(Some(support::one()));
 
-    sub.dispatch_key("C-r");
+    sub.dispatch_key(support::one(), "C-r");
     assert_eq!(notifications(&sub), vec!["1".to_string()]);
     assert_eq!(tick_owners(&sub), vec!["plugin/hog".to_string()]);
 }
@@ -746,7 +747,7 @@ fn an_overrunning_tick_loses_the_ops_it_pushed_as_well_as_its_drawing() {
 
     frame(&sub);
 
-    let ops = sub.drain_ops();
+    let ops = sub.drain_ops(Some(support::one()));
     assert!(
         !ops.iter().any(|(_, op)| matches!(op, Op::PaneSplit { .. })),
         "the discarded frame still split the window: {ops:?}"
@@ -792,7 +793,7 @@ fn a_raising_tick_loses_its_ops_but_is_still_reported() {
 
     frame(&sub);
 
-    let ops = sub.drain_ops();
+    let ops = sub.drain_ops(Some(support::one()));
     assert!(
         !ops.iter().any(|(_, op)| matches!(op, Op::PaneSplit { .. })),
         "{ops:?}"
@@ -837,10 +838,10 @@ fn the_handles_resubscribe_returns_remove_the_registrations_it_restored() {
     frame(&sub);
     assert!(tick_owners(&sub).is_empty());
 
-    sub.dispatch_key("C-r");
+    sub.dispatch_key(support::one(), "C-r");
     assert_eq!(tick_owners(&sub), vec!["plugin/spinner".to_string()]);
 
-    sub.dispatch_key("C-x");
+    sub.dispatch_key(support::one(), "C-x");
     assert!(
         tick_owners(&sub).is_empty(),
         "the handle resubscribe returned did not name the restored registration: {:?}",
@@ -877,9 +878,9 @@ fn resubscribe_returns_one_handle_for_each_tick_it_restored() {
 
     frame(&sub);
     assert!(tick_owners(&sub).is_empty());
-    sub.drain_ops();
+    sub.drain_ops(Some(support::one()));
 
-    sub.dispatch_key("C-r");
+    sub.dispatch_key(support::one(), "C-r");
 
     assert_eq!(notifications(&sub), vec!["2".to_string()]);
     assert_eq!(tick_owners(&sub).len(), 2);
@@ -898,7 +899,7 @@ fn a_key_handler_that_loops_for_ever_is_cut_off() {
     ]);
 
     let started = std::time::Instant::now();
-    sub.dispatch_key("C-x");
+    sub.dispatch_key(support::one(), "C-x");
     let took = started.elapsed();
 
     assert!(
@@ -918,10 +919,13 @@ fn an_event_handler_that_loops_for_ever_is_cut_off() {
     ]);
 
     let started = std::time::Instant::now();
-    sub.dispatch_event(&neotmux_proto::Event::PaneOutput {
-        pane: PaneId::from(1),
-        bytes: b"hello".to_vec(),
-    });
+    sub.dispatch_event(
+        support::one(),
+        &neotmux_proto::Event::PaneOutput {
+            pane: PaneId::from(1),
+            bytes: b"hello".to_vec(),
+        },
+    );
     let took = started.elapsed();
 
     assert!(
@@ -945,7 +949,7 @@ fn a_key_handler_that_overruns_does_not_cost_the_source_its_tick() {
     ]);
 
     for _ in 0..8 {
-        sub.dispatch_key("C-x");
+        sub.dispatch_key(support::one(), "C-x");
     }
     frame(&sub);
 

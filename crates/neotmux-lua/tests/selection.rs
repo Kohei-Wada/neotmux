@@ -39,8 +39,8 @@ fn built(body: &str) -> (tempfile::TempDir, LuaSubsystem) {
 }
 
 fn logged(sub: &LuaSubsystem) -> Vec<String> {
-    sub.dispatch_tick();
-    sub.drain_ops()
+    sub.dispatch_tick(support::one());
+    sub.drain_ops(Some(support::one()))
         .into_iter()
         .filter_map(|(_, op)| match op {
             Op::Log { text, .. } => Some(text),
@@ -159,6 +159,7 @@ fn a_text_run_is_recorded_whole_and_a_rect_carries_no_text() {
     let size = Size { rows: 24, cols: 80 };
     let pane = PaneId::from(1);
     sub.begin_frame(
+        support::one(),
         Epoch::new(size, vec![pane], Some(pane)),
         Geometry {
             size,
@@ -167,7 +168,7 @@ fn a_text_run_is_recorded_whole_and_a_rect_carries_no_text() {
             ..Default::default()
         },
     );
-    sub.dispatch_tick();
+    sub.dispatch_tick(support::one());
 
     let cmds = sub.frame_output();
     let text = cmds
