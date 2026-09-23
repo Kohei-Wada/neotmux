@@ -73,10 +73,10 @@ pub fn run(name: &str, args: &[String], session: Option<&str>, ctx: &mut Ctx<'_>
     match name {
         "new" => new(args, session, ctx),
         "rename" => rename(args, ctx),
-        "windows" => windows(session, ctx),
-        "panes" => panes(session, ctx),
-        "send" => send(args, ctx),
-        "capture" => capture(args, ctx),
+        "windows" => windows(args, session, ctx),
+        "panes" => panes(args, session, ctx),
+        "send" => send(args, session, ctx),
+        "capture" => capture(args, session, ctx),
         "switch" => switch(args, ctx),
         other => unknown(other),
     }
@@ -154,8 +154,18 @@ fn addressed<'a>(session: Option<&str>, ctx: &'a mut Ctx<'_>) -> Result<&'a mut 
     }
 }
 
-fn windows(session: Option<&str>, ctx: &mut Ctx<'_>) -> Ran {
-    let held = match addressed(session, ctx) {
+/// The session a bare positional word names, where `-t` did not — the same fallback `new`
+/// gives its name, because `windows` and `panes` take a session the same way `new`, `kill`
+/// and `switch` do.
+fn named(args: &[String], session: Option<&str>) -> Option<String> {
+    args.first()
+        .cloned()
+        .or_else(|| session.map(str::to_string))
+}
+
+fn windows(args: &[String], session: Option<&str>, ctx: &mut Ctx<'_>) -> Ran {
+    let name = named(args, session);
+    let held = match addressed(name.as_deref(), ctx) {
         Ok(held) => held,
         Err(no) => return no,
     };
@@ -174,9 +184,10 @@ fn windows(session: Option<&str>, ctx: &mut Ctx<'_>) -> Ran {
     )
 }
 
-fn panes(session: Option<&str>, ctx: &mut Ctx<'_>) -> Ran {
+fn panes(args: &[String], session: Option<&str>, ctx: &mut Ctx<'_>) -> Ran {
+    let name = named(args, session);
     let terminals = ctx.terminals.clone();
-    let held = match addressed(session, ctx) {
+    let held = match addressed(name.as_deref(), ctx) {
         Ok(held) => held,
         Err(no) => return no,
     };
@@ -220,13 +231,21 @@ fn split_enter(rest: &[String]) -> (String, bool) {
     }
 }
 
-fn send(args: &[String], ctx: &mut Ctx<'_>) -> Ran {
+fn send(args: &[String], session: Option<&str>, ctx: &mut Ctx<'_>) -> Ran {
+    if session.is_some() {
+        return Ran::failed(
+            "send takes a pane id and no -t: pane ids are the server's own and name a session already",
+        );
+    }
     let Some((first, rest)) = args.split_first() else {
         return Ran::failed("usage: neotmux send <pane> <text> [--enter]");
     };
     let Some(pane) = pane_id(first) else {
         return Ran::failed(format!("'{first}' is not a pane id"));
     };
+    if rest.is_empty() {
+        return Ran::failed("usage: neotmux send <pane> <text> [--enter]");
+    }
     let (text, enter) = split_enter(rest);
     let mut bytes = text.into_bytes();
     if enter {
@@ -247,7 +266,22 @@ fn send(args: &[String], ctx: &mut Ctx<'_>) -> Ran {
     Ran::failed(format!("no pane %{}", pane.get()))
 }
 
-fn capture(args: &[String], ctx: &mut Ctx<'_>) -> Ran {
+/// The visible grid with its trailing blank rows dropped. A pane's blank bottom is not
+/// content — a screen whose output sits at the top must not answer `--lines N` with N blank
+/// rows, and a bare `capture` must not either. Interior blank lines stay; only the tail goes.
+fn trim_trailing_blank(mut lines: Vec<String>) -> Vec<String> {
+    while lines.last().is_some_and(|line| line.trim_end().is_empty()) {
+        lines.pop();
+    }
+    lines
+}
+
+fn capture(args: &[String], session: Option<&str>, ctx: &mut Ctx<'_>) -> Ran {
+    if session.is_some() {
+        return Ran::failed(
+            "capture takes a pane id and no -t: pane ids are the server's own and name a session already",
+        );
+    }
     let Some(first) = args.first() else {
         return Ran::failed("usage: neotmux capture <pane> [--lines N]");
     };
@@ -265,13 +299,14 @@ fn capture(args: &[String], ctx: &mut Ctx<'_>) -> Ran {
     let Some(visible) = ctx.terminals.content(pane, None, want) else {
         return Ran::failed(format!("no pane %{}", pane.get()));
     };
+    let visible = trim_trailing_blank(visible.lines);
     let Some(count) = back else {
-        return Ran::ok(visible.lines);
+        return Ran::ok(visible);
     };
     // `--lines N` is the last N lines of everything the pane has: its history, then what is on
     // it now. A pane that has scrolled nothing answers with what it has.
     let extent = ctx.terminals.history_extent(pane).unwrap_or_default();
-    let wanted_history = count.saturating_sub(visible.lines.len());
+    let wanted_history = count.saturating_sub(visible.len());
     let from = usize::try_from(extent.len)
         .unwrap_or(usize::MAX)
         .saturating_sub(wanted_history);
@@ -279,7 +314,7 @@ fn capture(args: &[String], ctx: &mut Ctx<'_>) -> Ran {
         Some(history) => history.lines,
         None => Vec::new(),
     };
-    lines.extend(visible.lines);
+    lines.extend(visible);
     let cut = lines.len().saturating_sub(count);
     Ran::ok(lines.split_off(cut))
 }
@@ -325,5 +360,56 @@ mod tests {
         let (text, enter) = split_enter(&words(&["echo", "world"]));
         assert_eq!(text, "echo world");
         assert!(!enter);
+    }
+
+    #[test]
+    fn trailing_blank_rows_are_dropped_but_interior_ones_stay() {
+        let lines = trim_trailing_blank(words(&["hello", "", "world", "", "", ""]));
+        assert_eq!(
+            lines,
+            vec!["hello".to_string(), "".to_string(), "world".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_screen_with_nothing_on_it_trims_to_nothing() {
+        assert!(trim_trailing_blank(words(&["", "  ", ""])).is_empty());
+    }
+
+    /// `NAMES` is what the CLI checks a word against before it is treated as a command;
+    /// `run`'s match is what actually answers it. Nothing else checks the two agree, so a
+    /// name added to one and not the other would silently fall through to `unknown` — this
+    /// walks every name and asks that it does not.
+    #[test]
+    fn every_name_in_names_dispatches_to_something_other_than_unknown() {
+        let layers = neotmux_lua::runtime::Layers::default();
+        let terminals = Rc::new(PaneTerminals::new());
+        let lua = neotmux_lua::LuaSubsystem::build(layers, terminals.clone()).expect("lua");
+        let plugins = Plugins::new(lua);
+        let mut sessions = Sessions::default();
+        let waker = neotmux_term::wakeup::wakeup().expect("wakeup").1;
+        let mut clients: Vec<Attached> = Vec::new();
+
+        // `new` with no arguments spawns a real shell; a refused name reaches `run`'s match
+        // the same as any other command without paying for one.
+        let bad_name = vec!["-bad".to_string()];
+        let empty: Vec<String> = Vec::new();
+
+        for name in NAMES {
+            let args = if *name == "new" { &bad_name } else { &empty };
+            let mut ctx = Ctx {
+                sessions: &mut sessions,
+                plugins: &plugins,
+                terminals: &terminals,
+                waker: &waker,
+                clients: &mut clients,
+            };
+            let ran = run(name, args, None, &mut ctx);
+            assert_ne!(
+                ran.lines.first().map(String::as_str),
+                Some(format!("unknown command '{name}'")).as_deref(),
+                "'{name}' fell through to unknown"
+            );
+        }
     }
 }
