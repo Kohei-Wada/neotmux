@@ -8,6 +8,7 @@ pub mod opt;
 pub mod pane;
 pub(crate) mod rect;
 pub mod reserve;
+pub mod session;
 pub mod window;
 
 use std::cell::{Cell, RefCell};
@@ -270,6 +271,12 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
         let window = window::install(lua, sources.clone(), ops.clone(), geometry, window_ids)?;
         let window = seal(lua, window, "neotmux.window")?;
         neotmux.set("window", window)?;
+    }
+
+    {
+        let session = session::install(lua, ambient.clone(), sources.clone(), ops.clone())?;
+        let session = seal(lua, session, "neotmux.session")?;
+        neotmux.set("session", session)?;
     }
 
     {

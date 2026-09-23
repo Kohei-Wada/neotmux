@@ -24,7 +24,7 @@ use neotmux_lua::runtime::Layers;
 use neotmux_lua::{KeyOutcome, LuaSubsystem};
 use neotmux_proto::msg::{Attach, Done, End, ToClient, ToServer};
 use neotmux_proto::wire;
-use neotmux_proto::{Level, SessionId};
+use neotmux_proto::{Level, SessionId, Size};
 
 use neotmux_term::terminals::PaneTerminals;
 use neotmux_term::wakeup::{Waker, Wakeup, wakeup};
@@ -33,7 +33,7 @@ use crate::signals::ShutdownSignal;
 use neotmux::clip::Clip;
 use neotmux::link::Link;
 use neotmux::logging;
-use neotmux::plugins::Plugins;
+use neotmux::plugins::{Plugins, ServerOp};
 use neotmux::reads;
 use neotmux::session::{Pass, Session, Setup};
 
@@ -68,9 +68,12 @@ const GRACE: Duration = Duration::from_millis(10);
 /// is shown the same one and there is nothing per client to compare it against.
 struct Attached {
     link: Link,
-    /// The session this client is looking at. There is one today; a client will be able to
-    /// move between them without its connection being touched.
+    /// The session this client is looking at. It moves between them without its connection
+    /// being touched, which is what `session.switch` is.
     session: SessionId,
+    /// How big its terminal is, so a session it switches to can be refitted to it — the same
+    /// `window-size latest` rule an attach follows.
+    size: Size,
     /// Where the session's transcript was when this client attached: what it is told on its
     /// way out is what was raised while it was here.
     mark: usize,
@@ -517,6 +520,110 @@ fn door(
     Ok(adopted)
 }
 
+/// What a plugin asked of the set of sessions, applied once every session has had its frame.
+fn apply_server_ops(
+    asked: Vec<(SessionId, String, ServerOp)>,
+    plugins: &Plugins,
+    sessions: &mut Sessions,
+    clients: &mut Vec<Attached>,
+    terminals: &Rc<PaneTerminals>,
+    waker: &Waker,
+) {
+    for (from, tag, op) in asked {
+        match op {
+            ServerOp::Create { name } => {
+                if let Err(why) = neotmux::sock::validate_session_name(&name) {
+                    logging::log(
+                        Level::Error,
+                        &tag,
+                        &format!("session.create refused: {why}"),
+                    );
+                    continue;
+                }
+                if sessions.id_of(&name).is_some() {
+                    logging::log(
+                        Level::Error,
+                        &tag,
+                        &format!("session.create('{name}') refused: it already exists"),
+                    );
+                    continue;
+                }
+                // At the size of the session that asked: nobody is looking at the new one
+                // yet, and a surface has to be some size before a shell can open on it.
+                let Some(size) = sessions.get_mut(from).map(|session| session.surface_size())
+                else {
+                    continue;
+                };
+                match Session::new(&setup_for(plugins, size), waker.clone(), terminals.clone()) {
+                    Ok(session) => {
+                        let id = sessions.mint();
+                        sessions.live.insert(
+                            id,
+                            Held {
+                                name: name.clone(),
+                                session,
+                            },
+                        );
+                        plugins.lua().name_session(id, &name);
+                    }
+                    Err(err) => logging::log(
+                        Level::Error,
+                        &tag,
+                        &format!("session.create('{name}') failed: {err:#}"),
+                    ),
+                }
+            }
+            ServerOp::Switch { name } => match sessions.id_of(&name) {
+                Some(to) => {
+                    let mut moved = None;
+                    for client in clients.iter_mut().filter(|client| client.session == from) {
+                        client.session = to;
+                        moved = Some(client.size);
+                    }
+                    // Refitted to whoever just arrived and dirty by construction, so the next
+                    // frame is one they are shown — the same thing an attach does, for the
+                    // same reason.
+                    if let Some(size) = moved
+                        && let Some(session) = sessions.get_mut(to)
+                        && let Err(err) = session.adopt(&setup_for(plugins, size))
+                    {
+                        logging::log(
+                            Level::Error,
+                            &tag,
+                            &format!("session.switch('{name}') failed: {err:#}"),
+                        );
+                    }
+                }
+                None => logging::log(
+                    Level::Error,
+                    &tag,
+                    &format!("session.switch('{name}') refused: no session by that name"),
+                ),
+            },
+            ServerOp::Kill { name } => match sessions.id_of(&name) {
+                Some(id) => end_session(id, plugins, sessions, clients),
+                None => logging::log(
+                    Level::Error,
+                    &tag,
+                    &format!("session.kill('{name}') refused: no session by that name"),
+                ),
+            },
+        }
+    }
+}
+
+/// What a session is started or refitted with, out of the Lua layer and a size.
+fn setup_for(plugins: &Plugins, size: Size) -> Setup {
+    let lua = plugins.lua();
+    Setup {
+        size,
+        first_window: lua.reserve_window_id(),
+        reserved: lua.reserved(),
+        gutter: lua.opt().pane_gutter,
+        wants_pane_output: lua.has_subscriber("pane_output"),
+    }
+}
+
 /// A connection that asked rather than attached, answered and let go. It is not a client, so
 /// it never enters `clients` and never sees a frame.
 fn answer(
@@ -613,6 +720,7 @@ fn admit(
     Ok(Attached {
         link,
         session,
+        size: attach.size,
         mark: plugins.notifications().mark(),
         gone: false,
     })
@@ -732,6 +840,9 @@ fn frame(
     // them today, so this is one pass.
     let ids: Vec<SessionId> = sessions.live.keys().copied().collect();
     let mut over = false;
+    // Collected rather than applied in the loop: a client that switches must not be sent two
+    // frames in one pass, and a session made here must not tick before it has been drawn.
+    let mut asked: Vec<(SessionId, String, ServerOp)> = Vec::new();
     for id in ids {
         let Some(live) = sessions.get_mut(id) else {
             continue;
@@ -740,7 +851,8 @@ fn frame(
         // The whole of what used to be four messages: the session says what happened, the Lua
         // layer answers, the session applies that, and the picture comes of it.
         let tick = live.tick()?;
-        let tock = plugins.respond(id, tick);
+        let (tock, server) = plugins.respond(id, tick);
+        asked.extend(server.into_iter().map(|(tag, op)| (id, tag, op)));
         let Pass { steps, frame, end } = live.advance(&tock)?;
         let picture = (frame.is_some() || end.is_some()).then(|| {
             wire::encode_to_client(&ToClient::Done(&Done {
@@ -805,7 +917,16 @@ fn frame(
             None => {}
         }
     }
-    if over {
+    apply_server_ops(
+        asked,
+        plugins,
+        sessions,
+        clients,
+        serving.terminals,
+        serving.waker,
+    );
+    // After the ops: a `session.kill` of the last one is the server being over too.
+    if over || sessions.live.is_empty() {
         return Ok(true);
     }
 
@@ -878,6 +999,7 @@ fn deliver(clients: &mut [Attached], i: usize, sessions: &mut Sessions, plugins:
                 }
             }
             Ok(ToServer::Resize(size)) => {
+                clients[i].size = size;
                 if let Some(session) = sessions.get_mut(which)
                     && session.resize(size).is_err()
                 {

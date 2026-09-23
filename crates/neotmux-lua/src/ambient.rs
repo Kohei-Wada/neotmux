@@ -54,6 +54,22 @@ impl Ambient {
         self.names.borrow().get(&current).cloned()
     }
 
+    /// Every session there is, in name order, which is the order everything that lists them
+    /// prints them in.
+    pub fn names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.names.borrow().values().cloned().collect();
+        names.sort();
+        names
+    }
+
+    pub fn id_of(&self, name: &str) -> Option<SessionId> {
+        self.names
+            .borrow()
+            .iter()
+            .find(|(_, held)| held.as_str() == name)
+            .map(|(id, _)| *id)
+    }
+
     /// The session the work in hand is for, or `None` outside any dispatch — during a config
     /// load, for instance, where there is no session yet.
     pub fn current(&self) -> Option<SessionId> {

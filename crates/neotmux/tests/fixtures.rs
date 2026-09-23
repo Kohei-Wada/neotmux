@@ -2290,9 +2290,11 @@ fn the_shipped_watcher_is_off_by_default() {
     );
 }
 
-/// The columns `plugin/sidebar.lua` reserves, and the marker it puts against the window
-/// being shown.
+/// The columns `plugin/sidebar.lua` reserves, and the markers it puts against the session
+/// you are in and the window being shown. The sessions come first, so the session marker is
+/// what the band's top row holds.
 const SIDEBAR_COLS: u16 = 24;
+const CURRENT_SESSION_MARKER: &str = "\u{25cf}";
 const CURRENT_WINDOW_MARKER: &str = "\u{25b8}";
 
 /// The vertical edges end to end, on the screen a user sees: the sidebar is a shipped plugin
@@ -2304,7 +2306,8 @@ fn the_shipped_sidebar_lists_the_session_and_narrows_the_panes() {
     let mut nt = Neotmux::start_layered(&[init.path(), &shipped_layer()], "cat");
 
     nt.wait_for_status("cat", PATIENCE);
-    nt.wait_for_cell(PANE_TOP, 0, CURRENT_WINDOW_MARKER, PATIENCE);
+    nt.wait_for_cell(PANE_TOP, 0, CURRENT_SESSION_MARKER, PATIENCE);
+    nt.wait_for_cell(PANE_TOP + 1, 0, CURRENT_WINDOW_MARKER, PATIENCE);
     nt.wait_for_screen("1.1 cat", PATIENCE);
 
     // What the band costs: a pane starts where the sidebar ends, so the shell's own echo
@@ -2353,7 +2356,7 @@ fn the_shipped_sidebar_folds_to_a_rail_and_back() {
     );
     assert_eq!(
         nt.cell(PANE_TOP, 0),
-        CURRENT_WINDOW_MARKER,
+        CURRENT_SESSION_MARKER,
         "the fold took the markers column too:\n{folded}"
     );
 
@@ -2362,7 +2365,7 @@ fn the_shipped_sidebar_folds_to_a_rail_and_back() {
     nt.wait_for_screen("1.1 cat", PATIENCE);
     assert_eq!(
         nt.cell(PANE_TOP, 0),
-        CURRENT_WINDOW_MARKER,
+        CURRENT_SESSION_MARKER,
         "the band came back somewhere other than the left edge:\n{}",
         nt.screen_after(Duration::ZERO)
     );

@@ -19,6 +19,15 @@ use crate::input::key_spec;
 use crate::logging;
 use crate::notify::Notifications;
 
+/// What a plugin asked of the *server* rather than of a session. The set of sessions is not
+/// something a session can change, so these do not travel in a tock.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ServerOp {
+    Create { name: String },
+    Switch { name: String },
+    Kill { name: String },
+}
+
 /// The Lua subsystem and the notification surface that goes with it, driven a frame at a
 /// time.
 pub struct Plugins {
@@ -64,7 +73,7 @@ impl Plugins {
 
     /// One frame's worth of plugin work: catch the Lua layer up with what the session did,
     /// tick it, and answer with what it asked for and what it drew.
-    pub fn respond(&mut self, session: SessionId, tick: Tick) -> Tock {
+    pub fn respond(&mut self, session: SessionId, tick: Tick) -> (Tock, Vec<(String, ServerOp)>) {
         self.catch_up(session, tick.steps);
         if let Some(info) = tick.pane_info {
             self.lua.publish_pane_info(session, info);
@@ -72,23 +81,29 @@ impl Plugins {
         self.lua.begin_frame(session, tick.epoch, tick.geometry);
         self.lua.dispatch_tick(session);
 
-        let ops = self.drain_ops(Some(session));
+        let (ops, server) = self.drain_ops(Some(session));
         self.notifications.expire(Instant::now());
-        Tock {
+        let tock = Tock {
             ops,
             overlay: self.lua.frame_output(),
             notices: self.notifications.visible(),
             reserved: self.lua.reserved(),
             gutter: self.lua.opt().pane_gutter,
             wants_pane_output: self.lua.has_subscriber("pane_output"),
-        }
+        };
+        (tock, server)
     }
 
     /// The ops the session has to apply, with the name of whoever raised each. `log` and
     /// `notify` never leave: the source that raised them and the transcript that replays
     /// them are both here.
-    fn drain_ops(&mut self, session: Option<SessionId>) -> Vec<(String, SessionOp)> {
+    #[allow(clippy::type_complexity)]
+    fn drain_ops(
+        &mut self,
+        session: Option<SessionId>,
+    ) -> (Vec<(String, SessionOp)>, Vec<(String, ServerOp)>) {
         let mut out = Vec::new();
+        let mut server = Vec::new();
         for (id, op) in self.lua.drain_ops(session) {
             let tag = self
                 .lua
@@ -112,10 +127,22 @@ impl Plugins {
                 Op::PaneResize { dir, cells } => SessionOp::PaneResize { dir, cells },
                 Op::WindowCreate { window } => SessionOp::WindowCreate { window },
                 Op::WindowFocus { window } => SessionOp::WindowFocus { window },
+                Op::SessionCreate { name } => {
+                    server.push((tag, ServerOp::Create { name }));
+                    continue;
+                }
+                Op::SessionSwitch { name } => {
+                    server.push((tag, ServerOp::Switch { name }));
+                    continue;
+                }
+                Op::SessionKill { name } => {
+                    server.push((tag, ServerOp::Kill { name }));
+                    continue;
+                }
             };
             out.push((tag, op));
         }
-        out
+        (out, server)
     }
 
     /// The ops a layer raised while it was still loading, before there was a session for any
@@ -124,7 +151,25 @@ impl Plugins {
     pub fn drain_load_ops(&mut self) -> bool {
         let mut quit = false;
         // The load ran before any session existed, so what it raised belongs to none of them.
-        for (tag, op) in self.drain_ops(None) {
+        let (ops, server) = self.drain_ops(None);
+        for (tag, op) in server {
+            let (call, why) = match op {
+                ServerOp::Create { name } => (
+                    format!("session.create('{name}')"),
+                    "no session exists until one starts",
+                ),
+                ServerOp::Switch { name } => (
+                    format!("session.switch('{name}')"),
+                    "there is nothing to switch away from until a session starts",
+                ),
+                ServerOp::Kill { name } => (
+                    format!("session.kill('{name}')"),
+                    "no session exists until one starts",
+                ),
+            };
+            refuse(&tag, &call, why);
+        }
+        for (tag, op) in ops {
             match op {
                 SessionOp::Quit => quit = true,
                 SessionOp::Detach => refuse(
