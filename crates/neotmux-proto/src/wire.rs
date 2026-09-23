@@ -18,10 +18,9 @@ use std::collections::BTreeMap;
 use crate::frame::{Frame, Notice, OwnedFrame, OwnedPaneFrame, PaneFrame};
 use crate::keys::{Key, KeyCode, Modifiers};
 use crate::msg::{
-    Attach, End, Extent, Lines, OwnedToClient, Read, Reading, SessionOp, Step, Tick, ToClient,
-    ToServer, Tock,
+    Attach, End, OwnedToClient, Read, Reading, SessionOp, Step, Tick, ToClient, ToServer, Tock,
 };
-use crate::read::{Trailing, Want};
+use crate::read::{Extent, Lines, Trailing, Want};
 use crate::{
     Color, Dir, DrawCmd, Edge, Epoch, Event, Geometry, GridSnapshot, Level, PROTOCOL_VERSION,
     PaneId, PaneInfo, PaneRects, Rect, Reserved, Size, SnapCell, SplitDir, Window, WindowId,
@@ -2050,6 +2049,34 @@ mod tests {
         assert_eq!(
             &encoded[encoded.len() - 2..],
             &[1, 0],
+            "the two option bytes moved: {encoded:?}"
+        );
+        assert_eq!(
+            decode_to_server(&encoded).expect("decodes"),
+            ToServer::Read(read)
+        );
+    }
+
+    /// `Read::History`'s encode arm changed identically to `Read::Content`'s; `Trailing::Trim`
+    /// and `wrapped: true` make its fixture `[0, 1]`, the opposite of `Content`'s `[1, 0]`
+    /// above, so a copy-paste error between the two arms fails this rather than passing it.
+    #[test]
+    fn a_history_read_encodes_the_bytes_it_encoded_before_want() {
+        let read = Read::History {
+            pane: PaneId::from(7),
+            from: 3,
+            count: 5,
+            want: Want {
+                trailing: Trailing::Trim,
+                wrapped: true,
+            },
+        };
+        let encoded = encode_to_server(&ToServer::Read(read));
+
+        // pad = false, wrapped = true — the last two bytes of the message, unchanged.
+        assert_eq!(
+            &encoded[encoded.len() - 2..],
+            &[0, 1],
             "the two option bytes moved: {encoded:?}"
         );
         assert_eq!(

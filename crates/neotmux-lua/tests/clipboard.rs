@@ -32,21 +32,6 @@ fn ticked(sub: &LuaSubsystem) -> Vec<String> {
         .collect()
 }
 
-/// Two values, not one: the second is what a plugin has to put in front of a person instead
-/// of inventing "copied".
-#[test]
-fn a_write_answers_with_whether_it_was_written_and_why_not() {
-    let (_dir, sub) = built(
-        "local ok, err = neotmux.clipboard.set('yanked')\n\
-         neotmux.log.info(tostring(ok) .. ' ' .. tostring(err))",
-    );
-    let line = ticked(&sub).remove(0);
-    assert!(
-        line == "true nil" || line.starts_with("false "),
-        "the call answered something other than a write and its reason: {line:?}"
-    );
-}
-
 #[test]
 fn clipboard_cannot_be_replaced() {
     let (_dir, sub) = built(

@@ -5,7 +5,11 @@ use crate::panes::PaneLayout;
 /// Everything a pane tree has to be laid out against: the whole terminal, the bands taken off
 /// its edges, and the cells left between panes. One value because every window is assigned
 /// onto the same one, and a window that was hidden while it changed has to be told all
-/// three at once.
+/// four at once.
+///
+/// `minimum` is only read when a window is created (`push`): a later `Surface` carrying a
+/// different `minimum` to `resurface`/`show`/`close_pane` does not move it, since the layout
+/// keeps the value it was constructed with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Surface {
     pub size: Size,
@@ -315,10 +319,9 @@ mod tests {
     fn a_window_hidden_through_a_resize_is_caught_up_when_it_is_shown() {
         let mut windows = windows();
         windows.create(ws(2), surface());
-        let smaller_base = surface();
         let smaller = Surface {
             size: Size { rows: 10, cols: 40 },
-            ..smaller_base
+            ..surface()
         };
         windows.resurface(smaller);
 

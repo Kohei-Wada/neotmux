@@ -172,6 +172,8 @@ pub enum Read {
     },
 }
 
+// Re-exported here because they are what the wire's messages carry: `msg::Lines` etc. keep
+// working as a path.
 pub use crate::read::{Extent, Lines, Want};
 
 /// The answer to a [`Read`]. `None` throughout is a pane that does not exist, which is not

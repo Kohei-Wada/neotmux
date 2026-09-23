@@ -30,6 +30,7 @@ pub fn history(screen: &mut vt100::Screen, from: usize, count: usize) -> Vec<boo
 #[cfg(test)]
 mod tests {
     use super::*;
+    use neotmux_proto::read::Trailing;
 
     fn parser(rows: u16, cols: u16, scrollback: usize, feed: &[u8]) -> vt100::Parser {
         let mut parser = vt100::Parser::new(rows, cols, scrollback);
@@ -56,12 +57,7 @@ mod tests {
         let parser = parser(3, 4, 0, b"abcdef");
         assert_eq!(visible(parser.screen(), Some(2)), vec![false, false]);
         assert_eq!(
-            crate::lines::visible(
-                parser.screen(),
-                Some(2),
-                neotmux_proto::read::Trailing::Trim
-            )
-            .len(),
+            crate::lines::visible(parser.screen(), Some(2), Trailing::Trim).len(),
             2
         );
     }
@@ -71,12 +67,7 @@ mod tests {
         let mut parser = parser(2, 4, 100, b"abcdef\r\n\r\nxy");
         assert_eq!(history(parser.screen_mut(), 0, 10), vec![true, false]);
         assert_eq!(
-            crate::scrollback::lines(
-                parser.screen_mut(),
-                0,
-                10,
-                neotmux_proto::read::Trailing::Trim
-            ),
+            crate::scrollback::lines(parser.screen_mut(), 0, 10, Trailing::Trim),
             vec!["abcd", "ef"]
         );
     }

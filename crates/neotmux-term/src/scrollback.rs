@@ -15,6 +15,8 @@
 //! up — a pane holds a fixed number of lines, and once it holds that many each new line drops
 //! the oldest and every number shifts down by one.
 
+use neotmux_proto::read::Trailing;
+
 /// How many lines the pane holds above its visible screen.
 ///
 /// `set_scrollback` clamps what it is given to the number of lines actually held, so asking
@@ -67,7 +69,7 @@ pub fn lines(
     screen: &mut vt100::Screen,
     from: usize,
     count: usize,
-    trailing: neotmux_proto::read::Trailing,
+    trailing: Trailing,
 ) -> Vec<String> {
     walk(screen, from, count, |screen, row, cols| {
         crate::lines::row(screen, row, cols, trailing)
@@ -86,11 +88,11 @@ mod tests {
     }
 
     fn visible(parser: &vt100::Parser) -> Vec<String> {
-        crate::lines::visible(parser.screen(), None, neotmux_proto::read::Trailing::Trim)
+        crate::lines::visible(parser.screen(), None, Trailing::Trim)
     }
 
     fn lines(screen: &mut vt100::Screen, from: usize, count: usize) -> Vec<String> {
-        super::lines(screen, from, count, neotmux_proto::read::Trailing::Trim)
+        super::lines(screen, from, count, Trailing::Trim)
     }
 
     #[test]

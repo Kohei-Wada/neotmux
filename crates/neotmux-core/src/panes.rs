@@ -15,9 +15,9 @@ pub struct PaneLayout {
     /// How many cells to leave between panes. The host reserves them and has no idea what
     /// anyone puts there — the same deal as a band at the edge.
     gutter: u16,
-    /// The smallest a pane may be, as the caller gave it. Not a constant here: the design
-    /// puts it with the terminal ("the smallest grid `vt100` 0.16.2 survives, not a property
-    /// of layout") and passes it in, which is also what keeps this file free of a terminal.
+    /// The smallest a pane may be, as the caller gave it. Not a constant here: this file does
+    /// not know a terminal exists, so it takes the minimum on trust from whoever does and
+    /// passes it in.
     minimum: Size,
     tree: Tree,
     order: Vec<(PaneId, PRect)>,
@@ -27,9 +27,10 @@ pub struct PaneLayout {
 /// The one place a reserved band costs the panes anything, and the one place it is decided
 /// whether the terminal can afford it at all.
 ///
-/// A surface that cannot spare the reserved cells and still leave the panes a grid `vt100`
-/// survives applies **none** of them, rather than part of one: a half-honoured band is a band
-/// its owner would draw outside. That is the §6 hidden-pane case one level up — the bands are
+/// A surface that cannot spare the reserved cells and still leave the panes a grid at least
+/// the minimum the caller gave applies **none** of them, rather than part of one: a
+/// half-honoured band is a band its owner would draw outside. That is the §6 hidden-pane
+/// case one level up — the bands are
 /// not shown for the frame, nothing is refused and nothing is torn down, and growing the
 /// terminal back brings them straight back.
 ///
@@ -49,9 +50,9 @@ fn applied(full: Size, reserved: Reserved, minimum: Size) -> Reserved {
     applied
 }
 
-/// The one place "can this pane be shown at all" is decided. A rect below the minimum grid
-/// belongs to a pane the terminal has shrunk out of room for (§6): it is hidden for the
-/// frame, not resized to something `vt100` cannot hold and not closed.
+/// The one place "can this pane be shown at all" is decided. A rect below the minimum the
+/// caller gave belongs to a pane the terminal has shrunk out of room for (§6): it is hidden
+/// for the frame, not resized to something smaller than that minimum and not closed.
 fn showable(rect: PRect, minimum: Size) -> bool {
     rect.w >= minimum.cols && rect.h >= minimum.rows
 }
@@ -326,7 +327,7 @@ mod tests {
         assert_eq!(layout.panes(), vec![(pane(1), PRect::new(0, 0, 80, 24))]);
     }
 
-    /// The column case of the rule below, against `MIN_GRID.cols` rather than its rows.
+    /// The column case of the rule below, against the minimum's `cols` rather than its rows.
     #[test]
     fn a_terminal_too_narrow_for_a_vertical_band_applies_none_of_it() {
         let reserved = Reserved::vertical(20, 0);
@@ -380,9 +381,9 @@ mod tests {
         assert_eq!(layout.content, Size { rows: 20, cols: 21 });
     }
 
-    /// The reservation is all or nothing: a surface that cannot leave the panes a grid
-    /// `vt100` holds applies none of it, rather than honouring part of a band its owner
-    /// would then draw outside.
+    /// The reservation is all or nothing: a surface that cannot leave the panes a grid at
+    /// least the minimum the caller gave applies none of it, rather than honouring part of a
+    /// band its owner would then draw outside.
     #[test]
     fn a_terminal_too_small_for_the_bands_applies_none_of_them() {
         let reserved = bottom(1);

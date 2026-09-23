@@ -88,6 +88,13 @@ Two entries in the row are still somewhere else and are meant to be. The event b
 `neotmux-proto`'s `Event`, and the op buffer is `neotmux-lua`'s: M3 put the Lua layer on the
 client, and the ops are the plugins'. The table is what is out of date there, not the code.
 
+`session` and its state transitions are a third entry still outside `neotmux-core`, in
+`crates/neotmux/src/session.rs`, but unlike the other two it is not out of date: `session`
+and `shells` stay in the binary because they own the PTYs, which the layout section already
+rules on — the binary owns the map from `PaneId` to its PTY handle and asks core for the
+rects. The row is true of everything in it except `session`, and `session` is where it is by
+design, not by drift.
+
 ### 2.1 Boundary types live in `neotmux-core::proto`, not a separate crate yet
 
 All types that cross a boundary — `SessionId` / `WindowId` / `PaneId`, geometry, grid
