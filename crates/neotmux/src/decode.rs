@@ -410,9 +410,12 @@ mod tests {
     #[test]
     fn a_csi_u_key_round_trips_to_its_conventional_bytes() {
         use crate::input::encode_key;
-        assert_eq!(encode_key(one(b"\x1b[27u")).as_deref(), Some(&[0x1b][..]));
         assert_eq!(
-            encode_key(one(b"\x1b[97u")).as_deref(),
+            encode_key(one(b"\x1b[27u"), false).as_deref(),
+            Some(&[0x1b][..])
+        );
+        assert_eq!(
+            encode_key(one(b"\x1b[97u"), false).as_deref(),
             Some(b"a".as_slice())
         );
     }

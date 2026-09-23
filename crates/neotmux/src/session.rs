@@ -244,7 +244,7 @@ impl Session {
     /// with no pane focused there is no shell left to type into.
     pub fn key(&mut self, key: Key) -> anyhow::Result<()> {
         if let Some(focus) = self.windows.current().focus()
-            && let Some(bytes) = encode_key(key)
+            && let Some(bytes) = encode_key(key, self.terminals.application_cursor(focus))
         {
             self.shells.write(focus, &bytes)?;
         }

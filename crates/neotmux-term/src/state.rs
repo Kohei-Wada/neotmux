@@ -132,6 +132,16 @@ impl TermState {
     }
 
     /// Where the cursor is, zero-based, which is what a cursor report is asked for.
+    /// Whether the pane has asked for the cursor keys in their application form (DECCKM,
+    /// `CSI ?1h`) — which vim, less and readline's application mode all do.
+    ///
+    /// Always the live screen, never the frozen one: freezing is about what a plugin reads
+    /// and this is about what the child is sent, and a child goes on reading its keyboard
+    /// while somebody is looking at a snapshot of its screen.
+    pub fn application_cursor(&self) -> bool {
+        self.parser.screen().application_cursor()
+    }
+
     pub fn cursor(&self) -> (u16, u16) {
         self.parser.screen().cursor_position()
     }
@@ -551,6 +561,18 @@ mod tests {
         s.freeze();
         s.feed(b"\r\ncd");
         assert_eq!(s.cursor(), (1, 2));
+    }
+
+    /// DECCKM is the pane asking to be sent `ESC O A` rather than `ESC [ A`. Reading it is the
+    /// half neotmux was missing; `\x1b[?1l` puts it back.
+    #[test]
+    fn a_pane_says_whether_it_wants_the_cursor_keys_in_their_application_form() {
+        let mut state = TermState::new(Size { rows: 4, cols: 8 }, 0);
+        assert!(!state.application_cursor(), "off until something asks");
+        state.feed(b"\x1b[?1h");
+        assert!(state.application_cursor());
+        state.feed(b"\x1b[?1l");
+        assert!(!state.application_cursor());
     }
 
     #[test]

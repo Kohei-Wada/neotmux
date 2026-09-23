@@ -91,6 +91,15 @@ impl PaneTerminals {
         self.panes.borrow().get(&pane).map(|t| t.state.size())
     }
 
+    /// Whether this pane has asked for the cursor keys in their application form. For the
+    /// pane, neotmux is the terminal, so the pane's own mode decides what a key is written as.
+    pub fn application_cursor(&self, pane: PaneId) -> bool {
+        self.panes
+            .borrow()
+            .get(&pane)
+            .is_some_and(|t| t.state.application_cursor())
+    }
+
     pub fn snapshot_into(&self, pane: PaneId, out: &mut GridSnapshot) {
         if let Some(terminal) = self.panes.borrow().get(&pane) {
             terminal.state.snapshot_into(out);

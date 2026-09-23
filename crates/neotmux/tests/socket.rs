@@ -1170,3 +1170,38 @@ fn a_window_and_a_session_can_both_be_renamed_from_the_keyboard() {
     client.send("q");
     wait_for_log(runtime.path(), "at 作業 / 編集");
 }
+
+/// Issue #5, end to end: a pane that has not asked for anything is sent `ESC [ A` for Up. The
+/// shell is `cat`, so what it is sent is what comes back — with the escape shown as `^[` by
+/// the terminal drawing it.
+#[test]
+fn a_pane_that_asked_for_nothing_is_sent_the_csi_cursor_keys() {
+    let runtime = TestRuntime::new();
+    let mut client = Client::start(runtime.path(), "/bin/cat");
+    wait_for_socket(&socket_in(runtime.path()));
+
+    client.send("\x1b[A");
+    client.wait_for_output("^[[A");
+}
+
+/// And one that has set DECCKM — which vim, less and readline's application mode all do — is
+/// sent `ESC O A` instead.
+///
+/// The mode is set by what the pane *writes*, never by what is typed at it: a sequence typed
+/// into the client is decoded as keys long before any pane sees it. So the shell prints it and
+/// then becomes `cat`, which is the shape a real application has — it sets the mode on the way
+/// up and reads its keyboard afterwards.
+#[test]
+fn a_pane_that_asked_for_application_cursor_keys_is_sent_them() {
+    let runtime = TestRuntime::new();
+    let mut client = Client::start(runtime.path(), "/bin/sh");
+    wait_for_socket(&socket_in(runtime.path()));
+
+    client.send("printf '\\033[?1h'; exec cat\r");
+    // The shell's own echo is drawn in pieces with cursor moves between them, so there is no
+    // string to wait for here — only time for the sequence to reach the pane's parser.
+    std::thread::sleep(Duration::from_millis(1500));
+
+    client.send("\x1b[A");
+    client.wait_for_output("^[OA");
+}
