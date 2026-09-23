@@ -1,20 +1,19 @@
 -- The notifications, drawn.
 --
 -- `neotmux.notify` raises one and the host holds it: it expires them on its own clock and
--- keeps the transcript that is replayed on stderr when a client leaves. What it does *not*
--- decide any more is what one looks like — that is this file, and it is the last of the
--- visual surfaces to become a plugin's, after the status bar, the borders, the sidebar and
--- the footer.
+-- keeps the transcript a client attaching is told. What it does *not* decide any more is what
+-- one looks like — that is this file, and it is the last of the visual surfaces to become a
+-- plugin's, after the status bar, the borders, the sidebar and the footer.
 --
--- It used to be drawn by the host, over the bottom-right corner, one row each with no
--- background and the width counted in characters rather than columns — so a notification in
--- Japanese lost characters off the end and every one of them sat unreadably on top of whatever
--- the pane was printing.
+-- One notification is one box. Two of them stack up from the bottom-right corner with a row
+-- between, because two things raised by two plugins at two moments are two things, and a
+-- single frame round them reads as one.
 --
 --   C-b N       take them all down
 --
--- Nothing here is a host feature. `neotmux.notifications.list()` is the surface,
--- `neotmux.box` is the frame round it, and `neotmux.width` is what keeps the lines inside it.
+-- Nothing here is a host feature. `neotmux.notifications.list()` is the surface, `ctx:area()`
+-- is the corner to put them in — the pane area, so a sidebar or a footer moves them rather
+-- than being drawn over — and `neotmux.width` is what keeps the lines inside the frame.
 local box = require("neotmux.box")
 
 local M = {}
@@ -27,10 +26,15 @@ M.colors = {
   error = "#f38ba8", -- red
 }
 
--- The most it will take of the surface, in columns and rows. A notification is an
--- interruption, and one that covers what you were reading is a worse interruption.
+-- The most one takes of the surface, in columns and rows, and how many are shown at once. A
+-- notification is an interruption, and one that covers what you were reading is a worse
+-- interruption.
 M.width = 48
-M.rows = 6
+M.rows = 4
+M.stack = 3
+
+-- The blank row between two boxes. Without it they share an edge and read as one window.
+M.gap = 1
 
 M.band = nil
 
@@ -59,6 +63,22 @@ local function wrap(text, width)
   return out
 end
 
+-- One box, on the surface, at a place this file worked out. Not `neotmux.box`: that draws
+-- into a float's own coordinates, and a notification is a corner of the surface that only
+-- exists while something is showing — not a claim on a handle and a place.
+local function draw(ctx, x, y, w, h)
+  ctx:rect(nil, x, y, w, h, { bg = M.colors.frame })
+  local g = box.glyphs
+  local across = string.rep(g.horizontal, w - 2)
+  local edge = { fg = box.colors.line, bg = M.colors.frame }
+  ctx:text(nil, x, y, g.top_left .. across .. g.top_right, edge)
+  ctx:text(nil, x, y + h - 1, g.bottom_left .. across .. g.bottom_right, edge)
+  for row = 1, h - 2 do
+    ctx:text(nil, x, y + row, g.vertical, edge)
+    ctx:text(nil, x + w - 1, y + row, g.vertical, edge)
+  end
+end
+
 if package.loaded["plugin.prefix"] then
   require("plugin.prefix").commands["N"] = function()
     neotmux.notifications.clear()
@@ -70,51 +90,28 @@ neotmux.on_tick(function(ctx)
   if #list == 0 then
     return
   end
-  local size = ctx:size()
-  local width = math.min(M.width, size.cols)
-
-  -- Newest first, as the host hands them over, and drawn from the bottom up so a new one
-  -- appears where your eye already is.
-  local rows = {}
-  for _, one in ipairs(list) do
-    local prefix = one.tag ~= "" and (one.tag .. ": ") or ""
-    for _, line in ipairs(wrap(prefix .. one.text, width - 4)) do
-      rows[#rows + 1] = { text = line, level = one.level }
-    end
-    if #rows >= M.rows then
+  local area = ctx:area()
+  local width = math.min(M.width, area.w)
+  local x = area.x + area.w - width
+  -- Newest first, as the host hands them over, and the newest drawn lowest: a new one appears
+  -- where your eye already is and pushes the older ones up.
+  local bottom = area.y + area.h
+  for at, one in ipairs(list) do
+    if at > M.stack then
       break
     end
-  end
-  while #rows > M.rows do
-    table.remove(rows)
-  end
-
-  local h = #rows + 2
-  local x = size.cols - width
-  local y = size.rows - h
-  if x < 0 or y < 0 then
-    return
-  end
-
-  -- Not a float: a float is a claim on a handle and a place, and this is a corner of the
-  -- surface that only exists while something is showing. `ctx:rect` and `ctx:text` against the
-  -- surface are the whole of it.
-  ctx:rect(nil, x, y, width, h, { bg = M.colors.frame })
-  local g = box.glyphs
-  local across = string.rep(g.horizontal, width - 2)
-  ctx:text(nil, x, y, g.top_left .. across .. g.top_right, {
-    fg = box.colors.line,
-    bg = M.colors.frame,
-  })
-  ctx:text(nil, x, y + h - 1, g.bottom_left .. across .. g.bottom_right, {
-    fg = box.colors.line,
-    bg = M.colors.frame,
-  })
-  for at, row in ipairs(rows) do
-    local line = y + at
-    ctx:text(nil, x, line, g.vertical, { fg = box.colors.line, bg = M.colors.frame })
-    ctx:text(nil, x + width - 1, line, g.vertical, { fg = box.colors.line, bg = M.colors.frame })
-    ctx:text(nil, x + 2, line, row.text, { fg = palette(row.level), bg = M.colors.frame })
+    local prefix = one.tag ~= "" and (one.tag .. ": ") or ""
+    local lines = wrap(prefix .. one.text, width - 4)
+    local h = #lines + 2
+    local y = bottom - h
+    if y < area.y or x < area.x then
+      return
+    end
+    draw(ctx, x, y, width, h)
+    for row, text in ipairs(lines) do
+      ctx:text(nil, x + 2, y + row, text, { fg = palette(one.level), bg = M.colors.frame })
+    end
+    bottom = y - M.gap
   end
 end)
 
