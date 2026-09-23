@@ -94,6 +94,12 @@ impl Notifications {
         self.transcript.iter().skip(from).cloned().collect()
     }
 
+    /// Everything showing, taken down. The transcript is untouched: what was raised was
+    /// raised, and the exit replay is the record of it.
+    pub fn clear(&mut self) {
+        self.items.clear();
+    }
+
     pub fn expire(&mut self, now: Instant) {
         self.items
             .retain(|item| now.duration_since(item.created) < TTL);

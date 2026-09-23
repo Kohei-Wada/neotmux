@@ -1,5 +1,4 @@
 mod draw;
-mod notices;
 mod overlay;
 mod server;
 mod signals;

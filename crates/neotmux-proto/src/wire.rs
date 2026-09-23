@@ -15,15 +15,15 @@ use std::fmt;
 
 use std::collections::BTreeMap;
 
-use crate::frame::{Frame, Notice, OwnedFrame, OwnedPaneFrame, PaneFrame};
+use crate::frame::{Frame, OwnedFrame, OwnedPaneFrame, PaneFrame};
 use crate::keys::{Key, KeyCode, Modifiers};
 use crate::msg::{
     Attach, End, OwnedToClient, Read, Reading, SessionOp, Step, Tick, ToClient, ToServer, Tock,
 };
 use crate::read::{Extent, Lines, Trailing, Want};
 use crate::{
-    Color, Dir, DrawCmd, Edge, Epoch, Event, Geometry, GridSnapshot, Level, PROTOCOL_VERSION,
-    PaneId, PaneInfo, PaneRects, Rect, Reserved, Size, SnapCell, SplitDir, Window, WindowId,
+    Color, Dir, DrawCmd, Edge, Epoch, Event, Geometry, GridSnapshot, PROTOCOL_VERSION, PaneId,
+    PaneInfo, PaneRects, Rect, Reserved, Size, SnapCell, SplitDir, Window, WindowId,
 };
 
 /// The length of the handshake, which is the one message with a fixed size.
@@ -111,10 +111,6 @@ const CMD_LINE: u8 = 3;
 const COLOR_DEFAULT: u8 = 0;
 const COLOR_IDX: u8 = 1;
 const COLOR_RGB: u8 = 2;
-
-const LEVEL_INFO: u8 = 0;
-const LEVEL_WARN: u8 = 1;
-const LEVEL_ERROR: u8 = 2;
 
 const KEY_CHAR: u8 = 0;
 const KEY_ENTER: u8 = 1;
@@ -326,16 +322,6 @@ impl Writer {
                 self.color(*fg);
             }
         }
-    }
-
-    fn notice(&mut self, v: &Notice) {
-        self.u8(match v.level {
-            Level::Info => LEVEL_INFO,
-            Level::Warn => LEVEL_WARN,
-            Level::Error => LEVEL_ERROR,
-        });
-        self.str(&v.tag);
-        self.str(&v.text);
     }
 
     fn key(&mut self, v: Key) {
@@ -578,20 +564,6 @@ impl<'a> Reader<'a> {
             }),
             _ => Err(WireError::Malformed("draw command discriminant")),
         }
-    }
-
-    fn notice(&mut self) -> Result<Notice, WireError> {
-        let level = match self.u8()? {
-            LEVEL_INFO => Level::Info,
-            LEVEL_WARN => Level::Warn,
-            LEVEL_ERROR => Level::Error,
-            _ => return Err(WireError::Malformed("level discriminant")),
-        };
-        Ok(Notice {
-            level,
-            tag: self.string()?,
-            text: self.string()?,
-        })
     }
 
     fn key(&mut self) -> Result<Key, WireError> {
@@ -1035,10 +1007,6 @@ impl Writer {
         for cmd in &v.overlay {
             self.draw_cmd(cmd);
         }
-        self.len(v.notices.len());
-        for notice in &v.notices {
-            self.notice(notice);
-        }
         self.reserved(v.reserved);
         self.u16(v.gutter);
         self.bool(v.wants_pane_output);
@@ -1187,10 +1155,6 @@ impl Writer {
         self.len(v.overlay.len());
         for cmd in v.overlay {
             self.draw_cmd(cmd);
-        }
-        self.len(v.notices.len());
-        for notice in &v.notices {
-            self.notice(notice);
         }
     }
 }
@@ -1412,14 +1376,9 @@ impl Reader<'_> {
         for _ in 0..self.len()? {
             overlay.push(self.draw_cmd()?);
         }
-        let mut notices = Vec::new();
-        for _ in 0..self.len()? {
-            notices.push(self.notice()?);
-        }
         Ok(Tock {
             ops,
             overlay,
-            notices,
             reserved: self.reserved()?,
             gutter: self.u16()?,
             wants_pane_output: self.bool()?,
@@ -1544,17 +1503,12 @@ impl Reader<'_> {
         for _ in 0..self.len()? {
             overlay.push(self.draw_cmd()?);
         }
-        let mut notices = Vec::new();
-        for _ in 0..self.len()? {
-            notices.push(self.notice()?);
-        }
         Ok(OwnedFrame {
             size,
             panes,
             rects,
             cursor,
             overlay,
-            notices,
         })
     }
 }
@@ -1594,7 +1548,6 @@ mod tests {
             panes,
             rects,
             overlay: Vec::new(),
-            notices: Vec::new(),
         }
     }
 
@@ -1734,29 +1687,6 @@ mod tests {
     }
 
     #[test]
-    fn notices_round_trip_at_every_level() {
-        let mut frame = frame_of(vec![]);
-        frame.notices = vec![
-            Notice {
-                level: Level::Info,
-                tag: "lua".to_owned(),
-                text: "loaded".to_owned(),
-            },
-            Notice {
-                level: Level::Warn,
-                tag: String::new(),
-                text: "日本語".to_owned(),
-            },
-            Notice {
-                level: Level::Error,
-                tag: "io".to_owned(),
-                text: String::new(),
-            },
-        ];
-        round_trip(&frame);
-    }
-
-    #[test]
     fn every_key_round_trips_under_every_modifier() {
         let codes = [
             KeyCode::Char('a'),
@@ -1820,11 +1750,6 @@ mod tests {
             grid: grid_of(2, 4, &["a", "b", "c", "d", "e", "f", "g", "h"]),
         }]);
         frame.overlay = every_draw_cmd();
-        frame.notices = vec![Notice {
-            level: Level::Warn,
-            tag: "t".to_owned(),
-            text: "x".to_owned(),
-        }];
         let bytes = encode_frame(&frame.frame());
         for n in 0..bytes.len() {
             assert!(decode_frame(&bytes[..n]).is_err(), "prefix of {n} decoded");
@@ -1955,13 +1880,6 @@ mod tests {
                 rects.insert(PaneId::from(n as u32), self.rect());
             }
             let overlay = (0..self.below(5)).map(|_| self.draw_cmd()).collect();
-            let notices = (0..self.below(3))
-                .map(|_| Notice {
-                    level: [Level::Info, Level::Warn, Level::Error][self.below(3) as usize],
-                    tag: self.text(),
-                    text: self.text(),
-                })
-                .collect();
             OwnedFrame {
                 size: Size {
                     rows: self.next() as u16,
@@ -1971,7 +1889,6 @@ mod tests {
                 rects,
                 cursor: self.opt_pane(),
                 overlay,
-                notices,
             }
         }
     }
@@ -2264,11 +2181,6 @@ mod tests {
                 text: "painted".to_string(),
                 fg: Color::Idx(3),
                 bg: Color::Default,
-            }],
-            notices: vec![Notice {
-                level: Level::Warn,
-                tag: "clock".to_string(),
-                text: "noticed".to_string(),
             }],
             reserved: Reserved::horizontal(1, 0),
             gutter: 2,

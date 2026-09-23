@@ -15,8 +15,7 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    Dir, DrawCmd, Epoch, Event, Geometry, Notice, PaneId, PaneInfo, Reserved, Size, SplitDir,
-    WindowId,
+    Dir, DrawCmd, Epoch, Event, Geometry, PaneId, PaneInfo, Reserved, Size, SplitDir, WindowId,
 };
 
 /// What the client tells the server when it takes the session over: how big its terminal is,
@@ -101,7 +100,6 @@ pub struct Tock {
     /// against whoever asked and the source table is on the client.
     pub ops: Vec<(String, SessionOp)>,
     pub overlay: Vec<DrawCmd>,
-    pub notices: Vec<Notice>,
     pub reserved: Reserved,
     pub gutter: u16,
     pub wants_pane_output: bool,

@@ -54,6 +54,10 @@ pub enum Op {
         from: String,
         to: String,
     },
+    /// Take down every notification showing. The surface is the host's — it holds the ones
+    /// still inside their time and the transcript of every one ever raised — so clearing it
+    /// is a request like any other.
+    NoticesClear,
 }
 
 /// Where the buffer ended before a source's tick group ran, so that group's own ops can be

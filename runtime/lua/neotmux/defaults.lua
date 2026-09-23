@@ -17,6 +17,9 @@ return {
   -- key, and with more than one session going, a list of them with what each is running is
   -- the thing you would otherwise be keeping in your head.
   sessions = true,
+  -- With them: a notification nobody draws is a notification that only reaches the log, and
+  -- the host stopped drawing them when what one looks like became a plugin's decision.
+  notify = true,
   -- Off, unlike the rest: which output means a pane is waiting for a human is an opinion
   -- about what you run, and the other three are not.
   watch = false,

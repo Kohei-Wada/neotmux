@@ -8,8 +8,9 @@ pub struct PaneFrame<'a> {
     pub grid: &'a GridSnapshot,
 }
 
-/// A notification as a frame carries it: what it says, not where it goes or what colour it
-/// is drawn in.
+/// A notification as the host's surface holds it: what it says, not where it goes or what
+/// colour it is drawn in. It reaches a plugin through `neotmux.notifications.list()`, and
+/// whoever draws it decides the rest.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Notice {
     pub level: Level,
@@ -38,8 +39,6 @@ pub struct Frame<'a> {
     /// What the sources drew this frame, in surface coordinates or in a pane's, as each
     /// command says.
     pub overlay: &'a [DrawCmd],
-    /// The notifications still live this frame, newest first.
-    pub notices: Vec<Notice>,
 }
 
 /// A [`PaneFrame`] that owns its grid.
@@ -60,7 +59,6 @@ pub struct OwnedFrame {
     pub rects: PaneRects,
     pub cursor: Option<PaneId>,
     pub overlay: Vec<DrawCmd>,
-    pub notices: Vec<Notice>,
 }
 
 impl OwnedFrame {
@@ -79,7 +77,6 @@ impl OwnedFrame {
             rects: &self.rects,
             cursor: self.cursor,
             overlay: &self.overlay,
-            notices: self.notices.clone(),
         }
     }
 }

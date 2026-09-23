@@ -12,8 +12,7 @@ use neotmux::session::{Session, Setup};
 use neotmux_lua::KeyOutcome;
 use neotmux_lua::LuaSubsystem;
 use neotmux_lua::runtime::Layers;
-use neotmux_proto::Level;
-use neotmux_proto::frame::{Frame, Notice};
+use neotmux_proto::frame::Frame;
 use neotmux_proto::keys::{Key, KeyCode};
 use neotmux_proto::msg::End;
 use neotmux_proto::{DrawCmd, Reserved, SessionId, Size, WindowId};
@@ -185,7 +184,12 @@ fn a_frame_carries_what_the_sources_drew_and_what_they_notified() {
         ("init.lua", "require('plugin.painter')"),
         (
             "lua/plugin/painter.lua",
-            "neotmux.on_tick(function(ctx) ctx:text(nil, 1, 2, 'painted') end)\n\
+            "neotmux.on_tick(function(ctx)\n\
+             \x20 ctx:text(nil, 1, 2, 'painted')\n\
+             \x20 for at, one in ipairs(neotmux.notifications.list()) do\n\
+             \x20   ctx:text(nil, 0, at - 1, one.level .. ' ' .. one.tag .. ': ' .. one.text)\n\
+             \x20 end\n\
+             end)\n\
              neotmux.notify('info', 'noticed')\n\
              return {}",
         ),
@@ -203,8 +207,17 @@ fn a_frame_carries_what_the_sources_drew_and_what_they_notified() {
         "the tick's drawing is not in the frame: {:?}",
         frame.overlay
     );
-    assert_eq!(frame.notices.len(), 1);
-    assert_eq!(frame.notices[0].text, "noticed");
+    // The notification is in the frame because a plugin read it off the host's surface and
+    // drew it. It is not a field of the frame any more: what a notification looks like is the
+    // same kind of decision as what a status bar looks like, and both are Lua's.
+    assert!(
+        frame.overlay.iter().any(|cmd| matches!(
+            cmd,
+            DrawCmd::Text { text, .. } if text == "info plugin/painter: noticed"
+        )),
+        "the notification never reached a plugin: {:?}",
+        frame.overlay
+    );
 }
 
 #[test]
@@ -234,29 +247,13 @@ fn a_session_ends_when_its_last_shell_does_and_still_produces_that_frame() {
     );
 }
 
-/// A frame whose notices are whatever the caller says, so that a notice's whole life can be
-/// driven without waiting out the four seconds a real one takes to expire.
-fn frame_showing<'a>(
-    session: &'a mut Session,
-    plugins: &mut Plugins,
-    notices: Vec<Notice>,
-) -> neotmux::session::Pass<'a> {
-    let tick = session.tick().expect("tick");
-    let answer = plugins.respond(one(), tick);
-    let mut tock = answer.tock;
-    tock.notices = notices;
-    let mut pass = session.advance(&tock, &answer.views).expect("advance");
-    plugins.catch_up(one(), std::mem::take(&mut pass.steps));
-    pass
-}
-
 /// Frames until the session stops producing them: a shell that has finished starting up has
 /// nothing more to say, and from there a frame means something this test did.
 fn settle(session: &mut Session, plugins: &mut Plugins) {
     let deadline = Instant::now() + PATIENCE;
     let mut quiet = 0;
     while Instant::now() < deadline && quiet < 3 {
-        quiet = match frame_showing(session, plugins, Vec::new()).frame {
+        quiet = match frame(session, plugins).frame {
             Some(_) => 0,
             None => quiet + 1,
         };
@@ -265,37 +262,58 @@ fn settle(session: &mut Session, plugins: &mut Plugins) {
     assert!(quiet >= 3, "the session never went quiet");
 }
 
+/// A notification going away produces the frame that stops showing it. It used to be a field
+/// of the frame, compared per client; it is a plugin's drawing now, and the overlay changing
+/// is what the session already watches for.
 #[test]
-fn the_frame_that_takes_an_expired_notice_off_the_screen_is_produced() {
-    let (_dir, _wakeup, mut session, mut plugins) = halves(&[("init.lua", "return {}")]);
+fn the_frame_that_takes_a_cleared_notice_off_the_screen_is_produced() {
+    let (_dir, _wakeup, mut session, mut plugins) = halves(&[(
+        "init.lua",
+        "neotmux.on_tick(function(ctx)\n\
+         \x20 for at, one in ipairs(neotmux.notifications.list()) do\n\
+         \x20   ctx:text(nil, 0, at - 1, one.text)\n\
+         \x20 end\n\
+         end)\n\
+         neotmux.keymap.set('N', function() neotmux.notify('info', 'noticed') return true end)\n\
+         neotmux.keymap.set('C', function() neotmux.notifications.clear() return true end)\n",
+    )]);
     settle(&mut session, &mut plugins);
 
-    let notice = Notice {
-        level: Level::Info,
-        tag: "fixture".to_string(),
-        text: "noticed".to_string(),
-    };
-    let pass = frame_showing(&mut session, &mut plugins, vec![notice.clone()]);
-    assert_eq!(
-        pass.frame
-            .as_ref()
-            .expect("a frame while the notice is up")
-            .notices,
-        vec![notice]
-    );
-    drop(pass);
-
-    // The notice has expired, so this frame is the only thing that can stop it being drawn:
-    // without it the last picture the client was given still has it in.
-    let pass = frame_showing(&mut session, &mut plugins, Vec::new());
-    let shown = pass
-        .frame
-        .expect("the frame that stops showing an expired notice");
+    for typed in typed("N") {
+        key(&mut session, &plugins, typed);
+    }
+    // The op the key raised is drained after that tick, so the surface has it on the next
+    // one and a plugin draws it on the one after. Two frames, not a wait.
     assert!(
-        shown.notices.is_empty(),
-        "the notice is still in the frame: {:?}",
-        shown.notices
+        drawn_within(&mut session, &mut plugins, true),
+        "the notice was never drawn"
     );
+
+    for typed in typed("C") {
+        key(&mut session, &plugins, typed);
+    }
+    assert!(
+        drawn_within(&mut session, &mut plugins, false),
+        "the notice is still drawn after it was cleared"
+    );
+}
+
+/// Whether `noticed` is in the overlay, or is not, within a few frames of asking. An op is
+/// drained after the tick that raised it, so a change the keyboard made takes a frame or two
+/// to reach the picture — and this is the only thing either assertion is waiting for.
+fn drawn_within(session: &mut Session, plugins: &mut Plugins, want: bool) -> bool {
+    for _ in 0..5 {
+        if let Some(shown) = frame(session, plugins).frame {
+            let has = shown
+                .overlay
+                .iter()
+                .any(|cmd| matches!(cmd, DrawCmd::Text { text, .. } if text == "noticed"));
+            if has == want {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// The split in one test: the part a tock does to a session, which is the part shared,
@@ -311,7 +329,6 @@ fn two_applies_are_two_stops_on_the_way_to_two_frames() {
     let tock = neotmux_proto::msg::Tock {
         ops: Vec::new(),
         overlay: Vec::new(),
-        notices: Vec::new(),
         reserved: neotmux_proto::Reserved::default(),
         gutter: 0,
         wants_pane_output: false,
@@ -335,12 +352,12 @@ fn two_applies_are_two_stops_on_the_way_to_two_frames() {
     // whole of how two clients see the one it is in. A frame borrows the session it reads
     // off, so each one is asked for, read, and let go before the next is.
     let overlay: Vec<neotmux_proto::DrawCmd> = Vec::new();
-    let first = session.frame_with(&overlay, Vec::new(), &Default::default());
+    let first = session.frame_with(&overlay, &Default::default());
     let first_size = first.size;
     let first_panes: Vec<_> = first.panes.iter().map(|pane| pane.pane).collect();
     drop(first);
 
-    let second = session.frame_with(&overlay, Vec::new(), &Default::default());
+    let second = session.frame_with(&overlay, &Default::default());
     let second_size = second.size;
     let second_panes: Vec<_> = second.panes.iter().map(|pane| pane.pane).collect();
     drop(second);

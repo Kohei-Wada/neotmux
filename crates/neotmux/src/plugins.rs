@@ -90,14 +90,15 @@ impl Plugins {
             self.lua.publish_pane_info(session, info);
         }
         self.lua.begin_frame(session, tick.epoch, tick.geometry);
+        // Before the tick, so a plugin drawing the surface draws what is on it now.
+        self.notifications.expire(Instant::now());
+        self.lua.publish_notices(self.notifications.visible());
         self.lua.dispatch_tick(session);
 
         let (ops, server) = self.drain_ops(Some(session));
-        self.notifications.expire(Instant::now());
         let tock = Tock {
             ops,
             overlay: self.lua.frame_output(),
-            notices: self.notifications.visible(),
             reserved: self.lua.reserved(),
             gutter: self.lua.opt().pane_gutter,
             wants_pane_output: self.lua.has_subscriber("pane_output"),
@@ -133,6 +134,10 @@ impl Plugins {
                 Op::Notify { level, text } => {
                     self.notifications.push(level, &tag, &text);
                     logging::log(level, &tag, &text);
+                    continue;
+                }
+                Op::NoticesClear => {
+                    self.notifications.clear();
                     continue;
                 }
                 Op::Quit => SessionOp::Quit,

@@ -2605,7 +2605,9 @@ fn yanking_reports_the_register_it_put_the_text_in() {
     nt.send("\x02["); // C-b [
     nt.send("vlll");
     nt.send("y");
-    nt.wait_for_screen("yanked 1 line into plugin.copy.register", PATIENCE);
+    // A fragment, not the whole sentence: a notification is drawn in a box now and wraps to
+    // fit it, so the long form is no longer one run of characters on one row.
+    nt.wait_for_screen("yanked 1 line", PATIENCE);
 }
 
 /// Off unless the user says otherwise, like the watcher and the sidebar. Proven by
@@ -2895,4 +2897,53 @@ fn copy_mode_keeps_the_colours_the_pane_was_written_in() {
         "the scrolled view came out monochrome: {scrolled:?}"
     );
     nt.send("q");
+}
+
+/// A notification says what it says, whatever language it is in. The host drew these itself
+/// and cut them to a count of *characters*, so a line of Japanese overflowed the width it was
+/// given and lost cells off the end — `ペインが返事を待っています` came out as `ペン返をっい`.
+/// It is a plugin's drawing now, cut in columns by the host's own measure.
+#[test]
+fn a_notification_in_japanese_keeps_its_characters() {
+    let init = harness::runtime(&[(
+        "init.lua",
+        "require('plugin.prefix').commands['Y'] = function()\n\
+           neotmux.notify('warn', 'ペインが返事を待っています')\n\
+         end\n",
+    )]);
+    let mut nt = Neotmux::start_layered(&[init.path(), &shipped_layer()], "cat");
+    nt.wait_for_status("cat", PATIENCE);
+    nt.send("\x02Y");
+    nt.wait_for_screen("ペインが返事を待っています", PATIENCE);
+}
+
+/// And it is readable over whatever the pane was printing: the surface it is drawn on is the
+/// plugin's own, with a background and a frame, rather than bare text laid over the cells.
+#[test]
+fn a_notification_is_drawn_on_a_ground_of_its_own() {
+    let init = harness::runtime(&[(
+        "init.lua",
+        "require('plugin.prefix').commands['Y'] = function()\n\
+           neotmux.notify('info', 'noticed')\n\
+         end\n",
+    )]);
+    let mut nt = Neotmux::start_layered(&[init.path(), &shipped_layer()], "cat");
+    nt.wait_for_status("cat", PATIENCE);
+    nt.send("\x02Y");
+    nt.wait_for_screen("noticed", PATIENCE);
+
+    let screen = nt.screen_after(Duration::from_millis(200));
+    let row = screen
+        .lines()
+        .position(|line| line.contains("noticed"))
+        .expect("the notification is on the screen") as u16;
+    let col = screen
+        .lines()
+        .nth(row as usize)
+        .and_then(|line| line.find("noticed"))
+        .expect("the notification is on the screen") as u16;
+    assert!(
+        nt.cell_bg(row, col).is_some(),
+        "the notification was drawn straight onto the pane's cells:\n{screen}"
+    );
 }

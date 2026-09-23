@@ -4,7 +4,7 @@ use ratatui::layout::{Position, Rect};
 use ratatui::style::{Color, Modifier};
 use ratatui::{DefaultTerminal, Frame as TuiFrame};
 
-use crate::{notices, overlay};
+use crate::overlay;
 use neotmux_proto::frame::Frame;
 
 /// Puts a frame on this process's terminal. The one place a produced frame meets a screen:
@@ -35,7 +35,6 @@ pub fn show(terminal: &mut DefaultTerminal, frame: &Frame) -> anyhow::Result<()>
             // The whole area, not the pane area: a `pane = nil` command is in surface
             // coordinates, which is what lets a source draw in the band it reserved.
             overlay::apply(tui, area, frame.overlay, frame.rects);
-            notices::render(tui, area, &frame.notices);
         })
         .context("draw")?;
     Ok(())

@@ -23,6 +23,7 @@ use std::time::Duration;
 use mlua::chunk::ChunkMode;
 use mlua::{Function, Lua, Value};
 
+use neotmux_proto::frame::Notice;
 use neotmux_proto::read::PaneRead;
 use neotmux_proto::{
     DrawCmd, Epoch, Event, Geometry, Level, PaneId, PaneInfo, Reserved, SessionId, Size, WindowId,
@@ -70,6 +71,8 @@ pub struct LuaSubsystem {
     buffers: Rc<Buffers>,
     geometry: Rc<RefCell<Geometry>>,
     pane_info: Rc<RefCell<PaneInfos>>,
+    /// The notifications the host's surface is showing, as of this frame.
+    notices: Rc<RefCell<Vec<Notice>>>,
     /// Which session the work in hand is for, and what the others are holding meanwhile.
     ambient: Rc<Ambient>,
     budget: Rc<Budget>,
@@ -106,6 +109,7 @@ impl LuaSubsystem {
         let load_failures = Rc::new(RefCell::new(Vec::new()));
         let geometry = Rc::new(RefCell::new(Geometry::default()));
         let pane_info = Rc::new(RefCell::new(PaneInfos::new()));
+        let notices = Rc::new(RefCell::new(Vec::new()));
         // Before the op buffer, which reads the bound session at every push.
         let ambient = Rc::new(Ambient::new(geometry.clone(), pane_info.clone()));
         let ops = Rc::new(OpBuffer::new(Rc::clone(&ambient)));
@@ -129,6 +133,7 @@ impl LuaSubsystem {
                 load_failures: load_failures.clone(),
                 geometry: geometry.clone(),
                 pane_info: pane_info.clone(),
+                notices: notices.clone(),
                 panes,
                 clipboard,
                 overrun: overrun.clone(),
@@ -153,6 +158,7 @@ impl LuaSubsystem {
             buffers,
             geometry,
             pane_info,
+            notices,
             ambient,
             budget,
             overrun,
@@ -273,6 +279,13 @@ impl LuaSubsystem {
             self.window_ids.seen(window.id);
         }
         *self.geometry.borrow_mut() = geometry;
+    }
+
+    /// The notifications still showing, newest first, as the host's surface holds them.
+    /// Published rather than asked for, because the surface is the host's: it is what keeps
+    /// a notification about the Lua layer itself failing from depending on the Lua layer.
+    pub fn publish_notices(&self, notices: Vec<Notice>) {
+        *self.notices.borrow_mut() = notices;
     }
 
     /// What every pane is running, as the host last sampled it. Published on the host's own

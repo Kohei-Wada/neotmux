@@ -43,6 +43,7 @@ pub(crate) struct Shared {
     pub(crate) load_failures: Rc<RefCell<Vec<LoadFailure>>>,
     pub(crate) geometry: Rc<RefCell<Geometry>>,
     pub(crate) pane_info: Rc<RefCell<PaneInfos>>,
+    pub(crate) notices: Rc<RefCell<Vec<neotmux_proto::frame::Notice>>>,
     pub(crate) panes: Rc<dyn PaneRead>,
     pub(crate) clipboard: Rc<dyn crate::clipboard::Clipboard>,
     pub(crate) overrun: Rc<Overrun>,
@@ -189,6 +190,7 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
         load_failures,
         geometry,
         pane_info,
+        notices,
         panes,
         clipboard,
         overrun,
@@ -271,6 +273,44 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
         let window = window::install(lua, sources.clone(), ops.clone(), geometry, window_ids)?;
         let window = seal(lua, window, "neotmux.window")?;
         neotmux.set("window", window)?;
+    }
+
+    {
+        // `neotmux.notify` raises one; this is the surface they land on, for whoever draws it.
+        let notifications = lua.create_table()?;
+        {
+            let notices = notices.clone();
+            let list = lua.create_function(move |lua, ()| {
+                let table = lua.create_table()?;
+                for (at, notice) in notices.borrow().iter().enumerate() {
+                    let one = lua.create_table()?;
+                    one.set(
+                        "level",
+                        match notice.level {
+                            neotmux_proto::Level::Info => "info",
+                            neotmux_proto::Level::Warn => "warn",
+                            neotmux_proto::Level::Error => "error",
+                        },
+                    )?;
+                    one.set("tag", notice.tag.clone())?;
+                    one.set("text", notice.text.clone())?;
+                    table.set(at + 1, one)?;
+                }
+                Ok(table)
+            })?;
+            notifications.set("list", list)?;
+        }
+        {
+            let sources = sources.clone();
+            let ops = ops.clone();
+            let clear = lua.create_function(move |lua, ()| {
+                ops.push(source::caller(lua, &sources), Op::NoticesClear);
+                Ok(())
+            })?;
+            notifications.set("clear", clear)?;
+        }
+        let notifications = seal(lua, notifications, "neotmux.notifications")?;
+        neotmux.set("notifications", notifications)?;
     }
 
     {

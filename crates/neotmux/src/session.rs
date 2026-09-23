@@ -20,7 +20,7 @@ use crate::paneinfo::PaneInfoCache;
 use crate::procinfo;
 use crate::shells::Shells;
 use neotmux_core::windows::{PaneIds, Shown, Surface, Windows};
-use neotmux_proto::frame::{Frame, Notice, PaneFrame};
+use neotmux_proto::frame::{Frame, PaneFrame};
 use neotmux_proto::keys::Key;
 
 const MAX_CHUNKS_PER_FRAME: usize = 32;
@@ -54,7 +54,6 @@ pub struct Session {
     pane_info: PaneInfoCache,
     dirty: bool,
     last_overlay: Vec<DrawCmd>,
-    last_notices: Vec<Notice>,
     /// What has happened to the session since the client was last told, in order. A batch
     /// with one geometry attached would be a lie: a `pane_opened` handler must see the pane
     /// it is being told about, so the geometry moves between the events exactly as it does
@@ -123,7 +122,6 @@ impl Session {
             pane_info: PaneInfoCache::new(),
             dirty: true,
             last_overlay: Vec::new(),
-            last_notices: Vec::new(),
             steps: Vec::new(),
             wants_pane_output: setup.wants_pane_output,
             ended: false,
@@ -281,7 +279,6 @@ impl Session {
         // Nothing this client has been shown is on its screen, so the first frame is not
         // allowed to be "nothing changed".
         self.last_overlay.clear();
-        self.last_notices.clear();
         self.dirty = true;
         Ok(())
     }
@@ -611,10 +608,9 @@ impl Session {
     }
 
     /// The picture itself, and nothing else: the panes and the rects are the session's,
-    /// as everything else about it is; the overlay and the notices are the caller's,
-    /// passed in because they are this client's and the last ones sent are not necessarily
-    /// this client's.
-    fn picture<'a>(&'a self, overlay: &'a [DrawCmd], notices: Vec<Notice>) -> Frame<'a> {
+    /// as everything else about it is; the overlay is the caller's, passed in because it is
+    /// what the plugins drew and the session does not keep it.
+    fn picture<'a>(&'a self, overlay: &'a [DrawCmd]) -> Frame<'a> {
         let layout = self.windows.current();
         Frame {
             size: self.surface.size,
@@ -631,21 +627,18 @@ impl Session {
             rects: &layout.rects,
             cursor: layout.focus(),
             overlay,
-            notices,
         }
     }
 
-    /// The session's picture with a client's overlay and notices on it: the caller brings
-    /// the overlay and the notices, because they are that client's, and the caller keeps
-    /// them after the frame, which is the whole of why the frame may borrow them.
+    /// The session's picture with the plugins' overlay on it: the caller brings the overlay,
+    /// and keeps it after the frame, which is the whole of why the frame may borrow it.
     pub fn frame_with<'a>(
         &'a mut self,
         overlay: &'a [DrawCmd],
-        notices: Vec<Notice>,
         views: &BTreeMap<PaneId, usize>,
     ) -> Frame<'a> {
         self.snapshot(views);
-        self.picture(overlay, notices)
+        self.picture(overlay)
     }
 
     /// What applying a tock did to the session: the shared part, ops and geometry and
@@ -719,17 +712,13 @@ impl Session {
                 self.dirty = true;
             }
             self.last_overlay.clone_from(&tock.overlay);
-            if tock.notices != self.last_notices {
-                self.dirty = true;
-            }
-            self.last_notices.clone_from(&tock.notices);
         }
         match application.end {
             // The original forced this last frame (`if self.dirty || eof`); folding the
             // `Eof` into `apply`'s `end` must keep the frame too, not only the end.
             Some(End::Eof) => {
                 self.snapshot(views);
-                let frame = Some(self.picture(&self.last_overlay, tock.notices.clone()));
+                let frame = Some(self.picture(&self.last_overlay));
                 Ok(Pass {
                     steps: application.steps,
                     frame,
@@ -744,7 +733,7 @@ impl Session {
             None => {
                 let frame = if self.dirty {
                     self.snapshot(views);
-                    Some(self.picture(&self.last_overlay, tock.notices.clone()))
+                    Some(self.picture(&self.last_overlay))
                 } else {
                     None
                 };

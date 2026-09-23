@@ -703,7 +703,9 @@ attached is the terminal that asked.
 
 ```lua
 neotmux.log.info(text)    -- also .warn, .error
-neotmux.notify(level, text)  -- 'info' | 'warn' | 'error'; shown on screen and logged
+neotmux.notify(level, text)  -- 'info' | 'warn' | 'error'; raised on the surface and logged
+neotmux.notifications.list() -- what is on it now: { level =, tag =, text = }, newest first
+neotmux.notifications.clear()-- take them all down; the transcript keeps them
 neotmux.quit()
 neotmux.detach()          -- leave the session running and let go of this terminal
 neotmux.session_name()    -- the session this tick, key or event is for; nil during a load
@@ -948,20 +950,21 @@ costs one plugin one frame instead of costing you the program.
 
 ## The shipped defaults
 
-neotmux ships eight plugins in the runtime layer an install puts on the search path:
+neotmux ships nine plugins in the runtime layer an install puts on the search path:
 
 | plugin | what it does |
 |---|---|
 | `status` | the default status bar, on one reserved top row |
 | `prefix` | a `C-b` prefix over `v`, `-`, `o`, `h/j/k/l`, `r`, `c`, `n`, `p`, `,` and `[` |
 | `copy` | copy mode: read back over a pane's scrollback, select a region, yank it |
+| `notify` | draws the notifications, bottom-right, in a frame of their own |
 | `sessions` | the session picker on `C-b s`: every session and what it is running, `Enter` to go, `c` to make one, `r` to rename one, `d` to end one |
 | `borders` | a rule along every boundary between two panes |
 | `watch` | notifies you when a pane looks like it is waiting for you, on `neotmux.state`'s guess — **off by default** |
 | `sidebar` | a tree of every session, and the windows and panes of the one you are in, down a reserved left band, folded by `C-b b` — **off by default** |
 | `footer` | whichever mode is raised through `neotmux.mode`, on one reserved bottom row — **off by default** |
 
-None of them is a host feature — all eight are ordinary files making ordinary API calls, and
+None of them is a host feature — all nine are ordinary files making ordinary API calls, and
 the prefix is the only reason a fresh install can make a second pane at all. `C-b v` splits
 vertically (the panes end up side by side, because `pane.split('vertical')` divides the
 width), `C-b -` splits horizontally (one above the other), `C-b o` focuses the next pane,
@@ -1261,6 +1264,19 @@ neotmux.pane.unfreeze(pane)        -- on the way out
 Two sources asking for the same pane is the later one winning, the rule the overlay already
 follows for the same cells. A view is committed and discarded with your drawing, so a tick that
 overran leaves no pane scrolled.
+
+### The notification surface
+
+`neotmux.notify` raises one and the host holds it: it expires them on its own clock and keeps
+the transcript replayed on stderr when a client leaves. What one *looks like* is a plugin's,
+the same way a status bar is — `plugin.notify` is the shipped one, and
+`neotmux.notifications.list()` is what it reads.
+
+The surface is the host's on purpose. A source's own draw buffer is discarded when that source
+overruns, so a notification about the Lua layer failing cannot live in it; raised here, it
+outlives whatever raised it. What a plugin drawing them cannot survive is its own failure —
+and that one is in the log, which is where a plugin that has stopped drawing is diagnosed
+anyway.
 
 ### The prompt convention
 
