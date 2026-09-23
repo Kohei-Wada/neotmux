@@ -68,6 +68,15 @@ pub struct Session {
     terminals: Rc<PaneTerminals>,
 }
 
+/// One pane, as a command that lists them says it. The size is not here: it is the
+/// terminal's, which is the whole server's rather than one session's.
+pub struct PaneRow {
+    pub pane: PaneId,
+    pub window: WindowId,
+    pub command: Option<String>,
+    pub cwd: Option<String>,
+}
+
 /// What draining the panes found: `Eof` means the last pane is gone and the session ends
 /// after one final frame.
 #[derive(PartialEq, Eq)]
@@ -143,6 +152,46 @@ impl Session {
     /// The pane terminals, which answer the reads the Lua layer asks across the socket.
     pub fn terminals(&self) -> &Rc<PaneTerminals> {
         &self.terminals
+    }
+
+    /// Every window, in creation order, with the panes it holds and whatever it is called.
+    /// `Windows::named_panes`'s own tuples: a command prints them, and the proto's `Window`
+    /// is the frame's shape, not this one's.
+    pub fn windows_list(&self) -> Vec<(WindowId, Vec<PaneId>, Option<String>)> {
+        self.windows.named_panes()
+    }
+
+    /// Every pane the session holds, hidden windows included, with what its shell is running
+    /// read now rather than off the frame's cadence: a command answers a question asked at
+    /// this instant, and the cache exists for a thing drawn sixty times a second.
+    pub fn pane_rows(&self) -> Vec<PaneRow> {
+        let mut rows = Vec::new();
+        for (window, panes, _name) in self.windows.named_panes() {
+            for pane in panes {
+                let info = match self.shells.foreground(pane) {
+                    Some(pid) => procinfo::read(pid),
+                    None => PaneInfo::default(),
+                };
+                rows.push(PaneRow {
+                    pane,
+                    window,
+                    command: info.command,
+                    cwd: info.cwd,
+                });
+            }
+        }
+        rows
+    }
+
+    /// Bytes into a pane's shell, as though they had been typed at it. `false` is a pane this
+    /// session does not hold, which is the caller's cue to ask another one: pane ids are the
+    /// server's, not a session's.
+    pub fn write_to_pane(&mut self, pane: PaneId, bytes: &[u8]) -> anyhow::Result<bool> {
+        if !self.windows.all_panes().any(|held| held == pane) {
+            return Ok(false);
+        }
+        self.shells.write(pane, bytes)?;
+        Ok(true)
     }
 
     fn lay_out_reservations(&mut self) {

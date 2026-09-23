@@ -44,4 +44,4 @@ pub use wire::WireError;
 ///   the client (§11, M3). A renderer needed every one of them.
 /// - 3: `SessionOp::Detach` and `End::Detach`, so a client can leave without ending the
 ///   session. A renderer needed both.
-pub const PROTOCOL_VERSION: u32 = 8;
+pub const PROTOCOL_VERSION: u32 = 9;

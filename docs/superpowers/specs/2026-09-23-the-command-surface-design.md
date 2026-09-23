@@ -206,10 +206,19 @@ of it.
 1. **The wire and the door.** `Command`/`Ran`, the doorstep arm that reads one, and the two
    host commands that need nothing new underneath: `new` and `rename`. Shippable: `neotmux new
    agent-7` works at the end of it.
+
+   **Done, 2026-09-24**, planned in `plans/2026-09-23-the-host-commands.md`.
 2. **The reading and writing commands.** `panes`, `windows`, `send`, `capture`. This is the
    row of the herdr table, and at the end of it an agent can drive a session it started.
+
+   **Done, 2026-09-24**, planned in `plans/2026-09-23-the-host-commands.md`.
 3. **`switch`.** Small, and separate because it is the one host command that moves a client
    rather than touching a session.
+
+   **Done, 2026-09-24**, planned in `plans/2026-09-23-the-host-commands.md`. `switch_clients`
+   is lifted out of `ServerOp::Switch`'s arm in `apply_server_ops` so the plugin path and the
+   command path share one implementation: a plugin moves the clients of the session that
+   asked, and the command moves every client attached to this server.
 4. **`neotmux.command` and Lua dispatch.** The registration table, the frame's queue, name
    resolution and the fallback. Nothing before this depends on it, and everything a plugin
    wants from this spec arrives here.

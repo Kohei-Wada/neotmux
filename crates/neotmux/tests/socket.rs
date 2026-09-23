@@ -729,6 +729,68 @@ fn kill_with_nothing_running_says_so_and_fails() {
     );
 }
 
+/// What an agent asks before it sends anything: which pane is which.
+#[test]
+fn panes_names_the_pane_and_what_it_is_running() {
+    let runtime = TestRuntime::new();
+    let client = Client::start(runtime.path(), "/bin/cat");
+    wait_for_socket(&socket_in(runtime.path()));
+
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .arg("panes")
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run panes");
+    drop(client);
+    let rows = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(rows.starts_with("%1 @1 "), "{rows}");
+    assert!(rows.contains("cat"), "{rows}");
+}
+
+#[test]
+fn windows_names_the_window_and_counts_its_panes() {
+    let runtime = TestRuntime::new();
+    let client = Client::start(runtime.path(), "/bin/cat");
+    wait_for_socket(&socket_in(runtime.path()));
+
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .arg("windows")
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run windows");
+    drop(client);
+    assert!(out.status.success());
+    let rows = String::from_utf8_lossy(&out.stdout);
+    assert!(rows.contains("@1"), "{rows}");
+    assert!(rows.contains("panes=1"), "{rows}");
+}
+
+#[test]
+fn panes_of_a_session_that_is_not_running_fails() {
+    let runtime = TestRuntime::new();
+    let client = started(runtime.path());
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .args(["panes", "-t", "nowhere"])
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run panes");
+    drop(client);
+    assert!(!out.status.success());
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        said.contains("neotmux session 'nowhere' is not running"),
+        "{said}"
+    );
+}
+
 /// Two terminals in the session, and a word typed on one that the other has typed
 /// nothing: the one the first's plugins did not consume, the one the second sees — the
 /// whole of the feature in one sentence. The shell is `cat`, so the word is the pane's
@@ -1204,4 +1266,546 @@ fn a_pane_that_asked_for_application_cursor_keys_is_sent_them() {
 
     client.send("\x1b[A");
     client.wait_for_output("^[OA");
+}
+
+/// The whole path a `ToServer::Command` takes, with nothing implemented at the end of it: a
+/// name the host does not know is `Ran { ok: false, .. }`, not a silent success. `NAMES` is
+/// empty this task, so this is asked over the wire directly rather than through the CLI —
+/// `parse_args` would read `frobnicate` as a session name until `NAMES` has entries.
+#[test]
+fn a_command_nobody_implements_fails_and_says_which_name() {
+    let runtime = TestRuntime::new();
+    let client = started(runtime.path());
+
+    let mut stream = greeted(&socket_in(runtime.path()));
+    send_message(
+        &mut stream,
+        &wire::encode_to_server(&neotmux_proto::ToServer::Command {
+            session: None,
+            name: "frobnicate".to_string(),
+            args: Vec::new(),
+        }),
+    );
+    let answer = read_message(&mut stream);
+    drop(client);
+
+    match answer {
+        OwnedToClient::Ran { ok, lines } => {
+            assert!(!ok);
+            assert_eq!(lines, vec!["unknown command 'frobnicate'".to_string()]);
+        }
+        other => panic!("expected Ran, got {other:?}"),
+    }
+}
+
+/// A session with no client: what an agent starts before it has anywhere to look.
+#[test]
+fn new_starts_a_session_nobody_is_attached_to_and_ls_names_it() {
+    let runtime = TestRuntime::new();
+    let client = started(runtime.path());
+
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .args(["new", "agent-7"])
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run new");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let listed = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .arg("ls")
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run ls");
+    drop(client);
+    let names = String::from_utf8_lossy(&listed.stdout);
+    assert!(names.contains("agent-7"), "{names}");
+}
+
+/// `new` refuses the same names `validate_session_name` always has — the one law, not a
+/// second one the command line invents.
+#[test]
+fn new_refuses_a_name_the_server_would_not_hold() {
+    let runtime = TestRuntime::new();
+    let client = started(runtime.path());
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .args(["new", "-lead"])
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run new");
+    drop(client);
+    assert!(!out.status.success());
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(said.contains("may not start with '-'"), "{said}");
+}
+
+/// The row of the herdr table, in one test: an agent writes into a pane it did not open and
+/// reads back what the shell printed.
+#[test]
+fn send_reaches_the_pane_and_capture_reads_it_back() {
+    let runtime = TestRuntime::new();
+    let client = Client::start(runtime.path(), "/bin/cat");
+    wait_for_socket(&socket_in(runtime.path()));
+
+    let sent = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .args(["send", "%1", "from-outside", "--enter"])
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run send");
+    assert!(
+        sent.status.success(),
+        "{}",
+        String::from_utf8_lossy(&sent.stderr)
+    );
+
+    let deadline = Instant::now() + PATIENCE;
+    let seen = loop {
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+            .args(["capture", "%1"])
+            .env("XDG_RUNTIME_DIR", runtime.path())
+            .env("HOME", runtime.path())
+            .output()
+            .expect("run capture");
+        let text = String::from_utf8_lossy(&out.stdout).to_string();
+        if text.contains("from-outside") {
+            break text;
+        }
+        assert!(Instant::now() < deadline, "capture never saw it: {text:?}");
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    drop(client);
+    assert!(seen.contains("from-outside"), "{seen}");
+}
+
+#[test]
+fn send_to_a_pane_that_is_not_there_fails() {
+    let runtime = TestRuntime::new();
+    let client = started(runtime.path());
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .args(["send", "%99", "nothing"])
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run send");
+    drop(client);
+    assert!(!out.status.success());
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(said.contains("no pane %99"), "{said}");
+}
+
+/// A client looking at one session, moved to another by something that is not that client.
+///
+/// Both sessions could run `/bin/cat`, and if the marker were typed by the client after the
+/// switch it would echo back identically whether or not the switch actually happened — a
+/// switch that silently did nothing would still pass. So the marker is written into the
+/// second session's pane from outside, with `send`, before the client is ever moved to it:
+/// only a client actually looking at that session can show it.
+#[test]
+fn switch_moves_the_attached_client_to_the_named_session() {
+    let runtime = TestRuntime::new();
+    let mut client = Client::start(runtime.path(), "/bin/cat");
+    wait_for_socket(&socket_in(runtime.path()));
+    client.send("in-the-first\r");
+    client.wait_for_output("in-the-first");
+
+    let new_out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .args(["new", "second"])
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run new");
+    assert!(
+        new_out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&new_out.stderr)
+    );
+
+    let panes_out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .args(["panes", "-t", "second"])
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run panes");
+    assert!(
+        panes_out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&panes_out.stderr)
+    );
+    let listed = String::from_utf8_lossy(&panes_out.stdout).into_owned();
+    let pane = listed
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().next())
+        .unwrap_or_else(|| panic!("'second' has a pane: {listed:?}"));
+
+    // All-caps and dash-free so none of it coincides, character for character, with
+    // "in-the-first" at the same screen position — the renderer only resends a cell that
+    // actually changed, and a coincidental match would silently vanish from the client's
+    // byte stream rather than prove anything.
+    let sent = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .args(["send", pane, "SECONDSESSIONMARKER", "--enter"])
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run send");
+    assert!(
+        sent.status.success(),
+        "{}",
+        String::from_utf8_lossy(&sent.stderr)
+    );
+
+    let switch_out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .args(["switch", "second"])
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run switch");
+    assert!(
+        switch_out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&switch_out.stderr)
+    );
+
+    client.wait_for_output("SECONDSESSIONMARKER");
+    drop(client);
+}
+
+/// `windows` and `panes` take a bare positional session name too, the same as `new`, `kill`
+/// and `switch` do — `-t` is not the only way to say which session.
+#[test]
+fn panes_takes_a_bare_session_name_as_well_as_t() {
+    let runtime = TestRuntime::new();
+
+    // Named anything but "default", and no "default" session exists in this runtime at
+    // all: the old code read only `-t` and fell back to the default session for a bare
+    // positional, which would fail here ("session 'default' is not running") rather
+    // than answer "second"'s own pane — `panes default` would have passed against the
+    // unfixed code just as readily as against the fixed one.
+    let new_out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .args(["new", "second"])
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run new");
+    assert!(
+        new_out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&new_out.stderr)
+    );
+
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .args(["panes", "second"])
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run panes");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let rows = String::from_utf8_lossy(&out.stdout);
+    assert!(rows.starts_with("%1 @1 "), "{rows}");
+}
+
+/// `send` and `capture` take a pane id and no session: pane ids are the server's own, so
+/// `-t` would be redundant, and the spec says they refuse it rather than accept and ignore
+/// it.
+#[test]
+fn send_and_capture_refuse_t() {
+    let runtime = TestRuntime::new();
+    let client = Client::start(runtime.path(), "/bin/cat");
+    wait_for_socket(&socket_in(runtime.path()));
+
+    let send_out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .args(["send", "-t", "default", "%1", "hi"])
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run send");
+    assert!(!send_out.status.success());
+    let said = String::from_utf8_lossy(&send_out.stderr);
+    assert!(said.contains("-t"), "{said}");
+
+    let capture_out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .args(["capture", "-t", "default", "%1"])
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run capture");
+    drop(client);
+    assert!(!capture_out.status.success());
+    let said = String::from_utf8_lossy(&capture_out.stderr);
+    assert!(said.contains("-t"), "{said}");
+}
+
+/// `-t` past the command's first argument is payload, not a flag: a pane's own text can
+/// contain the literal token `-t` and it must reach the pane unharmed.
+#[test]
+fn a_t_in_the_middle_of_sends_text_is_not_eaten() {
+    let runtime = TestRuntime::new();
+    let client = Client::start(runtime.path(), "/bin/cat");
+    wait_for_socket(&socket_in(runtime.path()));
+
+    let sent = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .args(["send", "%1", "echo", "-t", "MARK", "--enter"])
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run send");
+    assert!(
+        sent.status.success(),
+        "{}",
+        String::from_utf8_lossy(&sent.stderr)
+    );
+
+    let deadline = Instant::now() + PATIENCE;
+    let seen = loop {
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+            .args(["capture", "%1"])
+            .env("XDG_RUNTIME_DIR", runtime.path())
+            .env("HOME", runtime.path())
+            .output()
+            .expect("run capture");
+        let text = String::from_utf8_lossy(&out.stdout).to_string();
+        if text.contains("echo -t MARK") {
+            break text;
+        }
+        assert!(Instant::now() < deadline, "capture never saw it: {text:?}");
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    drop(client);
+    assert!(seen.contains("echo -t MARK"), "{seen}");
+}
+
+/// `send` with a pane and no text at all is the usage refusal `send` already gives a missing
+/// pane — not a silent success that wrote nothing.
+#[test]
+fn send_with_no_text_is_refused() {
+    let runtime = TestRuntime::new();
+    let client = started(runtime.path());
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .args(["send", "%1"])
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run send");
+    drop(client);
+    assert!(!out.status.success());
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(said.contains("usage: neotmux send"), "{said}");
+}
+
+/// `--help` after a command word is the usage text and exit 0, the way it is anywhere else —
+/// not a question sent to the server.
+#[test]
+fn a_command_s_help_prints_usage_and_exits_zero() {
+    let runtime = TestRuntime::new();
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .args(["panes", "--help"])
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run panes --help");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert!(said.contains("usage: neotmux"), "{said}");
+}
+
+/// `--help` past the first argument is payload, the same as `-t` is: `send`'s whole job is
+/// putting exactly this text in the pane, so `git --help` must reach the shell rather than
+/// being read back out as a request for neotmux's own usage text.
+#[test]
+fn a_help_past_the_first_argument_of_send_is_sent_not_printed() {
+    let runtime = TestRuntime::new();
+    let client = Client::start(runtime.path(), "/bin/cat");
+    wait_for_socket(&socket_in(runtime.path()));
+
+    let sent = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .args(["send", "%1", "git", "--help", "--enter"])
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run send");
+    assert!(
+        sent.status.success(),
+        "{}",
+        String::from_utf8_lossy(&sent.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&sent.stdout).is_empty(),
+        "send must not have printed usage text"
+    );
+
+    let deadline = Instant::now() + PATIENCE;
+    let seen = loop {
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+            .args(["capture", "%1"])
+            .env("XDG_RUNTIME_DIR", runtime.path())
+            .env("HOME", runtime.path())
+            .output()
+            .expect("run capture");
+        let text = String::from_utf8_lossy(&out.stdout).to_string();
+        if text.contains("git --help") {
+            break text;
+        }
+        assert!(Instant::now() < deadline, "capture never saw it: {text:?}");
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    drop(client);
+    assert!(seen.contains("git --help"), "{seen}");
+}
+
+/// `switch` to a name nobody is running fails and says so, rather than starting one or
+/// guessing at the default — the first of `switch`'s two failure sentences.
+#[test]
+fn switch_to_a_session_that_is_not_running_fails() {
+    let runtime = TestRuntime::new();
+    let client = started(runtime.path());
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .args(["switch", "nowhere"])
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run switch");
+    drop(client);
+    assert!(!out.status.success());
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        said.contains("neotmux session 'nowhere' is not running"),
+        "{said}"
+    );
+}
+
+/// A session renamed while it is running: `ls` names it the new way afterwards, and not the
+/// old one.
+#[test]
+fn rename_changes_the_name_ls_shows_and_drops_the_old_one() {
+    let runtime = TestRuntime::new();
+    let client = started(runtime.path());
+
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .args(["rename", "default", "renamed"])
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run rename");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let listed = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .arg("ls")
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run ls");
+    drop(client);
+    let names = String::from_utf8_lossy(&listed.stdout);
+    assert!(names.contains("renamed"), "{names}");
+    assert!(
+        !names.lines().any(|line| line.starts_with("default")),
+        "{names}"
+    );
+}
+
+/// The whole point of finding 2: a pane whose output sits at the top of its grid, asked for
+/// fewer lines than the grid holds, answers with what was actually printed — not with the
+/// blank rows the grid pads its bottom with.
+#[test]
+fn capture_lines_trims_the_blank_tail_and_answers_the_actual_output() {
+    let runtime = TestRuntime::new();
+    let client = Client::start(runtime.path(), "/bin/cat");
+    wait_for_socket(&socket_in(runtime.path()));
+
+    let sent = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .args(["send", "%1", "short-output", "--enter"])
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run send");
+    assert!(
+        sent.status.success(),
+        "{}",
+        String::from_utf8_lossy(&sent.stderr)
+    );
+
+    let deadline = Instant::now() + PATIENCE;
+    loop {
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+            .args(["capture", "%1"])
+            .env("XDG_RUNTIME_DIR", runtime.path())
+            .env("HOME", runtime.path())
+            .output()
+            .expect("run capture");
+        if String::from_utf8_lossy(&out.stdout).contains("short-output") {
+            break;
+        }
+        assert!(Instant::now() < deadline, "capture never saw it");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    // The grid is 24 rows; the output is a couple of lines near its top. `--lines 3`, far
+    // fewer than the grid, must still answer with the output rather than the blank rows
+    // under it.
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .args(["capture", "%1", "--lines", "3"])
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run capture --lines");
+    drop(client);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("short-output"), "{text}");
+    assert!(
+        !text.trim().is_empty(),
+        "--lines answered blanks instead of the pane's content: {text:?}"
+    );
+}
+
+/// `new`'s cold-start path: every other test starts from a running server, but an agent's
+/// first `neotmux new` runs with nothing listening at all — `run_command`'s `start::begin()`
+/// branch, untested until now.
+#[test]
+fn new_starts_a_server_from_cold_when_nothing_is_listening() {
+    let runtime = TestRuntime::new();
+
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .args(["new", "solo"])
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run new");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let listed = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .arg("ls")
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run ls");
+    let names = String::from_utf8_lossy(&listed.stdout);
+    assert!(names.contains("solo"), "{names}");
 }
