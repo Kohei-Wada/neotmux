@@ -1399,3 +1399,31 @@ fn send_to_a_pane_that_is_not_there_fails() {
     let said = String::from_utf8_lossy(&out.stderr);
     assert!(said.contains("no pane %99"), "{said}");
 }
+
+/// A client looking at one session, moved to another by something that is not that client.
+#[test]
+fn switch_moves_the_attached_client_to_the_named_session() {
+    let runtime = TestRuntime::new();
+    let mut client = Client::start(runtime.path(), "/bin/cat");
+    wait_for_socket(&socket_in(runtime.path()));
+    client.send("in-the-first\r");
+    client.wait_for_output("in-the-first");
+
+    for args in [vec!["new", "second"], vec!["switch", "second"]] {
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+            .args(&args)
+            .env("XDG_RUNTIME_DIR", runtime.path())
+            .env("HOME", runtime.path())
+            .output()
+            .expect("run a command");
+        assert!(
+            out.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    client.send("in-the-second\r");
+    client.wait_for_output("in-the-second");
+    drop(client);
+}

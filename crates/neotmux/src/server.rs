@@ -67,7 +67,7 @@ const GRACE: Duration = Duration::from_millis(10);
 /// One client the frame reaches, and everything the server has to remember about it. Which
 /// is very little: the picture is the session's, one Lua layer's, so every client attached
 /// is shown the same one and there is nothing per client to compare it against.
-struct Attached {
+pub(crate) struct Attached {
     link: Link,
     /// The session this client is looking at. It moves between them without its connection
     /// being touched, which is what `session.switch` is.
@@ -579,24 +579,7 @@ fn apply_server_ops(
             }
             ServerOp::Switch { name } => match sessions.id_of(&name) {
                 Some(to) => {
-                    let mut moved = None;
-                    for client in clients.iter_mut().filter(|client| client.session == from) {
-                        client.session = to;
-                        moved = Some(client.size);
-                    }
-                    // Refitted to whoever just arrived and dirty by construction, so the next
-                    // frame is one they are shown — the same thing an attach does, for the
-                    // same reason.
-                    if let Some(size) = moved
-                        && let Some(session) = sessions.get_mut(to)
-                        && let Err(err) = session.adopt(&setup_for(plugins, size))
-                    {
-                        logging::log(
-                            Level::Error,
-                            &tag,
-                            &format!("session.switch('{name}') failed: {err:#}"),
-                        );
-                    }
+                    switch_clients(to, Some(from), clients, sessions, plugins);
                 }
                 None => logging::log(
                     Level::Error,
@@ -713,6 +696,43 @@ pub(crate) fn rename_session(
     Ok(())
 }
 
+/// Clients moved to the session named `to`: every one of them where `of` is `None`, or only
+/// those looking at `of`'s session where it names one. A plugin's `session.switch` moves the
+/// client that asked, so it passes its own session as `of`; the `switch` host command moves
+/// whoever is attached to this server, which is what "bring me to that session" means from
+/// outside, so it passes `None`. Returns how many clients moved.
+pub(crate) fn switch_clients(
+    to: SessionId,
+    of: Option<SessionId>,
+    clients: &mut [Attached],
+    sessions: &mut Sessions,
+    plugins: &Plugins,
+) -> usize {
+    let mut moved = 0usize;
+    let mut last_size = None;
+    for client in clients
+        .iter_mut()
+        .filter(|client| of.is_none_or(|from| client.session == from))
+    {
+        client.session = to;
+        last_size = Some(client.size);
+        moved += 1;
+    }
+    // Refitted to whoever just arrived and dirty by construction, so the next frame is one
+    // they are shown — the same thing an attach does, for the same reason.
+    if let Some(size) = last_size
+        && let Some(session) = sessions.get_mut(to)
+        && let Err(err) = session.adopt(&setup_for(plugins, size))
+    {
+        logging::log(
+            Level::Error,
+            "neotmux-server",
+            &format!("session.switch failed: {err:#}"),
+        );
+    }
+    moved
+}
+
 /// What a session is started or refitted with, out of the Lua layer and a size.
 pub(crate) fn setup_for(plugins: &Plugins, size: Size) -> Setup {
     let lua = plugins.lua();
@@ -760,6 +780,7 @@ fn answer(
                 plugins,
                 terminals: serving.terminals,
                 waker: serving.waker,
+                clients,
             };
             let ran = crate::command::run(&name, &args, session.as_deref(), &mut ctx);
             let _ = link.send(&wire::encode_to_client(&ToClient::Ran {

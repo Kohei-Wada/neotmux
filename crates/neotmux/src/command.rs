@@ -18,7 +18,9 @@ use neotmux::plugins::Plugins;
 
 use neotmux::session::Session;
 
-use crate::server::{RenameFailure, Sessions, StartFailure, rename_session, start_session};
+use crate::server::{
+    Attached, RenameFailure, Sessions, StartFailure, rename_session, start_session, switch_clients,
+};
 
 /// What a command did.
 pub struct Ran {
@@ -49,7 +51,9 @@ impl Ran {
 }
 
 /// Every name the host answers. The CLI reads it to tell a command from a session name.
-pub const NAMES: &[&str] = &["new", "rename", "windows", "panes", "send", "capture"];
+pub const NAMES: &[&str] = &[
+    "new", "rename", "windows", "panes", "send", "capture", "switch",
+];
 
 pub fn unknown(name: &str) -> Ran {
     Ran::failed(format!("unknown command '{name}'"))
@@ -62,6 +66,7 @@ pub struct Ctx<'a> {
     pub plugins: &'a Plugins,
     pub terminals: &'a Rc<PaneTerminals>,
     pub waker: &'a Waker,
+    pub clients: &'a mut Vec<Attached>,
 }
 
 pub fn run(name: &str, args: &[String], session: Option<&str>, ctx: &mut Ctx<'_>) -> Ran {
@@ -72,6 +77,7 @@ pub fn run(name: &str, args: &[String], session: Option<&str>, ctx: &mut Ctx<'_>
         "panes" => panes(session, ctx),
         "send" => send(args, ctx),
         "capture" => capture(args, ctx),
+        "switch" => switch(args, ctx),
         other => unknown(other),
     }
 }
@@ -119,6 +125,22 @@ fn rename(args: &[String], ctx: &mut Ctx<'_>) -> Ran {
             Ran::failed(format!("neotmux session '{from}' is not running"))
         }
     }
+}
+
+/// Moves whoever is attached to this server to the named session — `neotmux switch`'s whole
+/// job, and what "bring me to that session" means when the thing asking is not the client.
+fn switch(args: &[String], ctx: &mut Ctx<'_>) -> Ran {
+    let Some(name) = args.first() else {
+        return Ran::failed("usage: neotmux switch <name>");
+    };
+    let Some(id) = ctx.sessions.id_of(name) else {
+        return Ran::failed(format!("neotmux session '{name}' is not running"));
+    };
+    let moved = switch_clients(id, None, ctx.clients, ctx.sessions, ctx.plugins);
+    if moved == 0 {
+        return Ran::failed(format!("nothing is attached to move to '{name}'"));
+    }
+    Ran::did(name.clone())
 }
 
 /// The session a command is addressed to, or the sentence that says there is none.

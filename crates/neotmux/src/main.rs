@@ -219,6 +219,8 @@ commands:
                       write text into that pane's shell
   neotmux capture <pane> [--lines N]
                       what that pane is showing, oldest line first
+  neotmux switch <name>
+                      move the attached clients to that session
 
 options:
   --log <path>    write the log somewhere other than the default
