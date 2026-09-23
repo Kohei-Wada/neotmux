@@ -8,6 +8,16 @@
 //! Nothing in this file knows about the socket. A name, its arguments and the sessions go in;
 //! lines and whether it worked come out.
 
+use std::rc::Rc;
+
+use neotmux_proto::Size;
+use neotmux_term::terminals::PaneTerminals;
+use neotmux_term::wakeup::Waker;
+
+use neotmux::plugins::Plugins;
+
+use crate::server::{Sessions, rename_session, start_session};
+
 /// What a command did.
 pub struct Ran {
     pub ok: bool,
@@ -16,9 +26,16 @@ pub struct Ran {
 }
 
 impl Ran {
-    #[allow(dead_code)] // used once a command answers with more than one sentence
     pub fn ok(lines: Vec<String>) -> Self {
         Self { ok: true, lines }
+    }
+
+    /// The one line a command answers with when it has nothing more to say than that it did.
+    pub fn did(line: impl Into<String>) -> Self {
+        Self {
+            ok: true,
+            lines: vec![line.into()],
+        }
     }
 
     pub fn failed(why: impl Into<String>) -> Self {
@@ -30,10 +47,79 @@ impl Ran {
 }
 
 /// Every name the host answers. The CLI reads it to tell a command from a session name.
-pub const NAMES: &[&str] = &[];
+pub const NAMES: &[&str] = &["new", "rename"];
 
 pub fn unknown(name: &str) -> Ran {
     Ran::failed(format!("unknown command '{name}'"))
+}
+
+/// What a command reaches into the server for. Built fresh at the door, out of whatever
+/// `Serving` and the frame loop already hold.
+pub struct Ctx<'a> {
+    pub sessions: &'a mut Sessions,
+    pub plugins: &'a Plugins,
+    pub terminals: &'a Rc<PaneTerminals>,
+    pub waker: &'a Waker,
+}
+
+pub fn run(name: &str, args: &[String], session: Option<&str>, ctx: &mut Ctx<'_>) -> Ran {
+    match name {
+        "new" => new(args, session, ctx),
+        "rename" => rename(args, ctx),
+        other => unknown(other),
+    }
+}
+
+/// A session started with no client attached. Its surface is 80x24 because a surface has to
+/// be some size before a shell can open on it, and the first client to attach refits it —
+/// the `window-size latest` rule sessions already follow.
+const HEADLESS: Size = Size { rows: 24, cols: 80 };
+
+/// A name typed on the command line is one word, not a path. `validate_session_name` allows
+/// `/` — a session name is a key in a map, not a filename, and a plugin may put whatever it
+/// likes in one — but a word an agent or a person types at this door is read one token at a
+/// time, and `../escape` is not a name anybody meant to type.
+fn is_a_word(name: &str) -> Result<(), String> {
+    if name.contains('/') {
+        return Err(format!("'{name}' is not a word"));
+    }
+    Ok(())
+}
+
+fn new(args: &[String], session: Option<&str>, ctx: &mut Ctx<'_>) -> Ran {
+    let name = args
+        .first()
+        .map(String::as_str)
+        .or(session)
+        .unwrap_or(neotmux::sock::DEFAULT_SESSION)
+        .to_string();
+    if let Err(why) = is_a_word(&name) {
+        return Ran::failed(why);
+    }
+    match start_session(
+        &name,
+        HEADLESS,
+        ctx.plugins,
+        ctx.sessions,
+        ctx.terminals,
+        ctx.waker,
+    ) {
+        Ok(()) => Ran::ok(vec![name]),
+        Err(why) => Ran::failed(why),
+    }
+}
+
+fn rename(args: &[String], ctx: &mut Ctx<'_>) -> Ran {
+    let [from, to] = args else {
+        return Ran::failed("usage: neotmux rename <old> <new>");
+    };
+    if let Err(why) = is_a_word(to) {
+        return Ran::failed(why);
+    }
+    match rename_session(from, to, ctx.plugins, ctx.sessions) {
+        Ok(()) => Ran::did(to.clone()),
+        Err(why) => Ran::failed(why),
+    }
 }
 
 #[cfg(test)]

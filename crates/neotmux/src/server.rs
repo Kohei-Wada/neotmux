@@ -86,7 +86,7 @@ struct Attached {
 /// One entry today — the map is the shape the rest of them go in, and everything that used to
 /// say "the session" says "this one" through it.
 #[derive(Default)]
-struct Sessions {
+pub(crate) struct Sessions {
     live: BTreeMap<SessionId, Held>,
     next: u32,
     /// Handed to every session this server makes. A pane's terminal state is looked up by id
@@ -96,20 +96,20 @@ struct Sessions {
 }
 
 /// One session and the name it answers to.
-struct Held {
-    name: String,
-    session: Session,
+pub(crate) struct Held {
+    pub(crate) name: String,
+    pub(crate) session: Session,
 }
 
 impl Sessions {
     /// The id a new session takes. Never recycled, so an id names one session for the whole
     /// life of the server.
-    fn mint(&mut self) -> SessionId {
+    pub(crate) fn mint(&mut self) -> SessionId {
         self.next += 1;
         SessionId::from(self.next)
     }
 
-    fn id_of(&self, name: &str) -> Option<SessionId> {
+    pub(crate) fn id_of(&self, name: &str) -> Option<SessionId> {
         self.live
             .iter()
             .find(|(_, held)| held.name == name)
@@ -117,13 +117,13 @@ impl Sessions {
     }
 
     /// Every session's name, in name order, which is the order `ls` prints them in.
-    fn names(&self) -> Vec<String> {
+    pub(crate) fn names(&self) -> Vec<String> {
         let mut names: Vec<String> = self.live.values().map(|held| held.name.clone()).collect();
         names.sort();
         names
     }
 
-    fn get_mut(&mut self, id: SessionId) -> Option<&mut Session> {
+    pub(crate) fn get_mut(&mut self, id: SessionId) -> Option<&mut Session> {
         self.live.get_mut(&id).map(|held| &mut held.session)
     }
 }
@@ -520,7 +520,9 @@ fn door(
         match doorstep(&mut one) {
             Doorstep::Waiting => waiting.push(one),
             Doorstep::Gone => {}
-            Doorstep::Asking(ask) => answer(&mut one.link, ask, plugins, sessions, clients),
+            Doorstep::Asking(ask) => {
+                answer(&mut one.link, ask, plugins, sessions, clients, serving)
+            }
             Doorstep::Attaching(attach) => {
                 clients.push(admit(
                     one.link,
@@ -550,51 +552,18 @@ fn apply_server_ops(
     for (from, tag, op) in asked {
         match op {
             ServerOp::Create { name } => {
-                if let Err(why) = neotmux::sock::validate_session_name(&name) {
-                    logging::log(
-                        Level::Error,
-                        &tag,
-                        &format!("session.create refused: {why}"),
-                    );
-                    continue;
-                }
-                if sessions.id_of(&name).is_some() {
-                    logging::log(
-                        Level::Error,
-                        &tag,
-                        &format!("session.create('{name}') refused: it already exists"),
-                    );
-                    continue;
-                }
                 // At the size of the session that asked: nobody is looking at the new one
                 // yet, and a surface has to be some size before a shell can open on it.
                 let Some(size) = sessions.get_mut(from).map(|session| session.surface_size())
                 else {
                     continue;
                 };
-                let made = Session::new(
-                    &setup_for(plugins, size),
-                    waker.clone(),
-                    terminals.clone(),
-                    sessions.panes.clone(),
-                );
-                match made {
-                    Ok(session) => {
-                        let id = sessions.mint();
-                        sessions.live.insert(
-                            id,
-                            Held {
-                                name: name.clone(),
-                                session,
-                            },
-                        );
-                        plugins.lua().name_session(id, &name);
-                    }
-                    Err(err) => logging::log(
+                if let Err(why) = start_session(&name, size, plugins, sessions, terminals, waker) {
+                    logging::log(
                         Level::Error,
                         &tag,
-                        &format!("session.create('{name}') failed: {err:#}"),
-                    ),
+                        &format!("session.create('{name}') refused: {why}"),
+                    );
                 }
             }
             ServerOp::Switch { name } => match sessions.id_of(&name) {
@@ -625,38 +594,12 @@ fn apply_server_ops(
                 ),
             },
             ServerOp::Rename { from, to } => {
-                if let Err(why) = neotmux::sock::validate_session_name(&to) {
+                if let Err(why) = rename_session(&from, &to, plugins, sessions) {
                     logging::log(
                         Level::Error,
                         &tag,
-                        &format!("session.rename refused: {why}"),
+                        &format!("session.rename('{from}', '{to}') refused: {why}"),
                     );
-                    continue;
-                }
-                if sessions.id_of(&to).is_some() {
-                    logging::log(
-                        Level::Error,
-                        &tag,
-                        &format!("session.rename to '{to}' refused: it already exists"),
-                    );
-                    continue;
-                }
-                match sessions.id_of(&from) {
-                    Some(id) => {
-                        if let Some(held) = sessions.live.get_mut(&id) {
-                            held.name = to.clone();
-                        }
-                        // The Lua layer keeps its own copy, for `session.current()` and for
-                        // the list a picker draws.
-                        plugins.lua().name_session(id, &to);
-                    }
-                    None => logging::log(
-                        Level::Error,
-                        &tag,
-                        &format!(
-                            "session.rename('{from}', '{to}') refused: no session by that name"
-                        ),
-                    ),
                 }
             }
             ServerOp::Kill { name } => match sessions.id_of(&name) {
@@ -671,8 +614,70 @@ fn apply_server_ops(
     }
 }
 
+/// A session started with no client looking at it: a plugin's `session.create`, or the `new`
+/// host command. The name must be a word nobody else is already using, and past that it is
+/// the same session an attach would have made.
+pub(crate) fn start_session(
+    name: &str,
+    size: Size,
+    plugins: &Plugins,
+    sessions: &mut Sessions,
+    terminals: &Rc<PaneTerminals>,
+    waker: &Waker,
+) -> Result<(), String> {
+    neotmux::sock::validate_session_name(name)?;
+    if sessions.id_of(name).is_some() {
+        return Err(format!("a session called '{name}' already exists"));
+    }
+    let made = Session::new(
+        &setup_for(plugins, size),
+        waker.clone(),
+        terminals.clone(),
+        sessions.panes.clone(),
+    );
+    match made {
+        Ok(session) => {
+            let id = sessions.mint();
+            sessions.live.insert(
+                id,
+                Held {
+                    name: name.to_string(),
+                    session,
+                },
+            );
+            plugins.lua().name_session(id, name);
+            Ok(())
+        }
+        Err(err) => Err(format!("could not start '{name}': {err:#}")),
+    }
+}
+
+/// A session's name changes: a plugin's `session.rename`, or the `rename` host command. The
+/// new name must be a word, and one nobody else is already using.
+pub(crate) fn rename_session(
+    from: &str,
+    to: &str,
+    plugins: &Plugins,
+    sessions: &mut Sessions,
+) -> Result<(), String> {
+    neotmux::sock::validate_session_name(to)?;
+    let Some(id) = sessions.id_of(from) else {
+        return Err(format!("no session called '{from}'"));
+    };
+    if sessions.id_of(to).is_some() {
+        return Err(format!("a session called '{to}' already exists"));
+    }
+    if let Some(held) = sessions.live.get_mut(&id) {
+        held.name = to.to_string();
+    }
+    // The Lua layer keeps its own copy, for `session.current()` and for the list a picker
+    // draws.
+    plugins.lua().name_session(id, to);
+    Ok(())
+}
+
 /// What a session is started or refitted with, out of the Lua layer and a size.
-fn setup_for(plugins: &Plugins, size: Size) -> Setup {
+pub(crate) fn setup_for(plugins: &Plugins, size: Size) -> Setup {
     let lua = plugins.lua();
     Setup {
         size,
@@ -691,6 +696,7 @@ fn answer(
     plugins: &Plugins,
     sessions: &mut Sessions,
     clients: &mut Vec<Attached>,
+    serving: &Serving<'_>,
 ) {
     match ask {
         Ask::List => {
@@ -708,11 +714,17 @@ fn answer(
             let _ = link.send(&wire::encode_to_client(&ToClient::Killed(found)));
         }
         Ask::Command {
-            session: _session,
+            session,
             name,
-            args: _args,
+            args,
         } => {
-            let ran = crate::command::unknown(&name);
+            let mut ctx = crate::command::Ctx {
+                sessions,
+                plugins,
+                terminals: serving.terminals,
+                waker: serving.waker,
+            };
+            let ran = crate::command::run(&name, &args, session.as_deref(), &mut ctx);
             let _ = link.send(&wire::encode_to_client(&ToClient::Ran {
                 ok: ran.ok,
                 lines: &ran.lines,

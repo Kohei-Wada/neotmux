@@ -1235,3 +1235,47 @@ fn a_command_nobody_implements_fails_and_says_which_name() {
         other => panic!("expected Ran, got {other:?}"),
     }
 }
+
+/// A session with no client: what an agent starts before it has anywhere to look.
+#[test]
+fn new_starts_a_session_nobody_is_attached_to_and_ls_names_it() {
+    let runtime = TestRuntime::new();
+    let client = started(runtime.path());
+
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .args(["new", "agent-7"])
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run new");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let listed = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .arg("ls")
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run ls");
+    drop(client);
+    let names = String::from_utf8_lossy(&listed.stdout);
+    assert!(names.contains("agent-7"), "{names}");
+}
+
+/// The name is a word, and the same law the command line and the door already enforce.
+#[test]
+fn new_refuses_a_name_that_is_not_a_word() {
+    let runtime = TestRuntime::new();
+    let client = started(runtime.path());
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .args(["new", "../escape"])
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run new");
+    drop(client);
+    assert!(!out.status.success());
+}

@@ -208,6 +208,9 @@ commands:
   neotmux [name]      attach to the named session, or start it
   neotmux ls          the running sessions, one per line
   neotmux kill [name] end a session and every shell in it
+  neotmux new [name]  start a session with no client attached
+  neotmux rename <old> <new>
+                      rename a session
 
 options:
   --log <path>    write the log somewhere other than the default
@@ -283,23 +286,40 @@ fn main() -> anyhow::Result<()> {
 /// Runs a host command and prints what it said. Lines on stdout where it worked, the one
 /// sentence on stderr where it did not, and the exit status says which.
 fn run_command(name: &str, args: &[String], session: Option<&str>) -> anyhow::Result<()> {
-    let asked = ask(&neotmux_proto::msg::ToServer::Command {
+    let msg = neotmux_proto::msg::ToServer::Command {
         session: session.map(str::to_string),
         name: name.to_string(),
         args: args.to_vec(),
-    })?;
-    match asked {
-        Some(neotmux_proto::OwnedToClient::Ran { ok: true, lines }) => {
+    };
+    // `new` has nobody to ask yet where nothing is running — `ask` reads that as "nothing is
+    // running" rather than as a question to start a server over, which is right for every
+    // other command and wrong for this one.
+    let ran = if name == "new" {
+        let link = start::begin()?.finish()?;
+        let mut peer = link.borrow_mut();
+        peer.send(&neotmux_proto::wire::encode_to_server(&msg))
+            .context("ask the neotmux server")?;
+        let Some(message) = peer.recv().context("read the server's answer")? else {
+            anyhow::bail!("the neotmux server went away without answering");
+        };
+        neotmux_proto::wire::decode_to_client(&message).context("decode the server's answer")?
+    } else {
+        match ask(&msg)? {
+            Some(answer) => answer,
+            None => anyhow::bail!("no neotmux server is running"),
+        }
+    };
+    match ran {
+        neotmux_proto::OwnedToClient::Ran { ok: true, lines } => {
             for line in lines {
                 println!("{line}");
             }
             Ok(())
         }
-        Some(neotmux_proto::OwnedToClient::Ran { ok: false, lines }) => {
+        neotmux_proto::OwnedToClient::Ran { ok: false, lines } => {
             anyhow::bail!("{}", lines.join("\n"))
         }
-        Some(other) => anyhow::bail!("the neotmux server answered {other:?}"),
-        None => anyhow::bail!("no neotmux server is running"),
+        other => anyhow::bail!("the neotmux server answered {other:?}"),
     }
 }
 
