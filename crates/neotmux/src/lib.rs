@@ -11,6 +11,7 @@
 //! [`neotmux_proto::Frame`] — what to show, not how to show it. Turning that into a screen,
 //! reading a terminal, and catching the signals a process gets belong to the binary.
 
+pub mod clip;
 pub mod decode;
 pub mod input;
 pub mod link;
