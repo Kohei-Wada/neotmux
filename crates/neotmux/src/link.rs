@@ -33,6 +33,11 @@ pub struct Link {
     /// Messages read by somebody who was waiting for a different one, kept in the order they
     /// arrived so that whoever is reading the connection in general still sees them in it.
     stashed: VecDeque<Vec<u8>>,
+    /// The peer's hello as far as it has arrived, and how much of it that is. `open` fills
+    /// it before it hands the link over; [`Self::greet`] leaves it empty and
+    /// [`Self::greeted`] is what fills it, a readable socket at a time.
+    greeting: [u8; HELLO_LEN],
+    heard: usize,
 }
 
 impl Link {
@@ -43,21 +48,62 @@ impl Link {
     /// this connection with a deadline: a peer that connects and then says nothing would
     /// otherwise hold the server here for ever, and four bytes are not slow to send.
     pub fn open(stream: UnixStream) -> io::Result<Self> {
+        let mut link = Self::greet(stream)?;
+        link.stream.set_read_timeout(Some(GREETING_PATIENCE))?;
+        let heard = link.stream.read_exact(&mut link.greeting);
+        link.stream.set_read_timeout(None)?;
+        heard?;
+        link.heard = HELLO_LEN;
+        wire::decode_hello(&link.greeting).map_err(io::Error::other)?;
+        Ok(link)
+    }
+
+    /// This end's hello written and nothing read: the half of [`Self::open`] that does not
+    /// wait, for a side that has something else to be getting on with.
+    ///
+    /// A server takes this half at its door. The other half is [`Self::greeted`], asked only
+    /// where a poll has just said the connection has something to say, so a peer that
+    /// connects and then goes quiet sits at the door holding nothing but its own place —
+    /// rather than the frame every other client's shell is being served by.
+    pub fn greet(stream: UnixStream) -> io::Result<Self> {
         let mut link = Self {
             stream,
             inbox: Vec::new(),
             taken: 0,
             stashed: VecDeque::new(),
+            greeting: [0u8; HELLO_LEN],
+            heard: 0,
         };
         link.stream.write_all(&wire::encode_hello())?;
         link.stream.flush()?;
-        link.stream.set_read_timeout(Some(GREETING_PATIENCE))?;
-        let mut theirs = [0u8; HELLO_LEN];
-        let greeted = link.stream.read_exact(&mut theirs);
-        link.stream.set_read_timeout(None)?;
-        greeted?;
-        wire::decode_hello(&theirs).map_err(io::Error::other)?;
         Ok(link)
+    }
+
+    /// Whether the peer's hello has been heard in full and was one this end speaks.
+    ///
+    /// One read per ask, because the socket is a blocking one and the ask is the caller
+    /// saying a poll found something on it: reading past what that poll answered for is the
+    /// wait this whole split exists to avoid. `false` is "not all of it yet"; an error is a
+    /// connection that is over, a peer that hung up mid-hello included.
+    pub fn greeted(&mut self) -> io::Result<bool> {
+        if self.heard < HELLO_LEN {
+            match self.stream.read(&mut self.greeting[self.heard..]) {
+                Ok(0) => return Err(io::ErrorKind::UnexpectedEof.into()),
+                Ok(n) => self.heard += n,
+                Err(err) if err.kind() == io::ErrorKind::Interrupted => return Ok(false),
+                Err(err) => return Err(err),
+            }
+        }
+        if self.heard < HELLO_LEN {
+            return Ok(false);
+        }
+        wire::decode_hello(&self.greeting).map_err(io::Error::other)?;
+        Ok(true)
+    }
+
+    /// Whether the greeting is behind this link, so what comes next is a message.
+    pub fn is_greeted(&self) -> bool {
+        self.heard == HELLO_LEN
     }
 
     pub fn as_fd(&self) -> BorrowedFd<'_> {

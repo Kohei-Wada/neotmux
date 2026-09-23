@@ -285,3 +285,37 @@ fn kill_says_which_name_it_is_refusing_to_guess_at() {
         "work is gone, and ls with nothing running exits 1: {out:?} {err:?}"
     );
 }
+
+/// `kill work` with two terminals in the session ends it for both of them, exactly as it
+/// ends it for the one. The regression it catches runs in either direction: a kill that
+/// reached only the client it found first, and a kill that stopped reaching any of them
+/// once a session could have more than one.
+#[test]
+fn kill_work_with_two_clients_attached_ends_both() {
+    let rt = Runtime::new();
+    let layer = harness::runtime(&[("init.lua", "")]);
+
+    let mut first = Neotmux::start_named_on(rt.dir.path(), "work", &layer, "/bin/cat");
+    first.settle(Duration::from_millis(300));
+    first.send("two-are-looking\r");
+    first.wait_for_screen("two-are-looking", Duration::from_secs(10));
+
+    // The second terminal is in the same session, not a fresh one: what it is shown is what
+    // the first one typed, which an empty shell of its own would never say.
+    let mut second = Neotmux::start_named_on(rt.dir.path(), "work", &layer, "/bin/cat");
+    second.wait_for_screen("two-are-looking", Duration::from_secs(10));
+    up(&rt, "work");
+
+    let (code, said) = kill(&rt, Some("work"));
+    assert_eq!(code, 0, "kill work: {said:?}");
+    wait_for_gone(&rt, "work");
+
+    assert!(
+        first.wait_for_exit(Duration::from_secs(10)).is_some(),
+        "the first terminal is out: a killed session is one no client is left in"
+    );
+    assert!(
+        second.wait_for_exit(Duration::from_secs(10)).is_some(),
+        "and so is the second, which is the half a one-client kill could not have said"
+    );
+}

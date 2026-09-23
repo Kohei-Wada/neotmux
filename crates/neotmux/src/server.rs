@@ -42,6 +42,23 @@ const FRAME: Duration = Duration::from_millis(16);
 /// client's own patience: past that, nobody is coming and there is nothing to serve.
 const STARTUP: Duration = Duration::from_secs(10);
 
+/// How long a connection has to say what it is. The same patience the greeting had when the
+/// greeting was the whole of it, now covering the attach behind it too — and now spent at the
+/// door rather than inside a frame.
+const DOORSTEP: Duration = Duration::from_secs(5);
+
+/// The one short wait the door is allowed, and only for a connection that has just greeted.
+///
+/// The attach is a reply to this end's hello — the peer cannot have sent it before it read
+/// that — so at the moment the greeting lands the attach is on its way and a context switch
+/// behind. Waiting that much for it is what keeps a client in the round the door took it in,
+/// which is the round every one of them has been in since there was one to be in.
+///
+/// Spent once per connection: a peer that greets and then stalls costs this much once, and a
+/// peer that says nothing at all never costs even that, because the wait is not reached until
+/// something has been heard.
+const GRACE: Duration = Duration::from_millis(10);
+
 /// One slice of the tock wait. The tock wait has no deadline of its own — a client takes
 /// as long as it takes, and the one-client loop had the same property, its `recv`
 /// blocking until the client sent or stopped — so a client that stops sending is a
@@ -78,6 +95,17 @@ struct Attached {
     notices_dirty: bool,
 }
 
+/// What the server holds for the whole of its life, as against what one frame has: the
+/// socket its clients arrive on, the pipe its panes nudge it with, the handle the panes are
+/// given to do the nudging, and the signal that ends all of it. One value because every one
+/// of them is wanted wherever any of them is.
+struct Serving<'a> {
+    listener: &'a UnixListener,
+    wakeup: &'a Wakeup,
+    waker: &'a Waker,
+    shutdown: &'a ShutdownSignal,
+}
+
 pub fn serve(listener: &UnixListener, shutdown: &ShutdownSignal) -> anyhow::Result<()> {
     // Polled rather than blocked on, so the frame loop can answer a client instead of
     // leaving it in the backlog wondering.
@@ -85,8 +113,18 @@ pub fn serve(listener: &UnixListener, shutdown: &ShutdownSignal) -> anyhow::Resu
         .set_nonblocking(true)
         .context("make the socket pollable")?;
     let (wakeup, waker) = wakeup().context("open the panes' wakeup")?;
+    let serving = Serving {
+        listener,
+        wakeup: &wakeup,
+        waker: &waker,
+        shutdown,
+    };
     let mut session: Option<Session> = None;
     let mut clients: Vec<Attached> = Vec::new();
+    // Connections that have arrived and not yet said what they are. They outlive the call
+    // that took them in: a connection half-way through its handshake when a frame starts is
+    // still there at the next door look, rather than being a frame's own problem.
+    let mut pending: Vec<Pending> = Vec::new();
     let born = Instant::now();
 
     loop {
@@ -94,29 +132,14 @@ pub fn serve(listener: &UnixListener, shutdown: &ShutdownSignal) -> anyhow::Resu
             return Ok(());
         }
         if clients.is_empty() {
-            match await_client(
-                &mut clients,
-                &mut session,
-                listener,
-                &wakeup,
-                &waker,
-                shutdown,
-                born,
-            )? {
+            match await_client(&mut clients, &mut pending, &mut session, &serving, born)? {
                 true => continue,
                 // Over: signalled, out of its patience with no session, or the last
                 // shell of a session no client is holding went.
                 false => return Ok(()),
             }
         }
-        if frame(
-            &mut session,
-            &mut clients,
-            listener,
-            &wakeup,
-            &waker,
-            shutdown,
-        )? {
+        if frame(&mut session, &mut clients, &mut pending, &serving)? {
             return Ok(());
         }
     }
@@ -130,11 +153,9 @@ pub fn serve(listener: &UnixListener, shutdown: &ShutdownSignal) -> anyhow::Resu
 /// over, and the loop does not run again.
 fn await_client(
     clients: &mut Vec<Attached>,
+    pending: &mut Vec<Pending>,
     session: &mut Option<Session>,
-    listener: &UnixListener,
-    wakeup: &Wakeup,
-    waker: &Waker,
-    shutdown: &ShutdownSignal,
+    serving: &Serving<'_>,
     born: Instant,
 ) -> anyhow::Result<bool> {
     // A session with a client that has left waits for ever: that is what detach means.
@@ -142,13 +163,13 @@ fn await_client(
     // applies.
     let give_up = session.is_none().then_some(born + STARTUP);
     loop {
-        if shutdown.raised().is_some() {
+        if serving.shutdown.raised().is_some() {
             return Ok(false);
         }
         let frame_end = Instant::now() + FRAME;
         let ready = crate::tty::wait_on(
-            std::os::fd::AsFd::as_fd(listener),
-            session.is_some().then(|| wakeup.as_fd()),
+            std::os::fd::AsFd::as_fd(serving.listener),
+            session.is_some().then(|| serving.wakeup.as_fd()),
             give_up.map_or(frame_end, |at| at.min(frame_end)),
         )
         .context("wait for a client")?;
@@ -159,29 +180,16 @@ fn await_client(
             // Only once the poll has said so: the nudge is a pipe, and reading an empty
             // one is a wait with nothing to end it.
             if ready == crate::tty::Ready::Output {
-                wakeup.clear();
+                serving.wakeup.clear();
             }
             if session.idle()? {
                 return Ok(false);
             }
         }
-        // A ready client, attached: it is the new client, the one who sets the wants-OR
-        // (the other clients are none here). A connection that was greeted but never
-        // attached is dropped — it may not end anybody's session, the rule the old
-        // `attached` kept — and the server goes back to waiting.
-        if ready == crate::tty::Ready::Input
-            && let Some(stream) = taken(listener)?
-            && let Some(client) = attach_new(stream, session, waker)?
-        {
-            let wants = clients.iter().any(|c| c.wants) || client.wants;
-            if let Some(session) = session.as_mut() {
-                if wants {
-                    session.wants_output(true);
-                } else {
-                    session.forget_pane_output();
-                }
-            }
-            clients.push(client);
+        // The door, looked at every pass rather than only on a ready listener: a connection
+        // taken in on an earlier pass is still half-way through its handshake, and the poll
+        // above answered for the listener, not for it. Nothing here waits.
+        if door(pending, clients, session, serving)? {
             return Ok(true);
         }
     }
@@ -197,96 +205,234 @@ fn taken(listener: &UnixListener) -> anyhow::Result<Option<UnixStream>> {
     }
 }
 
-/// The new client, greeted and adopted: the one path that still says no to a connection
-/// whose first message is not an attach, for the reason the old `attached` gave, and one
-/// that says yes — rather than no, with a reason the client would not have believed —
-/// to a client a session already has. The caller, who has the other clients, sets the
-/// `wants_pane_output` OR, because `attach_new` does not hold them.
-fn attach_new(
-    stream: UnixStream,
+/// A connection that has arrived and not yet said what it is.
+///
+/// It is not a client, and no frame ever waits on it: the door is looked at once a frame and
+/// what is found there is read only as far as it has already spoken. A peer that connects and
+/// then goes quiet sits here until its patience runs out, holding nothing but its own place —
+/// the rule the old `attached` kept, now kept without the frame paying for it.
+struct Pending {
+    link: Link,
+    give_up: Instant,
+    /// Whether this connection has had its one short wait yet. See [`GRACE`].
+    graced: bool,
+}
+
+/// What one look at a connection at the door found.
+enum Doorstep {
+    /// Nothing yet, or not all of it: it stays at the door.
+    Waiting,
+    /// It said what it is.
+    Attaching(Attach),
+    /// It is over: hung up, out of patience, or something that was not an attach — the one
+    /// path that still says no to a connection, for the reason the old `attached` gave.
+    Gone,
+}
+
+/// One look at one connection at the door, which never waits.
+///
+/// Every read here happens where a poll has just said there is something to read, and only as
+/// far as that — which is the whole of C1: a handshake run inline is a handshake every other
+/// client's shell is waiting on. Within one look it goes as far as the connection has already
+/// spoken, so the ordinary client, whose hello and attach are written one after the other, is
+/// adopted by the same door look that took it in, the way the inline handshake always did —
+/// and a frame the door is inside of is not one a connection can be a step behind.
+///
+/// The steps are capped because the door is inside a frame: a peer trickling bytes that are
+/// not yet a message is one the next look carries on with, not one this frame keeps reading.
+fn doorstep(pending: &mut Pending) -> Doorstep {
+    /// How many times one look goes round before leaving the rest to the next one. Two is the
+    /// ordinary client — its hello, then its attach; the rest is room for a peer whose writes
+    /// landed in more pieces than it made them in.
+    const STEPS: usize = 8;
+
+    for _ in 0..STEPS {
+        // Nothing here waits, with the one exception [`GRACE`] is: a connection that has just
+        // greeted is a connection whose attach is already on the wire.
+        let until = if pending.link.is_greeted() && !pending.graced {
+            pending.graced = true;
+            Instant::now() + GRACE
+        } else {
+            Instant::now()
+        };
+        let ready = match crate::tty::wait_any(&[pending.link.as_fd()], until) {
+            Ok(crate::tty::Any::Ready(_)) => true,
+            Ok(crate::tty::Any::Idle) => false,
+            Ok(crate::tty::Any::HangUp(_)) => return Doorstep::Gone,
+            Err(err) => {
+                logging::log(
+                    Level::Warn,
+                    "neotmux-server",
+                    &format!("a connection at the door could not be waited on: {err}"),
+                );
+                return Doorstep::Gone;
+            }
+        };
+        if !ready {
+            break;
+        }
+        if !pending.link.is_greeted() {
+            match pending.link.greeted() {
+                Ok(_) => continue,
+                // A client built against another protocol, or one that hung up mid-handshake.
+                // Its own end says so; this one goes back to what it was doing.
+                Err(err) => {
+                    logging::log(
+                        Level::Warn,
+                        "neotmux-server",
+                        &format!("a client could not be greeted: {err}"),
+                    );
+                    return Doorstep::Gone;
+                }
+            }
+        }
+        match pending.link.fill() {
+            Ok(true) => {}
+            Ok(false) => return Doorstep::Gone,
+            Err(err) => {
+                logging::log(
+                    Level::Warn,
+                    "neotmux-server",
+                    &format!("a client's first message could not be read: {err}"),
+                );
+                return Doorstep::Gone;
+            }
+        }
+        let message = match pending.link.take() {
+            Ok(Some(message)) => message,
+            Ok(None) => continue,
+            Err(err) => {
+                logging::log(
+                    Level::Warn,
+                    "neotmux-server",
+                    &format!("a client's first message could not be read: {err}"),
+                );
+                return Doorstep::Gone;
+            }
+        };
+        return match wire::decode_to_server(&message) {
+            Ok(ToServer::Attach(attach)) => Doorstep::Attaching(attach),
+            Ok(other) => {
+                logging::log(
+                    Level::Warn,
+                    "neotmux-server",
+                    &format!("a client's first message was {other:?} rather than an attach"),
+                );
+                Doorstep::Gone
+            }
+            Err(err) => {
+                logging::log(
+                    Level::Warn,
+                    "neotmux-server",
+                    &format!("a client's first message could not be decoded: {err}"),
+                );
+                Doorstep::Gone
+            }
+        };
+    }
+
+    if Instant::now() >= pending.give_up {
+        logging::log(
+            Level::Warn,
+            "neotmux-server",
+            "a connection said nothing for long enough to be nobody",
+        );
+        return Doorstep::Gone;
+    }
+    Doorstep::Waiting
+}
+
+/// Everything at the door, looked at once and never listened to: whatever has arrived on the
+/// listener is taken and put there, everything already there is stepped, and whichever of them
+/// has said what it is becomes a client — a session adopting it, or, where there is no session
+/// yet, becoming one.
+///
+/// `true` is somebody having been adopted. The `wants_pane_output` OR is taken here because
+/// here is where the set of attached clients changes; a false OR is a `forget`, not a
+/// `wants_output(false)`, so the stale steps go with it.
+fn door(
+    pending: &mut Vec<Pending>,
+    clients: &mut Vec<Attached>,
     session: &mut Option<Session>,
-    waker: &Waker,
-) -> anyhow::Result<Option<Attached>> {
-    let mut link = match Link::open(stream) {
-        Ok(link) => link,
-        // A client built against another protocol, or one that hung up mid-handshake.
-        // Its own end says so; this one goes back to waiting.
-        Err(err) => {
-            logging::log(
+    serving: &Serving<'_>,
+) -> anyhow::Result<bool> {
+    while let Some(stream) = taken(serving.listener)? {
+        match Link::greet(stream) {
+            Ok(link) => pending.push(Pending {
+                link,
+                give_up: Instant::now() + DOORSTEP,
+                graced: false,
+            }),
+            Err(err) => logging::log(
                 Level::Warn,
                 "neotmux-server",
                 &format!("a client could not be greeted: {err}"),
-            );
-            return Ok(None);
+            ),
         }
-    };
-    let attach = match first_message(&mut link)? {
-        Some(attach) => attach,
-        None => return Ok(None),
-    };
-    let wants = attach.wants_pane_output;
+    }
+
+    let mut adopted = false;
+    let mut waiting: Vec<Pending> = Vec::new();
+    for mut one in std::mem::take(pending) {
+        match doorstep(&mut one) {
+            Doorstep::Waiting => waiting.push(one),
+            Doorstep::Gone => {}
+            Doorstep::Attaching(attach) => {
+                clients.push(admit(one.link, &attach, session, serving.waker)?);
+                adopted = true;
+            }
+        }
+    }
+    *pending = waiting;
+
+    if adopted && let Some(session) = session.as_mut() {
+        if clients.iter().any(|client| client.wants) {
+            session.wants_output(true);
+        } else {
+            session.forget_pane_output();
+        }
+    }
+    Ok(adopted)
+}
+
+/// The client a session adopts, out of the attach it sent — and, where there is no session,
+/// the session it is the first of.
+fn admit(
+    link: Link,
+    attach: &Attach,
+    session: &mut Option<Session>,
+    waker: &Waker,
+) -> anyhow::Result<Attached> {
     match session.as_mut() {
-        Some(session) => session.adopt(&attach)?,
+        Some(session) => session.adopt(attach)?,
         None => {
             // Assign through the parameter: a fresh `let session` would shadow the
             // `&mut Option<Session>` with an owned `Session` and `*session` could not
             // dereference it.
-            *session = Some(Session::new(&attach, waker.clone())?);
+            *session = Some(Session::new(attach, waker.clone())?);
         }
     }
-    Ok(Some(Attached {
+    Ok(Attached {
         link,
-        wants,
+        wants: attach.wants_pane_output,
         last_overlay: Vec::new(),
         last_notices: Vec::new(),
         first: true,
         gone: false,
         overlay_dirty: false,
         notices_dirty: false,
-    }))
+    })
 }
 
-/// The client's first message, and the reason it was not an attach, if it was not. The
-/// one place in the code a first message is read, which is where the rules the old
-/// `attached` had live, because they are the same rules.
-fn first_message(link: &mut Link) -> anyhow::Result<Option<Attach>> {
-    let message = match link.recv() {
-        Ok(Some(message)) => message,
-        Ok(None) => return Ok(None),
-        Err(err) => {
-            logging::log(
-                Level::Warn,
-                "neotmux-server",
-                &format!("a client's first message could not be read: {err}"),
-            );
-            return Ok(None);
-        }
-    };
-    match wire::decode_to_server(&message) {
-        Ok(ToServer::Attach(attach)) => Ok(Some(attach)),
-        Ok(other) => {
-            logging::log(
-                Level::Warn,
-                "neotmux-server",
-                &format!("a client's first message was {other:?} rather than an attach"),
-            );
-            Ok(None)
-        }
-        Err(err) => {
-            logging::log(
-                Level::Warn,
-                "neotmux-server",
-                &format!("a client's first message could not be decoded: {err}"),
-            );
-            Ok(None)
-        }
-    }
-}
-
-/// The one wait the frame is built over: the clients being waited on, in the order they
-/// attached, and the panes. One place builds the slot list for both loops, so a ready `i`
-/// always lands on the slot the `slots` it is read against thinks it is — the one `n`
-/// and the one list are what keep the two aligned when a client goes away mid-frame.
+/// The one wait the frame is built over: the clients still being waited on, in the order
+/// they attached, and the panes. `live` is the slot list — one entry per client the wait is
+/// for, holding that client's index — and the panes are the slot after the last of them, so
+/// a ready slot always lands on the client `live` says it is.
+///
+/// A client that has gone is left out of it. `POLLHUP` is level-triggered, so a hung-up fd
+/// left in the set comes back ready on every pass: the wait would return at once, for ever,
+/// while another client's tock is still owed — a whole core burnt at the moment one client
+/// has died and the rest are being served.
 ///
 /// `BorrowedFd` is `Copy`, so the fd list is laid out on the stack: every pre-filled slot
 /// is a real fd (the panes'), and the loop never makes a heap round between itself and
@@ -295,25 +441,68 @@ fn first_message(link: &mut Link) -> anyhow::Result<Option<Attach>> {
 /// the clock, not the wait, is where it spends its time.
 fn wait_over(
     clients: &[Attached],
-    n: usize,
+    live: &[usize],
     wakeup: &Wakeup,
     deadline: Instant,
 ) -> std::io::Result<crate::tty::Any> {
     const MAX_ON_STACK: usize = 32;
+    let n = live.len();
     if n.saturating_add(1) <= MAX_ON_STACK {
         let mut fds = [wakeup.as_fd(); MAX_ON_STACK];
-        for (slot, client) in fds.iter_mut().zip(clients.iter()) {
-            *slot = client.link.as_fd();
+        for (slot, &i) in fds.iter_mut().zip(live.iter()) {
+            *slot = clients[i].link.as_fd();
         }
         return crate::tty::wait_any(&fds[..n + 1], deadline);
     }
-    let fds: Vec<std::os::fd::BorrowedFd> = clients
+    let fds: Vec<std::os::fd::BorrowedFd> = live
         .iter()
-        .take(n)
-        .map(|client| client.link.as_fd())
+        .map(|&i| clients[i].link.as_fd())
         .chain(std::iter::once(wakeup.as_fd()))
         .collect();
     crate::tty::wait_any(&fds, deadline)
+}
+
+/// Whether this client's link is still worth reading, having read whatever had arrived.
+///
+/// An I/O error on one link is that client's own doing — a length prefix nobody could
+/// mean, a read that failed on its socket and no other — and costs its connection and
+/// nothing else, which is the deal the undecodable message already got. Letting it out
+/// of here would end the session, and with it every other client's shells.
+fn still_reading(client: &mut Attached) -> bool {
+    match client.link.fill() {
+        Ok(true) => true,
+        Ok(false) => {
+            client.gone = true;
+            false
+        }
+        Err(err) => {
+            logging::log(
+                Level::Warn,
+                "neotmux-server",
+                &format!("an attached client's link could not be read: {err}"),
+            );
+            client.gone = true;
+            false
+        }
+    }
+}
+
+/// The next whole message this client has already sent, or `None` for "not one" — which
+/// is either that the rest of it has not arrived or that the link is over, and `gone` is
+/// what tells those apart.
+fn next_message(client: &mut Attached) -> Option<Vec<u8>> {
+    match client.link.take() {
+        Ok(message) => message,
+        Err(err) => {
+            logging::log(
+                Level::Warn,
+                "neotmux-server",
+                &format!("an attached client announced a message that would not be one: {err}"),
+            );
+            client.gone = true;
+            None
+        }
+    }
 }
 
 /// The frame, with every client the session has at the moment the frame starts: one
@@ -325,40 +514,21 @@ fn wait_over(
 fn frame(
     session: &mut Option<Session>,
     clients: &mut Vec<Attached>,
-    listener: &UnixListener,
-    wakeup: &Wakeup,
-    waker: &Waker,
-    shutdown: &ShutdownSignal,
+    pending: &mut Vec<Pending>,
+    serving: &Serving<'_>,
 ) -> anyhow::Result<bool> {
-    // The slots the frame waits over, in order: a client per attachment, in the order
-    // the clients attached, and the panes. The tock is read off the slot of the client
-    // it is, and the panes owe one to nobody.
-    enum Slot {
-        Client(usize),
-        Panes,
-    }
     // The door is looked at once a frame rather than polled on every wait: a client that
     // arrived while the previous frame was still running is adopted here, before the
     // tick, so a second client's greeting never shares the window the frame is waiting
     // for its tock in. The old loop did the same once-a-frame door-look (turning its find
     // away, `BUSY`); this one adopts the one it finds, which is the whole point of a
     // second client looking at the same session.
-    if let Some(stream) = taken(listener)?
-        && let Some(client) = attach_new(stream, session, waker)?
-    {
-        let wants = clients.iter().any(|c| c.wants) || client.wants;
-        if let Some(session) = session.as_mut() {
-            if wants {
-                session.wants_output(true);
-            } else {
-                session.forget_pane_output();
-            }
-        }
-        clients.push(client);
-    }
-    let n = clients.len();
-    let mut slots: Vec<Slot> = (0..n).map(Slot::Client).collect();
-    slots.push(Slot::Panes);
+    door(pending, clients, session, serving)?;
+    // The slots the frame waits over: one per client it is still waiting on, holding that
+    // client's index, and the panes after the last of them. Refilled on every pass rather
+    // than built once — a client that goes mid-frame leaves the wait on the next pass, and
+    // its slot cannot be the slot a later ready is read against.
+    let mut live: Vec<usize> = Vec::with_capacity(clients.len() + 1);
 
     // The tick, once, shown to every client the frame is for, and a client that cannot
     // read it is a client that has gone, the rule the server has kept since M3, per
@@ -397,7 +567,7 @@ fn frame(
     // came from — with only the second having more than one client to come from.
     let mut tocks: Vec<Option<Tock>> = vec![None; clients.len()];
     'collect: loop {
-        if shutdown.raised().is_some() {
+        if serving.shutdown.raised().is_some() {
             return Ok(true);
         }
         if !expected
@@ -406,18 +576,19 @@ fn frame(
         {
             break 'collect;
         }
-        // Laid over the first `n` clients on this pass and the panes; the door is not in
+        // Laid over the clients still here on this pass and the panes; the door is not in
         // the wait, it is looked at once at the top of the frame. The wait's borrows end
         // before the arm that answers a client takes them.
-        let ready = wait_over(clients, n, wakeup, Instant::now() + TOCK)?;
+        live.clear();
+        live.extend((0..clients.len()).filter(|&i| !clients[i].gone));
+        let ready = wait_over(clients, &live, serving.wakeup, Instant::now() + TOCK)?;
         match ready {
-            crate::tty::Any::Ready(i) => match slots[i] {
-                Slot::Client(i) => {
-                    if !clients[i].link.fill()? {
-                        clients[i].gone = true;
+            crate::tty::Any::Ready(slot) => match live.get(slot).copied() {
+                Some(i) => {
+                    if !still_reading(&mut clients[i]) {
                         continue 'collect;
                     }
-                    while let Some(message) = clients[i].link.take()? {
+                    while let Some(message) = next_message(&mut clients[i]) {
                         match wire::decode_to_server(&message) {
                             Ok(ToServer::Tock(tock)) if tocks[i].is_none() => {
                                 // The client's own question, before the tock is handed over:
@@ -479,18 +650,21 @@ fn frame(
                                 clients[i].gone = true;
                             }
                         }
+                        // A client dropped for what it sent does not go on typing into the
+                        // shared pane: whatever else is in its inbox goes with it.
+                        if clients[i].gone {
+                            break;
+                        }
                     }
                 }
-                Slot::Panes => {
-                    // A shell that wrote is not a tock: the panes are drained to keep the
-                    // pipe from filling, and the frame goes on, because the tocks are the
-                    // frame. The old loop broke on this in its post-done idle, not in
-                    // its tock wait, which is where this one is.
-                    wakeup.clear();
-                }
+                // The slot past the last client is the panes. A shell that wrote is not a
+                // tock: the panes are drained to keep the pipe from filling, and the frame
+                // goes on, because the tocks are the frame. The old loop broke on this in
+                // its post-done idle, not in its tock wait, which is where this one is.
+                None => serving.wakeup.clear(),
             },
-            crate::tty::Any::HangUp(i) => {
-                if let Slot::Client(i) = slots[i] {
+            crate::tty::Any::HangUp(slot) => {
+                if let Some(&i) = live.get(slot) {
                     clients[i].gone = true;
                 }
             }
@@ -503,7 +677,10 @@ fn frame(
     // goes on without it.
     let mut steps: Vec<neotmux_proto::msg::Step> = Vec::new();
     let mut ended: Option<End> = None;
-    let mut detacher: Option<usize> = None;
+    // Every client that asked to leave, not just one: two plugins can call `neotmux.detach()`
+    // in the same frame, and the one whose ask was overwritten would be told `end: None` and
+    // stay attached with nothing to say why.
+    let mut detachers: Vec<usize> = Vec::new();
     for &i in &expected {
         if clients[i].gone {
             continue;
@@ -518,7 +695,7 @@ fn frame(
         steps.extend(application.steps);
         if let Some(end) = application.end {
             match end {
-                End::Detach => detacher = Some(i),
+                End::Detach => detachers.push(i),
                 other => ended = Some(other),
             }
         }
@@ -548,7 +725,7 @@ fn frame(
             } else {
                 None
             };
-            let end = if detacher == Some(i) {
+            let end = if detachers.contains(&i) {
                 Some(End::Detach)
             } else {
                 ended
@@ -571,13 +748,12 @@ fn frame(
             client.overlay_dirty = false;
             client.notices_dirty = false;
             client.first = false;
-            if detacher == Some(i) {
+            if detachers.contains(&i) {
                 // The one that is detaching is out, and its connection is about to close
                 // for the reason it asked to leave: drop it here rather than at the next
                 // frame's first send.
                 client.gone = true;
             }
-            drop(frame_ref);
         }
     }
 
@@ -596,35 +772,27 @@ fn frame(
         return Ok(true);
     }
 
-    // The gone were compacted out above, so the count this loop waits over is the clients
-    // still in hand: a stale one would put a ready door on a client slot and index a
-    // client that is no longer there.
-    let n = clients.len();
-
     // The rest of the frame's time belongs to whatever the clients have to say and to
     // the panes: a key reaches its shell the moment it arrives, and the panes' output
     // is the cue to start the next frame rather than to wait the deadline out.
     let frame_end = Instant::now() + FRAME;
-    // One slot per client still here, then the panes: the same count as the `wait_over`
-    // the loop waits over, so a ready `i` lands on the right slot.
-    let mut slots: Vec<Slot> = (0..n).map(Slot::Client).collect();
-    slots.push(Slot::Panes);
     loop {
-        if shutdown.raised().is_some() {
+        if serving.shutdown.raised().is_some() {
             return Ok(true);
         }
         if Instant::now() >= frame_end {
             break;
         }
-        let ready = wait_over(clients, n, wakeup, frame_end)?;
+        live.clear();
+        live.extend((0..clients.len()).filter(|&i| !clients[i].gone));
+        let ready = wait_over(clients, &live, serving.wakeup, frame_end)?;
         match ready {
-            crate::tty::Any::Ready(i) => match slots[i] {
-                Slot::Client(i) => {
-                    if !clients[i].link.fill()? {
-                        clients[i].gone = true;
+            crate::tty::Any::Ready(slot) => match live.get(slot).copied() {
+                Some(i) => {
+                    if !still_reading(&mut clients[i]) {
                         continue;
                     }
-                    while let Some(message) = clients[i].link.take()? {
+                    while let Some(message) = next_message(&mut clients[i]) {
                         match wire::decode_to_server(&message) {
                             Ok(ToServer::Key(key)) => {
                                 // One bad client is that client's doing and costs its
@@ -672,15 +840,21 @@ fn frame(
                                 clients[i].gone = true;
                             }
                         }
+                        // A client dropped for what it sent does not go on typing into the
+                        // shared pane: whatever else is in its inbox goes with it.
+                        if clients[i].gone {
+                            break;
+                        }
                     }
                 }
-                Slot::Panes => {
-                    wakeup.clear();
+                // The panes: their output is the cue to start the next frame.
+                None => {
+                    serving.wakeup.clear();
                     break;
                 }
             },
-            crate::tty::Any::HangUp(i) => {
-                if let Slot::Client(i) = slots[i] {
+            crate::tty::Any::HangUp(slot) => {
+                if let Some(&i) = live.get(slot) {
                     clients[i].gone = true;
                 }
             }

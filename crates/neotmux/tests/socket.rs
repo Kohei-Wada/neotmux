@@ -938,8 +938,8 @@ fn a_client_going_costs_the_other_nothing() {
     b.send("still-here\r");
     b.wait_for_output("still-here");
 
-    // And the session itself is out: a connect that is answered is the server itself
-    // saying so.
+    // And the session itself is still there: a connect that is answered is the server
+    // itself saying so.
     let deadline = Instant::now() + Duration::from_secs(2);
     let mut answered = false;
     while Instant::now() < deadline && !answered {
@@ -1187,4 +1187,53 @@ fn the_last_client_to_attach_is_the_one_the_session_is_told() {
         "the surface is the one with the band in it, the 24 rows the client attached
          with minus the one B reserved: {tick_a:?}"
     );
+}
+
+/// One connection's silence is its own: the door reads a connection only as far as it has
+/// spoken, so a peer that greets and then says nothing holds up nobody's frame.
+///
+/// The frame is what puts a shell's output on a screen, so the client that is attached and
+/// typing is the one that says whether the door cost anything: a door that ran the handshake
+/// inline would hold this client's next frame for as long as the silence lasted — which, for
+/// a peer that never sends its attach, is for ever.
+#[test]
+fn a_connection_that_says_nothing_costs_the_attached_client_nothing() {
+    let runtime = TestRuntime::new();
+    let mut client = started(runtime.path());
+
+    // Two kinds of silence, because the door has two reads in it: one that never says
+    // hello, and one that says hello and never attaches.
+    let _mute = UnixStream::connect(socket_in(runtime.path())).expect("connect");
+    let _silent = greeted(&socket_in(runtime.path()));
+
+    client.send("the-silent-ones-cost-nothing\r");
+    client.wait_for_output("the-silent-ones-cost-nothing");
+}
+
+/// A length prefix nobody could mean is one client's own doing, and it costs that client's
+/// connection and nothing else.
+///
+/// The link cannot be read past such a prefix, so the connection is over either way; what is
+/// asserted here is the other half — that the session, the other client and the shells behind
+/// it go on. This is the same deal the undecodable message already got, at the boundary one
+/// step before it: with a second client attached, letting it out would be one client ending
+/// another's shells with a four-byte write.
+#[test]
+fn one_client_s_impossible_message_costs_that_client_and_no_other() {
+    let runtime = TestRuntime::new();
+    let mut client = started(runtime.path());
+
+    // Attached, in a frame the session is waiting on, and then a prefix the link cannot be
+    // read past. Held to the end of the test: a connection that closed would be an ordinary
+    // hangup, which was never the thing in question.
+    let mut bad = raw_client(an_attach(), &runtime);
+    bad.write_all(&u32::MAX.to_le_bytes())
+        .expect("the prefix nobody could mean");
+    bad.flush().expect("flush");
+
+    client.send("the-impossible-message-costs-one\r");
+    client.wait_for_output("the-impossible-message-costs-one");
+
+    // And the session is the one that outlived it: the client above is being served by it.
+    let _ = &bad;
 }

@@ -484,6 +484,25 @@ impl Neotmux {
     }
 
     /// Blocks until the process is gone, and reports whether it left cleanly.
+    /// How the client left, once it has — whatever it left with.
+    ///
+    /// A session ended out from under a client is not a clean exit: the client says the
+    /// server went away and exits non-zero, which is the right thing to say and the wrong
+    /// thing to assert `success()` about. What a kill is asked here is that the client is
+    /// out, not how it took it.
+    pub fn wait_for_exit(&mut self, timeout: Duration) -> Option<portable_pty::ExitStatus> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if let Some(status) = self.child.try_wait().expect("try_wait") {
+                return Some(status);
+            }
+            if Instant::now() >= deadline {
+                return None;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
     pub fn exited_cleanly(&mut self, timeout: Duration) -> bool {
         let deadline = Instant::now() + timeout;
         loop {
