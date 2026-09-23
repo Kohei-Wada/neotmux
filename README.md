@@ -18,6 +18,10 @@ best-effort operation that is allowed to fail**. Plugins get an instruction budg
 that blows it is named, dropped for that frame, and unsubscribed if it keeps doing it. The
 failure stays partial and attributable instead of freezing the whole UI.
 
+And it puts that ABI in the multiplexer rather than the editor, because the multiplexer is
+the layer every program's input and output passes through — an editor should stay an editor,
+and a plugin here reaches the shell, the agent and nvim itself alike.
+
 ## Status
 
 Pre-release, and the plugin ABI is not stable yet.
