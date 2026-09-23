@@ -296,6 +296,42 @@ pub(crate) fn install(
     }
 
     {
+        let sources = sources.clone();
+        let ops = ops.clone();
+        let geometry = geometry.clone();
+        // Text into a pane's shell, as though it had been typed there. Bytes as written: no
+        // key names, and nothing wrapped in a bracketed paste — a caller that wants either
+        // writes the escapes itself, and the host does not guess at what a program expects.
+        //
+        // `true` is "accepted", not "arrived": like every other op this is applied after the
+        // tick, so a tick that raises or overruns loses its send with the rest of its frame.
+        // What can be answered now is whether the session holds that pane, and that is what
+        // `false` means. A frozen pane takes it — `pane.freeze` holds the screen somebody is
+        // reading, not the shell underneath it.
+        let send = lua.create_function(move |lua, (pane, text): (u32, String)| {
+            let pane = PaneId::from(pane);
+            let held = {
+                let geometry = geometry.borrow();
+                // Every window's, not this frame's: the pane a plugin answers is often in a
+                // window nobody is looking at.
+                geometry
+                    .windows
+                    .iter()
+                    .any(|window| window.panes.contains(&pane))
+            };
+            if !held {
+                return Ok((
+                    false,
+                    Value::String(lua.create_string(format!("no pane {pane}"))?),
+                ));
+            }
+            ops.push(source::caller(lua, &sources), Op::PaneSend { pane, text });
+            Ok((true, Value::Nil))
+        })?;
+        pane.set("send", send)?;
+    }
+
+    {
         let focus = lua.create_function(move |lua, pane: u32| {
             ops.push(
                 source::caller(lua, &sources),

@@ -1809,3 +1809,26 @@ fn new_starts_a_server_from_cold_when_nothing_is_listening() {
     let names = String::from_utf8_lossy(&listed.stdout);
     assert!(names.contains("solo"), "{names}");
 }
+
+/// `pane.send` end to end, with a real shell on a real pty: what a plugin writes arrives at
+/// the pane as though it had been typed there. The Lua tests pin the op; this pins the bytes.
+#[test]
+fn a_plugin_can_write_into_a_pane() {
+    let runtime = TestRuntime::new();
+    let layer = layer_with(&[(
+        "init.lua",
+        // Once, on the first tick that has a pane: a send every frame would be a shell being
+        // typed at sixty times a second.
+        "local sent = false
+         neotmux.on_tick(function()
+           if sent then return end
+           local pane = neotmux.pane.current()
+           if not pane then return end
+           sent = neotmux.pane.send(pane, 'typed-by-a-plugin\\n')
+         end)",
+    )]);
+
+    let client = Client::start_with(runtime.path(), "/bin/cat", 24, 80, &[layer.path()]);
+    client.wait_for_output("typed-by-a-plugin");
+    drop(client);
+}

@@ -28,6 +28,10 @@ pub enum Op {
         dir: Dir,
         cells: u16,
     },
+    PaneSend {
+        pane: PaneId,
+        text: String,
+    },
     WindowCreate {
         window: WindowId,
     },

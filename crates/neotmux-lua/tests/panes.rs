@@ -4,7 +4,8 @@ use std::path::{Path, PathBuf};
 use neotmux_lua::ops::Op;
 use neotmux_lua::runtime::Layers;
 use neotmux_lua::{KeyOutcome, LuaSubsystem};
-use neotmux_proto::{Dir, Epoch, Geometry, PaneId, Rect, SessionId, Size};
+use neotmux_proto::geometry::Window;
+use neotmux_proto::{Dir, Epoch, Geometry, PaneId, Rect, SessionId, Size, WindowId};
 
 mod support;
 
@@ -32,9 +33,14 @@ fn publish(sub: &LuaSubsystem, session: SessionId, panes: Vec<(PaneId, Rect)>, f
         Epoch::new(size, panes.iter().map(|(id, _)| *id).collect(), Some(focus)),
         Geometry {
             area: Rect::new(0, 0, size.cols, size.rows),
+            windows: vec![Window {
+                id: WindowId::from(1),
+                panes: panes.iter().map(|(id, _)| *id).collect(),
+                name: None,
+            }],
+            window: Some(WindowId::from(1)),
             panes,
             focus: Some(focus),
-            ..Default::default()
         },
     );
 }
@@ -52,10 +58,15 @@ fn side_by_side(sub: &LuaSubsystem) {
 }
 
 fn logged(sub: &LuaSubsystem, session: Option<SessionId>) -> Vec<String> {
-    sub.drain_ops(session)
-        .into_iter()
+    logged_from(&sub.drain_ops(session))
+}
+
+/// The same reading, off ops already drained: a test that has to look at what else was raised
+/// cannot drain twice.
+fn logged_from<S>(ops: &[(S, Op)]) -> Vec<String> {
+    ops.iter()
         .filter_map(|(_, op)| match op {
-            Op::Log { text, .. } => Some(text),
+            Op::Log { text, .. } => Some(text.clone()),
             _ => None,
         })
         .collect()
@@ -352,5 +363,110 @@ fn a_config_load_runs_with_no_session_bound() {
     assert!(
         logged(&sub, Some(support::one())).is_empty(),
         "an op raised before any session existed was filed under a session"
+    );
+}
+
+/// `pane.send` is the in-process half of `neotmux send`: text into a pane's shell, queued as
+/// an op like every other request a tick makes.
+#[test]
+fn a_send_is_an_op_carrying_the_text_as_written() {
+    let (_dir, sub) = built(&[(
+        "init.lua",
+        "neotmux.on_tick(function() neotmux.pane.send(1, 'echo hi\\n') end)",
+    )]);
+    side_by_side(&sub);
+    sub.dispatch_tick(support::one());
+    assert_eq!(
+        sub.drain_ops(Some(support::one()))
+            .into_iter()
+            .map(|(_, op)| op)
+            .collect::<Vec<_>>(),
+        vec![Op::PaneSend {
+            pane: PaneId::from(1),
+            text: "echo hi\n".to_string(),
+        }]
+    );
+}
+
+/// The one thing that can be answered at the moment of the call: whether the session holds
+/// that pane. Nothing is queued for a pane that is not there.
+#[test]
+fn a_send_to_a_pane_the_session_does_not_hold_answers_false_and_queues_nothing() {
+    let (_dir, sub) = built(&[(
+        "init.lua",
+        "neotmux.on_tick(function()
+           local ok, why = neotmux.pane.send(99, 'nothing')
+           neotmux.log.info(tostring(ok) .. ' ' .. tostring(why))
+         end)",
+    )]);
+    side_by_side(&sub);
+    sub.dispatch_tick(support::one());
+    let ops = sub.drain_ops(Some(support::one()));
+    assert_eq!(logged_from(&ops), vec!["false no pane %99".to_string()]);
+    assert!(
+        !ops.iter().any(|(_, op)| matches!(op, Op::PaneSend { .. })),
+        "a send was queued for a pane that is not there"
+    );
+}
+
+/// A pane in a window nobody is looking at is exactly the pane a plugin answers, so it is
+/// reachable: `windows`, not this frame's `panes`, is what a send is checked against.
+#[test]
+fn a_send_reaches_a_pane_in_a_window_that_is_not_shown() {
+    let (_dir, sub) = built(&[(
+        "init.lua",
+        "neotmux.on_tick(function() neotmux.pane.send(7, 'hidden\\n') end)",
+    )]);
+    let size = Size { rows: 24, cols: 80 };
+    let shown = PaneId::from(1);
+    sub.begin_frame(
+        support::one(),
+        Epoch::new(size, vec![shown], Some(shown)),
+        Geometry {
+            area: Rect::new(0, 0, size.cols, size.rows),
+            panes: vec![(shown, Rect::new(0, 0, 80, 24))],
+            focus: Some(shown),
+            windows: vec![
+                Window {
+                    id: WindowId::from(1),
+                    panes: vec![shown],
+                    name: None,
+                },
+                Window {
+                    id: WindowId::from(2),
+                    panes: vec![PaneId::from(7)],
+                    name: None,
+                },
+            ],
+            window: Some(WindowId::from(1)),
+        },
+    );
+    sub.dispatch_tick(support::one());
+    assert!(
+        sub.drain_ops(Some(support::one()))
+            .into_iter()
+            .any(|(_, op)| matches!(op, Op::PaneSend { pane, .. } if pane == PaneId::from(7))),
+        "a pane in a hidden window was refused"
+    );
+}
+
+/// A tick that overruns loses its frame, and the send goes with it: nothing is written during
+/// a tick, so there is no half of this to take back.
+#[test]
+fn a_send_from_a_tick_that_raises_is_discarded_with_the_rest_of_its_frame() {
+    let (_dir, sub) = built(&[(
+        "init.lua",
+        "neotmux.on_tick(function()
+           neotmux.pane.send(1, 'never arrives')
+           error('and then it raised')
+         end)",
+    )]);
+    side_by_side(&sub);
+    sub.dispatch_tick(support::one());
+    assert!(
+        !sub.drain_ops(Some(support::one()))
+            .iter()
+            .any(|(_, op)| matches!(op, Op::PaneSend { .. })),
+        "a raising tick's send survived it"
     );
 }

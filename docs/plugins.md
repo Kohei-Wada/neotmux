@@ -328,6 +328,7 @@ neotmux.pane.frozen(id)       -- true, false, or nil for no such pane
 neotmux.pane.split('horizontal' | 'vertical')
 neotmux.pane.focus(id)
 neotmux.pane.resize('left' | 'right' | 'up' | 'down', cells)
+neotmux.pane.send(id, text)   -- true, or false and why
 ```
 
 **An id is an identity, not a number to show anybody.** A `PaneId` is handed out once and
@@ -341,6 +342,20 @@ now, which closes the gap when a neighbour goes. `list()` is in layout order, so
 is the index in it, and finding it is a loop over the list you already have. The shipped bar
 does exactly that in `status/position.lua`. Use an id for anything you look a pane up by, and
 a position for anything you print.
+
+`send` writes text into a pane's shell, as though it had been typed there — the in-process half
+of `neotmux send`. The bytes go as written: no key names, and nothing wrapped in a bracketed
+paste, because what a program expects is not the host's to guess. A caller that wants either
+writes the escapes itself.
+
+Its `true` means **accepted**, not arrived. Like every other request a tick makes, a send is
+applied after the tick, so a tick that raises or overruns loses its send with the rest of its
+frame — which is also the answer to "does a dropped frame still type at my shell": it does not,
+because nothing was written while the tick ran. What can be answered at the moment of the call
+is whether this session holds that pane, and `false` is that answer. Any pane the session holds
+is reachable, including one in a window nobody is looking at — which is usually the pane a
+plugin is answering. A frozen pane takes a send too: `freeze` holds the screen somebody is
+reading, not the shell underneath it.
 
 `rect` answers out of the same published geometry `ctx:pane_rect` reads, in the same surface
 coordinates and with the same table — so geometry is a question you can ask from a key

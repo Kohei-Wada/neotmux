@@ -635,6 +635,7 @@ const OP_WINDOW_CREATE: u8 = 4;
 const OP_WINDOW_FOCUS: u8 = 5;
 const OP_DETACH: u8 = 6;
 const OP_WINDOW_RENAME: u8 = 7;
+const OP_PANE_SEND: u8 = 8;
 
 const SPLIT_HORIZONTAL: u8 = 0;
 const SPLIT_VERTICAL: u8 = 1;
@@ -1018,6 +1019,11 @@ impl Writer {
                 self.u8(OP_PANE_SPLIT);
                 self.split_dir(*dir);
             }
+            SessionOp::PaneSend { pane, text } => {
+                self.u8(OP_PANE_SEND);
+                self.u32(pane.get());
+                self.str(text);
+            }
             SessionOp::PaneFocus { pane } => {
                 self.u8(OP_PANE_FOCUS);
                 self.u32(pane.get());
@@ -1395,6 +1401,10 @@ impl Reader<'_> {
                 dir: self.split_dir()?,
             },
             OP_PANE_FOCUS => SessionOp::PaneFocus { pane: self.pane()? },
+            OP_PANE_SEND => SessionOp::PaneSend {
+                pane: self.pane()?,
+                text: self.string()?,
+            },
             OP_PANE_RESIZE => SessionOp::PaneResize {
                 dir: self.dir()?,
                 cells: self.u16()?,
@@ -2183,6 +2193,13 @@ mod tests {
                     "init".to_string(),
                     SessionOp::PaneFocus {
                         pane: PaneId::from(9),
+                    },
+                ),
+                (
+                    "plugin/slime".to_string(),
+                    SessionOp::PaneSend {
+                        pane: PaneId::from(3),
+                        text: "print('日本語も')\n".to_string(),
                     },
                 ),
                 (

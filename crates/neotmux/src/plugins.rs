@@ -145,6 +145,7 @@ impl Plugins {
                 Op::PaneSplit { dir } => SessionOp::PaneSplit { dir },
                 Op::PaneFocus { pane } => SessionOp::PaneFocus { pane },
                 Op::PaneResize { dir, cells } => SessionOp::PaneResize { dir, cells },
+                Op::PaneSend { pane, text } => SessionOp::PaneSend { pane, text },
                 Op::WindowCreate { window } => SessionOp::WindowCreate { window },
                 Op::WindowFocus { window } => SessionOp::WindowFocus { window },
                 Op::WindowRename { window, name } => SessionOp::WindowRename { window, name },
@@ -219,6 +220,11 @@ impl Plugins {
                 SessionOp::PaneFocus { pane } => refuse(
                     &tag,
                     &format!("pane.focus({pane})"),
+                    "no panes exist until the session starts",
+                ),
+                SessionOp::PaneSend { pane, .. } => refuse(
+                    &tag,
+                    &format!("pane.send({pane}, ...)"),
                     "no panes exist until the session starts",
                 ),
                 SessionOp::WindowCreate { window } => refuse(

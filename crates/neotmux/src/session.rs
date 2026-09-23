@@ -361,6 +361,18 @@ impl Session {
                     self.apply_split(tag, *dir)?;
                 }
                 SessionOp::PaneFocus { pane } => self.apply_focus(tag, *pane),
+                SessionOp::PaneSend { pane, text } => {
+                    // The pane was there when the tick asked; between then and here a shell
+                    // can have exited, and a plugin answering a pane that has just closed is
+                    // not making a mistake worth a log line every frame.
+                    if !self.write_to_pane(*pane, text.as_bytes())? {
+                        logging::log(
+                            Level::Warn,
+                            tag,
+                            &format!("pane.send({pane}, ...): the pane is not this session's"),
+                        );
+                    }
+                }
                 SessionOp::PaneResize { dir, cells } => self.apply_resize(tag, *dir, *cells)?,
                 SessionOp::WindowCreate { .. } if spawned >= MAX_NEW_SHELLS_PER_FRAME => {
                     logging::log(
