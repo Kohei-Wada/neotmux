@@ -808,7 +808,7 @@ fn resize_mode_moves_the_divider_five_columns_and_gives_the_keys_back() {
 
     nt.send("\x02r"); // C-b r: into resize mode
     for _ in 0..5 {
-        nt.send("\x1b[D"); // the left arrow, one cell each
+        nt.send("h"); // one cell each, the way every mode neotmux ships moves
     }
     nt.settle(Duration::from_millis(500));
 
@@ -2297,6 +2297,25 @@ const SIDEBAR_COLS: u16 = 24;
 const CURRENT_SESSION_MARKER: &str = "\u{25cf}";
 const CURRENT_WINDOW_MARKER: &str = "\u{25b8}";
 
+/// The sidebar's rows are two columns — a label on the left and what the thing is running
+/// against the right edge — so what names a pane is one row holding both, not one string.
+fn sidebar_row_naming(nt: &mut Neotmux, label: &str, command: &str, timeout: Duration) {
+    let deadline = Instant::now() + timeout;
+    loop {
+        let screen = nt.screen_after(Duration::from_millis(20));
+        if screen
+            .lines()
+            .any(|line| line.contains(label) && line.contains(command))
+        {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "no sidebar row named {label} as running {command}:\n{screen}"
+        );
+    }
+}
+
 /// The vertical edges end to end, on the screen a user sees: the sidebar is a shipped plugin
 /// that asks for a band of columns, lists what the session holds in it, and costs the panes
 /// exactly the columns it took.
@@ -2307,8 +2326,10 @@ fn the_shipped_sidebar_lists_the_session_and_narrows_the_panes() {
 
     nt.wait_for_status("cat", PATIENCE);
     nt.wait_for_cell(PANE_TOP, 0, CURRENT_SESSION_MARKER, PATIENCE);
-    nt.wait_for_cell(PANE_TOP + 1, 0, CURRENT_WINDOW_MARKER, PATIENCE);
-    nt.wait_for_screen("1.1 cat", PATIENCE);
+    // The sessions, a blank row, then the windows: the gap is what tells the two groups
+    // apart, and it folds to nothing rather than to a glyph in the marker column.
+    nt.wait_for_cell(PANE_TOP + 2, 0, CURRENT_WINDOW_MARKER, PATIENCE);
+    sidebar_row_naming(&mut nt, "1.1", "cat", PATIENCE);
 
     // What the band costs: a pane starts where the sidebar ends, so the shell's own echo
     // lands in the first column outside it and in none before it.
@@ -2324,10 +2345,10 @@ fn the_shipped_sidebar_lists_the_session_and_narrows_the_panes() {
     }
 
     nt.send("\x02c"); // C-b c: a second window, which the sidebar has to pick up
-    nt.wait_for_screen("2.1 cat", PATIENCE);
+    sidebar_row_naming(&mut nt, "2.1", "cat", PATIENCE);
     // The first window's pane is hidden now, and naming what it is running is most of why a
     // sidebar is worth a third of the width.
-    nt.wait_for_screen("1.1 cat", PATIENCE);
+    sidebar_row_naming(&mut nt, "1.1", "cat", PATIENCE);
 }
 
 /// What is left of the band when the sidebar is folded: the markers column.
@@ -2343,15 +2364,19 @@ fn the_shipped_sidebar_folds_to_a_rail_and_back() {
     let mut nt = Neotmux::start_layered(&[init.path(), &shipped_layer()], "cat");
 
     nt.wait_for_status("cat", PATIENCE);
-    nt.wait_for_screen("1.1 cat", PATIENCE);
+    sidebar_row_naming(&mut nt, "1.1", "cat", PATIENCE);
     nt.send("X");
     nt.wait_for_cell(PANE_TOP, SIDEBAR_COLS, "X", PATIENCE);
 
     nt.send("\x02b"); // C-b b
     nt.wait_for_cell(PANE_TOP, SIDEBAR_RAIL_COLS, "X", PATIENCE);
     let folded = nt.screen_after(Duration::ZERO);
+    // Below the status bar, which names the focused pane whatever the sidebar is doing.
     assert!(
-        !folded.contains("1.1 cat"),
+        !folded
+            .lines()
+            .skip(PANE_TOP as usize)
+            .any(|line| line.contains("1.1")),
         "the rail is too narrow to read and still had the names on it:\n{folded}"
     );
     assert_eq!(
@@ -2362,12 +2387,39 @@ fn the_shipped_sidebar_folds_to_a_rail_and_back() {
 
     nt.send("\x02b");
     nt.wait_for_cell(PANE_TOP, SIDEBAR_COLS, "X", PATIENCE);
-    nt.wait_for_screen("1.1 cat", PATIENCE);
+    sidebar_row_naming(&mut nt, "1.1", "cat", PATIENCE);
     assert_eq!(
         nt.cell(PANE_TOP, 0),
         CURRENT_SESSION_MARKER,
         "the band came back somewhere other than the left edge:\n{}",
         nt.screen_after(Duration::ZERO)
+    );
+}
+
+/// More rows than band is the ordinary case on a short terminal, and which rows go is the
+/// question: the pane you are in has to be one of the ones that stayed, or the sidebar is
+/// about somebody else's session.
+#[test]
+fn the_shipped_sidebar_keeps_the_pane_you_are_in_on_screen() {
+    let init = harness::runtime(&[("init.lua", "require('neotmux.defaults').sidebar = true")]);
+    // Short on purpose: five windows do not fit in what is left of ten rows.
+    let mut nt = Neotmux::start_sized(&[init.path(), &shipped_layer()], "cat", 10, 80);
+    nt.wait_for_cell(PANE_TOP, 0, CURRENT_SESSION_MARKER, PATIENCE);
+
+    for _ in 0..4 {
+        nt.send("\x02c"); // C-b c
+        nt.settle(Duration::from_millis(300));
+    }
+
+    // The window is the fifth, and its marker is on screen somewhere in the band.
+    sidebar_row_naming(&mut nt, "5.1", "cat", PATIENCE);
+    let screen = nt.screen_after(Duration::from_millis(200));
+    assert!(
+        screen
+            .lines()
+            .skip(PANE_TOP as usize)
+            .any(|line| line.starts_with(CURRENT_WINDOW_MARKER)),
+        "the window being shown scrolled off the bottom of the sidebar:\n{screen}"
     );
 }
 
@@ -2577,6 +2629,25 @@ fn turning_the_footer_on_reserves_a_second_row() {
         "cat",
     );
     nt.wait_for_screen("CLOCK 80x21", PATIENCE);
+}
+
+/// A band a plugin took and then left alone is a strip of bare terminal under everything
+/// else, which reads as a hole rather than as an empty bar. The footer reserves its row
+/// whether or not a mode is ever raised into it, so it paints it whether or not one is.
+#[test]
+fn the_footer_paints_the_row_it_reserved_with_no_mode_raised() {
+    let init = harness::runtime(&[("init.lua", "require('neotmux.defaults').footer = true")]);
+    let mut nt = Neotmux::start_layered(&[init.path(), &shipped_layer()], "cat");
+    nt.wait_for_status("cat", PATIENCE);
+    nt.settle(Duration::from_millis(400));
+
+    // The harness starts a 24-row terminal and the footer's band is the last row of it. A
+    // screen dump would not answer this: it is trimmed of the very blank line in question.
+    assert!(
+        nt.cell_bg(23, 0).is_some(),
+        "the footer reserved the bottom row and did not paint it:\n{}",
+        nt.screen_after(Duration::ZERO)
+    );
 }
 
 /// The same mechanism the shipped defaults already rely on — a later assignment in the same

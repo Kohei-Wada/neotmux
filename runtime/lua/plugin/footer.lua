@@ -25,13 +25,14 @@ neotmux.on_tick(function(ctx)
   if not row then
     return
   end
+  -- The band is painted whether or not there is a mode to name. A row nobody reserved belongs
+  -- to the panes; a row this plugin reserved and left alone is a strip of bare terminal under
+  -- everything else, which reads as a hole rather than as an empty bar.
+  ctx:rect(nil, row.x, row.y, row.w, row.h, { bg = M.colors.bar })
   local name = modes.current()
-  -- Nothing raised, nothing drawn: this tick's output is the whole frame, so an empty tick is
-  -- an empty row rather than one left showing whatever was there before.
   if not name then
     return
   end
-  ctx:rect(nil, row.x, row.y, row.w, row.h, { bg = M.colors.bar })
   ctx:text(nil, row.x, row.y, " " .. name .. " ", { fg = M.colors.text, bg = M.colors.bar })
 end)
 
