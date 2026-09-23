@@ -655,7 +655,7 @@ neotmux.log.info(text)    -- also .warn, .error
 neotmux.notify(level, text)  -- 'info' | 'warn' | 'error'; shown on screen and logged
 neotmux.quit()
 neotmux.detach()          -- leave the session running and let go of this terminal
-neotmux.session_name()    -- the name this client attached under; 'default' where it had none
+neotmux.session_name()    -- the session this tick, key or event is for; nil during a load
 neotmux.opt.tick_budget_ms = 8     -- per source per frame; 0 turns the budget off entirely
 neotmux.opt.tick_overrun_limit = 5 -- consecutive overruns before the tick is dropped; >= 1
 neotmux.opt.config_budget_ms = 5000 -- what one layer's init.lua gets, for the layers after it

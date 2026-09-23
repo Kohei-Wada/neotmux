@@ -2,7 +2,6 @@
 //! them is running, `kill work` ends only `work`, and a name that would not be a file in
 //! the directory is refused before it is a file.
 
-use std::os::unix::net::UnixStream;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
@@ -31,14 +30,19 @@ fn bin() -> std::path::PathBuf {
     std::path::PathBuf::from(env!("CARGO_BIN_EXE_neotmux"))
 }
 
-/// `kill` signals the server and the server notices on its own loop; the socket stops
-/// answering the moment that effect lands. Wait for it rather than asserting on the race
-/// between the signal and the next line — the same wait `socket.rs` makes after its own
-/// `kill` (`kill_ends_a_session_nobody_is_attached_to`).
+/// Whether the server says this session is running. A session is not a file any more — one
+/// socket holds all of them — so its existence is a question rather than a path to stat.
+fn running(rt: &Runtime, name: &str) -> bool {
+    let (code, out, _) = ls(rt);
+    code == 0 && out.lines().any(|line| line.starts_with(name))
+}
+
+/// `kill` reaches the server and the server ends the session on its own loop; `ls` stops
+/// naming it the moment that effect lands. Waited for rather than asserted on the race
+/// between the ask and the next line.
 fn wait_for_gone(rt: &Runtime, name: &str) {
-    let socket = rt.dir.path().join("neotmux").join(format!("{name}.sock"));
     let deadline = Instant::now() + Duration::from_secs(10);
-    while UnixStream::connect(&socket).is_ok() {
+    while running(rt, name) {
         assert!(
             Instant::now() < deadline,
             "the session '{name}' outlived kill"
@@ -47,13 +51,11 @@ fn wait_for_gone(rt: &Runtime, name: &str) {
     }
 }
 
-/// The client takes the terminal before its server has bound — the two run at the same time — so a
-/// test that uses the session waits for the binding first: the socket to be answerable.
-/// The same wait `socket.rs` makes in its `started()`, in reverse.
+/// The client takes the terminal before its server has bound — the two run at the same time —
+/// so a test that uses the session waits for it to exist first.
 fn up(rt: &Runtime, name: &str) {
-    let socket = rt.dir.path().join("neotmux").join(format!("{name}.sock"));
     let deadline = Instant::now() + Duration::from_secs(10);
-    while UnixStream::connect(&socket).is_err() {
+    while !running(rt, name) {
         assert!(
             Instant::now() < deadline,
             "the session '{name}' never came up"
@@ -62,8 +64,8 @@ fn up(rt: &Runtime, name: &str) {
     }
 }
 
-/// `ls` is a connect-probe of whichever directory it is told about, so it runs under the
-/// test's, and it is read as words, one session per line, name first.
+/// `ls` asks the server under whichever runtime directory it is told about, and is read as
+/// words: one session per line, name first.
 fn ls(rt: &Runtime) -> (i32, String, String) {
     let out = Command::new(bin())
         .env("XDG_RUNTIME_DIR", rt.dir.path())

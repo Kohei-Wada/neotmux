@@ -67,8 +67,7 @@ fn a_write_reaches_the_clipboard_the_host_gave() {
     .unwrap();
 
     let recording = Rc::new(Recording(RefCell::new(Vec::new())));
-    let sub = LuaSubsystem::build_named(
-        "default",
+    let sub = LuaSubsystem::build_with(
         Layers::from_paths(vec![dir.path().to_path_buf()]),
         support::panes(),
         recording.clone(),

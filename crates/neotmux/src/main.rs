@@ -251,7 +251,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     if cli.server {
-        return start::serve(cli.session);
+        return start::serve();
     }
     match cli.action {
         Action::Ls => list_sessions(),
@@ -260,58 +260,69 @@ fn main() -> anyhow::Result<()> {
     }
 }
 
-/// Ends a session's server from outside, for the case the protocol cannot reach: a
-/// client built against another version is refused by the handshake, and the session it
-/// cannot speak to would otherwise be unreachable and immortal.
+/// Asks the server one question and reads its one answer. `None` is nothing listening, which
+/// is not an error here: it is the answer to "what is running".
+fn ask(msg: &neotmux_proto::msg::ToServer) -> anyhow::Result<Option<neotmux_proto::OwnedToClient>> {
+    let paths = neotmux::sock::Paths::resolve(&|key| env::var_os(key))?;
+    let Some(stream) = neotmux::sock::connect(&paths.socket)? else {
+        return Ok(None);
+    };
+    let mut link = neotmux::link::Link::open(stream).context("greet the neotmux server")?;
+    link.send(&neotmux_proto::wire::encode_to_server(msg))
+        .context("ask the neotmux server")?;
+    let Some(message) = link.recv().context("read the server's answer")? else {
+        anyhow::bail!("the neotmux server went away without answering");
+    };
+    Ok(Some(
+        neotmux_proto::wire::decode_to_client(&message).context("decode the server's answer")?,
+    ))
+}
+
+/// The pid of the server, out of its lock file: the process a person would signal, and the
+/// one `ls` has always put on the line.
+fn server_pid() -> Option<i32> {
+    let paths = neotmux::sock::Paths::resolve(&|key| env::var_os(key)).ok()?;
+    std::fs::read_to_string(paths.lock)
+        .ok()?
+        .trim()
+        .parse::<i32>()
+        .ok()
+}
+
+/// Ends one session, by asking the server holding it. It used to be a signal to a process,
+/// because a session was one and there was no protocol to ask through. There is now.
 fn kill_session(name: &str) -> anyhow::Result<()> {
-    let paths = neotmux::sock::Paths::resolve(&|key| env::var_os(key), name)?;
-    let pid = match neotmux::sock::holder(&paths)? {
-        neotmux::sock::Holder::Nobody => {
+    let asked = ask(&neotmux_proto::msg::ToServer::Kill {
+        session: name.to_string(),
+    })?;
+    match asked {
+        Some(neotmux_proto::OwnedToClient::Killed(true)) => {}
+        Some(neotmux_proto::OwnedToClient::Killed(false)) | None => {
             anyhow::bail!("neotmux session '{name}' is not running")
         }
-        neotmux::sock::Holder::Unconfirmed => anyhow::bail!(
-            "session '{name}'s lock is held, but its pid could not be confirmed; refusing to signal it"
-        ),
-        neotmux::sock::Holder::Pid(pid) => pid,
-    };
-    nix::sys::signal::kill(
-        nix::unistd::Pid::from_raw(pid),
-        nix::sys::signal::Signal::SIGTERM,
-    )
-    .with_context(|| format!("signal the neotmux server (pid {pid})"))?;
-    println!("neotmux: asked the session '{name}' (pid {pid}) to end");
+        Some(other) => anyhow::bail!("the neotmux server answered {other:?}"),
+    }
+    match server_pid() {
+        Some(pid) => println!("neotmux: asked the session '{name}' (pid {pid}) to end"),
+        None => println!("neotmux: asked the session '{name}' to end"),
+    }
     Ok(())
 }
 
-/// The running sessions, the way the socket directory says they are: one file per
-/// session, and a connect probe the difference. A socket that answers is a session;
-/// one that does not is a file.
+/// The running sessions, the way the server says they are. It used to be a directory walk and
+/// a connect probe per file, because the sessions were processes; they are one server's now,
+/// and it is asked.
 fn list_sessions() -> anyhow::Result<()> {
-    use std::fs;
-    let dir = neotmux::sock::socket_dir(&|key| env::var_os(key));
-    let mut running: Vec<(String, Option<i32>)> = Vec::new();
-    if let Ok(entries) = fs::read_dir(&dir) {
-        for entry in entries.flatten() {
-            let file_name = entry.file_name();
-            let Some(name) = file_name.to_str() else {
-                continue;
-            };
-            let Some(name) = name.strip_suffix(".sock") else {
-                continue;
-            };
-            if neotmux::sock::connect(&dir.join(format!("{name}.sock")))?.is_some() {
-                let pid = fs::read_to_string(dir.join(format!("{name}.lock")))
-                    .ok()
-                    .and_then(|text| text.trim().parse::<i32>().ok());
-                running.push((name.to_string(), pid));
-            }
-        }
-    }
-    running.sort_by(|a, b| a.0.cmp(&b.0));
-    if running.is_empty() {
+    let names = match ask(&neotmux_proto::msg::ToServer::List)? {
+        Some(neotmux_proto::OwnedToClient::Sessions(names)) => names,
+        Some(other) => anyhow::bail!("the neotmux server answered {other:?}"),
+        None => Vec::new(),
+    };
+    if names.is_empty() {
         anyhow::bail!("no neotmux sessions are running");
     }
-    for (name, pid) in running {
+    let pid = server_pid();
+    for name in names {
         match pid {
             Some(pid) => println!("{name}  pid {pid}"),
             None => println!("{name}"),
@@ -324,11 +335,14 @@ fn client(session: Option<String>) -> anyhow::Result<()> {
     // First, and before the socket: until the terminal is in raw mode the line discipline is
     // answering the keyboard, and starting a server is not fast.
     let _raw = RawMode::enter();
-    let link = start::begin(session)?.finish()?;
+    let name = session
+        .clone()
+        .unwrap_or_else(|| neotmux::sock::DEFAULT_SESSION.to_string());
+    let link = start::begin()?.finish()?;
 
     // The attach, and the session's answer, before the screen: a session that a plugin ended
     // while it was loading must not flash the alternate screen on its way past.
-    let first = match tui::open(&link, tui::screen_size()?)? {
+    let first = match tui::open(&link, tui::screen_size()?, name)? {
         tui::Opened::Over(transcript) => {
             for line in &transcript {
                 eprintln!("neotmux: {line}");

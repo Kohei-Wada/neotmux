@@ -1,12 +1,15 @@
 //! Where the socket lives, and how one neotmux tells a live server from the file a dead one
 //! left behind.
 //!
-//! The path is `$XDG_RUNTIME_DIR/neotmux/<session>.sock`, falling back to
-//! `/tmp/neotmux-<uid>/<session>.sock` where that variable is unset. One socket per session
-//! rather than one per server with the sessions named inside it, which is tmux's
-//! arrangement: the whole point of M3 is that a session's cost is its own, and a file per
-//! session means killing one, finding one, or listing them is `ls` rather than a protocol.
-//! There is one name today — `default` — and the directory is what will hold the rest.
+//! The path is `$XDG_RUNTIME_DIR/neotmux/server.sock`, falling back to
+//! `/tmp/neotmux-<uid>/server.sock` where that variable is unset. One socket for a user, with
+//! the sessions named inside the server behind it, which is tmux's arrangement.
+//!
+//! It was a file per session, so that killing one, finding one or listing them was `ls`
+//! rather than a protocol. What ended that is the thing the sessions are for: a sidebar that
+//! shows what each session is doing has to read a session it is not attached to, and a
+//! process per session would need a second protocol to answer that. One process needs none,
+//! and having one, `ls` and `kill` are two more questions it answers.
 //!
 //! The permissions are set rather than left to `umask`: the directory is `0700` and the
 //! socket `0600`, and a directory that is already there is checked to be a directory, ours,
@@ -59,26 +62,16 @@ pub struct Paths {
 }
 
 impl Paths {
-    /// The socket and lock a client and its server agree on for the one name.
-    /// Callers must pass a name `validate_session_name` accepts: the CLI edge is where
-    /// the law is enforced, and this only composes the file names, without re-checking.
-    pub fn resolve(
-        env: &dyn Fn(&str) -> Option<std::ffi::OsString>,
-        name: &str,
-    ) -> anyhow::Result<Self> {
+    /// The socket and lock a client and its server agree on. One pair for a user: the
+    /// sessions are inside the server, and finding them is a question it answers.
+    pub fn resolve(env: &dyn Fn(&str) -> Option<std::ffi::OsString>) -> anyhow::Result<Self> {
         let dir = runtime_dir(env);
         make_dir(&dir).with_context(|| format!("prepare {}", dir.display()))?;
         Ok(Self {
-            socket: dir.join(format!("{name}.sock")),
-            lock: dir.join(format!("{name}.lock")),
+            socket: dir.join("server.sock"),
+            lock: dir.join("server.lock"),
         })
     }
-}
-
-/// Where a session's files live, whatever the name is. `ls` needs the directory rather
-/// than one name.
-pub fn socket_dir(env: &dyn Fn(&str) -> Option<std::ffi::OsString>) -> PathBuf {
-    runtime_dir(env)
 }
 
 fn runtime_dir(env: &dyn Fn(&str) -> Option<std::ffi::OsString>) -> PathBuf {
@@ -278,15 +271,14 @@ mod tests {
     }
 
     #[test]
-    fn resolve_builds_paths_for_the_name_asked_for() {
+    fn resolve_builds_the_one_pair_a_user_has() {
         // `resolve` prepares the directory as its first act, so the test needs a path it
         // can actually create rather than one it cannot.
         let tmp = tempfile::tempdir().expect("tempdir");
         let dir = tmp.path().to_path_buf();
-        let paths =
-            Paths::resolve(&env(Some(dir.to_str().expect("utf8"))), "work").expect("resolve");
-        assert_eq!(paths.socket, dir.join("neotmux/work.sock"));
-        assert_eq!(paths.lock, dir.join("neotmux/work.lock"));
+        let paths = Paths::resolve(&env(Some(dir.to_str().expect("utf8")))).expect("resolve");
+        assert_eq!(paths.socket, dir.join("neotmux/server.sock"));
+        assert_eq!(paths.lock, dir.join("neotmux/server.lock"));
     }
 
     #[test]

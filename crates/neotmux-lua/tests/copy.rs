@@ -58,8 +58,7 @@ fn built_named(
     )
     .unwrap();
     let terminals = support::panes();
-    let sub = LuaSubsystem::build_named(
-        "default",
+    let sub = LuaSubsystem::build_with(
         Layers::from_paths(vec![dir.path().to_path_buf(), shipped_layer()]),
         terminals.clone(),
         clipboard,

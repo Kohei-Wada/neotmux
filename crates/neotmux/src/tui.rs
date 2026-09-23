@@ -89,8 +89,8 @@ pub enum Opened {
 /// it began must not leave a terminal switched to a screen nothing was ever drawn on. The
 /// first frame is always owed: a session that has just started, and one that has just been
 /// adopted, are both dirty by construction.
-pub fn open(link: &Rc<RefCell<Link>>, size: Size) -> anyhow::Result<Opened> {
-    send(link, &ToServer::Attach(Attach { size }))?;
+pub fn open(link: &Rc<RefCell<Link>>, size: Size, session: String) -> anyhow::Result<Opened> {
+    send(link, &ToServer::Attach(Attach { size, session }))?;
     let mut transcript = Vec::new();
     loop {
         let message = {
@@ -108,7 +108,10 @@ pub fn open(link: &Rc<RefCell<Link>>, size: Size) -> anyhow::Result<Opened> {
             OwnedToClient::Bye(lines) => transcript = lines,
             OwnedToClient::Clip(text) => yank(&text),
             OwnedToClient::Refused(why) => anyhow::bail!("{why}"),
-            OwnedToClient::Tick(_) | OwnedToClient::Reading(_) => {}
+            OwnedToClient::Tick(_)
+            | OwnedToClient::Reading(_)
+            | OwnedToClient::Sessions(_)
+            | OwnedToClient::Killed(_) => {}
         }
     }
 }
@@ -203,9 +206,13 @@ pub fn run(
                 OwnedToClient::Clip(text) => yank(&text),
                 OwnedToClient::Bye(lines) => transcript = lines,
                 OwnedToClient::Refused(why) => anyhow::bail!("{why}"),
-                // The vocabulary of the frame that was a conversation. Nothing sends these
-                // any more.
-                OwnedToClient::Tick(_) | OwnedToClient::Reading(_) => {}
+                // The vocabulary of the frame that was a conversation, and the two answers
+                // only ever given at the door. Nothing sends any of these to a client that
+                // has attached.
+                OwnedToClient::Tick(_)
+                | OwnedToClient::Reading(_)
+                | OwnedToClient::Sessions(_)
+                | OwnedToClient::Killed(_) => {}
             }
         }
     }

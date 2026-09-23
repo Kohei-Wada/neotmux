@@ -86,8 +86,14 @@ struct Attached {
 /// say "the session" says "this one" through it.
 #[derive(Default)]
 struct Sessions {
-    live: BTreeMap<SessionId, Session>,
+    live: BTreeMap<SessionId, Held>,
     next: u32,
+}
+
+/// One session and the name it answers to.
+struct Held {
+    name: String,
+    session: Session,
 }
 
 impl Sessions {
@@ -96,6 +102,24 @@ impl Sessions {
     fn mint(&mut self) -> SessionId {
         self.next += 1;
         SessionId::from(self.next)
+    }
+
+    fn id_of(&self, name: &str) -> Option<SessionId> {
+        self.live
+            .iter()
+            .find(|(_, held)| held.name == name)
+            .map(|(id, _)| *id)
+    }
+
+    /// Every session's name, in name order, which is the order `ls` prints them in.
+    fn names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.live.values().map(|held| held.name.clone()).collect();
+        names.sort();
+        names
+    }
+
+    fn get_mut(&mut self, id: SessionId) -> Option<&mut Session> {
+        self.live.get_mut(&id).map(|held| &mut held.session)
     }
 }
 
@@ -112,7 +136,7 @@ struct Serving<'a> {
     terminals: &'a Rc<PaneTerminals>,
 }
 
-pub fn serve(name: &str, listener: &UnixListener, shutdown: &ShutdownSignal) -> anyhow::Result<()> {
+pub fn serve(listener: &UnixListener, shutdown: &ShutdownSignal) -> anyhow::Result<()> {
     // Polled rather than blocked on, so the frame loop can answer a client instead of
     // leaving it in the backlog wondering.
     listener
@@ -136,7 +160,7 @@ pub fn serve(name: &str, listener: &UnixListener, shutdown: &ShutdownSignal) -> 
         .ok()
         .and_then(|path| path.parent().map(std::path::Path::to_path_buf));
     let layers = Layers::resolve(&|key| std::env::var_os(key), exe_dir.as_deref());
-    let lua = LuaSubsystem::build_named(name, layers, terminals.clone(), clip.clone())?;
+    let lua = LuaSubsystem::build_with(layers, terminals.clone(), clip.clone())?;
     let mut plugins = Plugins::new(lua);
     for failure in plugins.lua().run_init() {
         logging::log(Level::Warn, &failure.source, &failure.message);
@@ -301,9 +325,18 @@ enum Doorstep {
     Waiting,
     /// It said what it is.
     Attaching(Attach),
+    /// It is not a client at all: it asked a question about the sessions, and the answer is
+    /// the whole of what it wanted.
+    Asking(Ask),
     /// It is over: hung up, out of patience, or something that was not an attach — the one
     /// path that still says no to a connection, for the reason the old `attached` gave.
     Gone,
+}
+
+/// What a connection that is not a client wanted.
+enum Ask {
+    List,
+    Kill { session: String },
 }
 
 /// One look at one connection at the door, which never waits.
@@ -388,7 +421,20 @@ fn doorstep(pending: &mut Pending) -> Doorstep {
             }
         };
         return match wire::decode_to_server(&message) {
-            Ok(ToServer::Attach(attach)) => Doorstep::Attaching(attach),
+            // The same law the command line enforces. A peer that did not come through the
+            // command line is not exempt from it: the name is a key in a map and a word in a
+            // list, and both of those are the CLI's business too.
+            Ok(ToServer::Attach(attach)) => {
+                match neotmux::sock::validate_session_name(&attach.session) {
+                    Ok(()) => Doorstep::Attaching(attach),
+                    Err(why) => {
+                        logging::log(Level::Warn, "neotmux-server", &why);
+                        Doorstep::Gone
+                    }
+                }
+            }
+            Ok(ToServer::List) => Doorstep::Asking(Ask::List),
+            Ok(ToServer::Kill { session }) => Doorstep::Asking(Ask::Kill { session }),
             Ok(other) => {
                 logging::log(
                     Level::Warn,
@@ -453,6 +499,7 @@ fn door(
         match doorstep(&mut one) {
             Doorstep::Waiting => waiting.push(one),
             Doorstep::Gone => {}
+            Doorstep::Asking(ask) => answer(&mut one.link, ask, plugins, sessions, clients),
             Doorstep::Attaching(attach) => {
                 clients.push(admit(
                     one.link,
@@ -468,6 +515,60 @@ fn door(
     }
     *pending = waiting;
     Ok(adopted)
+}
+
+/// A connection that asked rather than attached, answered and let go. It is not a client, so
+/// it never enters `clients` and never sees a frame.
+fn answer(
+    link: &mut Link,
+    ask: Ask,
+    plugins: &Plugins,
+    sessions: &mut Sessions,
+    clients: &mut Vec<Attached>,
+) {
+    match ask {
+        Ask::List => {
+            let names = sessions.names();
+            let _ = link.send(&wire::encode_to_client(&ToClient::Sessions(&names)));
+        }
+        Ask::Kill { session } => {
+            let found = match sessions.id_of(&session) {
+                Some(id) => {
+                    end_session(id, plugins, sessions, clients);
+                    true
+                }
+                None => false,
+            };
+            let _ = link.send(&wire::encode_to_client(&ToClient::Killed(found)));
+        }
+    }
+}
+
+/// A session ends: its clients are told, its shells go with it — `Shells::drop` closes every
+/// child — and the Lua layer forgets what it was holding for it.
+fn end_session(
+    id: SessionId,
+    plugins: &Plugins,
+    sessions: &mut Sessions,
+    clients: &mut Vec<Attached>,
+) {
+    for client in clients.iter_mut().filter(|client| client.session == id) {
+        let lines = plugins.notifications().since(client.mark);
+        let _ = client
+            .link
+            .send(&wire::encode_to_client(&ToClient::Bye(&lines)));
+        let _ = client
+            .link
+            .send(&wire::encode_to_client(&ToClient::Done(&Done {
+                steps: Vec::new(),
+                frame: None,
+                end: Some(End::Quit),
+            })));
+        client.gone = true;
+    }
+    clients.retain(|client| !client.gone);
+    sessions.live.remove(&id);
+    plugins.lua().forget_session(id);
 }
 
 /// The client a session adopts, out of the attach it sent — and, where there is no session,
@@ -489,17 +590,23 @@ fn admit(
         gutter: lua.opt().pane_gutter,
         wants_pane_output: lua.has_subscriber("pane_output"),
     };
-    // Whichever one is there, which is the only one there is. The attach will name it.
-    let session = match sessions.live.iter_mut().next() {
-        Some((id, session)) => {
-            session.adopt(&setup)?;
-            *id
+    let session = match sessions.id_of(&attach.session) {
+        Some(id) => {
+            if let Some(session) = sessions.get_mut(id) {
+                session.adopt(&setup)?;
+            }
+            id
         }
         None => {
             let id = sessions.mint();
-            sessions
-                .live
-                .insert(id, Session::new(&setup, waker.clone(), terminals.clone())?);
+            sessions.live.insert(
+                id,
+                Held {
+                    name: attach.session.clone(),
+                    session: Session::new(&setup, waker.clone(), terminals.clone())?,
+                },
+            );
+            plugins.lua().name_session(id, &attach.session);
             id
         }
     };
@@ -626,7 +733,7 @@ fn frame(
     let ids: Vec<SessionId> = sessions.live.keys().copied().collect();
     let mut over = false;
     for id in ids {
-        let Some(live) = sessions.live.get_mut(&id) else {
+        let Some(live) = sessions.get_mut(id) else {
             continue;
         };
 
@@ -690,11 +797,10 @@ fn frame(
             // the op belongs to more than another.
             Some(End::Detach) => clients.retain(|client| client.session != id),
             Some(_) => {
-                // What it was holding goes with it, so a server that outlives a session does
-                // not keep its geometry parked for a session that will never ask again.
-                plugins.lua().forget_session(id);
-                sessions.live.remove(&id);
-                over = true;
+                end_session(id, plugins, sessions, clients);
+                // The server is over when the last of them is: a session that quits takes
+                // itself, and only itself, unless it was the only one.
+                over = sessions.live.is_empty();
             }
             None => {}
         }
@@ -765,21 +871,21 @@ fn deliver(clients: &mut [Attached], i: usize, sessions: &mut Sessions, plugins:
                 // pane an unbound key belongs to is the session's to know, and both halves
                 // are here now.
                 if plugins.key(which, key) == KeyOutcome::Fallthrough
-                    && let Some(session) = sessions.live.get_mut(&which)
+                    && let Some(session) = sessions.get_mut(which)
                     && session.key(key).is_err()
                 {
                     clients[i].gone = true;
                 }
             }
             Ok(ToServer::Resize(size)) => {
-                if let Some(session) = sessions.live.get_mut(&which)
+                if let Some(session) = sessions.get_mut(which)
                     && session.resize(size).is_err()
                 {
                     clients[i].gone = true;
                 }
             }
             Ok(ToServer::Read(read)) => {
-                if let Some(session) = sessions.live.get_mut(&which) {
+                if let Some(session) = sessions.get_mut(which) {
                     let reading = reads::answer(session.terminals().as_ref(), read);
                     if clients[i]
                         .link
@@ -790,9 +896,12 @@ fn deliver(clients: &mut [Attached], i: usize, sessions: &mut Sessions, plugins:
                     }
                 }
             }
-            Ok(ToServer::Tock(_)) | Ok(ToServer::Attach(_)) => {
-                // A tock nobody asked for, or a second attach: neither is something the
-                // session can act on out here.
+            Ok(ToServer::Tock(_))
+            | Ok(ToServer::Attach(_))
+            | Ok(ToServer::List)
+            | Ok(ToServer::Kill { .. }) => {
+                // A tock nobody asked for, a second attach, or a question only the door
+                // answers: none of them is something the session can act on out here.
             }
             Err(err) => {
                 logging::log(

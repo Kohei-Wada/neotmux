@@ -39,7 +39,7 @@ impl TestRuntime {
 }
 
 fn socket_in(runtime: &Path) -> PathBuf {
-    runtime.join("neotmux/default.sock")
+    runtime.join("neotmux/server.sock")
 }
 
 /// The runtime layer neotmux ships: the one an install puts on the default search path,
@@ -449,6 +449,7 @@ fn greet_and_send_message(socket: &Path, payload: &[u8]) {
 fn an_attach() -> neotmux_proto::msg::Attach {
     neotmux_proto::msg::Attach {
         size: neotmux_proto::Size { rows: 24, cols: 80 },
+        session: neotmux::sock::DEFAULT_SESSION.to_string(),
     }
 }
 
@@ -941,5 +942,30 @@ fn a_plugin_ticks_while_no_client_is_attached() {
         seen.matches("ticked 10\n").count(),
         1,
         "the count started again, so the session got a second Lua layer:\n{seen}"
+    );
+}
+
+/// A client says which session it wants, and a second client saying the same name is given
+/// the same one rather than a fresh one. The name is the client's only say in the matter:
+/// everything else about a session is the server's.
+#[test]
+fn two_clients_naming_the_same_session_are_given_the_same_one() {
+    let runtime = TestRuntime::new();
+    let mut session = started(runtime.path());
+    session.send("shared-by-name\r");
+    session.wait_for_output("shared-by-name");
+
+    let mut raw = raw_attach(an_attach(), &runtime);
+    let done = next_done(&mut raw);
+    let frame = done.frame.expect("the session it named");
+    let text: String = frame
+        .panes
+        .iter()
+        .flat_map(|pane| pane.grid.cells.iter())
+        .map(|cell| cell.text.as_str())
+        .collect();
+    assert!(
+        text.contains("shared-by-name"),
+        "the named client was given a fresh session rather than the one it named"
     );
 }

@@ -27,6 +27,8 @@ pub struct Ambient {
     pane_info: Rc<RefCell<PaneInfos>>,
     current: Cell<Option<SessionId>>,
     parked: RefCell<BTreeMap<SessionId, Parked>>,
+    /// What each session is called. Set once, by the host, when it makes one.
+    names: RefCell<BTreeMap<SessionId, String>>,
 }
 
 impl Ambient {
@@ -36,7 +38,20 @@ impl Ambient {
             pane_info,
             current: Cell::new(None),
             parked: RefCell::new(BTreeMap::new()),
+            names: RefCell::new(BTreeMap::new()),
         }
+    }
+
+    /// What a session is called.
+    pub fn name(&self, session: SessionId, name: &str) {
+        self.names.borrow_mut().insert(session, name.to_string());
+    }
+
+    /// The bound session's name, or `None` outside any dispatch — during a config load, where
+    /// there is no session to be the name of.
+    pub fn current_name(&self) -> Option<String> {
+        let current = self.current.get()?;
+        self.names.borrow().get(&current).cloned()
     }
 
     /// The session the work in hand is for, or `None` outside any dispatch — during a config
@@ -48,6 +63,7 @@ impl Ambient {
     /// Everything a session was holding, dropped: it is over.
     pub fn forget(&self, session: SessionId) {
         self.parked.borrow_mut().remove(&session);
+        self.names.borrow_mut().remove(&session);
     }
 
     /// Makes `session` the one the live cells belong to, until the guard is dropped.
