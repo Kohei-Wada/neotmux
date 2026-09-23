@@ -86,6 +86,7 @@ Each of these returns a handle with one method, `handle:remove()`, which is idem
 | `neotmux.on_tick(fn)` | once per frame, with a `ctx` (below) |
 | `neotmux.on_event(name, fn)` | when that event fires, with a table of fields |
 | `neotmux.on_key(fn)` | for every key, before any binding; return `true` to consume it |
+| `neotmux.on_write(fn)` | before text is written into a pane; return `false, why` to refuse it |
 | `neotmux.float({ x =, y =, w =, h = })` | nothing runs; the grant is two-valued — a handle, or `nil` plus a message (below) |
 | `neotmux.keymap.set(spec, fn)` | for that one key; return `true` to consume it |
 | `neotmux.reserve(edge, cells)` | nothing runs; it takes a band of the surface (below) |
@@ -641,6 +642,55 @@ typing blind until the terminal grows back. The terminal cursor is hidden for as
 lasts. It has nowhere honest to sit — every other visible cell belongs to a pane that is not
 getting the keys, or to no pane at all — and no cursor is a better answer than one pointing at
 the wrong pane.
+
+### Guarding a write
+
+```lua
+neotmux.on_write(function(write)
+  -- write.pane, write.text, write.from ('tool' | 'plugin')
+  if write.text:find('rm%s+%-rf') then
+    return false, 'rm -rf is blocked'
+  end
+end)
+```
+
+Every write into a pane — `neotmux send` from outside, and a plugin's own `pane.send` — is
+offered to every handler registered this way before it happens, in the order they were
+registered. Answering nothing, or `true`, passes it. `false`, with or without a reason, refuses
+it, and the first refusal is the answer: nothing after it runs.
+
+That is not the same three doors this document keeps open elsewhere. A person's own keystrokes
+are `on_key`'s, not this one's — there is no text to hand a handler until it has already gone
+through the tty and come back out the other side as pixels, which is why `neotmux.state`
+guesses at a screen instead of reading a keystroke. A read is not a write and has nothing here
+to answer. And an agent that never calls into neotmux at all — one driving its terminal some
+other way — was never at this door to begin with; enforcing panes-only belongs to the agent's
+configuration or a sandbox, not to a hook that only ever sees what comes through a pane.
+
+A handler that raises, or that runs past its tick budget, refuses the write exactly as if it
+had returned `false` — the same rule `on_tick` and every other callback answer to. A guardrail
+that fails open is useless exactly when something is wrong, so a broken handler is a closed
+door rather than an open one.
+
+With nothing registered, the path a write takes is unchanged: the host asks `has_write_hooks`
+before it does anything else, and a session with no handler pays nothing for the question.
+
+#### The `neotmux.guard` convention
+
+`on_write` is one hook, and answering to it in prose gets old after the second rule. `neotmux.guard`
+is a pattern table over it, in the same spirit as `neotmux.mode` and `neotmux.box`: the host
+has never heard of it, and replacing the file changes nothing about neotmux.
+
+```lua
+local guard = require('neotmux.guard')
+guard.only('tool')                                 -- agents, not the person's plugins
+guard.block('rm%s+%-%w*[rf]', 'rm -rf is blocked')
+```
+
+`block` takes a Lua pattern and what to say when it matches; `only` narrows every rule to one
+kind of writer, `'tool'` or `'plugin'`, leaving the other alone. One handler is registered, the
+first time either is called, so a rule added later from your own `init.lua` needs no new
+subscription — it is read off `M.patterns` on the next write.
 
 ### Windows
 

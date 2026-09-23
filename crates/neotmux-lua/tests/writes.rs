@@ -1,4 +1,5 @@
 use std::fs;
+use std::path::{Path, PathBuf};
 
 use neotmux_lua::ops::Op;
 use neotmux_lua::runtime::Layers;
@@ -17,6 +18,28 @@ fn built(files: &[(&str, &str)]) -> (tempfile::TempDir, LuaSubsystem) {
     }
     let sub = LuaSubsystem::build(
         Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
+    assert!(sub.run_init().is_empty());
+    (dir, sub)
+}
+
+fn shipped_layer() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime")
+}
+
+/// The shipped runtime on the path behind the config, so `require('neotmux.guard')` resolves
+/// the way it would for a real user's `init.lua`.
+fn shipped(files: &[(&str, &str)]) -> (tempfile::TempDir, LuaSubsystem) {
+    let dir = tempfile::tempdir().unwrap();
+    for (rel, body) in files {
+        let path = dir.path().join(rel);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, body).unwrap();
+    }
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf(), shipped_layer()]),
         support::panes(),
     )
     .unwrap();
@@ -188,4 +211,43 @@ fn nothing_registered_is_nothing_listening() {
     assert!(!sub.has_write_hooks());
     let (_dir, sub) = built(&[("init.lua", "neotmux.on_write(function() end)")]);
     assert!(sub.has_write_hooks());
+}
+
+/// The convention on top of the hook: a pattern table, and one handler for all of it.
+#[test]
+fn the_guard_convention_refuses_a_line_that_matches_a_pattern() {
+    let (_dir, sub) = shipped(&[(
+        "init.lua",
+        "local guard = require('neotmux.guard')
+         guard.block('rm%s+%-%w*[rf]', 'rm -rf is blocked')",
+    )]);
+    side_by_side(&sub);
+    assert_eq!(
+        sub.dispatch_write(support::one(), PaneId::from(1), "rm -rf /tmp/x\n", "tool"),
+        WriteVerdict::Refused("rm -rf is blocked".to_string())
+    );
+    assert_eq!(
+        sub.dispatch_write(support::one(), PaneId::from(1), "ls -l\n", "tool"),
+        WriteVerdict::Pass
+    );
+}
+
+/// `only` is what makes a rule an agent's rule rather than everyone's.
+#[test]
+fn a_guard_can_apply_to_one_kind_of_writer() {
+    let (_dir, sub) = shipped(&[(
+        "init.lua",
+        "local guard = require('neotmux.guard')
+         guard.only('tool')
+         guard.block('careful', 'not from a tool')",
+    )]);
+    side_by_side(&sub);
+    assert_eq!(
+        sub.dispatch_write(support::one(), PaneId::from(1), "careful\n", "tool"),
+        WriteVerdict::Refused("not from a tool".to_string())
+    );
+    assert_eq!(
+        sub.dispatch_write(support::one(), PaneId::from(1), "careful\n", "plugin"),
+        WriteVerdict::Pass
+    );
 }
