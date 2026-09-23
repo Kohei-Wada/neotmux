@@ -83,3 +83,65 @@ fn a_load_sees_no_sessions_at_all() {
     );
     assert_eq!(logged(&sub, None), vec!["nil of 0".to_string()]);
 }
+
+/// The whole point: a plugin reads a session it is not running for, with every ordinary read,
+/// and is put back where it was afterwards.
+#[test]
+fn with_reads_another_session_and_puts_the_caller_back() {
+    let (_dir, sub) = built(
+        "neotmux.on_tick(function()\n\
+         \x20 local theirs = neotmux.session.with('home', function() return #neotmux.pane.list() end)\n\
+         \x20 neotmux.log.info('mine=' .. #neotmux.pane.list() .. ' theirs=' .. tostring(theirs)\n\
+         \x20   .. ' back=' .. neotmux.session.current())\n\
+         end)",
+    );
+    let work = support::one();
+    let home = SessionId::from(2);
+    make(&sub, work, "work", 1);
+    make(&sub, home, "home", 3);
+
+    sub.dispatch_tick(work);
+
+    assert_eq!(
+        logged(&sub, Some(work)),
+        vec!["mine=1 theirs=3 back=work".to_string()]
+    );
+}
+
+/// A name nothing answers to is not an error — a session can end between one tick and the
+/// next. The function does not run.
+#[test]
+fn with_a_name_nothing_answers_to_does_nothing() {
+    let (_dir, sub) = built(
+        "neotmux.on_tick(function()\n\
+         \x20 local ran = false\n\
+         \x20 local got = neotmux.session.with('gone', function() ran = true return 1 end)\n\
+         \x20 neotmux.log.info('got=' .. tostring(got) .. ' ran=' .. tostring(ran))\n\
+         end)",
+    );
+    make(&sub, support::one(), "work", 1);
+    sub.dispatch_tick(support::one());
+    assert_eq!(
+        logged(&sub, Some(support::one())),
+        vec!["got=nil ran=false".to_string()]
+    );
+}
+
+/// An error inside the call is the caller's error, and the binding is undone either way: the
+/// guard is what restores, so a raise cannot leave the layer reading somebody else's session.
+#[test]
+fn with_puts_the_caller_back_even_when_the_call_raises() {
+    let (_dir, sub) = built(
+        "neotmux.on_tick(function()\n\
+         \x20 pcall(function() neotmux.session.with('home', function() error('nope') end) end)\n\
+         \x20 neotmux.log.info('back=' .. neotmux.session.current())\n\
+         end)",
+    );
+    make(&sub, support::one(), "work", 1);
+    make(&sub, SessionId::from(2), "home", 1);
+    sub.dispatch_tick(support::one());
+    assert_eq!(
+        logged(&sub, Some(support::one())),
+        vec!["back=work".to_string()]
+    );
+}
