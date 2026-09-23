@@ -651,6 +651,14 @@ pane's scrollback are the server's, and stay. Every plugin's own state is the cl
 does not — the copy register, a raised mode, a fold, and the reservations, which the plugin
 re-makes at load. Re-attaching is a plugin restart, in those words.
 
+**Two clients in one session.** The copy mode one has is not the one the other has,
+because the copy mode is the client's and not the session's; the key that one types
+and its copy mode does not consume is the key the shell on the other one sees, because
+that key is the session's. A band one plugin reserves is the session's surface it
+reserves it from, not a row the other client's plugins did not ask for — the last
+client to attach is the one the session was told to be, and the one that is not is
+the one that looks at it.
+
 `neotmux.width` is the one measurement everything that takes a column agrees on. `#text` is
 bytes and `utf8.len(text)` is characters, and neither is a column: a wide character is one
 entry in a `pane.content` line and **two** cells on the grid, so `#line:sub(1, n)` is not

@@ -46,7 +46,10 @@ re-makes it when it loads. More than one session is in: `neotmux work` starts it
 second `neotmux work` attaches to it, `ls` lists the running ones and `kill [name]` ends
 one of them. The name is a filename — one to sixty-four characters of letters, digits, `-` and `_`, none first. `neotmux
 --kill` was its old spelling for one session; it is `kill` now, and `kill [name]` for the
-named ones. Two clients on one session at once is still out.
+named ones. Two terminals can be in one session at once: a key typed on either reaches the same
+pane, and each keeps its own copy of the plugins' state — which is to say, its own
+copy mode, its own bands, its own floats — and the one it does not keep is the
+session's.
 
 Copy mode is in, as a plugin: `C-b [` reads back over a pane's scrollback, selects a
 region and yanks it. What is still out is the pane's *own* view moving — the plugin

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Two clients in one session
+
+`neotmux work`, in two terminals at once. A key typed on one is the key the other
+sees, the session's and the pane's rather than the terminal's, and a plugin on one
+terminal can be in a mode the other is not, the same way one can be in a mode and
+the shell not be. The one that goes costs the other nothing, and the session the two
+of them are in goes on until its last shell exits or the last of them calls
+`neotmux.quit()`, which is to say, as long as a plugin on either of the two is still
+asking for what it asked for — the OR, and not the last word, which is what it used
+to be, and what "the last tock wins" would have made it.
+
 ### Sessions by name, and `kill` where `--kill` was
 
 `neotmux work` starts a session called `work` where nothing is running and attaches to
