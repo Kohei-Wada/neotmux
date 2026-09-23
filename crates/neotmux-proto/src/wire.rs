@@ -628,6 +628,8 @@ const TO_SERVER_KEY: u8 = 1;
 const TO_SERVER_RESIZE: u8 = 2;
 const TO_SERVER_READ: u8 = 3;
 const TO_SERVER_TOCK: u8 = 4;
+const TO_SERVER_LIST: u8 = 5;
+const TO_SERVER_KILL: u8 = 6;
 
 const TO_CLIENT_TICK: u8 = 0;
 const TO_CLIENT_DONE: u8 = 1;
@@ -635,6 +637,8 @@ const TO_CLIENT_READING: u8 = 2;
 const TO_CLIENT_REFUSED: u8 = 3;
 const TO_CLIENT_CLIP: u8 = 4;
 const TO_CLIENT_BYE: u8 = 5;
+const TO_CLIENT_SESSIONS: u8 = 6;
+const TO_CLIENT_KILLED: u8 = 7;
 
 const STEP_GEOMETRY: u8 = 0;
 const STEP_BANDS: u8 = 1;
@@ -707,6 +711,11 @@ pub fn encode_to_server(msg: &ToServer) -> Vec<u8> {
             w.u8(TO_SERVER_TOCK);
             w.tock(tock);
         }
+        ToServer::List => w.u8(TO_SERVER_LIST),
+        ToServer::Kill { session } => {
+            w.u8(TO_SERVER_KILL);
+            w.str(session);
+        }
     }
     w.finish()
 }
@@ -722,6 +731,10 @@ pub fn decode_to_server(bytes: &[u8]) -> Result<ToServer, WireError> {
         TO_SERVER_RESIZE => ToServer::Resize(r.size()?),
         TO_SERVER_READ => ToServer::Read(r.read()?),
         TO_SERVER_TOCK => ToServer::Tock(r.tock()?),
+        TO_SERVER_LIST => ToServer::List,
+        TO_SERVER_KILL => ToServer::Kill {
+            session: r.string()?,
+        },
         _ => return Err(WireError::Malformed("client message discriminant")),
     };
     r.finish()?;
@@ -747,6 +760,17 @@ pub fn encode_to_client(msg: &ToClient<'_>) -> Vec<u8> {
             w.u8(TO_CLIENT_REFUSED);
             w.str(why);
         }
+        ToClient::Sessions(names) => {
+            w.u8(TO_CLIENT_SESSIONS);
+            w.len(names.len());
+            for name in *names {
+                w.str(name);
+            }
+        }
+        ToClient::Killed(found) => {
+            w.u8(TO_CLIENT_KILLED);
+            w.bool(*found);
+        }
         ToClient::Clip(text) => {
             w.u8(TO_CLIENT_CLIP);
             w.str(text);
@@ -769,6 +793,15 @@ pub fn decode_to_client(bytes: &[u8]) -> Result<OwnedToClient, WireError> {
         TO_CLIENT_DONE => OwnedToClient::Done(r.done()?),
         TO_CLIENT_READING => OwnedToClient::Reading(r.reading()?),
         TO_CLIENT_REFUSED => OwnedToClient::Refused(r.string()?),
+        TO_CLIENT_SESSIONS => {
+            let n = r.len()?;
+            let mut names = Vec::with_capacity(n.min(64));
+            for _ in 0..n {
+                names.push(r.string()?);
+            }
+            OwnedToClient::Sessions(names)
+        }
+        TO_CLIENT_KILLED => OwnedToClient::Killed(r.bool()?),
         TO_CLIENT_CLIP => OwnedToClient::Clip(r.string()?),
         TO_CLIENT_BYE => {
             let n = r.len()?;
@@ -2289,6 +2322,23 @@ mod tests {
     /// Encoded and decoded inline, the way the `Refused` case beside it is: `ToClient`
     /// borrows and `OwnedToClient` does not, so the two sides of a round trip are not the
     /// same type and there is no helper to hand them both to.
+    #[test]
+    fn the_two_questions_that_are_not_an_attach_round_trip() {
+        round_trip_to_server(ToServer::List);
+        round_trip_to_server(ToServer::Kill {
+            session: "work".to_string(),
+        });
+
+        let names = vec!["default".to_string(), "work".to_string()];
+        let bytes = encode_to_client(&ToClient::Sessions(&names));
+        assert_eq!(decode_to_client(&bytes), Ok(OwnedToClient::Sessions(names)));
+
+        for found in [true, false] {
+            let bytes = encode_to_client(&ToClient::Killed(found));
+            assert_eq!(decode_to_client(&bytes), Ok(OwnedToClient::Killed(found)));
+        }
+    }
+
     #[test]
     fn the_clipboard_and_the_goodbye_round_trip() {
         let bytes = encode_to_client(&ToClient::Clip("yanked 日本語"));

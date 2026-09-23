@@ -198,6 +198,13 @@ pub enum ToServer {
     Resize(Size),
     Read(Read),
     Tock(Tock),
+    /// Not a client at all: a connection asking what sessions there are. The answer is the
+    /// whole of what it wanted, and it is let go afterwards.
+    List,
+    /// Nor this one: end that session, whoever is attached to it.
+    Kill {
+        session: String,
+    },
 }
 
 /// Server to client. Borrowed, because the two big payloads — a frame's grids and a tick's
@@ -209,6 +216,10 @@ pub enum ToClient<'a> {
     Reading(&'a Reading),
     /// Why this connection is not getting a session: something else already has it.
     Refused(&'a str),
+    /// Every session this server holds, in name order.
+    Sessions(&'a [String]),
+    /// Whether there was a session by that name to end.
+    Killed(bool),
     /// Text a plugin yanked, for the client to put on its terminal's clipboard. It is the
     /// one thing the Lua layer does that needs a terminal, and the terminal is over here.
     Clip(&'a str),
@@ -227,4 +238,6 @@ pub enum OwnedToClient {
     Refused(String),
     Clip(String),
     Bye(Vec<String>),
+    Sessions(Vec<String>),
+    Killed(bool),
 }
