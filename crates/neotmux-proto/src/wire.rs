@@ -602,6 +602,7 @@ const TO_SERVER_READ: u8 = 3;
 const TO_SERVER_TOCK: u8 = 4;
 const TO_SERVER_LIST: u8 = 5;
 const TO_SERVER_KILL: u8 = 6;
+const TO_SERVER_COMMAND: u8 = 7;
 
 const TO_CLIENT_TICK: u8 = 0;
 const TO_CLIENT_DONE: u8 = 1;
@@ -611,6 +612,7 @@ const TO_CLIENT_CLIP: u8 = 4;
 const TO_CLIENT_BYE: u8 = 5;
 const TO_CLIENT_SESSIONS: u8 = 6;
 const TO_CLIENT_KILLED: u8 = 7;
+const TO_CLIENT_RAN: u8 = 8;
 
 const STEP_GEOMETRY: u8 = 0;
 const STEP_BANDS: u8 = 1;
@@ -689,6 +691,20 @@ pub fn encode_to_server(msg: &ToServer) -> Vec<u8> {
             w.u8(TO_SERVER_KILL);
             w.str(session);
         }
+        ToServer::Command {
+            session,
+            name,
+            args,
+        } => {
+            w.u8(TO_SERVER_COMMAND);
+            w.bool(session.is_some());
+            w.str(session.as_deref().unwrap_or(""));
+            w.str(name);
+            w.len(args.len());
+            for arg in args {
+                w.str(arg);
+            }
+        }
     }
     w.finish()
 }
@@ -708,6 +724,20 @@ pub fn decode_to_server(bytes: &[u8]) -> Result<ToServer, WireError> {
         TO_SERVER_KILL => ToServer::Kill {
             session: r.string()?,
         },
+        TO_SERVER_COMMAND => {
+            let named = r.bool()?;
+            let session = r.string()?;
+            let name = r.string()?;
+            let mut args = Vec::new();
+            for _ in 0..r.len()? {
+                args.push(r.string()?);
+            }
+            ToServer::Command {
+                session: named.then_some(session),
+                name,
+                args,
+            }
+        }
         _ => return Err(WireError::Malformed("client message discriminant")),
     };
     r.finish()?;
@@ -755,6 +785,14 @@ pub fn encode_to_client(msg: &ToClient<'_>) -> Vec<u8> {
                 w.str(line);
             }
         }
+        ToClient::Ran { ok, lines } => {
+            w.u8(TO_CLIENT_RAN);
+            w.bool(*ok);
+            w.len(lines.len());
+            for line in *lines {
+                w.str(line);
+            }
+        }
     }
     w.finish()
 }
@@ -783,6 +821,14 @@ pub fn decode_to_client(bytes: &[u8]) -> Result<OwnedToClient, WireError> {
                 lines.push(r.string()?);
             }
             OwnedToClient::Bye(lines)
+        }
+        TO_CLIENT_RAN => {
+            let ok = r.bool()?;
+            let mut lines = Vec::new();
+            for _ in 0..r.len()? {
+                lines.push(r.string()?);
+            }
+            OwnedToClient::Ran { ok, lines }
         }
         _ => return Err(WireError::Malformed("server message discriminant")),
     };
@@ -2282,6 +2328,38 @@ mod tests {
             let bytes = encode_to_client(&ToClient::Killed(found));
             assert_eq!(decode_to_client(&bytes), Ok(OwnedToClient::Killed(found)));
         }
+    }
+
+    #[test]
+    fn a_command_and_its_answer_round_trip() {
+        let asked = ToServer::Command {
+            session: Some("work".to_string()),
+            name: "send".to_string(),
+            args: vec!["%4".to_string(), "cargo test".to_string()],
+        };
+        assert_eq!(decode_to_server(&encode_to_server(&asked)), Ok(asked));
+
+        let lines = vec!["%1 @1 80x24 bash /home/kohei".to_string()];
+        let answered = encode_to_client(&ToClient::Ran {
+            ok: true,
+            lines: &lines,
+        });
+        assert_eq!(
+            decode_to_client(&answered),
+            Ok(OwnedToClient::Ran { ok: true, lines })
+        );
+    }
+
+    /// A command with no session named is the default session's, and `None` has to survive the
+    /// wire as `None` rather than as an empty name: `""` is a name the door would refuse.
+    #[test]
+    fn a_command_with_no_session_named_keeps_its_none() {
+        let asked = ToServer::Command {
+            session: None,
+            name: "ls".to_string(),
+            args: Vec::new(),
+        };
+        assert_eq!(decode_to_server(&encode_to_server(&asked)), Ok(asked));
     }
 
     #[test]

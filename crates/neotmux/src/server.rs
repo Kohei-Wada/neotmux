@@ -1052,9 +1052,10 @@ fn deliver(clients: &mut [Attached], i: usize, sessions: &mut Sessions, plugins:
             Ok(ToServer::Tock(_))
             | Ok(ToServer::Attach(_))
             | Ok(ToServer::List)
-            | Ok(ToServer::Kill { .. }) => {
-                // A tock nobody asked for, a second attach, or a question only the door
-                // answers: none of them is something the session can act on out here.
+            | Ok(ToServer::Kill { .. })
+            | Ok(ToServer::Command { .. }) => {
+                // A tock nobody asked for, a second attach, a question only the door
+                // answers, or a command: none of them is something the session can act on out here.
             }
             Err(err) => {
                 logging::log(

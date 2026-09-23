@@ -110,7 +110,8 @@ pub fn open(link: &Rc<RefCell<Link>>, size: Size, session: String) -> anyhow::Re
             OwnedToClient::Tick(_)
             | OwnedToClient::Reading(_)
             | OwnedToClient::Sessions(_)
-            | OwnedToClient::Killed(_) => {}
+            | OwnedToClient::Killed(_)
+            | OwnedToClient::Ran { .. } => {}
         }
     }
 }
@@ -207,7 +208,8 @@ pub fn run(
                 OwnedToClient::Tick(_)
                 | OwnedToClient::Reading(_)
                 | OwnedToClient::Sessions(_)
-                | OwnedToClient::Killed(_) => {}
+                | OwnedToClient::Killed(_)
+                | OwnedToClient::Ran { .. } => {}
             }
         }
     }

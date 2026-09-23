@@ -207,6 +207,15 @@ pub enum ToServer {
     Kill {
         session: String,
     },
+    /// Not a client either: a connection asking the server to run a named command. The
+    /// answer is the whole of what it wanted, and it is let go afterwards.
+    Command {
+        /// The session the command is addressed to. `None` is the default name, the same
+        /// rule an attach follows.
+        session: Option<String>,
+        name: String,
+        args: Vec<String>,
+    },
 }
 
 /// Server to client. Borrowed, because the two big payloads — a frame's grids and a tick's
@@ -228,6 +237,12 @@ pub enum ToClient<'a> {
     /// The notifications raised while this client was attached, for it to replay on stderr
     /// once its terminal is restored. Sent before the frame that carries the end.
     Bye(&'a [String]),
+    /// What a command did. `lines` is stdout where `ok`, and the one sentence that says why
+    /// not where it is not. Never both.
+    Ran {
+        ok: bool,
+        lines: &'a [String],
+    },
 }
 
 /// What a decoded [`ToClient`] is held in, for the same reason [`crate::OwnedFrame`] exists:
@@ -242,4 +257,5 @@ pub enum OwnedToClient {
     Bye(Vec<String>),
     Sessions(Vec<String>),
     Killed(bool),
+    Ran { ok: bool, lines: Vec<String> },
 }
