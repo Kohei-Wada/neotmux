@@ -25,6 +25,34 @@ pub enum Outcome {
     },
 }
 
+/// The globals a plugin could otherwise use to catch the budget's interrupt, replaced with
+/// wrappers that re-raise it. The originals are locals in this chunk and a plugin has no name
+/// for them, which is the trick `vm::SEAL` uses for `load`.
+///
+/// It delegates to the real `pcall` rather than reimplementing it, so what a plugin sees —
+/// callable values, varargs, multiple returns, message handlers — is exactly Lua's.
+/// `table.pack`, `table.unpack` and `error` are captured for the same reason the others are.
+/// The seal's chunk name. `source::caller` skips it for the same reason it skips `=[C]`: the
+/// wrapper is host code standing exactly where `pcall`'s own frame used to stand, and the
+/// calling code was plainly still written somewhere else.
+pub const SEAL_CHUNK: &str = "=[neotmux budget seal]";
+
+const SEAL: &str = r#"
+local overran = ...
+local _pcall, _xpcall, _resume = pcall, xpcall, coroutine.resume
+local _pack, _unpack, _error = table.pack, table.unpack, error
+
+-- Level 0: the budget's message is the host's, and must not be prefixed with this chunk.
+local function guard(r)
+  if not r[1] and overran() then _error(r[2], 0) end
+  return _unpack(r, 1, r.n)
+end
+
+pcall = function(...) return guard(_pack(_pcall(...))) end
+xpcall = function(...) return guard(_pack(_xpcall(...))) end
+coroutine.resume = function(...) return guard(_pack(_resume(...))) end
+"#;
+
 #[derive(Clone, Copy)]
 struct Active {
     start: Instant,
@@ -50,26 +78,33 @@ impl Budget {
         })
     }
 
-    /// Opens one source's slice of one frame. Outside an `enter`/`leave` pair the hook does
-    /// nothing, so key and event dispatch are unmeasured — this is a *tick* budget.
+    /// Opens one measured region and starts its clock. Outside an `enter`/`leave` pair the
+    /// hook does nothing.
     ///
-    /// A slice is only measured if the frame armed a hook. A tick that raises the budget from
-    /// 0 mid-frame would otherwise give the sources after it a deadline with nothing watching
-    /// it: the loop that passes it is never interrupted and neotmux hangs.
-    pub fn enter(&self) {
+    /// The deadline is the caller's because the regions differ: a tick gets a frame's worth,
+    /// a config load gets far more. Whether anything is measured at all is still
+    /// `tick_budget_ms`, which is the documented way to switch the budget off.
+    ///
+    /// A region is only measured if a hook was armed for it. A tick that raises the budget
+    /// from 0 mid-frame would otherwise give the sources after it a deadline with nothing
+    /// watching it: the loop that passes it is never interrupted and neotmux hangs.
+    pub fn enter(&self, budget: Duration) {
         let measured = self.armed.get() && self.enabled();
         self.active.set(measured.then(|| Active {
             start: Instant::now(),
-            budget: Duration::from_millis(self.opts.borrow().tick_budget_ms),
+            budget,
         }));
         self.overran.set(false);
     }
 
     /// Closes the slice and says what it came to. The elapsed comparison is what catches a
     /// tick the hook never got to sample past the deadline.
+    ///
+    /// The flag is taken rather than read: the sealed `pcall` consults it, so an overrun that
+    /// outlived its region would re-raise an unrelated failure in the next one.
     pub fn leave(&self) -> Outcome {
         let active = self.active.take();
-        if self.overran.get() {
+        if self.overran.replace(false) {
             return Outcome::Interrupted;
         }
         match active {
@@ -125,6 +160,21 @@ impl Budget {
         Ok(())
     }
 
+    /// Makes the budget an interrupt rather than an error a plugin can catch. Called once,
+    /// when the VM is built; the wrappers stay for its life and cost nothing until a plugin
+    /// calls one.
+    ///
+    /// The host function reaches the chunk as its vararg and is never set on the globals
+    /// table, so there is no name a plugin could replace it under.
+    pub fn seal(lua: &Lua, budget: &Rc<Budget>) -> mlua::Result<()> {
+        let fired = budget.clone();
+        let overran = lua.create_function(move |_, ()| Ok(fired.overran.get()))?;
+        lua.load(SEAL)
+            .set_name(SEAL_CHUNK)
+            .set_mode(mlua::chunk::ChunkMode::Text)
+            .call::<()>(overran)
+    }
+
     pub fn disarm(&self, lua: &Lua) {
         lua.remove_global_hook();
         self.armed.set(false);
@@ -143,6 +193,11 @@ mod tests {
     use mlua::Function;
 
     use super::*;
+
+    /// The deadline a test opens its region with, which is the number its helper configured.
+    fn ms(n: u64) -> Duration {
+        Duration::from_millis(n)
+    }
 
     fn armed(tick_budget_ms: u64) -> (Lua, Rc<Budget>) {
         let (lua, budget, _) = armed_with_opts(tick_budget_ms);
@@ -178,7 +233,7 @@ mod tests {
         let slow = slow(&lua);
 
         opts.borrow_mut().tick_budget_ms = 1;
-        budget.enter();
+        budget.enter(ms(1));
         let result = slow.call::<i64>(());
         let outcome = budget.leave();
 
@@ -199,7 +254,7 @@ mod tests {
         let slow = slow(&lua);
 
         opts.borrow_mut().tick_budget_ms = 0;
-        budget.enter();
+        budget.enter(ms(0));
         let result = slow.call::<i64>(());
         let outcome = budget.leave();
 
@@ -218,12 +273,16 @@ mod tests {
             .eval()
             .unwrap();
 
-        budget.enter();
+        budget.enter(ms(5));
         let result = spin.call::<()>(());
-        budget.leave();
+        let outcome = budget.leave();
 
         assert!(result.is_err(), "an infinite loop returned normally");
-        assert!(budget.overran(), "the overrun was not recorded");
+        assert_eq!(
+            outcome,
+            Outcome::Interrupted,
+            "the overrun was not recorded"
+        );
         assert!(
             !lua.globals().get::<bool>("reached").unwrap(),
             "the tick ran past the loop the budget was supposed to cut off"
@@ -245,12 +304,16 @@ mod tests {
             .eval()
             .unwrap();
 
-        budget.enter();
+        budget.enter(ms(5));
         let result = spin.call::<()>(());
-        budget.leave();
+        let outcome = budget.leave();
 
         assert!(result.is_err(), "a coroutine ran past the budget");
-        assert!(budget.overran(), "the overrun was not recorded");
+        assert_eq!(
+            outcome,
+            Outcome::Interrupted,
+            "the overrun was not recorded"
+        );
         assert!(
             !lua.globals().get::<bool>("reached").unwrap(),
             "the coroutine ran past the loop the budget was supposed to cut off"
@@ -279,7 +342,7 @@ mod tests {
             .eval()
             .unwrap();
 
-        budget.enter();
+        budget.enter(ms(0));
         let result = long.call::<i64>(());
         budget.leave();
 
@@ -296,7 +359,7 @@ mod tests {
             .eval()
             .unwrap();
 
-        budget.enter();
+        budget.enter(ms(1));
         let result = long.call::<i64>(());
         budget.leave();
 
@@ -312,11 +375,185 @@ mod tests {
             .eval()
             .unwrap();
 
-        budget.enter();
+        budget.enter(ms(5_000));
         let result = work.call::<i64>(());
         budget.leave();
 
         assert_eq!(result.unwrap(), 100_000);
         assert!(!budget.overran());
+    }
+
+    /// Sealing the globals is what makes the budget an interrupt rather than an error:
+    /// without it a loop that calls anything inside `pcall` catches the budget's own error
+    /// and goes round again, for ever.
+    fn sealed(tick_budget_ms: u64) -> (Lua, Rc<Budget>) {
+        let (lua, budget) = armed(tick_budget_ms);
+        Budget::seal(&lua, &budget).unwrap();
+        (lua, budget)
+    }
+
+    /// These spin with no escape hatch of their own: a seal that does not hold hangs the test
+    /// run rather than failing it, which is the loudest signal available.
+    fn spins_through(lua: &Lua, body: &str) -> Function {
+        lua.load(format!("return function() while true do {body} end end"))
+            .eval()
+            .unwrap()
+    }
+
+    #[test]
+    fn a_sealed_pcall_cannot_swallow_the_budget() {
+        let (lua, budget) = sealed(5);
+        let spin = spins_through(&lua, "pcall(function() end)");
+
+        budget.enter(ms(5));
+        let result = spin.call::<()>(());
+        let outcome = budget.leave();
+
+        assert!(result.is_err(), "pcall swallowed the budget error");
+        assert_eq!(outcome, Outcome::Interrupted);
+    }
+
+    #[test]
+    fn a_sealed_xpcall_cannot_swallow_the_budget() {
+        let (lua, budget) = sealed(5);
+        let spin = spins_through(&lua, "xpcall(function() end, function(e) return e end)");
+
+        budget.enter(ms(5));
+        let result = spin.call::<()>(());
+        budget.leave();
+
+        assert!(result.is_err(), "xpcall swallowed the budget error");
+    }
+
+    #[test]
+    fn a_sealed_resume_cannot_swallow_the_budget() {
+        let (lua, budget) = sealed(5);
+        let spin = spins_through(
+            &lua,
+            "local co = coroutine.create(function() end) coroutine.resume(co)",
+        );
+
+        budget.enter(ms(5));
+        let result = spin.call::<()>(());
+        budget.leave();
+
+        assert!(
+            result.is_err(),
+            "coroutine.resume swallowed the budget error"
+        );
+    }
+
+    #[test]
+    fn a_pcall_inside_a_coroutine_cannot_swallow_the_budget() {
+        let (lua, budget) = sealed(5);
+        let spin: Function = lua
+            .load(
+                "return function()
+                   coroutine.wrap(function()
+                     while true do pcall(function() end) end
+                   end)()
+                 end",
+            )
+            .eval()
+            .unwrap();
+
+        budget.enter(ms(5));
+        let result = spin.call::<()>(());
+        budget.leave();
+
+        assert!(
+            result.is_err(),
+            "a coroutine's pcall swallowed the budget error"
+        );
+    }
+
+    /// The seal only bites once the budget has fired. An ordinary failure inside a tick is
+    /// still an ordinary `false, err` — a plugin that guards its own work with `pcall` keeps
+    /// working.
+    #[test]
+    fn a_sealed_pcall_still_reports_an_ordinary_failure() {
+        let (lua, budget) = sealed(5_000);
+        let probe: Function = lua
+            .load("return function() return pcall(function() error('nope') end) end")
+            .eval()
+            .unwrap();
+
+        budget.enter(ms(5_000));
+        let (ok, message) = probe.call::<(bool, String)>(()).unwrap();
+        budget.leave();
+
+        assert!(!ok);
+        assert!(
+            message.contains("nope"),
+            "the error value was lost: {message}"
+        );
+    }
+
+    #[test]
+    fn a_sealed_pcall_passes_arguments_and_returns_through() {
+        let (lua, budget) = sealed(5_000);
+        let probe: Function = lua
+            .load("return function() return pcall(function(a, b) return b, a end, 1, 2) end")
+            .eval()
+            .unwrap();
+
+        budget.enter(ms(5_000));
+        let (ok, first, second) = probe.call::<(bool, i64, i64)>(()).unwrap();
+        budget.leave();
+
+        assert!(ok);
+        assert_eq!((first, second), (2, 1));
+    }
+
+    /// A plugin that clears the globals the wrapper is built from must not be able to break
+    /// the seal with them.
+    #[test]
+    fn the_seal_does_not_depend_on_globals_a_plugin_can_replace() {
+        let (lua, budget) = sealed(5);
+        lua.load("table.pack = nil table.unpack = nil error = nil")
+            .exec()
+            .unwrap();
+        let spin = spins_through(&lua, "pcall(function() end)");
+
+        budget.enter(ms(5));
+        let result = spin.call::<()>(());
+        budget.leave();
+
+        assert!(result.is_err(), "the seal was broken by clearing a global");
+    }
+
+    /// An overrun that outlived its region would make the next unrelated `pcall` re-raise.
+    #[test]
+    fn leaving_forgets_the_overrun() {
+        let (lua, budget) = sealed(5);
+        let spin = spins_through(&lua, "pcall(function() end)");
+
+        budget.enter(ms(5));
+        let _ = spin.call::<()>(());
+        assert_eq!(budget.leave(), Outcome::Interrupted);
+
+        assert!(
+            !budget.overran(),
+            "the overrun outlived the region it belonged to"
+        );
+    }
+    /// The deadline is the caller's, so one VM can measure regions of different sizes — which
+    /// is what lets a config load have its own.
+    #[test]
+    fn a_region_is_measured_against_the_deadline_it_was_given() {
+        let (lua, budget) = sealed(5);
+        let spin = spins_through(&lua, "pcall(function() end)");
+
+        budget.enter(ms(200));
+        let started = Instant::now();
+        let result = spin.call::<()>(());
+        let took = started.elapsed();
+        budget.leave();
+
+        assert!(result.is_err());
+        assert!(
+            took >= ms(200),
+            "a 200 ms region was cut off after {took:?}"
+        );
     }
 }

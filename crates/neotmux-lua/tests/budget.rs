@@ -884,3 +884,147 @@ fn resubscribe_returns_one_handle_for_each_tick_it_restored() {
     assert_eq!(notifications(&sub), vec!["2".to_string()]);
     assert_eq!(tick_owners(&sub).len(), 2);
 }
+
+/// A handler that never returns must not be able to hang neotmux, whichever entry point it
+/// was reached through. Before these regions were measured, `dispatch_key` never came back.
+#[test]
+fn a_key_handler_that_loops_for_ever_is_cut_off() {
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.spin')"),
+        (
+            "lua/plugin/spin.lua",
+            "neotmux.keymap.set('C-x', function() while true do end end) return {}",
+        ),
+    ]);
+
+    let started = std::time::Instant::now();
+    sub.dispatch_key("C-x");
+    let took = started.elapsed();
+
+    assert!(
+        took < std::time::Duration::from_secs(2),
+        "a spinning key handler ran for {took:?}"
+    );
+}
+
+#[test]
+fn an_event_handler_that_loops_for_ever_is_cut_off() {
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.spin')"),
+        (
+            "lua/plugin/spin.lua",
+            "neotmux.on_event('pane_output', function() while true do end end) return {}",
+        ),
+    ]);
+
+    let started = std::time::Instant::now();
+    sub.dispatch_event(&neotmux_proto::Event::PaneOutput {
+        pane: PaneId::from(1),
+        bytes: b"hello".to_vec(),
+    });
+    let took = started.elapsed();
+
+    assert!(
+        took < std::time::Duration::from_secs(2),
+        "a spinning event handler ran for {took:?}"
+    );
+}
+
+/// Parking takes away a *tick* subscription and announces "is no longer ticking". What
+/// overran here was not a tick, so the source keeps drawing.
+#[test]
+fn a_key_handler_that_overruns_does_not_cost_the_source_its_tick() {
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.spin')"),
+        (
+            "lua/plugin/spin.lua",
+            "neotmux.on_tick(function(ctx) ctx:text(nil, 0, 0, 'still here') end)
+             neotmux.keymap.set('C-x', function() while true do end end)
+             return {}",
+        ),
+    ]);
+
+    for _ in 0..8 {
+        sub.dispatch_key("C-x");
+    }
+    frame(&sub);
+
+    assert!(
+        texts(&sub).iter().any(|t| t == "still here"),
+        "a key overrun cost the source its tick"
+    );
+}
+
+/// `built_layers`, without its assertion that loading was clean: these tests are about a load
+/// that is not.
+fn built_loading_layers(layers: &[&[(&str, &str)]]) -> (Vec<tempfile::TempDir>, LuaSubsystem) {
+    let mut dirs = Vec::new();
+    for files in layers {
+        let dir = tempfile::tempdir().unwrap();
+        for (rel, body) in *files {
+            let path = dir.path().join(rel);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, body).unwrap();
+        }
+        dirs.push(dir);
+    }
+    let paths = dirs.iter().map(|d| d.path().to_path_buf()).collect();
+    let sub = LuaSubsystem::build(Layers::from_paths(paths), support::panes()).unwrap();
+    (dirs, sub)
+}
+
+/// Two layers, because a region's deadline is fixed when it opens: an `init.lua` cannot lower
+/// its own budget, only that of the layers loaded after it.
+#[test]
+fn an_init_that_loops_for_ever_is_cut_off_and_reported() {
+    let (_dirs, sub) = built_loading_layers(&[
+        &[("init.lua", "neotmux.opt.config_budget_ms = 50")],
+        &[("init.lua", "while true do end")],
+    ]);
+
+    let started = std::time::Instant::now();
+    let failures = sub.run_init();
+    let took = started.elapsed();
+
+    assert!(
+        took < std::time::Duration::from_secs(5),
+        "a spinning init.lua ran for {took:?}"
+    );
+    assert!(
+        failures.iter().any(|f| f.message.contains("50 ms budget")),
+        "the budget did not account for the load: {failures:?}"
+    );
+}
+
+/// The reason a load does not share the tick's deadline: this one is far past 8 ms and is not
+/// a bug.
+#[test]
+fn a_slow_but_finite_init_still_loads() {
+    let (_dirs, sub) = built_loading_layers(&[
+        &[("init.lua", "neotmux.opt.config_budget_ms = 5000")],
+        &[(
+            "init.lua",
+            "local n = 0 for _ = 1, 20000000 do n = n + 1 end",
+        )],
+    ]);
+
+    assert!(
+        sub.run_init().is_empty(),
+        "a load well inside its budget was reported as a failure"
+    );
+}
+
+/// Guard against the new `__newindex` arm swallowing typos.
+#[test]
+fn an_unknown_opt_key_is_still_refused() {
+    let (_dirs, sub) = built_loading_layers(&[&[("init.lua", "neotmux.opt.config_budget = 50")]]);
+
+    let failures = sub.run_init();
+
+    assert!(
+        failures
+            .iter()
+            .any(|f| f.message.contains("unknown neotmux.opt key")),
+        "a misspelled option was accepted: {failures:?}"
+    );
+}

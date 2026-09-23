@@ -119,7 +119,9 @@ impl Sources {
 /// of the Lua stack is the host binding currently running, so the search starts at level 1.
 /// C frames are skipped: `pcall(neotmux.quit)`, `xpcall`, `coroutine.wrap` and a callback
 /// invoked by `table.sort` or `string.gsub` all put one between the binding and the chunk,
-/// and the calling code was plainly still written somewhere. Nothing else is skipped, so the
+/// and the calling code was plainly still written somewhere. The budget's seal
+/// ([`crate::budget::SEAL_CHUNK`]) is skipped with them: it is a Lua frame rather than a C
+/// one, but it stands where `pcall`'s frame stood and is host code either way. Nothing else is skipped, so the
 /// library rule (§4.2) is unchanged — a library frame is a chunk and the walk stops there —
 /// and a chunk with no file behind it stays `ANONYMOUS` instead of blaming its caller.
 pub fn caller(lua: &Lua, sources: &Sources) -> SourceId {
@@ -130,7 +132,10 @@ pub fn caller(lua: &Lua, sources: &Sources) -> SourceId {
         }) else {
             return ANONYMOUS;
         };
-        if source.as_deref() == Some("=[C]") {
+        if matches!(
+            source.as_deref(),
+            Some("=[C]") | Some(crate::budget::SEAL_CHUNK)
+        ) {
             level += 1;
             continue;
         }

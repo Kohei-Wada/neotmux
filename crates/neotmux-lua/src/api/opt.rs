@@ -14,6 +14,11 @@ pub const MAX_PANE_GUTTER: u16 = 4;
 #[derive(Debug, Clone)]
 pub struct Opts {
     pub tick_budget_ms: u64,
+    /// What one layer's `init.lua` gets. Far larger than a tick's: a load legitimately does
+    /// more work than a frame, and cutting it off at the tick budget would make plugins
+    /// unloadable. It is a deadline, not a target — anything near it is a bug in the plugin,
+    /// and neotmux shows nothing until the load returns.
+    pub config_budget_ms: u64,
     pub tick_overrun_limit: u32,
     /// Cells left between panes. The host reserves them; what goes in them is a plugin's
     /// business and the host never learns.
@@ -24,6 +29,7 @@ impl Default for Opts {
     fn default() -> Self {
         Self {
             tick_budget_ms: 8,
+            config_budget_ms: 5_000,
             tick_overrun_limit: 5,
             pane_gutter: 0,
         }
@@ -41,6 +47,10 @@ pub fn install(lua: &Lua, opts: Rc<RefCell<Opts>>) -> mlua::Result<Table> {
                 "tick_budget_ms" => {
                     let value = lua.unpack::<u64>(value)?;
                     opts.borrow_mut().tick_budget_ms = value;
+                }
+                "config_budget_ms" => {
+                    let value = lua.unpack::<u64>(value)?;
+                    opts.borrow_mut().config_budget_ms = value;
                 }
                 "tick_overrun_limit" => {
                     let value = lua.unpack::<u32>(value)?;

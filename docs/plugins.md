@@ -635,8 +635,9 @@ neotmux.notify(level, text)  -- 'info' | 'warn' | 'error'; shown on screen and l
 neotmux.quit()
 neotmux.detach()          -- leave the session running and let go of this terminal
 neotmux.session_name()    -- the name this client attached under; 'default' where it had none
-neotmux.opt.tick_budget_ms = 8     -- per source per frame; 0 turns the budget off
+neotmux.opt.tick_budget_ms = 8     -- per source per frame; 0 turns the budget off entirely
 neotmux.opt.tick_overrun_limit = 5 -- consecutive overruns before the tick is dropped; >= 1
+neotmux.opt.config_budget_ms = 5000 -- what one layer's init.lua gets, for the layers after it
 neotmux.opt.pane_gutter = 0        -- cells left between panes, for whoever draws there; <= 4
 neotmux.resubscribe(name)          -- give a dropped source its tick back; returns handles
 neotmux.width(text)                -- how many columns `text` takes on a pane's grid
@@ -776,9 +777,13 @@ function and call the library from inside it.
 Your tick gets **8 ms per frame**, and it is 8 ms for the *file*, not for each callback: two
 `on_tick` callbacks written in the same file share one slice.
 
-What an overrun looks like from inside your plugin: nothing you can catch usefully. Your code
-stops between two instructions with an error you did not raise, wherever it happened to be.
-A coroutine does not help — the measurement follows into `coroutine.wrap`. In the log:
+What an overrun looks like from inside your plugin: nothing you can catch. Your code stops
+between two instructions with an error you did not raise, wherever it happened to be. A
+coroutine does not help — the measurement follows into `coroutine.wrap` — and neither does
+`pcall`: once the deadline has passed, `pcall`, `xpcall` and `coroutine.resume` re-raise the
+budget's error instead of reporting it, so a loop wrapped in one still stops. An ordinary
+failure in your own `pcall` is reported to you exactly as it always was; only the budget's own
+error is unswallowable. In the log:
 
 ```
 2026-09-20 10:11:12Z [ERROR] plugin/clock: tick exceeded its 8 ms budget
@@ -796,6 +801,19 @@ After **5 consecutive** overruns your tick subscription is removed and a notific
 you. Now nothing refreshes your drawing, so it is cleared rather than frozen. One tick that
 finishes inside the budget wipes the count, so this only happens to a plugin that is over
 every single frame.
+
+### The other places plugin code runs
+
+Your key handlers and your event handlers are measured against the same 8 ms. An overrun there
+is cut off and logged and that is all — it does not count towards the five, because what the
+count buys back is a *tick* subscription and a key handler is not one.
+
+Your `init.lua` is measured too, against `config_budget_ms` rather than the tick budget: a
+load legitimately does far more work than a frame, and 8 ms would make plugins unloadable. Pass
+it and the load fails the way any other load failure does, naming the file — neotmux comes up
+without you rather than not coming up at all. The deadline is fixed when your file starts, so
+setting `config_budget_ms` in one layer's `init.lua` changes the budget of the layers loaded
+after it, never its own.
 
 ### Getting back
 
@@ -826,14 +844,15 @@ both. Remove the handles first.
 neotmux.opt.tick_budget_ms = 0
 ```
 
-Nothing is measured and nothing is counted — no hook is armed at all. This is what you want
-while stepping through a plugin with a debugger, and it means a `while true do end` freezes
+Nothing is measured and nothing is counted — no hook is armed at all, in a tick, in a key or
+event handler, or during a load, whatever `config_budget_ms` says. This is what you want while
+stepping through a plugin with a debugger, and it means a `while true do end` anywhere freezes
 neotmux with no way out but killing it.
 
 ### What the budget cannot cut off
 
 The hook that measures you fires between Lua instructions, so it cannot interrupt anything that
-is not Lua instructions. It still checks the clock when your tick returns, so these are still
+is not Lua instructions. `pcall` is no longer on this list — see above. It still checks the clock when your tick returns, so these are still
 your overruns: you lose the frame and you are named in the log. They count towards the five
 only past **twice** the budget, because that measurement is wall clock over the whole frame —
 it includes the host's own work and a garbage collection step some other plugin triggered — and
@@ -846,9 +865,6 @@ a plugin that is a millisecond over on a loaded machine has not done anything wr
   budget: 189.4 ms, not cut off — no sample landed past the deadline`
 - **`__gc` finalizers.** Lua switches the hook off while a finalizer runs, so the same applies.
   Measured: 162 ms in one finalizer
-- **`pcall`.** The budget error is an ordinary Lua error, so `pcall` catches it. It buys you
-  nothing: you still lose the frame and the overrun is still counted against your limit. An
-  unbounded `while true do pcall(f) end` does hang neotmux
 - **a host binding that blocks.** That would be our bug, not yours
 
 None of this is a sandbox. Plugins are trusted (below); the budget is there so an *accident*
