@@ -559,18 +559,21 @@ impl Session {
         true
     }
 
-    /// The session's picture with a client's overlay and notices on it. The overlay and
-    /// notices are the client's, passed in because they are this client's and the last
-    /// ones sent are not necessarily this client's; the panes and the rects are the
-    /// session's, as everything else about the picture is.
-    pub fn frame_with<'a>(&'a mut self, overlay: &'a [DrawCmd], notices: Vec<Notice>) -> Frame<'a> {
-        // The shown window's panes only: a hidden pane's terminal goes on taking its child's
-        // output, but copying its grid into a frame nobody draws it in would bill every
-        // window onto every frame.
+    /// The shared part of any picture: the session's dirty and the panes' grids are
+    /// frozen before the render, because a render is what clears the dirty, and a hidden
+    /// pane's terminal goes on taking its child's output, but copying its grid into a
+    /// frame nobody draws it in would bill every window onto every frame.
+    fn snapshot(&mut self) {
         let shown: Vec<PaneId> = self.windows.current().rects.keys().copied().collect();
         self.shells.snapshot(shown.into_iter());
         self.dirty = false;
+    }
 
+    /// The picture itself, and nothing else: the panes and the rects are the session's,
+    /// as everything else about it is; the overlay and the notices are the caller's,
+    /// passed in because they are this client's and the last ones sent are not necessarily
+    /// this client's.
+    fn picture<'a>(&'a self, overlay: &'a [DrawCmd], notices: Vec<Notice>) -> Frame<'a> {
         let layout = self.windows.current();
         Frame {
             size: self.surface.size,
@@ -591,37 +594,12 @@ impl Session {
         }
     }
 
-    /// The single-client picture: the overlay is the session's own record, the one the
-    /// passing tock just committed, rather than a buffer the caller owns. `advance`
-    /// reads it from the session, so the frame borrows `self` — not the tock — which is
-    /// why `advance` can return it and the server's `frame_with` cannot.
-    fn frame(&mut self, notices: Vec<Notice>) -> Frame<'_> {
-        // The shown window's panes only: a hidden pane's terminal goes on taking its
-        // child's output, but copying its grid out for a frame nobody draws it in would put
-        // every window on every frame's bill.
-        let shown: Vec<PaneId> = self.windows.current().rects.keys().copied().collect();
-        self.shells.snapshot(shown.into_iter());
-        self.dirty = false;
-
-        let shells = &self.shells;
-        let layout = self.windows.current();
-        Frame {
-            size: self.surface.size,
-            panes: layout
-                .showable()
-                .filter_map(|(pane, rect)| {
-                    Some(PaneFrame {
-                        pane,
-                        rect,
-                        grid: shells.grid(pane)?,
-                    })
-                })
-                .collect(),
-            rects: &layout.rects,
-            cursor: layout.focus(),
-            overlay: &self.last_overlay,
-            notices,
-        }
+    /// The session's picture with a client's overlay and notices on it: the caller brings
+    /// the overlay and the notices, because they are that client's, and the caller keeps
+    /// them after the frame, which is the whole of why the frame may borrow them.
+    pub fn frame_with<'a>(&'a mut self, overlay: &'a [DrawCmd], notices: Vec<Notice>) -> Frame<'a> {
+        self.snapshot();
+        self.picture(overlay, notices)
     }
 
     /// What applying a tock did to the session: the shared part, ops and geometry and
@@ -721,7 +699,8 @@ impl Session {
             // The original forced this last frame (`if self.dirty || eof`); folding the
             // `Eof` into `apply`'s `end` must keep the frame too, not only the end.
             Some(End::Eof) => {
-                let frame = Some(self.frame(tock.notices.clone()));
+                self.snapshot();
+                let frame = Some(self.picture(&self.last_overlay, tock.notices.clone()));
                 Ok(Pass {
                     steps: application.steps,
                     frame,
@@ -735,7 +714,8 @@ impl Session {
             }),
             None => {
                 let frame = if self.dirty {
-                    Some(self.frame(tock.notices.clone()))
+                    self.snapshot();
+                    Some(self.picture(&self.last_overlay, tock.notices.clone()))
                 } else {
                     None
                 };

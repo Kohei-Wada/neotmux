@@ -46,8 +46,8 @@ const STARTUP: Duration = Duration::from_secs(10);
 /// as long as it takes, and the one-client loop had the same property, its `recv`
 /// blocking until the client sent or stopped — so a client that stops sending is a
 /// client whose connection stops, and the slice is only the length of one `poll` the
-/// way it is, because the wait has to be askable of the door and the panes on the way
-/// rather than a `recv` a client holds forever.
+/// way it is, because the wait has to be askable of the clients and the panes on the
+/// way rather than a `recv` a client holds forever.
 const TOCK: Duration = Duration::from_secs(60);
 
 /// One client the frame reaches, and everything the server has to remember about it.
@@ -360,13 +360,10 @@ fn frame(
     let mut slots: Vec<Slot> = (0..n).map(Slot::Client).collect();
     slots.push(Slot::Panes);
 
-    // The tick, once, shown to every client the frame is for. A client that cannot read
-    // it is a client that has gone, the rule the server has kept since M3, per
-    // connection.
-    // The tick, once, for every client the frame is for. `tick` is owned (it does not
-    // borrow the session), so the `&mut` the tick holds is scoped to this block and the
-    // `session` parameter stays free for the door arm below, which adopts a client into
-    // the very same `Option`.
+    // The tick, once, shown to every client the frame is for, and a client that cannot
+    // read it is a client that has gone, the rule the server has kept since M3, per
+    // connection. `tick` is owned (it does not borrow the session), so the `&mut` it
+    // holds is scoped to this block and the session stays free for the waits below.
     let tick = {
         let Some(session) = session.as_mut() else {
             clients.retain(|client| !client.gone);
@@ -530,8 +527,6 @@ fn frame(
     // The picture, per client, because the picture is per client. The session's dirt is
     // the same for all of them and is read before the first render, because a render is
     // what clears it; the overlay and the notices are each one's own.
-    let needs_session = session.as_mut().is_some();
-    let _ = needs_session;
     if let Some(session) = session.as_mut() {
         let session_dirty = session.is_dirty();
         let force = matches!(ended, Some(End::Eof));
