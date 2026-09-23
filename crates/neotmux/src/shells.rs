@@ -168,11 +168,18 @@ impl Shells {
     /// Copies out the grid of each named pane. The panes being drawn, not every pane: a
     /// hidden window's terminal goes on taking its child's output either way, and
     /// snapshotting it would put every window on every frame's bill.
-    pub fn snapshot(&mut self, panes: impl Iterator<Item = PaneId>) {
+    pub fn snapshot(
+        &mut self,
+        panes: impl Iterator<Item = PaneId>,
+        views: &std::collections::BTreeMap<PaneId, usize>,
+    ) {
         let terminals = &self.terminals;
         for pane in panes {
             if let Some(shell) = self.shells.get_mut(&pane) {
-                terminals.snapshot_into(pane, &mut shell.grid);
+                match views.get(&pane) {
+                    Some(back) => terminals.snapshot_into_at(pane, &mut shell.grid, *back),
+                    None => terminals.snapshot_into(pane, &mut shell.grid),
+                }
             }
         }
     }
@@ -476,7 +483,7 @@ mod tests {
         };
         let pump = |shells: &mut Shells| {
             let drained = shells.drain(32, |_, _| {}).expect("drain");
-            shells.snapshot(std::iter::once(pane(1)));
+            shells.snapshot(std::iter::once(pane(1)), &Default::default());
             drained.output
         };
 

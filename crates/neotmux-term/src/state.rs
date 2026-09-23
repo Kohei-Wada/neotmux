@@ -198,6 +198,16 @@ impl TermState {
 
     /// The grid the renderer draws: the frozen one while the pane is held, so the display
     /// stops moving while the PTY goes on being read.
+    /// The same, with the screen wound `back` lines into the history first and put back
+    /// afterwards. What a copy mode is: the pane's own cells, at another place in its own
+    /// scrollback, with every colour and attribute they were written with.
+    pub fn snapshot_into_at(&mut self, out: &mut GridSnapshot, back: usize) {
+        let resting = self.reading().scrollback();
+        self.reading_mut().set_scrollback(back);
+        self.snapshot_into(out);
+        self.reading_mut().set_scrollback(resting);
+    }
+
     pub fn snapshot_into(&self, out: &mut GridSnapshot) {
         let screen = self.reading();
         let (rows, cols) = screen.size();

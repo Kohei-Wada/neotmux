@@ -902,9 +902,9 @@ fn frame(
         // The whole of what used to be four messages: the session says what happened, the Lua
         // layer answers, the session applies that, and the picture comes of it.
         let tick = live.tick()?;
-        let (tock, server) = plugins.respond(id, tick);
-        asked.extend(server.into_iter().map(|(tag, op)| (id, tag, op)));
-        let Pass { steps, frame, end } = live.advance(&tock)?;
+        let answer = plugins.respond(id, tick);
+        asked.extend(answer.server.into_iter().map(|(tag, op)| (id, tag, op)));
+        let Pass { steps, frame, end } = live.advance(&answer.tock, &answer.views)?;
         let picture = (frame.is_some() || end.is_some()).then(|| {
             wire::encode_to_client(&ToClient::Done(&Done {
                 // Nothing on the client has to be caught up any more: the steps go to a Lua

@@ -106,6 +106,13 @@ impl PaneTerminals {
         }
     }
 
+    /// The same, wound `back` lines into the pane's own history for this one snapshot.
+    pub fn snapshot_into_at(&self, pane: PaneId, out: &mut GridSnapshot, back: usize) {
+        if let Some(terminal) = self.panes.borrow_mut().get_mut(&pane) {
+            terminal.state.snapshot_into_at(out, back);
+        }
+    }
+
     /// A stamp that changes whenever the pane's terminal has been fed since it was last read.
     /// It says the screen *may* have changed, not that it did — a chunk that only moved the
     /// cursor moves it too — and that is the whole contract: it is the cheap question a

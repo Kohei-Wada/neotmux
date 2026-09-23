@@ -314,6 +314,22 @@ impl Neotmux {
     /// nothing else — the glyph it leaves alone is what `cell` already answers — so this is
     /// the only way a PTY test can see one at all. `None` for a cell left at the terminal's
     /// own background or set from the palette rather than by name.
+    /// A cell's foreground, as an indexed colour. What a test asks when the question is
+    /// whether the pane's own colours survived something.
+    pub fn cell_fg_idx(&self, row: u16, col: u16) -> Option<u8> {
+        match self
+            .parser
+            .lock()
+            .unwrap()
+            .screen()
+            .cell(row, col)?
+            .fgcolor()
+        {
+            vt100::Color::Idx(i) => Some(i),
+            _ => None,
+        }
+    }
+
     pub fn cell_bg(&self, row: u16, col: u16) -> Option<(u8, u8, u8)> {
         match self
             .parser

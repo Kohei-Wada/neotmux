@@ -12,9 +12,11 @@
 --
 --   C-b [       enter, on the pane you are in
 --   h j k l     the cursor, one cell
+--   w b e       a word forward, a word back, the end of one
+--   0 ^ $       the first column, the first word, the last
 --   C-u C-d     half a screen
 --   g G         the oldest line the snapshot holds, the newest
---   Space       start a selection here, or drop the one there is
+--   v           start a selection here, or drop the one there is
 --   y           yank it
 --   Esc q       leave
 --
@@ -27,6 +29,7 @@
 -- pane; this file is the mode. Changing what a key does touches one table in one of them.
 local snapshot = require("neotmux.snapshot")
 local selection = require("neotmux.selection")
+local words = require("neotmux.words")
 local modes = require("neotmux.mode")
 
 local M = {}
@@ -65,6 +68,10 @@ local state = nil
 local mode_handle = nil
 
 local function leave()
+  if state then
+    -- The pane goes back to showing what it is doing, and to moving while it does it.
+    neotmux.pane.unfreeze(state.pane)
+  end
   if mode_handle then
     mode_handle:lower()
     mode_handle = nil
@@ -130,6 +137,45 @@ M.commands = {
   ["cursor-down"] = function(mode)
     mode.cursor.line = mode.cursor.line + 1
   end,
+  -- The word motions, which are about the line the cursor is on. `w` and `b` step to the
+  -- next line where there is nothing left on this one, the way vim does; `e`, `0`, `^` and
+  -- `$` stay where they are.
+  ["word-forward"] = function(mode)
+    local line = snapshot.line(mode.buffer, mode.cursor.line) or ""
+    local col = words.forward(line, mode.cursor.col)
+    if col then
+      mode.cursor.col = col
+    else
+      mode.cursor.line = mode.cursor.line + 1
+      mode.cursor.col = words.first_word(snapshot.line(mode.buffer, mode.cursor.line) or "")
+    end
+  end,
+  ["word-back"] = function(mode)
+    local line = snapshot.line(mode.buffer, mode.cursor.line) or ""
+    local col = words.back(line, mode.cursor.col)
+    if col then
+      mode.cursor.col = col
+    elseif mode.cursor.line > 0 then
+      mode.cursor.line = mode.cursor.line - 1
+      mode.cursor.col = words.last(snapshot.line(mode.buffer, mode.cursor.line) or "")
+    end
+  end,
+  ["word-end"] = function(mode)
+    local line = snapshot.line(mode.buffer, mode.cursor.line) or ""
+    local col = words.word_end(line, mode.cursor.col)
+    if col then
+      mode.cursor.col = col
+    end
+  end,
+  ["line-start"] = function(mode)
+    mode.cursor.col = 0
+  end,
+  ["line-first-word"] = function(mode)
+    mode.cursor.col = words.first_word(snapshot.line(mode.buffer, mode.cursor.line) or "")
+  end,
+  ["line-end"] = function(mode)
+    mode.cursor.col = words.last(snapshot.line(mode.buffer, mode.cursor.line) or "")
+  end,
   ["halfpage-up"] = function(mode, rect)
     mode.cursor.line = mode.cursor.line - page(rect)
   end,
@@ -185,11 +231,17 @@ M.keys = {
   ["l"] = "cursor-right",
   ["k"] = "cursor-up",
   ["j"] = "cursor-down",
+  ["w"] = "word-forward",
+  ["b"] = "word-back",
+  ["e"] = "word-end",
+  ["0"] = "line-start",
+  ["^"] = "line-first-word",
+  ["$"] = "line-end",
   ["C-u"] = "halfpage-up",
   ["C-d"] = "halfpage-down",
   ["g"] = "history-top",
   ["G"] = "history-bottom",
-  [" "] = "begin-selection",
+  ["v"] = "begin-selection",
   ["y"] = "copy-selection",
   ["Esc"] = "cancel",
   ["q"] = "cancel",
@@ -209,6 +261,10 @@ function M.enter()
   if mode_handle then
     mode_handle:lower()
   end
+  -- Held still for the life of the mode. The buffer above is the text the cursor is dragged
+  -- over; this is the same instant's cells, and the two have to be the same instant or the
+  -- selection is over one thing and the screen shows another.
+  neotmux.pane.freeze(pane)
   state = {
     pane = pane,
     buffer = buffer,
@@ -263,32 +319,19 @@ neotmux.on_tick(function(ctx)
   end
   settle(rect)
 
-  -- What the view costs, and why the mode is built this way.
+  -- The view is the pane's own cells, wound back into its own history: `ctx:view` says which
+  -- rows this frame draws and the host snapshots them, so every colour and attribute the child
+  -- wrote is still there.
   --
-  -- The pane's own grid is what the host renders. There is exactly one case where that grid
-  -- already shows what the mode wants shown — the view sitting on the snapshot's own screen,
-  -- over a pane that has not been fed since the snapshot was taken — and in that case the
-  -- frame is one `ctx:tint` for the cursor and nothing else. Any other case, scrolled or
-  -- overtaken, and every row is wrong: the pane is erased and redrawn out of the snapshot,
-  -- one `ctx:rect` and one `ctx:text` per non-blank row, which on a full-width pane of 23
-  -- rows is 25 commands.
+  -- It used to redraw the rows itself, one `ctx:rect` and one `ctx:text` each, out of the
+  -- lines it had taken — and a line out of the ABI is text, so the view was monochrome. That
+  -- was the cost of the host never scrolling a pane; scrolling one for the length of a frame
+  -- is cheaper than redrawing it and is the only way to keep what it looked like.
   --
-  -- No read is on that bill at all. The lines were taken once, on the way in; the tick slices
-  -- a table. That is the difference between this and a mode that asks the host for its screen
-  -- every frame, and it is the same arrangement that makes the text coherent.
-  local showing = state.top == state.buffer.history
-    and neotmux.pane.revision(state.pane) == state.buffer.revision
-  if not showing then
-    ctx:rect(state.pane, 0, 0, rect.w, rect.h)
-    for at, line in ipairs(snapshot.window(state.buffer, state.top, rect.h)) do
-      if line ~= "" then
-        -- Text, because text is what the ABI hands back: a line out of the snapshot has no
-        -- colours on it, so a redrawn view is monochrome and the tint below is the only
-        -- colour in it.
-        ctx:text(state.pane, 0, at - 1, line)
-      end
-    end
-  end
+  -- The pane is frozen for the life of the mode, so what is drawn cannot move under the
+  -- selection: the buffer the cursor is dragged over and the cells on the screen are the same
+  -- instant.
+  ctx:view(state.pane, math.max(0, state.buffer.history - state.top))
 
   if state.anchor then
     -- The selection is two absolute points; this is where they are projected onto the rows

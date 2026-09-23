@@ -2566,7 +2566,7 @@ fn a_selection_is_visible_over_text_that_is_still_readable() {
     assert_eq!(nt.cell(PANE_TOP, 1), "B", "the pane is not where expected");
 
     nt.send("\x02["); // C-b [
-    nt.send(" "); // start the selection under the cursor
+    nt.send("v"); // start the selection under the cursor
     nt.send("lll");
     nt.settle(Duration::from_millis(400));
 
@@ -2603,7 +2603,7 @@ fn yanking_reports_the_register_it_put_the_text_in() {
     nt.wait_for_screen("ABCDEFGH", PATIENCE);
 
     nt.send("\x02["); // C-b [
-    nt.send(" lll");
+    nt.send("vlll");
     nt.send("y");
     nt.wait_for_screen("yanked 1 line into plugin.copy.register", PATIENCE);
 }
@@ -2858,4 +2858,41 @@ fn a_pane_positioned_with_hvp_draws_where_it_meant_to() {
     nt.wait_for_cell(2, 4, "L", PATIENCE);
     nt.wait_for_cell(2, 39, "R", PATIENCE);
     nt.wait_for_cell(5, 4, "B", PATIENCE);
+}
+
+/// Copy mode keeps the pane's colours. It used to redraw the rows out of the lines it had
+/// taken, and a line out of the ABI is text — so a scrolled view was monochrome. The host
+/// snapshots the pane at the place in its own history the mode is showing, so what appears is
+/// the pane's own cells with everything the child wrote on them.
+#[test]
+fn copy_mode_keeps_the_colours_the_pane_was_written_in() {
+    let (mut nt, _init) = start_shipped("", "/bin/sh");
+    nt.settle(Duration::from_millis(600));
+    // More lines than the screen holds, each in a colour of its own.
+    nt.send(
+        "i=1; while [ $i -le 40 ]; do printf '\\033[3%dmline %s\\033[0m\\n' $((i % 8)) $i; \
+         i=$((i+1)); done\r",
+    );
+    nt.wait_for_screen("line 40", PATIENCE);
+    nt.settle(Duration::from_millis(400));
+
+    let live: Vec<Option<u8>> = (1..8).map(|row| nt.cell_fg_idx(row, 2)).collect();
+    assert!(
+        live.iter().filter(|fg| fg.is_some()).count() >= 6,
+        "the fixture did not colour its lines: {live:?}"
+    );
+
+    nt.send("\x02["); // C-b [
+    nt.settle(Duration::from_millis(300));
+    for _ in 0..12 {
+        nt.send("k");
+    }
+    nt.settle(Duration::from_millis(600));
+
+    let scrolled: Vec<Option<u8>> = (1..8).map(|row| nt.cell_fg_idx(row, 2)).collect();
+    assert!(
+        scrolled.iter().filter(|fg| fg.is_some()).count() >= 6,
+        "the scrolled view came out monochrome: {scrolled:?}"
+    );
+    nt.send("q");
 }

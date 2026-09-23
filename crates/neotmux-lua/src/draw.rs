@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
-use neotmux_proto::{DrawCmd, Epoch};
+use neotmux_proto::{DrawCmd, Epoch, PaneId};
 
 use crate::float::FloatId;
 use crate::source::SourceId;
@@ -24,6 +24,11 @@ struct Inner {
     committed: BTreeMap<SourceId, Committed>,
     scratch_f: BTreeMap<SourceId, FloatEntries>,
     committed_f: BTreeMap<SourceId, (Epoch, FloatEntries)>,
+    /// Which panes a source is showing at a place in their own history, and how far back.
+    /// Committed and discarded with that source's drawing, because it is part of the same
+    /// picture: a frame thrown away must not leave a pane scrolled.
+    scratch_v: BTreeMap<SourceId, BTreeMap<PaneId, usize>>,
+    committed_v: BTreeMap<SourceId, (Epoch, BTreeMap<PaneId, usize>)>,
 }
 
 #[derive(Default)]
@@ -59,6 +64,17 @@ impl Buffers {
         inner.scratch_f.entry(owner).or_default().push((id, cmds));
     }
 
+    /// This source asks for `pane` to be drawn `back` lines into its own history for this
+    /// frame. The last word wins, the way a draw command's does.
+    pub fn record_view(&self, owner: SourceId, pane: PaneId, back: usize) {
+        self.inner
+            .borrow_mut()
+            .scratch_v
+            .entry(owner)
+            .or_default()
+            .insert(pane, back);
+    }
+
     pub fn commit(&self, owner: SourceId) {
         let mut inner = self.inner.borrow_mut();
         let epoch = inner.epoch.clone();
@@ -71,13 +87,17 @@ impl Buffers {
         inner.committed.insert(owner, entry);
 
         let floats = inner.scratch_f.remove(&owner).unwrap_or_default();
-        inner.committed_f.insert(owner, (epoch, floats));
+        inner.committed_f.insert(owner, (epoch.clone(), floats));
+
+        let views = inner.scratch_v.remove(&owner).unwrap_or_default();
+        inner.committed_v.insert(owner, (epoch, views));
     }
 
     pub fn discard(&self, owner: SourceId) {
         let mut inner = self.inner.borrow_mut();
         inner.scratch.remove(&owner);
         inner.scratch_f.remove(&owner);
+        inner.scratch_v.remove(&owner);
     }
 
     pub fn forget(&self, owner: SourceId) {
@@ -86,6 +106,22 @@ impl Buffers {
         inner.committed.remove(&owner);
         inner.scratch_f.remove(&owner);
         inner.committed_f.remove(&owner);
+        inner.scratch_v.remove(&owner);
+        inner.committed_v.remove(&owner);
+    }
+
+    /// Every pane some source is showing at a place in its history, under the frame this
+    /// `begin` opened. Two sources asking for the same pane is the later one winning, which
+    /// is the rule the overlay already follows for the same cells.
+    pub fn applicable_views(&self) -> BTreeMap<PaneId, usize> {
+        let inner = self.inner.borrow();
+        let mut out = BTreeMap::new();
+        for (epoch, views) in inner.committed_v.values() {
+            if *epoch == inner.epoch {
+                out.extend(views.iter().map(|(pane, back)| (*pane, *back)));
+            }
+        }
+        out
     }
 
     /// Everything committed under the frame this `begin` opened. A buffer left over from an

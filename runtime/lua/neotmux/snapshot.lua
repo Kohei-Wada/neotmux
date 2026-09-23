@@ -7,10 +7,10 @@
 -- is yanked, and the whole point of a copy mode is that what you took is what you saw. tmux
 -- clones the grid on the way in for exactly this reason and reads only the clone.
 --
--- The host has no way to freeze a pane, so a snapshot is the nearest honest thing: what the
--- pane does after it is taken is not in here, and a mode reading it stays coherent by not
--- changing. When a freeze does arrive the caller changes nothing — it is already reading a
--- fixed buffer.
+-- `pane.freeze` holds the pane's *cells* still; this holds its *text* still, and a mode wants
+-- both — the lines a cursor is dragged over and the screen it is dragged over have to be the
+-- same instant. `plugin.copy` takes one of these and freezes the pane, and the two together
+-- are what make a selection mean anything.
 --
 -- It registers nothing and draws nothing. Line 0 is the oldest line the pane held at the
 -- moment it was taken, which is the numbering `pane.scrollback` already uses, and the visible

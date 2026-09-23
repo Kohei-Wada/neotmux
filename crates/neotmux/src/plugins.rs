@@ -9,10 +9,12 @@
 //! that names a terminal. The session is on the other side of it, and it is the next function
 //! call rather than a socket.
 
+use std::collections::BTreeMap;
+
 use neotmux_lua::ops::Op;
 use neotmux_lua::{KeyOutcome, LuaSubsystem};
 use neotmux_proto::msg::{SessionOp, Step, Tick, Tock};
-use neotmux_proto::{Key, Level, SessionId};
+use neotmux_proto::{Key, Level, PaneId, SessionId};
 use std::time::Instant;
 
 use crate::input::key_spec;
@@ -27,6 +29,14 @@ pub enum ServerOp {
     Switch { name: String },
     Kill { name: String },
     Rename { from: String, to: String },
+}
+
+/// One frame's worth of answer from the plugins: what the session has to apply, what the
+/// *server* has to apply, and which panes this frame shows at a place in their own history.
+pub struct Answer {
+    pub tock: Tock,
+    pub server: Vec<(String, ServerOp)>,
+    pub views: BTreeMap<PaneId, usize>,
 }
 
 /// The Lua subsystem and the notification surface that goes with it, driven a frame at a
@@ -74,7 +84,7 @@ impl Plugins {
 
     /// One frame's worth of plugin work: catch the Lua layer up with what the session did,
     /// tick it, and answer with what it asked for and what it drew.
-    pub fn respond(&mut self, session: SessionId, tick: Tick) -> (Tock, Vec<(String, ServerOp)>) {
+    pub fn respond(&mut self, session: SessionId, tick: Tick) -> Answer {
         self.catch_up(session, tick.steps);
         if let Some(info) = tick.pane_info {
             self.lua.publish_pane_info(session, info);
@@ -92,7 +102,11 @@ impl Plugins {
             gutter: self.lua.opt().pane_gutter,
             wants_pane_output: self.lua.has_subscriber("pane_output"),
         };
-        (tock, server)
+        Answer {
+            tock,
+            server,
+            views: self.lua.frame_views(),
+        }
     }
 
     /// The ops the session has to apply, with the name of whoever raised each. `log` and

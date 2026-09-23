@@ -131,6 +131,7 @@ neotmux.on_tick(function(ctx)
   local r = ctx:pane_rect(pane_id)             -- { x = , y = , w = , h = } or nil
   local band = ctx:reserved()                  -- your own band, or nil (below)
   local float = ctx:float_rect(win)           -- your own float, or nil (below)
+  ctx:view(pane, 12)                          -- draw that pane 12 lines back in its own history
 end)
 ```
 
@@ -1235,6 +1236,31 @@ columns would push every name on its row across by one.
 The **width** is not in that table. It is a `local` at the top of the file, because the
 reservation is made once while the file is being required and the host is never told a band
 changed width. Edit it there, or leave the sidebar off.
+
+### Showing a pane's own history
+
+```lua
+ctx:view(pane, back)
+```
+
+The pane is drawn `back` lines into its own scrollback for this frame, and for this frame only:
+nothing about the session moves, the child is not told, and the next frame that does not ask
+shows the pane as it is. What you get is the pane's **own cells** — every colour, every
+attribute, exactly what the child wrote — which is the thing you cannot have by reading
+`pane.content` and drawing it back, because a line out of this ABI is text.
+
+That is what copy mode is built on. Pair it with `pane.freeze`, or the view slides under you
+the moment the child prints:
+
+```lua
+neotmux.pane.freeze(pane)          -- on the way in
+ctx:view(pane, back)               -- every tick, from your own idea of where you are
+neotmux.pane.unfreeze(pane)        -- on the way out
+```
+
+Two sources asking for the same pane is the later one winning, the rule the overlay already
+follows for the same cells. A view is committed and discarded with your drawing, so a tick that
+overran leaves no pane scrolled.
 
 ### The prompt convention
 

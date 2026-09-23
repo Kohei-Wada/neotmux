@@ -601,9 +601,12 @@ impl Session {
     /// frozen before the render, because a render is what clears the dirty, and a hidden
     /// pane's terminal goes on taking its child's output, but copying its grid into a
     /// frame nobody draws it in would bill every window onto every frame.
-    fn snapshot(&mut self) {
+    /// The grids this frame draws from. `views` names the panes a plugin is showing at a
+    /// place in their own history — a copy mode is one — and how far back; the rest are shown
+    /// as they are.
+    fn snapshot(&mut self, views: &BTreeMap<PaneId, usize>) {
         let shown: Vec<PaneId> = self.windows.current().rects.keys().copied().collect();
-        self.shells.snapshot(shown.into_iter());
+        self.shells.snapshot(shown.into_iter(), views);
         self.dirty = false;
     }
 
@@ -635,8 +638,13 @@ impl Session {
     /// The session's picture with a client's overlay and notices on it: the caller brings
     /// the overlay and the notices, because they are that client's, and the caller keeps
     /// them after the frame, which is the whole of why the frame may borrow them.
-    pub fn frame_with<'a>(&'a mut self, overlay: &'a [DrawCmd], notices: Vec<Notice>) -> Frame<'a> {
-        self.snapshot();
+    pub fn frame_with<'a>(
+        &'a mut self,
+        overlay: &'a [DrawCmd],
+        notices: Vec<Notice>,
+        views: &BTreeMap<PaneId, usize>,
+    ) -> Frame<'a> {
+        self.snapshot(views);
         self.picture(overlay, notices)
     }
 
@@ -696,7 +704,11 @@ impl Session {
 
     /// The second half: what the tick asked for, applied, and the frame that came of it.
     /// The frame is `None` when nothing changed and the last one still stands.
-    pub fn advance(&mut self, tock: &Tock) -> anyhow::Result<Pass<'_>> {
+    pub fn advance(
+        &mut self,
+        tock: &Tock,
+        views: &BTreeMap<PaneId, usize>,
+    ) -> anyhow::Result<Pass<'_>> {
         self.wants_output(tock.wants_pane_output);
         let application = self.apply(tock)?;
         // The picture this tock asked for is committed before the end is looked at, on
@@ -716,7 +728,7 @@ impl Session {
             // The original forced this last frame (`if self.dirty || eof`); folding the
             // `Eof` into `apply`'s `end` must keep the frame too, not only the end.
             Some(End::Eof) => {
-                self.snapshot();
+                self.snapshot(views);
                 let frame = Some(self.picture(&self.last_overlay, tock.notices.clone()));
                 Ok(Pass {
                     steps: application.steps,
@@ -731,7 +743,7 @@ impl Session {
             }),
             None => {
                 let frame = if self.dirty {
-                    self.snapshot();
+                    self.snapshot(views);
                     Some(self.picture(&self.last_overlay, tock.notices.clone()))
                 } else {
                     None

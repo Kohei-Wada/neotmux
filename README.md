@@ -54,10 +54,11 @@ Two terminals can be in one session at once: a key typed on either reaches the s
 both see the same plugin state, because there is one Lua layer for the server and the modes,
 floats and bands it holds belong to the session rather than to whoever is looking at it.
 
-Copy mode is in, as a plugin: `C-b [` reads back over a pane's scrollback, selects a
-region and yanks it. What is still out is the pane's *own* view moving — the plugin
-draws the lines it wants seen over a grid the host never scrolls — and the system
-clipboard, which this ABI cannot reach, so a yank lands in a Lua register.
+Copy mode is in, as a plugin: `C-b [` reads back over a pane's scrollback with the vim
+motions — `h/j/k/l`, `w/b/e`, `0/^/$`, `C-u/C-d`, `g/G` — `v` starts a selection and `y` yanks
+it. The view is the pane's own cells shown at a place in its own history (`ctx:view`), so it
+keeps every colour the child wrote. What is still out is the system clipboard, which this ABI
+cannot reach, so a yank lands in a Lua register and is offered to the terminal over OSC 52.
 
 Also out of v0.1: mouse, a plugin manager, and tmux compatibility
 in any form.

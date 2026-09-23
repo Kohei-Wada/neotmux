@@ -122,6 +122,14 @@ fn texts(cmds: &[DrawCmd]) -> Vec<String> {
         .collect()
 }
 
+/// How far back into its own history the frame is showing the pane. The mode says it with
+/// `ctx:view` and the host snapshots the pane there, so this — and not a list of drawn rows —
+/// is what "the view has scrolled" now looks like from outside.
+fn view(sub: &LuaSubsystem) -> usize {
+    sub.dispatch_tick(support::one());
+    sub.frame_views().get(&pane()).copied().unwrap_or(0)
+}
+
 fn tints(cmds: &[DrawCmd]) -> Vec<(Rect, Option<Color>)> {
     cmds.iter()
         .filter_map(|cmd| match cmd {
@@ -179,15 +187,9 @@ fn scrolling_above_the_screen_draws_lines_the_pane_no_longer_shows() {
 
     enter(&sub);
     keys(&sub, &["k"]);
-    let cmds = frame(&sub);
-    assert!(
-        texts(&cmds).contains(&"four".to_string()),
-        "the history was never read: {cmds:?}"
-    );
-    assert!(
-        texts(&cmds).contains(&"nine".to_string()),
-        "the view lost the rows it kept: {cmds:?}"
-    );
+    // One line back into the history is where `four` is: the host snapshots the pane there,
+    // with the cells the child wrote rather than a redraw of its text.
+    assert_eq!(view(&sub), 1);
 }
 
 /// `g` walks to the oldest line the pane still holds, which is the top of the history.
@@ -197,13 +199,15 @@ fn g_lands_on_the_oldest_line_and_capital_g_on_the_newest() {
     scrolled(&sub);
     enter(&sub);
     keys(&sub, &["g"]);
-    assert!(texts(&frame(&sub)).contains(&"one".to_string()));
+    // The oldest line the snapshot holds, which is as far back as the view goes.
+    assert_eq!(view(&sub), 4);
 
     keys(&sub, &["G"]);
     let cmds = frame(&sub);
-    assert!(
-        texts(&cmds).is_empty(),
-        "the bottom of the buffer is the screen and needs no redraw: {cmds:?}"
+    assert_eq!(
+        sub.frame_views().get(&pane()).copied().unwrap_or(0),
+        0,
+        "the newest line is the pane's own screen"
     );
     assert_eq!(tints(&cmds)[0].0, Rect::new(0, 5, 1, 1));
 }
@@ -216,7 +220,7 @@ fn the_selection_is_tinted_over_the_pane_and_never_painted_over_it() {
     let (_dir, sub) = built("");
     scrolled(&sub);
     enter(&sub);
-    keys(&sub, &[" ", "j", "l", "l"]);
+    keys(&sub, &["v", "j", "l", "l"]);
     let cmds = frame(&sub);
 
     assert!(
@@ -254,8 +258,8 @@ fn a_selection_reads_the_same_way_round_whichever_way_it_was_dragged() {
         out
     };
     // (1, 0) to (1, 2), anchored at each end in turn.
-    let down = spans(&["l", " ", "j", "j"]);
-    let up = spans(&["j", "j", "l", " ", "k", "k"]);
+    let down = spans(&["l", "v", "j", "j"]);
+    let up = spans(&["j", "j", "l", "v", "k", "k"]);
     assert_eq!(
         down,
         vec![
@@ -281,7 +285,7 @@ fn yanking_puts_the_selected_text_in_the_register() {
     scrolled(&sub);
     enter(&sub);
     // To the top of the history, select `one` and the two lines under it.
-    keys(&sub, &["g", " ", "j", "j", "l", "l", "l", "l", "y"]);
+    keys(&sub, &["g", "v", "j", "j", "l", "l", "l", "l", "y"]);
     sub.dispatch_tick(support::one());
     keys(&sub, &["C-b", "R"]);
     let said = logged(&sub);
@@ -304,7 +308,7 @@ fn a_yank_reads_across_the_boundary_between_the_history_and_the_screen() {
     let (_dir, sub) = built(REPORT);
     scrolled(&sub);
     enter(&sub);
-    keys(&sub, &["g", "j", "j", "j", " ", "j", "l", "l", "l", "y"]);
+    keys(&sub, &["g", "j", "j", "j", "v", "j", "l", "l", "l", "y"]);
     sub.dispatch_tick(support::one());
     keys(&sub, &["C-b", "R"]);
     let said = logged(&sub);
@@ -350,24 +354,27 @@ fn q_leaves_the_mode() {
     );
 }
 
-/// What a scrolled frame costs, stated rather than guessed: one erase and one text command
-/// per non-blank row of the pane, and nothing else while there is no selection. A six-row
-/// pane showing six lines is seven commands.
+/// What a scrolled frame costs, stated rather than guessed: nothing but the cursor.
+///
+/// It used to be one erase and one text command per row, because the mode redrew the view out
+/// of the lines it had taken — and a line out of the ABI is text, so the view was monochrome.
+/// `ctx:view` moves that job to the host, which has the cells: no row is drawn at all, and
+/// the ones that appear are the pane's own with every colour on them.
 #[test]
-fn a_scrolled_frame_costs_one_erase_and_one_text_per_row() {
+fn a_scrolled_frame_draws_nothing_but_the_cursor() {
     let (_dir, sub) = built("");
     scrolled(&sub);
     enter(&sub);
     keys(&sub, &["g"]);
     let cmds = frame(&sub);
-    assert_eq!(
-        cmds.iter()
-            .filter(|cmd| matches!(cmd, DrawCmd::Rect { .. }))
-            .count(),
-        1,
-        "{cmds:?}"
+    assert!(
+        texts(&cmds).is_empty(),
+        "the mode redrew the rows: {cmds:?}"
     );
-    assert_eq!(texts(&cmds).len(), usize::from(SIZE.rows), "{cmds:?}");
+    assert!(
+        !cmds.iter().any(|cmd| matches!(cmd, DrawCmd::Rect { .. })),
+        "the mode erased the pane: {cmds:?}"
+    );
     assert_eq!(tints(&cmds).len(), 1, "{cmds:?}");
 }
 
@@ -381,18 +388,7 @@ fn what_the_pane_prints_after_the_mode_opens_is_not_in_the_buffer() {
     enter(&sub);
     sub.terminals().feed(pane(), b"\r\nELEVEN\r\nTWELVE");
 
-    let cmds = frame(&sub);
-    let drawn = texts(&cmds);
-    assert!(
-        drawn.contains(&"ten".to_string()),
-        "the snapshot was not what got drawn: {drawn:?}"
-    );
-    assert!(
-        !drawn.contains(&"ELEVEN".to_string()),
-        "the mode redrew itself out of the live pane: {drawn:?}"
-    );
-
-    keys(&sub, &["G", " ", "l", "l", "y"]);
+    keys(&sub, &["G", "v", "l", "l", "y"]);
     sub.dispatch_tick(support::one());
     keys(&sub, &["C-b", "R"]);
     let said = logged(&sub);
@@ -402,18 +398,23 @@ fn what_the_pane_prints_after_the_mode_opens_is_not_in_the_buffer() {
     );
 }
 
-/// A pane printing under the mode is also what takes the cheap frame away: the pane's own
-/// grid no longer shows the snapshot's bottom, so the mode has to draw it.
+/// A pane printing under the mode does not move what the mode is showing. The pane is frozen
+/// for the life of the mode, so the cells on the screen and the lines the cursor is being
+/// dragged over are the same instant — which is the whole reason a copy mode takes a copy.
 #[test]
-fn a_pane_that_prints_under_the_mode_costs_the_redraw_it_did_not_cost_before() {
+fn a_pane_that_prints_under_the_mode_does_not_move_the_view() {
     let (_dir, sub) = built("");
     scrolled(&sub);
     enter(&sub);
-    assert!(texts(&frame(&sub)).is_empty(), "the quiet frame drew rows");
-    sub.terminals().feed(pane(), b"\r\nELEVEN");
-    assert!(
-        !texts(&frame(&sub)).is_empty(),
-        "the mode kept showing a grid that had moved under it"
+    keys(&sub, &["k", "k"]);
+    let before = view(&sub);
+    assert!(before > 0, "k did not scroll the view");
+
+    sub.terminals().feed(pane(), b"\r\nELEVEN\r\nTWELVE");
+    assert_eq!(
+        view(&sub),
+        before,
+        "the pane printing under the mode moved what it was showing"
     );
 }
 
@@ -425,7 +426,7 @@ fn a_selection_survives_its_anchor_scrolling_off_the_view() {
     let (_dir, sub) = built(REPORT);
     scrolled(&sub);
     enter(&sub);
-    keys(&sub, &["g", " ", "G", "l", "l", "y"]);
+    keys(&sub, &["g", "v", "G", "l", "l", "y"]);
     sub.dispatch_tick(support::one());
     keys(&sub, &["C-b", "R"]);
     let said = logged(&sub);
@@ -445,7 +446,7 @@ fn an_end_above_the_view_is_clamped_and_the_rest_still_shows() {
     scrolled(&sub);
     enter(&sub);
     // Anchor on the oldest line, then drag to the bottom: the anchor scrolls off the top.
-    keys(&sub, &["g", " ", "G"]);
+    keys(&sub, &["g", "v", "G"]);
     let selected: Vec<Rect> = tints(&frame(&sub))
         .into_iter()
         .filter(|(_, bg)| *bg == Some(SELECTION))
@@ -509,7 +510,7 @@ fn a_yank_claims_the_register_and_only_offers_the_clipboard() {
     let (_dir, sub) = built_named("", std::rc::Rc::new(WorkingClipboard));
     scrolled(&sub);
     enter(&sub);
-    keys(&sub, &[" ", "l", "y"]);
+    keys(&sub, &["v", "l", "y"]);
     let said = logged(&sub);
     assert!(
         said.iter().any(|line| line
@@ -522,5 +523,53 @@ fn a_yank_claims_the_register_and_only_offers_the_clipboard() {
             .iter()
             .any(|line| line.contains("copied") && line.contains("clipboard")),
         "the yank claimed a clipboard: {said:?}"
+    );
+}
+
+/// The word motions, read back through a yank: `w` steps to the next word, `$` to the last
+/// one on the line, `^` back to the first. Columns, not bytes — the line is measured the way
+/// the renderer measured it.
+#[test]
+fn the_word_motions_land_where_vim_would_put_them() {
+    let (_dir, sub) = built_named(REPORT, std::rc::Rc::new(WorkingClipboard));
+    sub.terminals().open(pane(), SIZE, 100);
+    sub.terminals().feed(pane(), b"alpha beta gamma");
+    enter(&sub);
+
+    // From column 0: two words forward is `gamma`, and `$` is its last column.
+    keys(&sub, &["w", "w", "v", "$", "y"]);
+    sub.dispatch_tick(support::one());
+    keys(&sub, &["C-b", "R"]);
+    assert!(
+        logged(&sub).iter().any(|line| line == "register=[gamma]"),
+        "w w selected the wrong run"
+    );
+
+    // And back: `^` is the first word, `e` the end of it.
+    enter(&sub);
+    keys(&sub, &["$", "^", "v", "e", "y"]);
+    sub.dispatch_tick(support::one());
+    keys(&sub, &["C-b", "R"]);
+    assert!(
+        logged(&sub).iter().any(|line| line == "register=[alpha]"),
+        "^ and e did not bracket the first word"
+    );
+}
+
+/// A motion is in columns, so a line of wide characters steps by two cells a character and
+/// the selection lands on the character rather than half of it.
+#[test]
+fn a_word_motion_counts_columns_and_not_bytes() {
+    let (_dir, sub) = built_named(REPORT, std::rc::Rc::new(WorkingClipboard));
+    sub.terminals().open(pane(), SIZE, 100);
+    sub.terminals().feed(pane(), "日本語 ok".as_bytes());
+    enter(&sub);
+
+    keys(&sub, &["w", "v", "$", "y"]);
+    sub.dispatch_tick(support::one());
+    keys(&sub, &["C-b", "R"]);
+    assert!(
+        logged(&sub).iter().any(|line| line == "register=[ok]"),
+        "a word motion over wide characters landed in the wrong column"
     );
 }

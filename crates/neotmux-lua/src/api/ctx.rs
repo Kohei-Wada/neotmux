@@ -204,6 +204,17 @@ impl UserData for Ctx {
             Ok(table)
         });
 
+        // The pane's own cells, at another place in its own history, for this frame only.
+        //
+        // What a copy mode wants: every colour and attribute the child wrote, which a plugin
+        // redrawing the lines itself cannot have — `pane.content` hands back text. The pane
+        // is not scrolled, and nothing about the session moves: this is what the frame shows.
+        methods.add_method("view", |_, this, (pane, back): (u32, usize)| {
+            this.buffers
+                .record_view(this.owner, PaneId::from(pane), back);
+            Ok(())
+        });
+
         methods.add_method("pane_rect", |lua, this, pane: u32| {
             match this.pane_rect(PaneId::from(pane)) {
                 Some(found) => Ok(Value::Table(rect::to_table(lua, found)?)),

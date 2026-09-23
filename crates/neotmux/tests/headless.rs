@@ -111,8 +111,10 @@ fn screen(frame: &Frame) -> String {
 fn frame<'a>(session: &'a mut Session, plugins: &mut Plugins) -> neotmux::session::Pass<'a> {
     let tick = session.tick().expect("tick");
     // The server ops are the set of sessions changing, and there is one session here.
-    let (tock, _server) = plugins.respond(one(), tick);
-    let mut pass = session.advance(&tock).expect("advance");
+    let answer = plugins.respond(one(), tick);
+    let mut pass = session
+        .advance(&answer.tock, &answer.views)
+        .expect("advance");
     // What the ops did, told to the plugins before anything else happens — the same round
     // the client keeps its keyboard out of.
     plugins.catch_up(one(), std::mem::take(&mut pass.steps));
@@ -240,9 +242,10 @@ fn frame_showing<'a>(
     notices: Vec<Notice>,
 ) -> neotmux::session::Pass<'a> {
     let tick = session.tick().expect("tick");
-    let (mut tock, _server) = plugins.respond(one(), tick);
+    let answer = plugins.respond(one(), tick);
+    let mut tock = answer.tock;
     tock.notices = notices;
-    let mut pass = session.advance(&tock).expect("advance");
+    let mut pass = session.advance(&tock, &answer.views).expect("advance");
     plugins.catch_up(one(), std::mem::take(&mut pass.steps));
     pass
 }
@@ -332,12 +335,12 @@ fn two_applies_are_two_stops_on_the_way_to_two_frames() {
     // whole of how two clients see the one it is in. A frame borrows the session it reads
     // off, so each one is asked for, read, and let go before the next is.
     let overlay: Vec<neotmux_proto::DrawCmd> = Vec::new();
-    let first = session.frame_with(&overlay, Vec::new());
+    let first = session.frame_with(&overlay, Vec::new(), &Default::default());
     let first_size = first.size;
     let first_panes: Vec<_> = first.panes.iter().map(|pane| pane.pane).collect();
     drop(first);
 
-    let second = session.frame_with(&overlay, Vec::new());
+    let second = session.frame_with(&overlay, Vec::new(), &Default::default());
     let second_size = second.size;
     let second_panes: Vec<_> = second.panes.iter().map(|pane| pane.pane).collect();
     drop(second);

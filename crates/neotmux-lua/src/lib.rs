@@ -604,6 +604,11 @@ impl LuaSubsystem {
             .any(|id| matches!(self.registry.kind(id), Some(Kind::Event(name)) if name == event))
     }
 
+    /// Which panes this frame is showing at a place in their own history, and how far back.
+    pub fn frame_views(&self) -> BTreeMap<PaneId, usize> {
+        self.buffers.applicable_views()
+    }
+
     pub fn frame_output(&self) -> Vec<DrawCmd> {
         let mut out = self.buffers.applicable();
         for cmds in self.buffers.applicable_floats().into_values() {
