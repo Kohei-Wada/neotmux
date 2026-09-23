@@ -1265,17 +1265,20 @@ fn new_starts_a_session_nobody_is_attached_to_and_ls_names_it() {
     assert!(names.contains("agent-7"), "{names}");
 }
 
-/// The name is a word, and the same law the command line and the door already enforce.
+/// `new` refuses the same names `validate_session_name` always has — the one law, not a
+/// second one the command line invents.
 #[test]
-fn new_refuses_a_name_that_is_not_a_word() {
+fn new_refuses_a_name_the_server_would_not_hold() {
     let runtime = TestRuntime::new();
     let client = started(runtime.path());
     let out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
-        .args(["new", "../escape"])
+        .args(["new", "-lead"])
         .env("XDG_RUNTIME_DIR", runtime.path())
         .env("HOME", runtime.path())
         .output()
         .expect("run new");
     drop(client);
     assert!(!out.status.success());
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(said.contains("may not start with '-'"), "{said}");
 }

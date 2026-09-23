@@ -558,12 +558,17 @@ fn apply_server_ops(
                 else {
                     continue;
                 };
-                if let Err(why) = start_session(&name, size, plugins, sessions, terminals, waker) {
-                    logging::log(
-                        Level::Error,
-                        &tag,
-                        &format!("session.create('{name}') refused: {why}"),
-                    );
+                if let Err(err) = start_session(&name, size, plugins, sessions, terminals, waker) {
+                    let said = match err {
+                        StartFailure::Invalid(why) => format!("session.create refused: {why}"),
+                        StartFailure::Taken => {
+                            format!("session.create('{name}') refused: it already exists")
+                        }
+                        StartFailure::Failed(err) => {
+                            format!("session.create('{name}') failed: {err:#}")
+                        }
+                    };
+                    logging::log(Level::Error, &tag, &said);
                 }
             }
             ServerOp::Switch { name } => match sessions.id_of(&name) {
@@ -594,12 +599,17 @@ fn apply_server_ops(
                 ),
             },
             ServerOp::Rename { from, to } => {
-                if let Err(why) = rename_session(&from, &to, plugins, sessions) {
-                    logging::log(
-                        Level::Error,
-                        &tag,
-                        &format!("session.rename('{from}', '{to}') refused: {why}"),
-                    );
+                if let Err(err) = rename_session(&from, &to, plugins, sessions) {
+                    let said = match err {
+                        RenameFailure::Invalid(why) => format!("session.rename refused: {why}"),
+                        RenameFailure::Taken => {
+                            format!("session.rename to '{to}' refused: it already exists")
+                        }
+                        RenameFailure::Missing => format!(
+                            "session.rename('{from}', '{to}') refused: no session by that name"
+                        ),
+                    };
+                    logging::log(Level::Error, &tag, &said);
                 }
             }
             ServerOp::Kill { name } => match sessions.id_of(&name) {
@@ -614,6 +624,15 @@ fn apply_server_ops(
     }
 }
 
+/// Why [`start_session`] refused. A plugin's log line and a command's `Ran::failed` have
+/// never shared a sentence, so the reason is handed back distinguished rather than already
+/// formatted, and each caller says it its own way.
+pub(crate) enum StartFailure {
+    Invalid(String),
+    Taken,
+    Failed(anyhow::Error),
+}
+
 /// A session started with no client looking at it: a plugin's `session.create`, or the `new`
 /// host command. The name must be a word nobody else is already using, and past that it is
 /// the same session an attach would have made.
@@ -624,10 +643,12 @@ pub(crate) fn start_session(
     sessions: &mut Sessions,
     terminals: &Rc<PaneTerminals>,
     waker: &Waker,
-) -> Result<(), String> {
-    neotmux::sock::validate_session_name(name)?;
+) -> Result<(), StartFailure> {
+    if let Err(why) = neotmux::sock::validate_session_name(name) {
+        return Err(StartFailure::Invalid(why));
+    }
     if sessions.id_of(name).is_some() {
-        return Err(format!("a session called '{name}' already exists"));
+        return Err(StartFailure::Taken);
     }
     let made = Session::new(
         &setup_for(plugins, size),
@@ -648,8 +669,16 @@ pub(crate) fn start_session(
             plugins.lua().name_session(id, name);
             Ok(())
         }
-        Err(err) => Err(format!("could not start '{name}': {err:#}")),
+        Err(err) => Err(StartFailure::Failed(err)),
     }
+}
+
+/// Why [`rename_session`] refused. See [`StartFailure`] for why this is not already a
+/// sentence.
+pub(crate) enum RenameFailure {
+    Invalid(String),
+    Taken,
+    Missing,
 }
 
 /// A session's name changes: a plugin's `session.rename`, or the `rename` host command. The
@@ -659,13 +688,15 @@ pub(crate) fn rename_session(
     to: &str,
     plugins: &Plugins,
     sessions: &mut Sessions,
-) -> Result<(), String> {
-    neotmux::sock::validate_session_name(to)?;
+) -> Result<(), RenameFailure> {
+    if let Err(why) = neotmux::sock::validate_session_name(to) {
+        return Err(RenameFailure::Invalid(why));
+    }
     let Some(id) = sessions.id_of(from) else {
-        return Err(format!("no session called '{from}'"));
+        return Err(RenameFailure::Missing);
     };
     if sessions.id_of(to).is_some() {
-        return Err(format!("a session called '{to}' already exists"));
+        return Err(RenameFailure::Taken);
     }
     if let Some(held) = sessions.live.get_mut(&id) {
         held.name = to.to_string();

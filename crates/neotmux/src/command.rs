@@ -16,7 +16,7 @@ use neotmux_term::wakeup::Waker;
 
 use neotmux::plugins::Plugins;
 
-use crate::server::{Sessions, rename_session, start_session};
+use crate::server::{RenameFailure, Sessions, StartFailure, rename_session, start_session};
 
 /// What a command did.
 pub struct Ran {
@@ -75,17 +75,6 @@ pub fn run(name: &str, args: &[String], session: Option<&str>, ctx: &mut Ctx<'_>
 /// the `window-size latest` rule sessions already follow.
 const HEADLESS: Size = Size { rows: 24, cols: 80 };
 
-/// A name typed on the command line is one word, not a path. `validate_session_name` allows
-/// `/` — a session name is a key in a map, not a filename, and a plugin may put whatever it
-/// likes in one — but a word an agent or a person types at this door is read one token at a
-/// time, and `../escape` is not a name anybody meant to type.
-fn is_a_word(name: &str) -> Result<(), String> {
-    if name.contains('/') {
-        return Err(format!("'{name}' is not a word"));
-    }
-    Ok(())
-}
-
 fn new(args: &[String], session: Option<&str>, ctx: &mut Ctx<'_>) -> Ran {
     let name = args
         .first()
@@ -93,9 +82,6 @@ fn new(args: &[String], session: Option<&str>, ctx: &mut Ctx<'_>) -> Ran {
         .or(session)
         .unwrap_or(neotmux::sock::DEFAULT_SESSION)
         .to_string();
-    if let Err(why) = is_a_word(&name) {
-        return Ran::failed(why);
-    }
     match start_session(
         &name,
         HEADLESS,
@@ -105,7 +91,11 @@ fn new(args: &[String], session: Option<&str>, ctx: &mut Ctx<'_>) -> Ran {
         ctx.waker,
     ) {
         Ok(()) => Ran::ok(vec![name]),
-        Err(why) => Ran::failed(why),
+        Err(StartFailure::Invalid(why)) => Ran::failed(why),
+        Err(StartFailure::Taken) => {
+            Ran::failed(format!("a session called '{name}' is already running"))
+        }
+        Err(StartFailure::Failed(err)) => Ran::failed(format!("could not start '{name}': {err:#}")),
     }
 }
 
@@ -113,12 +103,15 @@ fn rename(args: &[String], ctx: &mut Ctx<'_>) -> Ran {
     let [from, to] = args else {
         return Ran::failed("usage: neotmux rename <old> <new>");
     };
-    if let Err(why) = is_a_word(to) {
-        return Ran::failed(why);
-    }
     match rename_session(from, to, ctx.plugins, ctx.sessions) {
         Ok(()) => Ran::did(to.clone()),
-        Err(why) => Ran::failed(why),
+        Err(RenameFailure::Invalid(why)) => Ran::failed(why),
+        Err(RenameFailure::Taken) => {
+            Ran::failed(format!("a session called '{to}' is already running"))
+        }
+        Err(RenameFailure::Missing) => {
+            Ran::failed(format!("neotmux session '{from}' is not running"))
+        }
     }
 }
 
