@@ -39,7 +39,7 @@ impl TestRuntime {
 }
 
 fn socket_in(runtime: &Path) -> PathBuf {
-    runtime.join("neotmux/default.sock")
+    runtime.join("neotmux/server.sock")
 }
 
 /// The runtime layer neotmux ships: the one an install puts on the default search path,

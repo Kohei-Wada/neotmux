@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use anyhow::Context as _;
 
 use neotmux::link::Link;
-use neotmux::sock::{self, DEFAULT_SESSION, Lock, Paths};
+use neotmux::sock::{self, Lock, Paths};
 
 use crate::server;
 use crate::signals::ShutdownSignal;
@@ -30,9 +30,8 @@ const START_TIMEOUT: Duration = Duration::from_secs(10);
 /// It stands down quietly rather than complaining when somebody else got there first: two
 /// clients starting at the same instant will both have tried, and the loser has nothing to
 /// report — its client is about to connect to the winner.
-pub fn serve(session: Option<String>) -> anyhow::Result<()> {
-    let name = session.as_deref().unwrap_or(DEFAULT_SESSION);
-    let paths = Paths::resolve(&|key| std::env::var_os(key), name)?;
+pub fn serve() -> anyhow::Result<()> {
+    let paths = Paths::resolve(&|key| std::env::var_os(key))?;
     let Some(_lock) = Lock::take(&paths)? else {
         return Ok(());
     };
@@ -68,12 +67,11 @@ pub struct Starting {
 }
 
 /// Finds this session's server, or starts one, and returns without waiting for it.
-pub fn begin(session: Option<String>) -> anyhow::Result<Starting> {
-    let name = session.as_deref().unwrap_or(DEFAULT_SESSION);
-    let paths = Paths::resolve(&|key| std::env::var_os(key), name)?;
+pub fn begin() -> anyhow::Result<Starting> {
+    let paths = Paths::resolve(&|key| std::env::var_os(key))?;
     let connected = sock::connect(&paths.socket)?;
     if connected.is_none() {
-        spawn(session)?;
+        spawn()?;
     }
     Ok(Starting { paths, connected })
 }
@@ -112,15 +110,12 @@ fn open(stream: UnixStream) -> anyhow::Result<Rc<RefCell<Link>>> {
 /// terminal, or the `C-c` meant for a shell in a pane would reach the process holding every
 /// pane. Its standard descriptors go to `/dev/null` for the same reason — it has nothing to
 /// say to a screen it does not own, and the log file is where it says it.
-fn spawn(session: Option<String>) -> anyhow::Result<()> {
+fn spawn() -> anyhow::Result<()> {
     let exe = std::env::current_exe().context("find the neotmux binary")?;
     // No `current_dir` on the server: its own directory is the startup directory, and
     // every pane that is not told where to go from asks one of its children.
     let mut command = Command::new(exe);
     command.arg("--server");
-    if let Some(name) = session {
-        command.arg(name);
-    }
     if let Some(log) = logged() {
         command.arg("--log").arg(log);
     }
