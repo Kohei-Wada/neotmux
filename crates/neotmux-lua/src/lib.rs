@@ -157,6 +157,12 @@ impl LuaSubsystem {
 
     pub fn run_init(&self) -> Vec<LoadFailure> {
         self.loading.set(true);
+        if let Err(err) = Budget::arm(&self.lua, &self.budget) {
+            self.report_text(
+                source::ANONYMOUS,
+                format!("the config budget is off: {err}"),
+            );
+        }
         for layer in self.layers.paths() {
             let init_path = layer.join("init.lua");
             let source = match fs::read(&init_path) {
@@ -188,14 +194,30 @@ impl LuaSubsystem {
                 }
             };
 
-            if let Err(err) = func.call::<()>(()) {
+            // Per layer rather than around the loop: one slow layer must not spend the
+            // deadline of the ones after it.
+            let budget_ms = self.opts.borrow().config_budget_ms;
+            self.budget.enter(Duration::from_millis(budget_ms));
+            let called = func.call::<()>(());
+            let outcome = self.budget.leave();
+
+            if let Err(err) = called {
                 self.load_failures.borrow_mut().push(LoadFailure {
                     source: tag(),
                     message: format!("{err:#}"),
                 });
             }
+            // Both entries, as a discarded tick gets both: the raised error is what the load
+            // hit, and this is what it was measured against. Neither says the other.
+            if outcome != Outcome::WithinBudget {
+                self.load_failures.borrow_mut().push(LoadFailure {
+                    source: tag(),
+                    message: format!("loading exceeded its {budget_ms} ms budget"),
+                });
+            }
         }
 
+        self.budget.disarm(&self.lua);
         self.loading.set(false);
         std::mem::take(&mut *self.load_failures.borrow_mut())
     }
