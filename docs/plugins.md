@@ -9,6 +9,27 @@ because there is nothing to declare to. There is no enable/disable because loadi
 what "enabled" means. There is no plugin name because the thing neotmux knows about is the
 *chunk your code was written in*, which it names after the file's path.
 
+## Where your code runs
+
+Your plugin runs in the neotmux **server** — the process that holds the panes, the shells and
+the terminal state — and there is one Lua layer for a session, shared by every client attached
+to it. Two terminals looking at the same session are looking at the same plugins, with the
+same modes, the same floats and the same reservations.
+
+It keeps running while you are detached. That is the whole point: a plugin that watches a
+long-running job, answers it, or starts the next one when it finishes is doing its work in the
+window where nobody is looking, and it can only do that if it is running. `on_tick` ticks with
+no terminal attached, exactly as it does with one.
+
+What that costs is that a plugin which wedges wedges the session rather than one terminal,
+which is what the tick budget below is for.
+
+It also means **nothing on this API waits**. Anything that has to wait for something to happen
+is a subscription that delivers on a later tick, never a call that returns when the waiting is
+over. That is a contract and not an implementation note: the budget interrupts Lua between
+instructions, and no Lua instruction runs while the host is inside a blocking call, so a host
+call that waited could not be cut off.
+
 ## Where files go
 
 ```
@@ -676,7 +697,10 @@ cannot disagree. A combining mark adds nothing, because it is drawn into the cel
 A control character adds nothing either, because it is never drawn — a tab moves the cursor
 rather than filling cells, and no tab ever reaches a `pane.content` line for that reason.
 
-`neotmux.clipboard.set` writes an OSC 52 sequence carrying `text` to the client's terminal.
+`neotmux.clipboard.set` sends an OSC 52 sequence carrying `text` to the terminal of every
+client attached. Your plugin runs in the server, which has no terminal of its own, so with
+nobody attached there is nothing to write to and the call answers `false` with that as the
+reason.
 
 ```lua
 local ok, err = neotmux.clipboard.set(selected)
@@ -690,8 +714,8 @@ clipboard holds the text, and neotmux cannot find out whether it does. OSC 52 ha
 terminal that does not implement it discards it in silence, as it would any escape sequence it
 does not know; and a terminal that does implement it may have it turned off, or there may be
 an ssh session or another multiplexer in between that dropped it. `false` comes with the
-reason, and it is always about the write — there was no terminal to write to, or writing to it
-failed.
+reason, and it is always about the write — there was no client attached to write to, or
+writing to one failed.
 
 So do not put "Copied to clipboard" on the screen on a `true`. That is the bug this return
 value exists to let you avoid: tmux checks terminfo's `Ms` capability and writes nothing at all
@@ -711,7 +735,8 @@ read the `~/.config/neotmux` layer is resolved from. It is `nil`, not `''`, wher
 had no `HOME`.
 
 Logs go to `$XDG_STATE_HOME/neotmux/neotmux.log`, or wherever `--log` says. Notifications also
-replay on stderr when neotmux exits, so a message from a frame you never saw is not lost.
+replay on stderr when a client exits, so a message from a frame you never saw is not lost. A
+client is replayed what was raised while it was attached, not the session's whole life.
 
 ## How your code is identified
 
