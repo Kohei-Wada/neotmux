@@ -234,6 +234,19 @@ fn wait_for_socket(socket: &Path) {
     }
 }
 
+/// `neotmux capture` on a pane, as a plain string. Callers that need to know the pty has
+/// caught up to a particular point call this only after waiting for that point's own marker
+/// (with `wait_for_output` or by polling capture itself), so this is one shot, not a poll.
+fn capture_pane(runtime: &Path, pane: &str) -> String {
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .args(["capture", pane])
+        .env("XDG_RUNTIME_DIR", runtime)
+        .env("HOME", runtime)
+        .output()
+        .expect("run capture");
+    String::from_utf8_lossy(&out.stdout).to_string()
+}
+
 /// A client that has started its session: the shell has echoed something back, which means
 /// the whole round trip — key in, socket, pane, frame, socket, screen — is running.
 fn started(runtime: &Path) -> Client {
@@ -1423,7 +1436,14 @@ fn a_plugin_can_refuse_a_write_from_the_command_line() {
         "{}",
         String::from_utf8_lossy(&sent.stderr)
     );
+    // The allowed line's arrival is the proof the pty has caught up past the point where the
+    // blocked one would have landed, had it gone through.
     client.wait_for_output("ALLOWED-LINE");
+    let seen = capture_pane(runtime.path(), "%1");
+    assert!(
+        !seen.contains("BLOCKED-LINE"),
+        "the blocked line reached the pane: {seen}"
+    );
     drop(client);
 }
 
@@ -1433,24 +1453,48 @@ fn a_write_handler_that_raises_refuses_the_write() {
     let runtime = TestRuntime::new();
     let layer = layer_with(&[(
         "init.lua",
-        "neotmux.on_write(function() error('the guard is broken') end)",
+        // Raises only for the write under test; everything else passes, which gives the test
+        // an "allowed" line to wait for and so prove the pty has caught up.
+        "neotmux.on_write(function(write)
+           if write.text:find('BLOCKED') then
+             error('the guard is broken')
+           end
+         end)",
     )]);
     let client = Client::start_with(runtime.path(), "/bin/cat", 24, 80, &[layer.path()]);
     wait_for_socket(&socket_in(runtime.path()));
 
     let out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
-        .args(["send", "%1", "NEVER-ARRIVES", "--enter"])
+        .args(["send", "%1", "BLOCKED-LINE", "--enter"])
         .env("XDG_RUNTIME_DIR", runtime.path())
         .env("HOME", runtime.path())
         .output()
         .expect("run send");
-    drop(client);
     assert!(!out.status.success());
     assert!(
         String::from_utf8_lossy(&out.stderr).contains("the guard is broken"),
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
+
+    let sent = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .args(["send", "%1", "ALLOWED-LINE", "--enter"])
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run send");
+    assert!(
+        sent.status.success(),
+        "{}",
+        String::from_utf8_lossy(&sent.stderr)
+    );
+    client.wait_for_output("ALLOWED-LINE");
+    let seen = capture_pane(runtime.path(), "%1");
+    assert!(
+        !seen.contains("BLOCKED-LINE"),
+        "the blocked line reached the pane: {seen}"
+    );
+    drop(client);
 }
 
 #[test]
