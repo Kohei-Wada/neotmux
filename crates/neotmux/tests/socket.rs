@@ -1977,3 +1977,42 @@ fn a_plugin_reads_the_line_discipline_of_a_real_pane() {
     );
     drop(client);
 }
+
+/// The bypass that would make all of this pointless: a plugin writing into a pane must pass
+/// the same hook every other write passes.
+#[test]
+fn a_plugin_s_own_write_passes_the_hook_too() {
+    let runtime = TestRuntime::new();
+    let layer = layer_with(&[(
+        "init.lua",
+        "neotmux.on_write(function(write)
+           neotmux.log.info('offered ' .. write.from .. ': ' .. write.text)
+           if write.text:find('BLOCKED') then return false, 'no' end
+         end)
+         local step = 0
+         neotmux.on_tick(function()
+           local pane = neotmux.pane.current()
+           if not pane then return end
+           if step == 0 then
+             step = 1
+             neotmux.pane.send(pane, 'BLOCKED-BY-THE-HOOK\\n')
+           elseif step == 1 then
+             step = 2
+             neotmux.pane.send(pane, 'ALLOWED-BY-THE-HOOK\\n')
+           end
+         end)",
+    )]);
+    let client = Client::start_with(runtime.path(), "/bin/cat", 24, 80, &[layer.path()]);
+    wait_for_log(runtime.path(), "offered plugin: BLOCKED-BY-THE-HOOK");
+    wait_for_log(runtime.path(), "refused");
+
+    // The allowed send's arrival is the proof the pty has caught up past the point where
+    // the blocked one would have landed, had it gone through by any path.
+    client.wait_for_output("ALLOWED-BY-THE-HOOK");
+    let seen = capture_pane(runtime.path(), "%1");
+    assert!(
+        !seen.contains("BLOCKED-BY-THE-HOOK"),
+        "the blocked write reached the pane: {seen}"
+    );
+    drop(client);
+}

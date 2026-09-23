@@ -146,6 +146,9 @@ impl Plugins {
     ) -> (Vec<(String, SessionOp)>, Vec<(String, ServerOp)>) {
         let mut out = Vec::new();
         let mut server = Vec::new();
+        // Collected first, and only converted in a second pass below: a write check needs
+        // `&mut self`, which the tag lookup above (`&self.lua`) cannot be held across.
+        let mut pending = Vec::new();
         for (id, op) in self.lua.drain_ops(session) {
             let tag = self
                 .lua
@@ -171,7 +174,10 @@ impl Plugins {
                 Op::PaneSplit { dir } => SessionOp::PaneSplit { dir },
                 Op::PaneFocus { pane } => SessionOp::PaneFocus { pane },
                 Op::PaneResize { dir, cells } => SessionOp::PaneResize { dir, cells },
-                Op::PaneSend { pane, text } => SessionOp::PaneSend { pane, text },
+                Op::PaneSend { pane, text } => {
+                    pending.push((tag, pane, text));
+                    continue;
+                }
                 Op::WindowCreate { window } => SessionOp::WindowCreate { window },
                 Op::WindowFocus { window } => SessionOp::WindowFocus { window },
                 Op::WindowRename { window, name } => SessionOp::WindowRename { window, name },
@@ -193,6 +199,18 @@ impl Plugins {
                 }
             };
             out.push((tag, op));
+        }
+        for (tag, pane, text) in pending {
+            // After the tick has returned, so the VM is idle: a handler is never re-entered
+            // from inside the tick that queued this. With no session yet (a load op), there
+            // is nothing to check against and no pane for it to land in either.
+            let checked = match session {
+                Some(session) => self.check_write(session, pane, &text, "plugin").is_ok(),
+                None => true,
+            };
+            if checked {
+                out.push((tag, SessionOp::PaneSend { pane, text }));
+            }
         }
         (out, server)
     }

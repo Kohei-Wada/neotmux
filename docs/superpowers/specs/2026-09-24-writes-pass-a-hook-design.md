@@ -62,7 +62,7 @@ The handler is called with one table:
 | --- | --- |
 | `pane` | the pane the text is going to |
 | `text` | exactly the bytes that would be written, as a string |
-| `from` | `'tool'` for a connection that is not a client, `'terminal'` for an attached one |
+| `from` | `'tool'` for a connection that is not a client, `'plugin'` for a plugin's own `pane.send`. A person's keys are not writes (§1), so `'terminal'` is not emitted today. |
 
 and answers:
 
@@ -80,9 +80,9 @@ the answer and the rest are not called — a refusal is a decision, not a vote.
 Two paths write text into a pane, and both are hooked:
 
 - `neotmux send <pane> <text>` — the host command, `from = 'tool'` on a command connection.
-- `neotmux.pane.send(id, text)` — a plugin's own write, applied with the frame's ops. Hooking
-  this is what stops plugins being the bypass, and it means a plugin's write is offered to
-  every *other* plugin's handler as well as its own.
+- `neotmux.pane.send(id, text)` — a plugin's own write, applied with the frame's ops,
+  `from = 'plugin'`. Hooking this is what stops plugins being the bypass, and it means a
+  plugin's write is offered to every *other* plugin's handler as well as its own.
 
 Not hooked, deliberately: a key from an attached client (§1), a pty resize, and anything the
 host writes for its own reasons (a query answer, a paste the terminal itself sent).
