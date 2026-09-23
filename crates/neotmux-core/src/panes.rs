@@ -1,4 +1,4 @@
-use neotmux_core::layout::{ResizeRefused, SplitRefused, Tree, assign};
+use crate::layout::{ResizeRefused, SplitRefused, Tree, assign};
 use neotmux_proto::{Dir, Edge, Epoch, PaneId, PaneRects, Rect as PRect, Reserved, Size, SplitDir};
 
 /// Everything the host knows about how panes are arranged: the tree (§6), the surface it is

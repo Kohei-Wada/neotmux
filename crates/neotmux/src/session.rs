@@ -19,7 +19,7 @@ use crate::logging;
 use crate::paneinfo::PaneInfoCache;
 use crate::procinfo;
 use crate::shells::Shells;
-use crate::windows::{Shown, Surface, Windows};
+use neotmux_core::windows::{Shown, Surface, Windows};
 use neotmux_proto::frame::{Frame, Notice, PaneFrame};
 use neotmux_proto::keys::Key;
 
