@@ -89,8 +89,8 @@ pub enum Opened {
 /// it began must not leave a terminal switched to a screen nothing was ever drawn on. The
 /// first frame is always owed: a session that has just started, and one that has just been
 /// adopted, are both dirty by construction.
-pub fn open(link: &Rc<RefCell<Link>>, size: Size) -> anyhow::Result<Opened> {
-    send(link, &ToServer::Attach(Attach { size }))?;
+pub fn open(link: &Rc<RefCell<Link>>, size: Size, session: String) -> anyhow::Result<Opened> {
+    send(link, &ToServer::Attach(Attach { size, session }))?;
     let mut transcript = Vec::new();
     loop {
         let message = {

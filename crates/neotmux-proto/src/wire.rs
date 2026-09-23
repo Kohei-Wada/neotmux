@@ -689,6 +689,7 @@ pub fn encode_to_server(msg: &ToServer) -> Vec<u8> {
         ToServer::Attach(attach) => {
             w.u8(TO_SERVER_ATTACH);
             w.size(attach.size);
+            w.str(&attach.session);
         }
         ToServer::Key(key) => {
             w.u8(TO_SERVER_KEY);
@@ -713,7 +714,10 @@ pub fn encode_to_server(msg: &ToServer) -> Vec<u8> {
 pub fn decode_to_server(bytes: &[u8]) -> Result<ToServer, WireError> {
     let mut r = Reader::new(bytes);
     let msg = match r.u8()? {
-        TO_SERVER_ATTACH => ToServer::Attach(Attach { size: r.size()? }),
+        TO_SERVER_ATTACH => ToServer::Attach(Attach {
+            size: r.size()?,
+            session: r.string()?,
+        }),
         TO_SERVER_KEY => ToServer::Key(r.key()?),
         TO_SERVER_RESIZE => ToServer::Resize(r.size()?),
         TO_SERVER_READ => ToServer::Read(r.read()?),
@@ -1981,6 +1985,7 @@ mod tests {
     fn an_attach_round_trips() {
         round_trip_to_server(ToServer::Attach(Attach {
             size: Size { rows: 24, cols: 80 },
+            session: "work".to_string(),
         }));
     }
 

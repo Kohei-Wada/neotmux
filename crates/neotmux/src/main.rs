@@ -324,11 +324,14 @@ fn client(session: Option<String>) -> anyhow::Result<()> {
     // First, and before the socket: until the terminal is in raw mode the line discipline is
     // answering the keyboard, and starting a server is not fast.
     let _raw = RawMode::enter();
+    let name = session
+        .clone()
+        .unwrap_or_else(|| neotmux::sock::DEFAULT_SESSION.to_string());
     let link = start::begin(session)?.finish()?;
 
     // The attach, and the session's answer, before the screen: a session that a plugin ended
     // while it was loading must not flash the alternate screen on its way past.
-    let first = match tui::open(&link, tui::screen_size()?)? {
+    let first = match tui::open(&link, tui::screen_size()?, name)? {
         tui::Opened::Over(transcript) => {
             for line in &transcript {
                 eprintln!("neotmux: {line}");

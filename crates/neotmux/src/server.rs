@@ -86,8 +86,14 @@ struct Attached {
 /// say "the session" says "this one" through it.
 #[derive(Default)]
 struct Sessions {
-    live: BTreeMap<SessionId, Session>,
+    live: BTreeMap<SessionId, Held>,
     next: u32,
+}
+
+/// One session and the name it answers to.
+struct Held {
+    name: String,
+    session: Session,
 }
 
 impl Sessions {
@@ -96,6 +102,17 @@ impl Sessions {
     fn mint(&mut self) -> SessionId {
         self.next += 1;
         SessionId::from(self.next)
+    }
+
+    fn id_of(&self, name: &str) -> Option<SessionId> {
+        self.live
+            .iter()
+            .find(|(_, held)| held.name == name)
+            .map(|(id, _)| *id)
+    }
+
+    fn get_mut(&mut self, id: SessionId) -> Option<&mut Session> {
+        self.live.get_mut(&id).map(|held| &mut held.session)
     }
 }
 
@@ -388,7 +405,18 @@ fn doorstep(pending: &mut Pending) -> Doorstep {
             }
         };
         return match wire::decode_to_server(&message) {
-            Ok(ToServer::Attach(attach)) => Doorstep::Attaching(attach),
+            // The same law the command line enforces. A peer that did not come through the
+            // command line is not exempt from it: the name is a key in a map and a word in a
+            // list, and both of those are the CLI's business too.
+            Ok(ToServer::Attach(attach)) => {
+                match neotmux::sock::validate_session_name(&attach.session) {
+                    Ok(()) => Doorstep::Attaching(attach),
+                    Err(why) => {
+                        logging::log(Level::Warn, "neotmux-server", &why);
+                        Doorstep::Gone
+                    }
+                }
+            }
             Ok(other) => {
                 logging::log(
                     Level::Warn,
@@ -489,17 +517,22 @@ fn admit(
         gutter: lua.opt().pane_gutter,
         wants_pane_output: lua.has_subscriber("pane_output"),
     };
-    // Whichever one is there, which is the only one there is. The attach will name it.
-    let session = match sessions.live.iter_mut().next() {
-        Some((id, session)) => {
-            session.adopt(&setup)?;
-            *id
+    let session = match sessions.id_of(&attach.session) {
+        Some(id) => {
+            if let Some(session) = sessions.get_mut(id) {
+                session.adopt(&setup)?;
+            }
+            id
         }
         None => {
             let id = sessions.mint();
-            sessions
-                .live
-                .insert(id, Session::new(&setup, waker.clone(), terminals.clone())?);
+            sessions.live.insert(
+                id,
+                Held {
+                    name: attach.session.clone(),
+                    session: Session::new(&setup, waker.clone(), terminals.clone())?,
+                },
+            );
             id
         }
     };
@@ -626,7 +659,7 @@ fn frame(
     let ids: Vec<SessionId> = sessions.live.keys().copied().collect();
     let mut over = false;
     for id in ids {
-        let Some(live) = sessions.live.get_mut(&id) else {
+        let Some(live) = sessions.get_mut(id) else {
             continue;
         };
 
@@ -765,21 +798,21 @@ fn deliver(clients: &mut [Attached], i: usize, sessions: &mut Sessions, plugins:
                 // pane an unbound key belongs to is the session's to know, and both halves
                 // are here now.
                 if plugins.key(which, key) == KeyOutcome::Fallthrough
-                    && let Some(session) = sessions.live.get_mut(&which)
+                    && let Some(session) = sessions.get_mut(which)
                     && session.key(key).is_err()
                 {
                     clients[i].gone = true;
                 }
             }
             Ok(ToServer::Resize(size)) => {
-                if let Some(session) = sessions.live.get_mut(&which)
+                if let Some(session) = sessions.get_mut(which)
                     && session.resize(size).is_err()
                 {
                     clients[i].gone = true;
                 }
             }
             Ok(ToServer::Read(read)) => {
-                if let Some(session) = sessions.live.get_mut(&which) {
+                if let Some(session) = sessions.get_mut(which) {
                     let reading = reads::answer(session.terminals().as_ref(), read);
                     if clients[i]
                         .link

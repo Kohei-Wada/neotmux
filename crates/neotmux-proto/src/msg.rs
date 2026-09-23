@@ -28,6 +28,9 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Attach {
     pub size: Size,
+    /// Which session this client is asking for. The server hands back the one with that name
+    /// or makes it, which is what `neotmux <name>` has always meant.
+    pub session: String,
 }
 
 /// One thing that happened to the session, in the order it happened.
