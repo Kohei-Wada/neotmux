@@ -129,7 +129,7 @@ struct Serving<'a> {
     terminals: &'a Rc<PaneTerminals>,
 }
 
-pub fn serve(name: &str, listener: &UnixListener, shutdown: &ShutdownSignal) -> anyhow::Result<()> {
+pub fn serve(listener: &UnixListener, shutdown: &ShutdownSignal) -> anyhow::Result<()> {
     // Polled rather than blocked on, so the frame loop can answer a client instead of
     // leaving it in the backlog wondering.
     listener
@@ -153,7 +153,7 @@ pub fn serve(name: &str, listener: &UnixListener, shutdown: &ShutdownSignal) -> 
         .ok()
         .and_then(|path| path.parent().map(std::path::Path::to_path_buf));
     let layers = Layers::resolve(&|key| std::env::var_os(key), exe_dir.as_deref());
-    let lua = LuaSubsystem::build_named(name, layers, terminals.clone(), clip.clone())?;
+    let lua = LuaSubsystem::build_with(layers, terminals.clone(), clip.clone())?;
     let mut plugins = Plugins::new(lua);
     for failure in plugins.lua().run_init() {
         logging::log(Level::Warn, &failure.source, &failure.message);
@@ -533,6 +533,7 @@ fn admit(
                     session: Session::new(&setup, waker.clone(), terminals.clone())?,
                 },
             );
+            plugins.lua().name_session(id, &attach.session);
             id
         }
     };

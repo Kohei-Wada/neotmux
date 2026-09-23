@@ -40,7 +40,7 @@ pub fn serve(session: Option<String>) -> anyhow::Result<()> {
         return Ok(());
     };
     let shutdown = ShutdownSignal::install()?;
-    let served = server::serve(name, &listener, &shutdown);
+    let served = server::serve(&listener, &shutdown);
     // Taken away on the way out, so the next client does not connect to a server that is
     // gone — and only if it is still this server's, so one that outlived a replacement does
     // not take the replacement's name with it.

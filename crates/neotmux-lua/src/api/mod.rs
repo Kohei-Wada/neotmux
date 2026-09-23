@@ -53,7 +53,7 @@ pub(crate) struct Shared {
     /// Which session this client is in, as the host knows it. Beside `home` in kind:
     /// a fact about the process rather than about a pane, and nothing in the Lua layer
     /// could set it.
-    pub(crate) session_name: String,
+    pub(crate) ambient: Rc<crate::ambient::Ambient>,
 }
 
 pub(crate) fn make_handle(
@@ -195,7 +195,7 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
         window_ids,
         floats,
         home,
-        session_name,
+        ambient,
     } = shared;
     let neotmux = lua.create_table()?;
 
@@ -293,9 +293,12 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
     }
 
     {
-        let name = session_name.clone();
-        let session_name =
-            lua.create_function(move |_lua, (): ()| Ok::<String, mlua::Error>(name.clone()))?;
+        // `nil` during a load: a load happens before any session does, and every other
+        // per-session fact is empty there for the same reason.
+        let ambient = ambient.clone();
+        let session_name = lua.create_function(move |_lua, (): ()| {
+            Ok::<Option<String>, mlua::Error>(ambient.current_name())
+        })?;
         neotmux.set("session_name", session_name)?;
     }
 

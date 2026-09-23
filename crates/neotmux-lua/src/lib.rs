@@ -81,13 +81,13 @@ pub struct LuaSubsystem {
 
 impl LuaSubsystem {
     pub fn build(layers: Layers, panes: Rc<dyn PaneRead>) -> anyhow::Result<Self> {
-        Self::build_named("default", layers, panes, Rc::new(clipboard::Absent))
+        Self::build_with(layers, panes, Rc::new(clipboard::Absent))
     }
 
-    /// The named half of `build`, which passes the default: `neotmux.session_name()` is
-    /// the one that answers whichever of the two the client was started with.
-    pub fn build_named(
-        session_name: impl Into<String>,
+    /// The half of `build` that takes a clipboard. There is no name here: one layer serves
+    /// every session, so `neotmux.session_name()` is a property of the dispatch in hand and
+    /// the host names each session as it makes it.
+    pub fn build_with(
         layers: Layers,
         panes: Rc<dyn PaneRead>,
         clipboard: Rc<dyn Clipboard>,
@@ -136,7 +136,7 @@ impl LuaSubsystem {
                 window_ids: window_ids.clone(),
                 floats: floats.clone(),
                 home,
-                session_name: session_name.into(),
+                ambient: Rc::clone(&ambient),
             },
         )
         .map_err(|err| anyhow::anyhow!("{err:#}"))?;
@@ -640,6 +640,11 @@ impl LuaSubsystem {
     /// for it again.
     pub fn forget_session(&self, session: SessionId) {
         self.ambient.forget(session);
+    }
+
+    /// What a session is called, for `neotmux.session_name()` to answer during its dispatches.
+    pub fn name_session(&self, session: SessionId, name: &str) {
+        self.ambient.name(session, name);
     }
 
     pub fn registry(&self) -> &Registry {
