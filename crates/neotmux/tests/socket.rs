@@ -1401,6 +1401,12 @@ fn send_to_a_pane_that_is_not_there_fails() {
 }
 
 /// A client looking at one session, moved to another by something that is not that client.
+///
+/// Both sessions could run `/bin/cat`, and if the marker were typed by the client after the
+/// switch it would echo back identically whether or not the switch actually happened — a
+/// switch that silently did nothing would still pass. So the marker is written into the
+/// second session's pane from outside, with `send`, before the client is ever moved to it:
+/// only a client actually looking at that session can show it.
 #[test]
 fn switch_moves_the_attached_client_to_the_named_session() {
     let runtime = TestRuntime::new();
@@ -1409,21 +1415,64 @@ fn switch_moves_the_attached_client_to_the_named_session() {
     client.send("in-the-first\r");
     client.wait_for_output("in-the-first");
 
-    for args in [vec!["new", "second"], vec!["switch", "second"]] {
-        let out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
-            .args(&args)
-            .env("XDG_RUNTIME_DIR", runtime.path())
-            .env("HOME", runtime.path())
-            .output()
-            .expect("run a command");
-        assert!(
-            out.status.success(),
-            "{args:?}: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-    }
+    let new_out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .args(["new", "second"])
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run new");
+    assert!(
+        new_out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&new_out.stderr)
+    );
 
-    client.send("in-the-second\r");
-    client.wait_for_output("in-the-second");
+    let panes_out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .args(["panes", "-t", "second"])
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run panes");
+    assert!(
+        panes_out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&panes_out.stderr)
+    );
+    let listed = String::from_utf8_lossy(&panes_out.stdout).into_owned();
+    let pane = listed
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().next())
+        .unwrap_or_else(|| panic!("'second' has a pane: {listed:?}"));
+
+    // All-caps and dash-free so none of it coincides, character for character, with
+    // "in-the-first" at the same screen position — the renderer only resends a cell that
+    // actually changed, and a coincidental match would silently vanish from the client's
+    // byte stream rather than prove anything.
+    let sent = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .args(["send", pane, "SECONDSESSIONMARKER", "--enter"])
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run send");
+    assert!(
+        sent.status.success(),
+        "{}",
+        String::from_utf8_lossy(&sent.stderr)
+    );
+
+    let switch_out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .args(["switch", "second"])
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run switch");
+    assert!(
+        switch_out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&switch_out.stderr)
+    );
+
+    client.wait_for_output("SECONDSESSIONMARKER");
     drop(client);
 }

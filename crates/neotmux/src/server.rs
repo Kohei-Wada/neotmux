@@ -579,7 +579,13 @@ fn apply_server_ops(
             }
             ServerOp::Switch { name } => match sessions.id_of(&name) {
                 Some(to) => {
-                    switch_clients(to, Some(from), clients, sessions, plugins);
+                    if let Err(err) = switch_clients(to, Some(from), clients, sessions, plugins) {
+                        logging::log(
+                            Level::Error,
+                            &tag,
+                            &format!("session.switch('{name}') failed: {err:#}"),
+                        );
+                    }
                 }
                 None => logging::log(
                     Level::Error,
@@ -700,14 +706,20 @@ pub(crate) fn rename_session(
 /// those looking at `of`'s session where it names one. A plugin's `session.switch` moves the
 /// client that asked, so it passes its own session as `of`; the `switch` host command moves
 /// whoever is attached to this server, which is what "bring me to that session" means from
-/// outside, so it passes `None`. Returns how many clients moved.
+/// outside, so it passes `None`.
+///
+/// Returns how many clients moved. The move itself cannot fail — a client's `session` field is
+/// just data — but refitting `to` to whoever just arrived can, the same as an attach's can, so
+/// that failure is handed back rather than logged here: a plugin's log line and a command's
+/// `Ran::failed` have never shared a sentence, the same reason [`StartFailure`] and
+/// [`RenameFailure`] are not already formatted, and each caller says it its own way.
 pub(crate) fn switch_clients(
     to: SessionId,
     of: Option<SessionId>,
     clients: &mut [Attached],
     sessions: &mut Sessions,
     plugins: &Plugins,
-) -> usize {
+) -> anyhow::Result<usize> {
     let mut moved = 0usize;
     let mut last_size = None;
     for client in clients
@@ -722,15 +734,10 @@ pub(crate) fn switch_clients(
     // they are shown — the same thing an attach does, for the same reason.
     if let Some(size) = last_size
         && let Some(session) = sessions.get_mut(to)
-        && let Err(err) = session.adopt(&setup_for(plugins, size))
     {
-        logging::log(
-            Level::Error,
-            "neotmux-server",
-            &format!("session.switch failed: {err:#}"),
-        );
+        session.adopt(&setup_for(plugins, size))?;
     }
-    moved
+    Ok(moved)
 }
 
 /// What a session is started or refitted with, out of the Lua layer and a size.

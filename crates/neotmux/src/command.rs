@@ -136,11 +136,11 @@ fn switch(args: &[String], ctx: &mut Ctx<'_>) -> Ran {
     let Some(id) = ctx.sessions.id_of(name) else {
         return Ran::failed(format!("neotmux session '{name}' is not running"));
     };
-    let moved = switch_clients(id, None, ctx.clients, ctx.sessions, ctx.plugins);
-    if moved == 0 {
-        return Ran::failed(format!("nothing is attached to move to '{name}'"));
+    match switch_clients(id, None, ctx.clients, ctx.sessions, ctx.plugins) {
+        Ok(0) => Ran::failed(format!("nothing is attached to move to '{name}'")),
+        Ok(_) => Ran::did(name.clone()),
+        Err(err) => Ran::failed(format!("could not switch to '{name}': {err:#}")),
     }
-    Ran::did(name.clone())
 }
 
 /// The session a command is addressed to, or the sentence that says there is none.
