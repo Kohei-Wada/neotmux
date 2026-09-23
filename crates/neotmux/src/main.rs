@@ -136,13 +136,17 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Cli {
                         Some(value) => session = Some(value),
                         None => warnings.push("-t requires a session name argument".to_string()),
                     }
-                }
-                let cargs: Vec<String> = args.by_ref().collect();
-                // `--help` after a command word is the same request it is anywhere else:
-                // the usage text, and exit 0 — not a question asked of a server.
-                if cargs.iter().any(|a| a == "--help" || a == "-h") {
+                } else if args
+                    .peek()
+                    .is_some_and(|next| next == "--help" || next == "-h")
+                {
+                    // `--help` right after a command word is the same request it is
+                    // anywhere else: usage text, exit 0. Anywhere past that position it
+                    // is payload, the same as `-t` is — `send %1 git --help` sends the
+                    // text, it does not print usage.
                     help = true;
                 }
+                let cargs: Vec<String> = args.by_ref().collect();
                 action = Action::Command { name, args: cargs };
             }
             arg if !arg.starts_with('-') && !arg.is_empty() => {
@@ -655,6 +659,28 @@ mod tests {
                 assert_eq!(
                     args,
                     vec!["%1".to_string(), "--lines".to_string(), "3".to_string()]
+                );
+            }
+            _ => panic!("expected a command"),
+        }
+    }
+
+    #[test]
+    fn a_command_s_help_right_after_it_is_usage_but_later_is_payload() {
+        let cli = parse_args(args(&["panes", "--help"]));
+        assert!(cli.help, "--help right after the command word is usage");
+
+        let cli = parse_args(args(&["send", "%1", "git", "--help"]));
+        assert!(
+            !cli.help,
+            "--help past the first argument is the command's own text, not a request for usage"
+        );
+        match cli.action {
+            Action::Command { name, args } => {
+                assert_eq!(name, "send");
+                assert_eq!(
+                    args,
+                    vec!["%1".to_string(), "git".to_string(), "--help".to_string()]
                 );
             }
             _ => panic!("expected a command"),

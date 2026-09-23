@@ -1482,16 +1482,30 @@ fn switch_moves_the_attached_client_to_the_named_session() {
 #[test]
 fn panes_takes_a_bare_session_name_as_well_as_t() {
     let runtime = TestRuntime::new();
-    let client = Client::start(runtime.path(), "/bin/cat");
-    wait_for_socket(&socket_in(runtime.path()));
+
+    // Named anything but "default", and no "default" session exists in this runtime at
+    // all: the old code read only `-t` and fell back to the default session for a bare
+    // positional, which would fail here ("session 'default' is not running") rather
+    // than answer "second"'s own pane — `panes default` would have passed against the
+    // unfixed code just as readily as against the fixed one.
+    let new_out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .args(["new", "second"])
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run new");
+    assert!(
+        new_out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&new_out.stderr)
+    );
 
     let out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
-        .args(["panes", "default"])
+        .args(["panes", "second"])
         .env("XDG_RUNTIME_DIR", runtime.path())
         .env("HOME", runtime.path())
         .output()
         .expect("run panes");
-    drop(client);
     assert!(
         out.status.success(),
         "{}",
@@ -1607,6 +1621,50 @@ fn a_command_s_help_prints_usage_and_exits_zero() {
     );
     let said = String::from_utf8_lossy(&out.stdout);
     assert!(said.contains("usage: neotmux"), "{said}");
+}
+
+/// `--help` past the first argument is payload, the same as `-t` is: `send`'s whole job is
+/// putting exactly this text in the pane, so `git --help` must reach the shell rather than
+/// being read back out as a request for neotmux's own usage text.
+#[test]
+fn a_help_past_the_first_argument_of_send_is_sent_not_printed() {
+    let runtime = TestRuntime::new();
+    let client = Client::start(runtime.path(), "/bin/cat");
+    wait_for_socket(&socket_in(runtime.path()));
+
+    let sent = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .args(["send", "%1", "git", "--help", "--enter"])
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run send");
+    assert!(
+        sent.status.success(),
+        "{}",
+        String::from_utf8_lossy(&sent.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&sent.stdout).is_empty(),
+        "send must not have printed usage text"
+    );
+
+    let deadline = Instant::now() + PATIENCE;
+    let seen = loop {
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+            .args(["capture", "%1"])
+            .env("XDG_RUNTIME_DIR", runtime.path())
+            .env("HOME", runtime.path())
+            .output()
+            .expect("run capture");
+        let text = String::from_utf8_lossy(&out.stdout).to_string();
+        if text.contains("git --help") {
+            break text;
+        }
+        assert!(Instant::now() < deadline, "capture never saw it: {text:?}");
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    drop(client);
+    assert!(seen.contains("git --help"), "{seen}");
 }
 
 /// `switch` to a name nobody is running fails and says so, rather than starting one or
