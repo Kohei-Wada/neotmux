@@ -648,6 +648,49 @@ window and moves you to another; closing the last window exits neotmux.
 A reserved band belongs to the surface, not to a window: a status line reserves its row once
 and keeps it across every switch.
 
+### Sessions
+
+One server holds every session you have started, and one Lua layer serves all of them. So a
+plugin can see the others, not only the one whose tick it is running in.
+
+```lua
+neotmux.session.current()          -- the session this tick, key or event is for; nil at load
+neotmux.session.list()             -- every session there is, in name order
+neotmux.session.with(name, fn)     -- run fn against that session, and give back what it returned
+neotmux.session.create(name)       -- a new session, at the size of the one that asked
+neotmux.session.switch(name)       -- move to it
+neotmux.session.kill(name)         -- end it, and every shell in it
+```
+
+`with` is the interesting one, and it is how the shipped sidebar says what each session is
+running:
+
+```lua
+local panes, command = 0, nil
+neotmux.session.with('work', function()
+  panes = #neotmux.pane.list()
+  local focus = neotmux.pane.current()
+  local info = focus and neotmux.pane.info(focus)
+  command = info and info.command
+end)
+```
+
+Every ordinary read works inside it, `pane.content` and the rest included — it rebinds which
+session the reads are about, and nothing had to be written per call to make that so. Two things
+it does not do:
+
+- **It does not move your drawing.** `ctx` belongs to the session whose tick is running, so a
+  `ctx:text` inside a `with` still draws where the tick is. Drawing one session's panes into
+  another's surface is not a thing there is an API for.
+- **It is not an error to name a session that is not there.** You get `nil` and the function
+  does not run: a session can end between one tick and the next, and a watcher's loop is not
+  your mistake.
+
+`create`, `switch` and `kill` are ops like `pane.split` — they take effect after your tick, not
+during it, so a `create` followed by a `list` in the same tick does not name the new one.
+`switch` moves **every client attached to the session that asked**, which with one terminal
+attached is the terminal that asked.
+
 ### Everything else
 
 ```lua

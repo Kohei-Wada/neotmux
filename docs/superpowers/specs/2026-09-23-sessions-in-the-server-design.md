@@ -22,7 +22,7 @@ Measured against that, neotmux has two of the four:
 | sessions live in a daemon and survive disconnect | yes |
 | the daemon watches what a session is doing while nobody is looking | yes, since the Lua layer moved into the server |
 | an agent drives its pane through an API rather than through keys | no — `2026-09-23-lua-on-the-server-design.md` §9, not built |
-| all the sessions in one view, and a way into any of them | half: they are all in one server and `ls` lists them, but the view and the way in are Lua's, and Lua cannot ask yet |
+| all the sessions in one view, and a way into any of them | yes: the shipped sidebar draws a row per session saying what it is running, and `C-b s` moves between them — all of it Lua, on `neotmux.session.*` |
 
 The fourth is this spec. And the fourth is not "a list of names": a list of names is
 `neotmux ls`, which already exists and is not herdr. What makes it herdr is that the row for
@@ -219,6 +219,12 @@ tick, where there is no client in scope, it moves every client attached to the c
 Both of those are stated rather than discovered, and the second is what a session-picker
 launched from a tick would want anyway.
 
+**Corrected, 2026-09-24.** The first half was not built and the rule is the second half in both
+cases: `switch` moves every client attached to the session that asked. An op remembers the
+session it was raised for and nothing else, and attributing one to a client is machinery §9's
+command surface needs anyway — a command arrives *from* somewhere. With one client, which is
+the ordinary case, the two rules are one behaviour.
+
 `neotmux.session_name()` becomes an alias for `session.current()`. It answered "the session
 this client was started with" — a fact that stops existing — and the nearest true thing is the
 one `current()` gives.
@@ -299,7 +305,8 @@ So the internals go first and the socket goes with N sessions:
    table does not list because they are asked at the door rather than by a client;
    `neotmux.session_name()` answers the session whose dispatch is running, and `nil` during a
    load.
-3. **`neotmux.session.*`**, including `with`, and the sidebar that uses it.
+3. **`neotmux.session.*`**, including `with`, and the sidebar that uses it. Done, in
+   `plans/2026-09-24-the-sessions-api.md`.
 
 ## 12. Tests
 
