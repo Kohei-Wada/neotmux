@@ -27,26 +27,30 @@ use anyhow::Context as _;
 /// The only default there is. A client that was not told a name is holding this one.
 pub const DEFAULT_SESSION: &str = "default";
 
-/// What a session name may be. It becomes a filename, so the law is the filesystem's
-/// and the argv's at once: one to sixty-four of `[A-Za-z0-9_-]`, and the first is not
-/// `-`, because an argument that looks like a flag is not a name the parser can tell it
-/// apart from one.
+/// What a session name may be: one to sixty-four characters, none of them a control
+/// character, and the first not `-`.
+///
+/// It used to be the filesystem's law as well, because the name was a filename — one socket
+/// per session, named after it. It is not one any more: there is one socket for the server and
+/// a name is a key in a map and a word on a screen. So the law is what those two need. `-`
+/// first, because an argument that looks like a flag is not a name the parser can tell apart
+/// from one; no control characters, because a name is printed by `ls`, drawn in a sidebar and
+/// written into a log, and a name carrying `ESC` would be writing escape sequences into all
+/// three. Everything else is allowed, 日本語 included.
 pub fn validate_session_name(name: &str) -> Result<(), String> {
-    let bytes = name.as_bytes();
-    if bytes.is_empty() || bytes.len() > 64 {
+    let chars = name.chars().count();
+    if chars == 0 || chars > 64 {
         return Err(format!(
             "session name '{name}' is not one to sixty-four characters long"
         ));
     }
-    if bytes[0] == b'-' {
+    if name.starts_with('-') {
         return Err(format!("session name '{name}' may not start with '-'"));
     }
-    if !bytes
-        .iter()
-        .all(|b| b.is_ascii_alphanumeric() || *b == b'-' || *b == b'_')
-    {
+    if let Some(bad) = name.chars().find(|c| c.is_control()) {
         return Err(format!(
-            "session name '{name}' may only use letters, digits, '-' and '_'"
+            "session name '{name}' may not hold a control character (U+{:04X})",
+            bad as u32
         ));
     }
     Ok(())
@@ -257,15 +261,37 @@ mod tests {
         move |key| (key == "XDG_RUNTIME_DIR").then(|| value.clone()).flatten()
     }
 
+    /// A name is a word a person types and reads, and no longer a filename. What is left of
+    /// the law is what the command line and the screen need.
     #[test]
-    fn a_name_is_a_lawful_filename_and_nothing_more() {
-        for name in ["work", "default", "a", "a-b_c9", &"x".repeat(64)] {
+    fn a_name_is_a_word_a_person_can_type_and_read() {
+        for name in [
+            "work",
+            "default",
+            "a",
+            "a-b_c9",
+            "作業",
+            "web-dashboard",
+            "a b",
+            "a/b",
+            "émile",
+            &"x".repeat(64),
+            &"あ".repeat(64),
+        ] {
             assert!(validate_session_name(name).is_ok(), "{name}");
         }
-        for name in ["", &"x".repeat(65), "a:b", "a/b", "a b", "-lead", "a..b"] {
+        for name in [
+            "",
+            &"x".repeat(65),
+            &"あ".repeat(65),
+            "-lead",
+            "a\nb",
+            "a\x1b[31mb",
+            "a\tb",
+        ] {
             assert!(
                 validate_session_name(name).is_err(),
-                "{name} should be refused"
+                "{name:?} should be refused"
             );
         }
     }

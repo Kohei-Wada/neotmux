@@ -453,6 +453,14 @@ mod tests {
 
     #[test]
     fn one_positional_is_the_session_it_attaches() {
+        let cli = parse_args(args(&["作業"]));
+        assert_eq!(
+            cli.session.as_deref(),
+            Some("作業"),
+            "a name is a word a person types, not a filename"
+        );
+        assert!(cli.refusal.is_none());
+
         let cli = parse_args(args(&["work"]));
         assert!(matches!(cli.action, Action::Attach));
         assert_eq!(cli.session.as_deref(), Some("work"));
@@ -490,9 +498,9 @@ mod tests {
         // a name it could not confirm must not fall back to `default`, which is the one
         // case the Review Focus says is dangerous.
         let cases: &[&[&str]] = &[
-            ["kill", "a:b"].as_slice(),
+            ["kill", "a\nb"].as_slice(),
             ["kill", "-lead"].as_slice(),
-            ["a:b"].as_slice(),
+            ["a\u{1b}[31mb"].as_slice(),
             ["kill", ""].as_slice(),
         ];
         for case in cases {

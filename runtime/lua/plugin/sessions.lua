@@ -63,11 +63,23 @@ local mode_handle = nil
 -- `ctx` belongs to a tick.
 local area = nil
 
--- A name a session may have, one character at a time: the host refuses anything else, so
--- refusing it here is the difference between a key that does nothing and an op that is logged
--- as a mistake.
+-- A name a session may have, one character at a time.
+--
+-- A key spec is either one character or a word — `Enter`, `Esc`, `C-x` — so one character is
+-- the whole of the test, counted in codepoints rather than bytes: あ is one character and
+-- three bytes, and a name may hold it. The host refuses `-` at the front and anything that is
+-- not printable; refusing those here is the difference between a key that does nothing and an
+-- op that is logged as a mistake.
 local function nameable(key)
-  return #key == 1 and key:match("[A-Za-z0-9_-]") ~= nil
+  if utf8.len(key) ~= 1 then
+    return false
+  end
+  if key == "-" and state.typing == "" then
+    return false
+  end
+  -- Control characters arrive under their own names, never as themselves, so anything one
+  -- character long that got this far is printable.
+  return true
 end
 
 -- What a session is doing: how many panes it has, and what the one somebody is looking at is

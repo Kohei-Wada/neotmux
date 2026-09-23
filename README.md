@@ -38,19 +38,21 @@ status line shipped as a plugin rather than built in.
 
 Detach and attach are in. `C-b d` (or `neotmux.detach()`) leaves the session running and
 exits the client; running `neotmux` again finds it and attaches instead of starting a new
-one. `neotmux kill` ends a session from outside, for the case where a rebuilt client can no
-longer talk to it at all. A re-attach is a plugin restart: the panes, the shells, the layout
-and each pane's scrollback are the server's and survive; a plugin's own state — a copy
-register, a raised mode, a folded sidebar — is the client's and does not, and the plugin
-re-makes it when it loads. More than one session is in: `neotmux work` starts it and a
-second `neotmux work` attaches to it, `ls` lists the running ones and `kill [name]` ends
-one of them. The name is a filename — one to sixty-four characters of letters, digits, `-` and `_`, none first. `neotmux
---kill` was its old spelling for one session; it is `kill` now, and `kill [name]` for the
-named ones. Two terminals can be in one session at once: a key typed on either reaches the same
-pane, and each keeps its own copy of the plugins' state — which is to say, its own
-copy mode, its own floats — and the one it does not keep is the session's. The
-surface the bands are taken from is the session's too: the last terminal to attach is
-the one whose bands the session was told to be.
+one. Nothing is lost to a detach: the panes, the shells, the layout, each pane's scrollback
+*and the plugins* are the server's. A plugin keeps ticking while no terminal is attached,
+which is what makes it possible to write one that watches a long-running job, and a copy
+register or a raised mode is still there when you come back.
+
+More than one session is in, and they live in one server behind one socket. `neotmux work`
+starts that session or attaches to it, `ls` lists them, `kill [name]` ends one and the server
+goes when its last session does. A name is a word a person types and reads rather than a
+filename — one to sixty-four characters, none of them a control character, and not `-` first,
+so `作業` is a session name. The shipped picker on `C-b s` lists every session with what it is
+running and makes, switches to or ends one.
+
+Two terminals can be in one session at once: a key typed on either reaches the same pane, and
+both see the same plugin state, because there is one Lua layer for the server and the modes,
+floats and bands it holds belong to the session rather than to whoever is looking at it.
 
 Copy mode is in, as a plugin: `C-b [` reads back over a pane's scrollback, selects a
 region and yanks it. What is still out is the pane's *own* view moving — the plugin

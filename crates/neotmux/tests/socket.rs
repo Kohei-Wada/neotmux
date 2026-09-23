@@ -1101,3 +1101,34 @@ fn ending_one_session_leaves_the_other_typing_into_its_own_shell() {
     client.send("after-the-kill\r");
     client.wait_for_output("after-the-kill");
 }
+
+/// A session name is a word a person types and reads, and no longer a filename: the socket is
+/// the server's and the name is a key in a map. So it may be in whatever language the person
+/// thinks in.
+#[test]
+fn a_session_can_be_named_in_japanese() {
+    let runtime = TestRuntime::new();
+    let layer = layer_with(&[(
+        "init.lua",
+        "local said = {}\n\
+         neotmux.on_tick(function()\n\
+           local line = 'in ' .. neotmux.session.current()\n\
+           if not said[line] then\n\
+             said[line] = true\n\
+             neotmux.log.info(line)\n\
+           end\n\
+         end)\n\
+         neotmux.keymap.set('C-y', function()\n\
+           neotmux.session.create('作業')\n\
+           neotmux.session.switch('作業')\n\
+           return true\n\
+         end)\n",
+    )]);
+
+    let mut client = Client::start_with_prefix_and_layer(runtime.path(), "/bin/cat", layer.path());
+    wait_for_socket(&socket_in(runtime.path()));
+    wait_for_log(runtime.path(), "in default");
+
+    client.send("\x19"); // C-y
+    wait_for_log(runtime.path(), "in 作業");
+}
