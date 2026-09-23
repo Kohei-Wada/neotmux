@@ -48,8 +48,9 @@ one of them. The name is a filename — one to sixty-four characters of letters,
 --kill` was its old spelling for one session; it is `kill` now, and `kill [name]` for the
 named ones. Two terminals can be in one session at once: a key typed on either reaches the same
 pane, and each keeps its own copy of the plugins' state — which is to say, its own
-copy mode, its own bands, its own floats — and the one it does not keep is the
-session's.
+copy mode, its own floats — and the one it does not keep is the session's. The
+surface the bands are taken from is the session's too: the last terminal to attach is
+the one whose bands the session was told to be.
 
 Copy mode is in, as a plugin: `C-b [` reads back over a pane's scrollback, selects a
 region and yanks it. What is still out is the pane's *own* view moving — the plugin
