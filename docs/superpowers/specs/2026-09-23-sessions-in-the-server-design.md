@@ -22,7 +22,7 @@ Measured against that, neotmux has two of the four:
 | sessions live in a daemon and survive disconnect | yes |
 | the daemon watches what a session is doing while nobody is looking | yes, since the Lua layer moved into the server |
 | an agent drives its pane through an API rather than through keys | no — `2026-09-23-lua-on-the-server-design.md` §9, not built |
-| all the sessions in one view, and a way into any of them | no |
+| all the sessions in one view, and a way into any of them | half: they are all in one server and `ls` lists them, but the view and the way in are Lua's, and Lua cannot ask yet |
 
 The fourth is this spec. And the fourth is not "a list of names": a list of names is
 `neotmux ls`, which already exists and is not herdr. What makes it herdr is that the row for
@@ -293,7 +293,12 @@ So the internals go first and the socket goes with N sessions:
 1. **The word, with one session.** `SessionId`, the map, the ambient binding, ops tagged.
    Nothing observable changes. Done, in `plans/2026-09-23-the-word-session.md`.
 2. **The socket, the CLI and N sessions**, in one step, so the two-name behaviour moves from
-   two servers to two sessions in one server rather than being absent in between.
+   two servers to two sessions in one server rather than being absent in between. Done, in
+   `plans/2026-09-24-one-server-many-sessions.md`. `Attach` carries the name the client asked
+   for; the wire gained `List` and `Kill` up and `Sessions` and `Killed` down, which §6's
+   table does not list because they are asked at the door rather than by a client;
+   `neotmux.session_name()` answers the session whose dispatch is running, and `nil` during a
+   load.
 3. **`neotmux.session.*`**, including `with`, and the sidebar that uses it.
 
 ## 12. Tests
