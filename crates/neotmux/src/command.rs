@@ -63,7 +63,7 @@ pub fn unknown(name: &str) -> Ran {
 /// `Serving` and the frame loop already hold.
 pub struct Ctx<'a> {
     pub sessions: &'a mut Sessions,
-    pub plugins: &'a Plugins,
+    pub plugins: &'a mut Plugins,
     pub terminals: &'a Rc<PaneTerminals>,
     pub waker: &'a Waker,
     pub clients: &'a mut Vec<Attached>,
@@ -247,21 +247,32 @@ fn send(args: &[String], session: Option<&str>, ctx: &mut Ctx<'_>) -> Ran {
         return Ran::failed("usage: neotmux send <pane> <text> [--enter]");
     }
     let (text, enter) = split_enter(rest);
-    let mut bytes = text.into_bytes();
+    let mut bytes = text.clone().into_bytes();
     if enter {
         bytes.push(b'\r');
     }
     // Pane ids are the server's, so the pane is looked for in every session rather than in the
     // one `-t` named — which is why `send` takes no `-t` at all.
     for id in ctx.sessions.ids() {
+        let holds = match ctx.sessions.get_mut(id) {
+            Some(session) => session.holds_pane(pane),
+            None => continue,
+        };
+        if !holds {
+            continue;
+        }
+        // Asked once the owner is known, so a refusal names a pane that exists and a write
+        // to a pane that does not is still the "no pane" answer it was.
+        if let Err(why) = ctx.plugins.check_write(id, pane, &text, "tool") {
+            return Ran::failed(why);
+        }
         let Some(session) = ctx.sessions.get_mut(id) else {
             continue;
         };
-        match session.write_to_pane(pane, &bytes) {
-            Ok(true) => return Ran::ok(Vec::new()),
-            Ok(false) => continue,
-            Err(err) => return Ran::failed(format!("could not write to %{}: {err:#}", pane.get())),
-        }
+        return match session.write_to_pane(pane, &bytes) {
+            Ok(_) => Ran::ok(Vec::new()),
+            Err(err) => Ran::failed(format!("could not write to %{}: {err:#}", pane.get())),
+        };
     }
     Ran::failed(format!("no pane %{}", pane.get()))
 }
@@ -385,7 +396,7 @@ mod tests {
         let layers = neotmux_lua::runtime::Layers::default();
         let terminals = Rc::new(PaneTerminals::new());
         let lua = neotmux_lua::LuaSubsystem::build(layers, terminals.clone()).expect("lua");
-        let plugins = Plugins::new(lua);
+        let mut plugins = Plugins::new(lua);
         let mut sessions = Sessions::default();
         let waker = neotmux_term::wakeup::wakeup().expect("wakeup").1;
         let mut clients: Vec<Attached> = Vec::new();
@@ -399,7 +410,7 @@ mod tests {
             let args = if *name == "new" { &bad_name } else { &empty };
             let mut ctx = Ctx {
                 sessions: &mut sessions,
-                plugins: &plugins,
+                plugins: &mut plugins,
                 terminals: &terminals,
                 waker: &waker,
                 clients: &mut clients,

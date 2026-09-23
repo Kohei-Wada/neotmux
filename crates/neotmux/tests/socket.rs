@@ -1384,6 +1384,75 @@ fn send_reaches_the_pane_and_capture_reads_it_back() {
     assert!(seen.contains("from-outside"), "{seen}");
 }
 
+/// The agent path, guarded: a plugin refuses the write, the command fails saying why, and
+/// the shell never saw it.
+#[test]
+fn a_plugin_can_refuse_a_write_from_the_command_line() {
+    let runtime = TestRuntime::new();
+    let layer = layer_with(&[(
+        "init.lua",
+        "neotmux.on_write(function(write)
+           if write.text:find('BLOCKED') then
+             return false, 'BLOCKED is blocked'
+           end
+         end)",
+    )]);
+    let client = Client::start_with(runtime.path(), "/bin/cat", 24, 80, &[layer.path()]);
+    wait_for_socket(&socket_in(runtime.path()));
+
+    let refused = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .args(["send", "%1", "BLOCKED-LINE", "--enter"])
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run send");
+    assert!(!refused.status.success());
+    let said = String::from_utf8_lossy(&refused.stderr);
+    assert!(said.contains("BLOCKED is blocked"), "{said}");
+
+    // And the one that is not blocked still arrives, so the refusal is a decision rather
+    // than the path being broken.
+    let sent = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .args(["send", "%1", "ALLOWED-LINE", "--enter"])
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run send");
+    assert!(
+        sent.status.success(),
+        "{}",
+        String::from_utf8_lossy(&sent.stderr)
+    );
+    client.wait_for_output("ALLOWED-LINE");
+    drop(client);
+}
+
+/// Fail closed, end to end: the handler is broken, so the write does not happen.
+#[test]
+fn a_write_handler_that_raises_refuses_the_write() {
+    let runtime = TestRuntime::new();
+    let layer = layer_with(&[(
+        "init.lua",
+        "neotmux.on_write(function() error('the guard is broken') end)",
+    )]);
+    let client = Client::start_with(runtime.path(), "/bin/cat", 24, 80, &[layer.path()]);
+    wait_for_socket(&socket_in(runtime.path()));
+
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .args(["send", "%1", "NEVER-ARRIVES", "--enter"])
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run send");
+    drop(client);
+    assert!(!out.status.success());
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("the guard is broken"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
 #[test]
 fn send_to_a_pane_that_is_not_there_fails() {
     let runtime = TestRuntime::new();

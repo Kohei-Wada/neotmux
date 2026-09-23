@@ -12,7 +12,7 @@
 use std::collections::BTreeMap;
 
 use neotmux_lua::ops::Op;
-use neotmux_lua::{KeyOutcome, LuaSubsystem};
+use neotmux_lua::{KeyOutcome, LuaSubsystem, WriteVerdict};
 use neotmux_proto::msg::{SessionOp, Step, Tick, Tock};
 use neotmux_proto::{Key, Level, PaneId, SessionId};
 use std::time::Instant;
@@ -61,6 +61,31 @@ impl Plugins {
     /// Everything raised this session, for replaying on stderr once the terminal is back.
     pub fn notifications(&self) -> &Notifications {
         &self.notifications
+    }
+
+    /// The one place a write is checked, and the one place a refusal is announced.
+    ///
+    /// With nothing listening this is a registry lookup and no more, which is what keeps a
+    /// server whose layers register no handler on exactly the path it has today.
+    pub fn check_write(
+        &mut self,
+        session: SessionId,
+        pane: PaneId,
+        text: &str,
+        from: &str,
+    ) -> Result<(), String> {
+        if !self.lua.has_write_hooks() {
+            return Ok(());
+        }
+        match self.lua.dispatch_write(session, pane, text, from) {
+            WriteVerdict::Pass => Ok(()),
+            WriteVerdict::Refused(why) => {
+                let said = format!("write to {pane} refused: {why}");
+                logging::log(Level::Warn, "neotmux", &said);
+                self.notifications.push(Level::Warn, "neotmux", &said);
+                Err(why)
+            }
+        }
     }
 
     /// Offers a key to the plugins. `Fallthrough` means nobody wanted it, and it belongs to

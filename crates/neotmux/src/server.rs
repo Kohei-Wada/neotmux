@@ -757,7 +757,7 @@ pub(crate) fn setup_for(plugins: &Plugins, size: Size) -> Setup {
 fn answer(
     link: &mut Link,
     ask: Ask,
-    plugins: &Plugins,
+    plugins: &mut Plugins,
     sessions: &mut Sessions,
     clients: &mut Vec<Attached>,
     serving: &Serving<'_>,

@@ -183,6 +183,12 @@ impl Session {
         rows
     }
 
+    /// Whether this session holds the pane, so its owner can be found before anything is
+    /// written to it.
+    pub fn holds_pane(&self, pane: PaneId) -> bool {
+        self.windows.all_panes().any(|held| held == pane)
+    }
+
     /// Bytes into a pane's shell, as though they had been typed at it. `false` is a pane this
     /// session does not hold, which is the caller's cue to ask another one: pane ids are the
     /// server's, not a session's.
