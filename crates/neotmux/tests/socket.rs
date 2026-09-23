@@ -1034,3 +1034,70 @@ fn the_sidebar_knows_every_session_and_c_b_s_moves_between_them() {
     client.send("s");
     wait_for_log(runtime.path(), "second sees default,second");
 }
+
+/// The session picker, end to end: `C-b s` opens it, `c` names a session and Enter makes it
+/// and goes there, and `d` on another row ends that one. All of it Lua, over the API the
+/// server exposes and does not itself use.
+#[test]
+fn the_picker_makes_a_session_switches_to_it_and_ends_one() {
+    let runtime = TestRuntime::new();
+    let layer = layer_with(&[(
+        "init.lua",
+        "local said = {}\n\
+         neotmux.on_tick(function()\n\
+           local line = neotmux.session.current() .. ' sees ' .. table.concat(neotmux.session.list(), ',')\n\
+           if not said[line] then\n\
+             said[line] = true\n\
+             neotmux.log.info(line)\n\
+           end\n\
+         end)\n",
+    )]);
+
+    let mut client = Client::start_with_prefix_and_layer(runtime.path(), "/bin/cat", layer.path());
+    wait_for_socket(&socket_in(runtime.path()));
+    wait_for_log(runtime.path(), "default sees default");
+
+    // C-b s, then `c`, a name, and Enter: made and moved into.
+    client.send("\x02s");
+    client.send("cbuild\r");
+    wait_for_log(runtime.path(), "build sees build,default");
+
+    // And from there, `d` on the row above ends the one this client is not in.
+    client.send("\x02s");
+    client.send("kd");
+    wait_for_log(runtime.path(), "build sees build");
+}
+
+/// Two sessions in one server are two sets of panes. They were not: a pane's terminal state is
+/// looked up by id out of one table for the whole server, and every session numbered its panes
+/// from one — so the second session's first pane *was* the first session's, and ending either
+/// closed the other's shell under it.
+#[test]
+fn ending_one_session_leaves_the_other_typing_into_its_own_shell() {
+    let runtime = TestRuntime::new();
+    let layer = layer_with(&[(
+        "init.lua",
+        "neotmux.keymap.set('C-y', function()\n\
+           neotmux.session.create('second')\n\
+           neotmux.session.switch('second')\n\
+           return true\n\
+         end)\n\
+         neotmux.keymap.set('C-g', function()\n\
+           neotmux.session.kill('default')\n\
+           return true\n\
+         end)\n",
+    )]);
+
+    let mut client = Client::start_with_prefix_and_layer(runtime.path(), "/bin/cat", layer.path());
+    wait_for_socket(&socket_in(runtime.path()));
+    client.send("in-default\r");
+    client.wait_for_output("in-default");
+
+    client.send("\x19"); // C-y: a second session, and into it
+    client.send("in-second\r");
+    client.wait_for_output("in-second");
+
+    client.send("\x07"); // C-g: end the one we are not in
+    client.send("after-the-kill\r");
+    client.wait_for_output("after-the-kill");
+}

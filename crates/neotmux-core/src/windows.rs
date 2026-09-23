@@ -46,21 +46,40 @@ struct Window {
 /// assigned, and is resurfaced only when it becomes current. That is what keeps a hidden
 /// window off the frame's bill — a terminal resize costs one reassignment, not one per
 /// window — and it is why `show` takes the surface rather than reading one.
+/// Pane ids, handed out and never reused.
+///
+/// Shared rather than owned, because the reason two windows must not number their panes apart
+/// is the reason two *sessions* must not either: one server holds them all, a pane's terminal
+/// state is looked up by id, and `pane.focus(id)` naming two panes is the same bug whichever
+/// two trees it is spread over.
+#[derive(Clone, Default)]
+pub struct PaneIds(std::rc::Rc<std::cell::Cell<u32>>);
+
+impl PaneIds {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn take(&self) -> PaneId {
+        let next = self.0.get() + 1;
+        self.0.set(next);
+        PaneId::from(next)
+    }
+}
+
 pub struct Windows {
     entries: Vec<Window>,
     current: usize,
-    /// Handed out across every window, never reused. Two trees numbering their panes
-    /// apart would make `pane.focus(id)` name two panes, and a hidden pane is still a pane.
-    next_pane: u32,
+    ids: PaneIds,
 }
 
 impl Windows {
     /// The session's first window, with its first pane.
-    pub fn new(id: WindowId, surface: Surface) -> (Self, PaneId) {
+    pub fn new(id: WindowId, surface: Surface, ids: PaneIds) -> (Self, PaneId) {
         let mut windows = Self {
             entries: Vec::new(),
             current: 0,
-            next_pane: 1,
+            ids,
         };
         let first = windows.push(id, surface);
         (windows, first)
@@ -89,9 +108,7 @@ impl Windows {
     }
 
     pub fn take_pane_id(&mut self) -> PaneId {
-        let pane = PaneId::from(self.next_pane);
-        self.next_pane += 1;
-        pane
+        self.ids.take()
     }
 
     /// Every window in creation order, with its panes in layout order. A hidden window's
@@ -234,12 +251,12 @@ mod tests {
     }
 
     fn windows() -> Windows {
-        Windows::new(ws(1), surface()).0
+        Windows::new(ws(1), surface(), PaneIds::new()).0
     }
 
     #[test]
     fn the_session_starts_with_one_window_holding_one_pane() {
-        let (windows, first) = Windows::new(ws(1), surface());
+        let (windows, first) = Windows::new(ws(1), surface(), PaneIds::new());
         assert_eq!(ids(&windows), vec![ws(1)]);
         assert_eq!(windows.current_id(), ws(1));
         assert_eq!(windows.current().focus(), Some(first));
@@ -247,7 +264,7 @@ mod tests {
 
     #[test]
     fn pane_ids_do_not_collide_across_windows() {
-        let (mut windows, first) = Windows::new(ws(1), surface());
+        let (mut windows, first) = Windows::new(ws(1), surface(), PaneIds::new());
         let split = windows.take_pane_id();
         windows
             .current_mut()
@@ -273,7 +290,7 @@ mod tests {
     /// panes it holds, in the order they are laid out.
     #[test]
     fn a_hidden_windows_panes_are_reported_in_layout_order() {
-        let (mut windows, first) = Windows::new(ws(1), surface());
+        let (mut windows, first) = Windows::new(ws(1), surface(), PaneIds::new());
         let hidden = windows.create(ws(2), surface());
         let split = windows.take_pane_id();
         windows.show(ws(2), surface());
@@ -292,7 +309,7 @@ mod tests {
     /// What `pane.info` is sampled over: the panes of every window, not the shown one's.
     #[test]
     fn every_window_contributes_its_panes() {
-        let (mut windows, first) = Windows::new(ws(1), surface());
+        let (mut windows, first) = Windows::new(ws(1), surface(), PaneIds::new());
         let hidden = windows.create(ws(2), surface());
         let split = windows.take_pane_id();
         windows
@@ -331,7 +348,7 @@ mod tests {
 
     #[test]
     fn closing_a_pane_with_a_sibling_leaves_the_window_alone() {
-        let (mut windows, first) = Windows::new(ws(1), surface());
+        let (mut windows, first) = Windows::new(ws(1), surface(), PaneIds::new());
         let split = windows.take_pane_id();
         windows
             .current_mut()
@@ -347,7 +364,7 @@ mod tests {
 
     #[test]
     fn closing_the_last_pane_of_the_shown_window_closes_it_and_shows_another() {
-        let (mut windows, first) = Windows::new(ws(1), surface());
+        let (mut windows, first) = Windows::new(ws(1), surface(), PaneIds::new());
         windows.create(ws(2), surface());
 
         let closed = windows.close_pane(first, surface()).expect("known pane");
@@ -371,7 +388,7 @@ mod tests {
 
     #[test]
     fn closing_the_last_window_leaves_nothing() {
-        let (mut windows, first) = Windows::new(ws(1), surface());
+        let (mut windows, first) = Windows::new(ws(1), surface(), PaneIds::new());
         assert!(windows.close_pane(first, surface()).is_some());
         assert!(windows.is_empty());
     }

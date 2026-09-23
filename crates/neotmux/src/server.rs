@@ -26,6 +26,7 @@ use neotmux_proto::msg::{Attach, Done, End, ToClient, ToServer};
 use neotmux_proto::wire;
 use neotmux_proto::{Level, SessionId, Size};
 
+use neotmux_core::windows::PaneIds;
 use neotmux_term::terminals::PaneTerminals;
 use neotmux_term::wakeup::{Waker, Wakeup, wakeup};
 
@@ -91,6 +92,10 @@ struct Attached {
 struct Sessions {
     live: BTreeMap<SessionId, Held>,
     next: u32,
+    /// Handed to every session this server makes. A pane's terminal state is looked up by id
+    /// out of one table for the whole server, so two sessions numbering their panes apart
+    /// would have them sharing a shell — and ending one would close the other's.
+    panes: PaneIds,
 }
 
 /// One session and the name it answers to.
@@ -554,7 +559,13 @@ fn apply_server_ops(
                 else {
                     continue;
                 };
-                match Session::new(&setup_for(plugins, size), waker.clone(), terminals.clone()) {
+                let made = Session::new(
+                    &setup_for(plugins, size),
+                    waker.clone(),
+                    terminals.clone(),
+                    sessions.panes.clone(),
+                );
+                match made {
                     Ok(session) => {
                         let id = sessions.mint();
                         sessions.live.insert(
@@ -710,7 +721,12 @@ fn admit(
                 id,
                 Held {
                     name: attach.session.clone(),
-                    session: Session::new(&setup, waker.clone(), terminals.clone())?,
+                    session: Session::new(
+                        &setup,
+                        waker.clone(),
+                        terminals.clone(),
+                        sessions.panes.clone(),
+                    )?,
                 },
             );
             plugins.lua().name_session(id, &attach.session);

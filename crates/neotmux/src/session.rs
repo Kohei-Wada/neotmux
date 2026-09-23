@@ -19,7 +19,7 @@ use crate::logging;
 use crate::paneinfo::PaneInfoCache;
 use crate::procinfo;
 use crate::shells::Shells;
-use neotmux_core::windows::{Shown, Surface, Windows};
+use neotmux_core::windows::{PaneIds, Shown, Surface, Windows};
 use neotmux_proto::frame::{Frame, Notice, PaneFrame};
 use neotmux_proto::keys::Key;
 
@@ -94,14 +94,19 @@ impl Session {
     /// Starts the session a client has just asked for. The size is the client's, because the
     /// terminal is; the reservations, the gutter and the first window's id are the Lua
     /// layer's, and reach here through whoever can see it.
-    pub fn new(setup: &Setup, waker: Waker, terminals: Rc<PaneTerminals>) -> anyhow::Result<Self> {
+    pub fn new(
+        setup: &Setup,
+        waker: Waker,
+        terminals: Rc<PaneTerminals>,
+        pane_ids: PaneIds,
+    ) -> anyhow::Result<Self> {
         let surface = Surface {
             size: clamp_to_min_grid(setup.size),
             reserved: setup.reserved,
             gutter: setup.gutter,
             minimum: neotmux_term::state::MIN_GRID,
         };
-        let (windows, first) = Windows::new(setup.first_window, surface);
+        let (windows, first) = Windows::new(setup.first_window, surface, pane_ids);
         let mut shells = Shells::new(waker, terminals.clone());
         // The session's own directory: the server is a grandchild of the directory neotmux
         // was started from, and `start_dir` cannot be asked for it yet — there is no pane
@@ -810,7 +815,7 @@ mod tests {
             gutter: 0,
             minimum: neotmux_term::state::MIN_GRID,
         };
-        let (windows, first) = Windows::new(WindowId::from(1), surface);
+        let (windows, first) = Windows::new(WindowId::from(1), surface, PaneIds::new());
         assert_eq!(
             pane_size(windows.rect(first), first).expect("the first pane has a rect"),
             size
