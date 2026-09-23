@@ -940,25 +940,31 @@ costs one plugin one frame instead of costing you the program.
 
 ## The shipped defaults
 
-neotmux ships seven plugins in the runtime layer an install puts on the search path:
+neotmux ships eight plugins in the runtime layer an install puts on the search path:
 
 | plugin | what it does |
 |---|---|
 | `status` | the default status bar, on one reserved top row |
 | `prefix` | a `C-b` prefix over `v`, `-`, `o`, `h/j/k/l`, `r`, `c`, `n`, `p` and `[` |
 | `copy` | copy mode: read back over a pane's scrollback, select a region, yank it |
+| `sessions` | the session picker on `C-b s`: every session and what it is running, `Enter` to go, `c` to make one, `d` to end one |
 | `borders` | a rule along every boundary between two panes |
 | `watch` | says which pane looks like it is waiting for you — **off by default** |
 | `sidebar` | the windows and their panes, down a reserved left band, folded by `C-b b` — **off by default** |
 | `footer` | whichever mode is raised through `neotmux.mode`, on one reserved bottom row — **off by default** |
 
-None of them is a host feature — all seven are ordinary files making ordinary API calls, and
+None of them is a host feature — all eight are ordinary files making ordinary API calls, and
 the prefix is the only reason a fresh install can make a second pane at all. `C-b v` splits
 vertically (the panes end up side by side, because `pane.split('vertical')` divides the
 width), `C-b -` splits horizontally (one above the other), `C-b o` focuses the next pane,
 `C-b h/j/k/l` focuses the pane to the left, below, above or to the right, `C-b r` enters
-resize mode, `C-b [` enters copy mode, `C-b c` opens a window and switches to it, and `C-b n` and `C-b p`
+resize mode, `C-b [` enters copy mode, `C-b s` opens the session picker, `C-b c` opens a window
+and switches to it, and `C-b n` and `C-b p`
 walk to the next window and the one before, each wrapping around.
+
+Every mode moves with `j`/`k` (and `h`/`l` where sideways means anything): one spelling across
+the picker, copy mode, pane focus and resize, so a hand that has learned one has learned all of
+them. The arrows are deliberately not bound.
 With the sidebar on, `C-b b` folds it — the sidebar adds that one itself, since it is the
 optional plugin and the prefix is the standard one.
 
@@ -968,7 +974,7 @@ There is no wrapping — at the edge of the window the key does nothing, and `o`
 for walking every pane in turn.
 
 Resize mode is a flag in the plugin and an `on_key`, like the prefix itself; the host has no
-idea it exists. In it, the arrows and `h/j/k/l` move the boundary one cell at a time
+idea it exists. In it, `h/j/k/l` move the boundary one cell at a time
 (`require('plugin.prefix').resize_step` sets how far), and the first key that is not one of
 them leaves — `Esc` and `Enter` being the two that mean nothing else. Both the armed prefix and
 resize mode raise their own name in `neotmux.mode` for as long as they are up — see
@@ -1203,6 +1209,29 @@ columns would push every name on its row across by one.
 The **width** is not in that table. It is a `local` at the top of the file, because the
 reservation is made once while the file is being required and the host is never told a band
 changed width. Edit it there, or leave the sidebar off.
+
+### The box convention
+
+The host draws nothing into a float: it hands you a rect and a coordinate space, and the cells
+are yours. So a window that reads as a window — a line round it, its content held off the edge —
+is a convention, and `neotmux.box` is where the shipped one lives, in the same spirit as
+`neotmux.mode`.
+
+```lua
+local box = require('neotmux.box')
+
+neotmux.on_tick(function(ctx)
+  local rect = ctx:float_rect(win)
+  if not rect then return end
+  local inner = box.draw(ctx, win, rect, { title = 'sessions' })
+  ctx:text(win, inner.x, inner.y, 'the first row of your content')
+end)
+```
+
+`draw` fills the rect, puts a frame with rounded corners on its edge, and hands back the rect
+*inside* the frame, so the arithmetic is done once. `M.glyphs` and `M.colors` are read on every
+call, so an `init.lua` that wants square corners or another palette assigns to them. A float
+too small to hold a frame is filled and handed back whole rather than drawn over.
 
 ### The mode convention
 

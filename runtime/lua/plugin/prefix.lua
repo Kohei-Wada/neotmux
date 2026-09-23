@@ -16,7 +16,7 @@
 --   v  -        split the focused pane, side by side or stacked
 --   o           the next pane in layout order
 --   h j k l     the pane to the left, below, above, to the right
---   r           resize mode: arrows or h/j/k/l move the boundary, anything else leaves
+--   r           resize mode: h/j/k/l move the boundary, anything else leaves
 --   c  n  p     a new window, the next one, the one before
 --   d           leave the session running and let go of this terminal
 local nav = require("neotmux.nav")
@@ -60,17 +60,14 @@ end
 local next_window = step_window(1)
 local prev_window = step_window(-1)
 
--- A direction key, in both spellings a hand reaches for. `h/j/k/l` move the focus; the same
--- four, and the arrows, move a boundary once `r` has been pressed.
+-- A direction key. `h/j/k/l` move the focus, and the same four move a boundary once `r` has
+-- been pressed. The arrows are not here on purpose: one spelling, in every mode neotmux
+-- ships, is worth more than two in this one.
 local DIRECTIONS = {
   h = "left",
   j = "down",
   k = "up",
   l = "right",
-  Left = "left",
-  Down = "down",
-  Up = "up",
-  Right = "right",
 }
 
 -- The pane that way, or nothing at all: at the edge of the window `h` does nothing rather
@@ -90,7 +87,7 @@ end
 -- the height, which is what the glyph looks like.
 local M = {
   key = "C-b",
-  -- How many cells one press of an arrow moves the boundary.
+  -- How many cells one press moves the boundary.
   resize_step = 1,
   commands = {
     ["v"] = function()

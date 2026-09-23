@@ -269,7 +269,7 @@ fn resize_mode_adjusts_until_a_key_that_is_not_an_adjustment() {
     sub.dispatch_key(support::one(), "r");
     assert!(ops(&sub).is_empty(), "entering the mode is not an op");
 
-    for key in ["Left", "h", "Up"] {
+    for key in ["h", "h", "k"] {
         assert_eq!(sub.dispatch_key(support::one(), key), KeyOutcome::Consumed);
     }
     assert_eq!(

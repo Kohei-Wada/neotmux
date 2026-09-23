@@ -13,6 +13,10 @@ return {
   -- pane's cells, and a multiplexer that cannot read back over its own scrollback is missing
   -- the use of a buffer it is already keeping.
   copy = true,
+  -- With copy mode, and for the same bargain: it spends no screen space until you press the
+  -- key, and with more than one session going, a list of them with what each is running is
+  -- the thing you would otherwise be keeping in your head.
+  sessions = true,
   -- Off, unlike the rest: which output means a pane is waiting for a human is an opinion
   -- about what you run, and the other three are not.
   watch = false,
