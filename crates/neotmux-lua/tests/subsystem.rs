@@ -802,6 +802,28 @@ fn a_quit_called_through_pcall_is_attributed_to_the_calling_chunk() {
     assert_eq!(sub.sources().name(*id).as_deref(), Some("init"));
 }
 
+/// The budget's seal wraps `xpcall` beside `pcall`, putting a Lua frame where a C frame used
+/// to be. `source::caller` skips it, so the chunk that wrote the call is still the one blamed
+/// for it. `coroutine.resume` needs no such test: its wrapper's frame is on the calling
+/// thread, and what a resumed coroutine runs is attributed on its own.
+#[test]
+fn a_quit_called_through_xpcall_is_attributed_to_the_calling_chunk() {
+    let dir = layer(&[("init.lua", "xpcall(neotmux.quit, function(e) return e end)")]);
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
+    assert!(sub.run_init().is_empty());
+
+    let ops = sub.drain_ops();
+    let (id, _) = ops
+        .iter()
+        .find(|(_, op)| matches!(op, Op::Quit))
+        .expect("no quit op");
+    assert_eq!(sub.sources().name(*id).as_deref(), Some("init"));
+}
+
 #[test]
 fn a_log_call_from_inside_a_resumed_coroutine_is_attributed_to_its_chunk() {
     let dir = layer(&[

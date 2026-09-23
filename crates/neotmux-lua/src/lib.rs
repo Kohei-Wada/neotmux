@@ -110,6 +110,7 @@ impl LuaSubsystem {
 
         let overrun = Rc::new(Overrun::new());
         let budget = Budget::new(opts.clone());
+        Budget::seal(&lua, &budget).map_err(|err| anyhow::anyhow!("{err:#}"))?;
 
         let loading = api::install(
             &lua,
