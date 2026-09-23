@@ -884,3 +884,73 @@ fn resubscribe_returns_one_handle_for_each_tick_it_restored() {
     assert_eq!(notifications(&sub), vec!["2".to_string()]);
     assert_eq!(tick_owners(&sub).len(), 2);
 }
+
+/// A handler that never returns must not be able to hang neotmux, whichever entry point it
+/// was reached through. Before these regions were measured, `dispatch_key` never came back.
+#[test]
+fn a_key_handler_that_loops_for_ever_is_cut_off() {
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.spin')"),
+        (
+            "lua/plugin/spin.lua",
+            "neotmux.keymap.set('C-x', function() while true do end end) return {}",
+        ),
+    ]);
+
+    let started = std::time::Instant::now();
+    sub.dispatch_key("C-x");
+    let took = started.elapsed();
+
+    assert!(
+        took < std::time::Duration::from_secs(2),
+        "a spinning key handler ran for {took:?}"
+    );
+}
+
+#[test]
+fn an_event_handler_that_loops_for_ever_is_cut_off() {
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.spin')"),
+        (
+            "lua/plugin/spin.lua",
+            "neotmux.on_event('pane_output', function() while true do end end) return {}",
+        ),
+    ]);
+
+    let started = std::time::Instant::now();
+    sub.dispatch_event(&neotmux_proto::Event::PaneOutput {
+        pane: PaneId::from(1),
+        bytes: b"hello".to_vec(),
+    });
+    let took = started.elapsed();
+
+    assert!(
+        took < std::time::Duration::from_secs(2),
+        "a spinning event handler ran for {took:?}"
+    );
+}
+
+/// Parking takes away a *tick* subscription and announces "is no longer ticking". What
+/// overran here was not a tick, so the source keeps drawing.
+#[test]
+fn a_key_handler_that_overruns_does_not_cost_the_source_its_tick() {
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.spin')"),
+        (
+            "lua/plugin/spin.lua",
+            "neotmux.on_tick(function(ctx) ctx:text(nil, 0, 0, 'still here') end)
+             neotmux.keymap.set('C-x', function() while true do end end)
+             return {}",
+        ),
+    ]);
+
+    for _ in 0..8 {
+        sub.dispatch_key("C-x");
+    }
+    frame(&sub);
+
+    assert!(
+        texts(&sub).iter().any(|t| t == "still here"),
+        "a key overrun cost the source its tick"
+    );
+}

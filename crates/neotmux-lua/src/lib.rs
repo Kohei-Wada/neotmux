@@ -277,7 +277,8 @@ impl LuaSubsystem {
             let mark = self.ops.mark();
             // The budget is per source per frame, so it spans the whole group: a source that
             // has already spent its slice must not get a fresh one from its next callback.
-            self.budget.enter();
+            self.budget
+                .enter(Duration::from_millis(self.opts.borrow().tick_budget_ms));
             for id in ids {
                 let Some(callback) = self.registry.callback(id) else {
                     continue;
@@ -385,15 +386,42 @@ impl LuaSubsystem {
     ///
     /// Among the observers, the owners holding a live float are offered the key before the
     /// rest — topmost float first, registration order inside each owner (spec §5).
+    /// One measured region outside a frame: the hook is armed for it and taken away again, for
+    /// the reason `dispatch_tick` gives — an always-armed hook halves the interpreter.
+    ///
+    /// An overrun here is cut off and reported and that is all. Parking takes away a *tick*
+    /// subscription and announces "is no longer ticking", and what overran here was not a
+    /// tick. The report is anonymous because one region runs callbacks belonging to different
+    /// sources; whichever handler raised is named by the error path that ran it.
+    fn measured<T>(&self, run: impl FnOnce() -> T) -> T {
+        if let Err(err) = Budget::arm(&self.lua, &self.budget) {
+            self.report_text(source::ANONYMOUS, format!("the budget is off: {err}"));
+        }
+        let budget_ms = self.opts.borrow().tick_budget_ms;
+        self.budget.enter(Duration::from_millis(budget_ms));
+        let value = run();
+        let outcome = self.budget.leave();
+        self.budget.disarm(&self.lua);
+        if outcome != Outcome::WithinBudget {
+            self.report_text(
+                source::ANONYMOUS,
+                format!("a handler exceeded the {budget_ms} ms budget"),
+            );
+        }
+        value
+    }
+
     pub fn dispatch_key(&self, spec: &str) -> KeyOutcome {
         let Ok(normalised) = keymap::normalise(spec) else {
             return KeyOutcome::Fallthrough;
         };
 
-        if self.offer_key(&normalised) == KeyOutcome::Consumed {
-            return KeyOutcome::Consumed;
-        }
-        self.dispatch_binding(&normalised)
+        self.measured(|| {
+            if self.offer_key(&normalised) == KeyOutcome::Consumed {
+                return KeyOutcome::Consumed;
+            }
+            self.dispatch_binding(&normalised)
+        })
     }
 
     /// Every `on_key` callback, stopping at the first that consumes: the float owners in
@@ -504,29 +532,33 @@ impl LuaSubsystem {
             }
         };
 
-        for id in subscribers {
-            let Some(callback) = self.registry.callback(id) else {
-                continue;
-            };
-            let Some(owner) = self.registry.owner(id) else {
-                continue;
-            };
-            let Ok(func) = self.lua.registry_value::<Function>(&callback) else {
-                continue;
-            };
-            let table = match api::event::table(event, &self.lua, bytes.as_ref()) {
-                Ok(table) => table,
-                Err(err) => {
-                    let name = event.name();
-                    self.report_text(owner, format!("{name} payload was not built: {err}"));
+        // Measured from here: what is above is the host building a payload, and only what a
+        // subscriber does with it is the plugin's time.
+        self.measured(|| {
+            for id in subscribers {
+                let Some(callback) = self.registry.callback(id) else {
                     continue;
-                }
-            };
+                };
+                let Some(owner) = self.registry.owner(id) else {
+                    continue;
+                };
+                let Ok(func) = self.lua.registry_value::<Function>(&callback) else {
+                    continue;
+                };
+                let table = match api::event::table(event, &self.lua, bytes.as_ref()) {
+                    Ok(table) => table,
+                    Err(err) => {
+                        let name = event.name();
+                        self.report_text(owner, format!("{name} payload was not built: {err}"));
+                        continue;
+                    }
+                };
 
-            if let Err(err) = func.call::<()>(table) {
-                self.report(owner, &err);
+                if let Err(err) = func.call::<()>(table) {
+                    self.report(owner, &err);
+                }
             }
-        }
+        });
     }
 
     /// Whether anything is subscribed to an event. The host asks about `pane_output` before

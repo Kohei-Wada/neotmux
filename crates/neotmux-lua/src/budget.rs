@@ -78,17 +78,21 @@ impl Budget {
         })
     }
 
-    /// Opens one source's slice of one frame. Outside an `enter`/`leave` pair the hook does
-    /// nothing, so key and event dispatch are unmeasured — this is a *tick* budget.
+    /// Opens one measured region and starts its clock. Outside an `enter`/`leave` pair the
+    /// hook does nothing.
     ///
-    /// A slice is only measured if the frame armed a hook. A tick that raises the budget from
-    /// 0 mid-frame would otherwise give the sources after it a deadline with nothing watching
-    /// it: the loop that passes it is never interrupted and neotmux hangs.
-    pub fn enter(&self) {
+    /// The deadline is the caller's because the regions differ: a tick gets a frame's worth,
+    /// a config load gets far more. Whether anything is measured at all is still
+    /// `tick_budget_ms`, which is the documented way to switch the budget off.
+    ///
+    /// A region is only measured if a hook was armed for it. A tick that raises the budget
+    /// from 0 mid-frame would otherwise give the sources after it a deadline with nothing
+    /// watching it: the loop that passes it is never interrupted and neotmux hangs.
+    pub fn enter(&self, budget: Duration) {
         let measured = self.armed.get() && self.enabled();
         self.active.set(measured.then(|| Active {
             start: Instant::now(),
-            budget: Duration::from_millis(self.opts.borrow().tick_budget_ms),
+            budget,
         }));
         self.overran.set(false);
     }
@@ -190,6 +194,11 @@ mod tests {
 
     use super::*;
 
+    /// The deadline a test opens its region with, which is the number its helper configured.
+    fn ms(n: u64) -> Duration {
+        Duration::from_millis(n)
+    }
+
     fn armed(tick_budget_ms: u64) -> (Lua, Rc<Budget>) {
         let (lua, budget, _) = armed_with_opts(tick_budget_ms);
         (lua, budget)
@@ -224,7 +233,7 @@ mod tests {
         let slow = slow(&lua);
 
         opts.borrow_mut().tick_budget_ms = 1;
-        budget.enter();
+        budget.enter(ms(1));
         let result = slow.call::<i64>(());
         let outcome = budget.leave();
 
@@ -245,7 +254,7 @@ mod tests {
         let slow = slow(&lua);
 
         opts.borrow_mut().tick_budget_ms = 0;
-        budget.enter();
+        budget.enter(ms(0));
         let result = slow.call::<i64>(());
         let outcome = budget.leave();
 
@@ -264,7 +273,7 @@ mod tests {
             .eval()
             .unwrap();
 
-        budget.enter();
+        budget.enter(ms(5));
         let result = spin.call::<()>(());
         let outcome = budget.leave();
 
@@ -295,7 +304,7 @@ mod tests {
             .eval()
             .unwrap();
 
-        budget.enter();
+        budget.enter(ms(5));
         let result = spin.call::<()>(());
         let outcome = budget.leave();
 
@@ -333,7 +342,7 @@ mod tests {
             .eval()
             .unwrap();
 
-        budget.enter();
+        budget.enter(ms(0));
         let result = long.call::<i64>(());
         budget.leave();
 
@@ -350,7 +359,7 @@ mod tests {
             .eval()
             .unwrap();
 
-        budget.enter();
+        budget.enter(ms(1));
         let result = long.call::<i64>(());
         budget.leave();
 
@@ -366,7 +375,7 @@ mod tests {
             .eval()
             .unwrap();
 
-        budget.enter();
+        budget.enter(ms(5_000));
         let result = work.call::<i64>(());
         budget.leave();
 
@@ -396,7 +405,7 @@ mod tests {
         let (lua, budget) = sealed(5);
         let spin = spins_through(&lua, "pcall(function() end)");
 
-        budget.enter();
+        budget.enter(ms(5));
         let result = spin.call::<()>(());
         let outcome = budget.leave();
 
@@ -409,7 +418,7 @@ mod tests {
         let (lua, budget) = sealed(5);
         let spin = spins_through(&lua, "xpcall(function() end, function(e) return e end)");
 
-        budget.enter();
+        budget.enter(ms(5));
         let result = spin.call::<()>(());
         budget.leave();
 
@@ -424,7 +433,7 @@ mod tests {
             "local co = coroutine.create(function() end) coroutine.resume(co)",
         );
 
-        budget.enter();
+        budget.enter(ms(5));
         let result = spin.call::<()>(());
         budget.leave();
 
@@ -448,7 +457,7 @@ mod tests {
             .eval()
             .unwrap();
 
-        budget.enter();
+        budget.enter(ms(5));
         let result = spin.call::<()>(());
         budget.leave();
 
@@ -469,7 +478,7 @@ mod tests {
             .eval()
             .unwrap();
 
-        budget.enter();
+        budget.enter(ms(5_000));
         let (ok, message) = probe.call::<(bool, String)>(()).unwrap();
         budget.leave();
 
@@ -488,7 +497,7 @@ mod tests {
             .eval()
             .unwrap();
 
-        budget.enter();
+        budget.enter(ms(5_000));
         let (ok, first, second) = probe.call::<(bool, i64, i64)>(()).unwrap();
         budget.leave();
 
@@ -506,7 +515,7 @@ mod tests {
             .unwrap();
         let spin = spins_through(&lua, "pcall(function() end)");
 
-        budget.enter();
+        budget.enter(ms(5));
         let result = spin.call::<()>(());
         budget.leave();
 
@@ -519,13 +528,32 @@ mod tests {
         let (lua, budget) = sealed(5);
         let spin = spins_through(&lua, "pcall(function() end)");
 
-        budget.enter();
+        budget.enter(ms(5));
         let _ = spin.call::<()>(());
         assert_eq!(budget.leave(), Outcome::Interrupted);
 
         assert!(
             !budget.overran(),
             "the overrun outlived the region it belonged to"
+        );
+    }
+    /// The deadline is the caller's, so one VM can measure regions of different sizes — which
+    /// is what lets a config load have its own.
+    #[test]
+    fn a_region_is_measured_against_the_deadline_it_was_given() {
+        let (lua, budget) = sealed(5);
+        let spin = spins_through(&lua, "pcall(function() end)");
+
+        budget.enter(ms(200));
+        let started = Instant::now();
+        let result = spin.call::<()>(());
+        let took = started.elapsed();
+        budget.leave();
+
+        assert!(result.is_err());
+        assert!(
+            took >= ms(200),
+            "a 200 ms region was cut off after {took:?}"
         );
     }
 }
