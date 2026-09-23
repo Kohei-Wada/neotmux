@@ -8,13 +8,10 @@ mod tty;
 mod tui;
 
 use std::env;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::Context as _;
-use neotmux::plugins::Plugins;
-use neotmux::{logging, reads};
-use neotmux_lua::LuaSubsystem;
-use neotmux_lua::runtime::Layers;
+use neotmux::logging;
 use neotmux_proto::Level;
 
 /// What the invocation asks for, before the name. A name is not a mode.
@@ -323,68 +320,27 @@ fn list_sessions() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// The client's clipboard: the OSC 52 sequence, written to the terminal the renderer draws
-/// on and flushed. Flushing is not optional — the sequence carries no newline, so a
-/// line-buffered terminal would otherwise hold it until something else came along.
-struct TerminalClipboard;
-
-impl neotmux_lua::clipboard::Clipboard for TerminalClipboard {
-    fn set(&self, text: &str) -> std::io::Result<()> {
-        use std::io::Write as _;
-        let mut out = std::io::stdout().lock();
-        out.write_all(&neotmux_term::osc52::set(text))?;
-        out.flush()
-    }
-}
-
 fn client(session: Option<String>) -> anyhow::Result<()> {
     // First, and before the socket: until the terminal is in raw mode the line discipline is
     // answering the keyboard, and starting a server is not fast.
     let _raw = RawMode::enter();
+    let link = start::begin(session)?.finish()?;
 
-    // Started here and waited for below: a server is a fork and an exec, and loading the
-    // plugins is the other slow thing a client does. Neither waits for the other.
-    let starting = start::begin(session.clone())?;
-
-    let exe_dir = env::current_exe()
-        .ok()
-        .and_then(|path| path.parent().map(Path::to_path_buf));
-    let layers = Layers::resolve(&|key| env::var_os(key), exe_dir.as_deref());
-    let panes = std::rc::Rc::new(reads::RemotePanes::new());
-    // The session the client was started under, default taken: the Lua layer is told it
-    // as a fact it could not otherwise know (`neotmux.session_name()`).
-    let name = session.unwrap_or_else(|| neotmux::sock::DEFAULT_SESSION.to_string());
-    let lua = LuaSubsystem::build_named(
-        name,
-        layers,
-        panes.clone(),
-        std::rc::Rc::new(TerminalClipboard),
-    )?;
-    let mut plugins = Plugins::new(lua);
-    for failure in plugins.lua().run_init() {
-        logging::log(Level::Warn, &failure.source, &failure.message);
-    }
-
-    // Drained here, before `ratatui::init()`, so an init-time `neotmux.quit()` exits before
-    // the alternate screen is entered and before the server is asked to start a session.
-    if plugins.drain_load_ops() {
-        return Ok(());
-    }
-
-    let link = starting.finish()?;
-    panes.attach(link.clone());
+    // The attach, and the session's answer, before the screen: a session that a plugin ended
+    // while it was loading must not flash the alternate screen on its way past.
+    let first = match tui::open(&link, tui::screen_size()?)? {
+        tui::Opened::Over(transcript) => {
+            for line in &transcript {
+                eprintln!("neotmux: {line}");
+            }
+            return Ok(());
+        }
+        tui::Opened::Running(done) => *done,
+    };
 
     let shutdown = signals::ShutdownSignal::install()?;
     let mut terminal = ratatui::init();
-    let attach = tui::attach(&terminal, &plugins)?;
-    let result = tui::run(
-        &mut terminal,
-        &shutdown,
-        &mut plugins,
-        &link,
-        &panes,
-        attach,
-    );
+    let result = tui::run(&mut terminal, &shutdown, &link, first);
     // Not `ratatui::restore`: it reports a failure with `eprintln!`, which panics when the
     // terminal it is trying to restore is the one that has gone away.
     if let Err(err) = ratatui::try_restore() {
@@ -394,8 +350,13 @@ fn client(session: Option<String>) -> anyhow::Result<()> {
             &format!("could not restore the terminal: {err}"),
         );
     }
-    plugins.notifications().flush(&mut std::io::stderr());
-    match result? {
+    let left = result?;
+    // The notifications raised while this client was attached, said now that there is a
+    // terminal to say them on: a full-screen TUI cannot use stderr while it is running.
+    for line in &left.transcript {
+        eprintln!("neotmux: {line}");
+    }
+    match left.signal {
         Some(signal) => signals::die_of(signal),
         None => Ok(()),
     }

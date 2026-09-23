@@ -1,10 +1,13 @@
 //! The half of a frame that belongs to the plugins.
 //!
-//! M3 puts the Lua layer beside the screen rather than beside the panes: the server holds
-//! other people's long-running jobs, so a plugin that freezes should cost one client and not
-//! every session. What is left here is that half on its own — a [`Tick`] in, a [`Tock`] out,
-//! and not one line that names a terminal. The session is on the other side of it, and
-//! whether that side is a socket or the next function call is somebody else's decision.
+//! The Lua layer runs beside the panes, in the server, because the most interesting thing a
+//! plugin can do — watch a long-running job while nobody is looking at it — is a thing it can
+//! only do while it is running. What that costs is a plugin that freezes taking the session
+//! with it, which is what the budget in `neotmux-lua` is for.
+//!
+//! What is here is that half on its own — a [`Tick`] in, a [`Tock`] out, and not one line
+//! that names a terminal. The session is on the other side of it, and it is the next function
+//! call rather than a socket.
 
 use neotmux_lua::ops::Op;
 use neotmux_lua::{KeyOutcome, LuaSubsystem};

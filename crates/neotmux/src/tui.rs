@@ -3,9 +3,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
-use neotmux_lua::KeyOutcome;
-use neotmux_proto::msg::OwnedDone;
-use neotmux_proto::msg::{Attach, ToServer};
+use neotmux_proto::msg::{Attach, OwnedDone, ToServer};
 use neotmux_proto::wire;
 use neotmux_proto::{OwnedToClient, Size};
 use neotmux_term::state::clamp_to_min_grid;
@@ -13,17 +11,22 @@ use ratatui::DefaultTerminal;
 
 use neotmux::decode::Decoder;
 use neotmux::link::Link;
-use neotmux::plugins::Plugins;
-use neotmux::reads::RemotePanes;
 use neotmux_proto::keys::Key;
 
 use crate::draw;
 use crate::signals::{self, ShutdownSignal};
-use crate::tty::{self, Ready, Terminal};
+use crate::tty::{Ready, Terminal};
 
 /// How long one pass of the loop waits before looking up. The server sets the frame rate;
 /// this is only how often the client notices a signal or a resize with nothing else going on.
 const PATIENCE: Duration = Duration::from_millis(16);
+
+/// The terminal's size, asked of the terminal itself rather than of a renderer: it is wanted
+/// before there is one, because the attach happens before the alternate screen.
+pub fn screen_size() -> anyhow::Result<Size> {
+    let (cols, rows) = ratatui::crossterm::terminal::size().context("terminal size")?;
+    Ok(clamp_to_min_grid(Size { rows, cols }))
+}
 
 pub fn terminal_size(terminal: &DefaultTerminal) -> anyhow::Result<Size> {
     let area = terminal.size().context("terminal size")?;
@@ -65,41 +68,68 @@ impl Keyboard {
     }
 }
 
-/// What a client says when it takes a session over: everything about the session that only
-/// this side knows — how big the terminal is, what the plugins reserved of it, and where
-/// window ids are up to.
-pub fn attach(terminal: &DefaultTerminal, plugins: &Plugins) -> anyhow::Result<Attach> {
-    let lua = plugins.lua();
-    Ok(Attach {
-        size: terminal_size(terminal)?,
-        first_window: lua.reserve_window_id(),
-        reserved: lua.reserved(),
-        gutter: lua.opt().pane_gutter,
-        wants_pane_output: lua.has_subscriber("pane_output"),
-    })
+/// Why the client stopped, and what the session asked it to say once the terminal is back.
+pub struct Left {
+    pub signal: Option<i32>,
+    pub transcript: Vec<String>,
 }
 
-/// The process with the screen: the terminal, the raw mode, the key decoding, the drawing —
-/// and the plugins, which M3 puts here so that one that freezes costs one client rather than
-/// everybody's shells.
+/// What the session said when this client attached.
+pub enum Opened {
+    /// It is over already — a plugin called `neotmux.quit()` while the session was loading.
+    /// Nothing was drawn, and nothing should be.
+    Over(Vec<String>),
+    /// There is a session, and this is the first frame of it.
+    Running(Box<OwnedDone>),
+}
+
+/// The attach, and the session's first word about it.
 ///
-/// It never touches a pane. A key nobody bound is a message, a resize is a message, and the
-/// picture that comes back is a message; what is behind them is the server's.
+/// Asked for before the alternate screen is entered, because a session that was over before
+/// it began must not leave a terminal switched to a screen nothing was ever drawn on. The
+/// first frame is always owed: a session that has just started, and one that has just been
+/// adopted, are both dirty by construction.
+pub fn open(link: &Rc<RefCell<Link>>, size: Size) -> anyhow::Result<Opened> {
+    send(link, &ToServer::Attach(Attach { size }))?;
+    let mut transcript = Vec::new();
+    loop {
+        let message = {
+            let mut peer = link.borrow_mut();
+            match peer.recv().context("read from the server")? {
+                Some(message) => message,
+                None => return Err(gone(&mut peer)),
+            }
+        };
+        match wire::decode_to_client(&message).context("decode a server message")? {
+            OwnedToClient::Done(done) if done.end.is_some() => {
+                return Ok(Opened::Over(transcript));
+            }
+            OwnedToClient::Done(done) => return Ok(Opened::Running(Box::new(done))),
+            OwnedToClient::Bye(lines) => transcript = lines,
+            OwnedToClient::Clip(text) => yank(&text),
+            OwnedToClient::Refused(why) => anyhow::bail!("{why}"),
+            OwnedToClient::Tick(_) | OwnedToClient::Reading(_) => {}
+        }
+    }
+}
+
+/// The process with the screen: the terminal, the raw mode, the key decoding, the drawing.
+///
+/// It holds no plugin and makes no decision. A key it reads is sent, not judged; the picture
+/// that comes back is painted, not composed. Both of those are the session's, and the session
+/// is in the other process.
 pub fn run(
     terminal: &mut DefaultTerminal,
     shutdown: &ShutdownSignal,
-    plugins: &mut Plugins,
     link: &Rc<RefCell<Link>>,
-    panes: &RemotePanes,
-    attach: Attach,
-) -> anyhow::Result<Option<i32>> {
+    first: OwnedDone,
+) -> anyhow::Result<Left> {
     let mut keyboard = Keyboard::open()?;
     let winch = signals::WindowChange::install()?;
-    send(link, &ToServer::Attach(attach))?;
-    // The terminal is not read until the first round is over. Until then the Lua layer has
-    // been told nothing, and a key typed at the prompt before neotmux took over would reach
-    // an `on_key` handler that believes the session is empty.
-    let mut settled = false;
+    let mut transcript = Vec::new();
+    if let Some(frame) = &first.frame {
+        draw::show(terminal, &frame.frame())?;
+    }
 
     #[cfg(debug_assertions)]
     if std::env::var_os("NEOTMUX_PANIC_TEST").is_some() {
@@ -108,7 +138,10 @@ pub fn run(
 
     loop {
         if let Some(signal) = shutdown.raised() {
-            return Ok(Some(signal));
+            return Ok(Left {
+                signal: Some(signal),
+                transcript,
+            });
         }
         if winch.taken() {
             let size = terminal_size(terminal)?;
@@ -118,29 +151,28 @@ pub fn run(
         let deadline = Instant::now() + PATIENCE;
         let ready = {
             let peer = link.borrow();
-            if settled {
-                keyboard.tty.wait_beside(peer.as_fd(), deadline)
-            } else {
-                tty::wait_on(peer.as_fd(), None, deadline).map(|ready| match ready {
-                    // The socket is the first descriptor in that wait, so both what it
-                    // reports as input and what it reports as a hangup are the server's.
-                    Ready::Input | Ready::HangUp => Ready::Output,
-                    other => other,
-                })
-            }
-            .context("wait for input")?
+            keyboard
+                .tty
+                .wait_beside(peer.as_fd(), deadline)
+                .context("wait for input")?
         };
         match ready {
-            Ready::HangUp => return Ok(Some(signals::HANGUP)),
+            Ready::HangUp => {
+                return Ok(Left {
+                    signal: Some(signals::HANGUP),
+                    transcript,
+                });
+            }
             Ready::Input => match keyboard.typed()? {
-                Typed::HangUp => return Ok(Some(signals::HANGUP)),
+                Typed::HangUp => {
+                    return Ok(Left {
+                        signal: Some(signals::HANGUP),
+                        transcript,
+                    });
+                }
                 Typed::Keys(keys) => {
                     for key in keys {
-                        // Offered to the plugins first and sent on only if nobody wanted it:
-                        // which pane an unbound key belongs to is the session's to know.
-                        if plugins.key(key) == KeyOutcome::Fallthrough {
-                            send(link, &ToServer::Key(key))?;
-                        }
+                        send(link, &ToServer::Key(key))?;
                     }
                 }
             },
@@ -157,48 +189,37 @@ pub fn run(
             let message = link.borrow_mut().take().context("read from the server")?;
             let Some(message) = message else { break };
             match wire::decode_to_client(&message).context("decode a server message")? {
-                OwnedToClient::Tick(mut tick) => {
-                    panes.publish(std::mem::take(&mut tick.revisions));
-                    // The whole exchange, with the keyboard left alone until it is over: the
-                    // ops this reply carries are applied at the far end, and a key handler
-                    // that ran in between would see a session that had already moved on.
-                    let tock = plugins.respond(tick);
-                    send(link, &ToServer::Tock(tock))?;
-                    let done = round(link)?;
-                    plugins.catch_up(done.steps);
+                OwnedToClient::Done(done) => {
                     if let Some(frame) = &done.frame {
                         draw::show(terminal, &frame.frame())?;
                     }
                     if done.end.is_some() {
-                        return Ok(None);
+                        return Ok(Left {
+                            signal: None,
+                            transcript,
+                        });
                     }
-                    settled = true;
                 }
+                OwnedToClient::Clip(text) => yank(&text),
+                OwnedToClient::Bye(lines) => transcript = lines,
                 OwnedToClient::Refused(why) => anyhow::bail!("{why}"),
-                // A finished frame outside a round, or a read nobody asked for: neither is
-                // something this loop can be in the middle of.
-                OwnedToClient::Done(_) | OwnedToClient::Reading(_) => {}
+                // The vocabulary of the frame that was a conversation. Nothing sends these
+                // any more.
+                OwnedToClient::Tick(_) | OwnedToClient::Reading(_) => {}
             }
         }
     }
 }
 
-/// The far end of the round: the tick's reply has gone, and nothing else may happen here
-/// until the answer comes back.
-fn round(link: &Rc<RefCell<Link>>) -> anyhow::Result<OwnedDone> {
-    loop {
-        let mut peer = link.borrow_mut();
-        let message = match peer.recv().context("read from the server")? {
-            Some(message) => message,
-            None => return Err(gone(&mut peer)),
-        };
-        drop(peer);
-        match wire::decode_to_client(&message).context("decode a server message")? {
-            OwnedToClient::Done(done) => return Ok(done),
-            OwnedToClient::Refused(why) => anyhow::bail!("{why}"),
-            OwnedToClient::Tick(_) | OwnedToClient::Reading(_) => {}
-        }
-    }
+/// The one thing on the screen the session cannot do for itself: OSC 52, written to this
+/// client's terminal and flushed. Flushing is not optional — the sequence carries no newline,
+/// so a line-buffered terminal would hold it until something else came along.
+fn yank(text: &str) {
+    use std::io::Write as _;
+    let mut out = std::io::stdout().lock();
+    let _ = out
+        .write_all(&neotmux_term::osc52::set(text))
+        .and_then(|()| out.flush());
 }
 
 fn send(link: &Rc<RefCell<Link>>, msg: &ToServer) -> anyhow::Result<()> {

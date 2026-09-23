@@ -1,11 +1,13 @@
 //! The messages two neotmux processes send each other.
 //!
-//! The split (§11, M3) puts the session — the panes, the layout, the terminals — in a server
-//! and the screen in a client, and it puts the **Lua layer on the client**, because a frozen
-//! plugin should cost one client rather than everybody's shells. That means the frame loop is
-//! a conversation rather than a function call: the server says what happened and what the
-//! session looks like ([`Tick`]), the client runs the tick against it and says what its
-//! plugins want ([`Tock`]), and the server applies that and answers with the frame.
+//! The split puts the session — the panes, the layout, the terminals — and the Lua layer that
+//! talks about them in a server, and the screen in a client. So the client sends what only it
+//! knows (its size, the keys it read) and is sent the picture; the frame loop is a function
+//! call inside the server.
+//!
+//! [`Tick`], [`Tock`], [`Step`], [`Read`] and [`Reading`] are the vocabulary of the frame as
+//! a conversation, from when the Lua layer was the client's. Nothing sends them now; they go
+//! out with the sweep.
 //!
 //! Everything here is data. [`crate::wire`] turns it into bytes; who reads and writes those
 //! bytes is the socket's owner's business.
@@ -17,22 +19,15 @@ use crate::{
     WindowId,
 };
 
-/// What the client tells the server when it takes the session over.
+/// What the client tells the server when it takes the session over: how big its terminal is,
+/// which is the one thing about the session only it knows.
 ///
-/// The size and the first window id come from the client because both are its own: the
-/// terminal is the client's, and window ids are handed out by the Lua layer, which is too
-/// (`window.create()` answers with an id before the window exists). A server that already
-/// holds a session will ignore `first_window` when detach/attach lands; today there is
-/// exactly one attach, and it is the one that starts the session.
+/// It used to carry four more facts — the first window's id, the bands the plugins reserved,
+/// the gutter and the `pane_output` subscription — because the Lua layer that knew them was
+/// the client's. It is the server's now, and the server does not have to be told.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Attach {
     pub size: Size,
-    pub first_window: WindowId,
-    pub reserved: Reserved,
-    pub gutter: u16,
-    /// Whether anything is subscribed to `pane_output`. Nothing is, almost always, and a
-    /// pane's bytes are the one payload big enough that asking first is worth a bool.
-    pub wants_pane_output: bool,
 }
 
 /// One thing that happened to the session, in the order it happened.
@@ -211,6 +206,12 @@ pub enum ToClient<'a> {
     Reading(&'a Reading),
     /// Why this connection is not getting a session: something else already has it.
     Refused(&'a str),
+    /// Text a plugin yanked, for the client to put on its terminal's clipboard. It is the
+    /// one thing the Lua layer does that needs a terminal, and the terminal is over here.
+    Clip(&'a str),
+    /// The notifications raised while this client was attached, for it to replay on stderr
+    /// once its terminal is restored. Sent before the frame that carries the end.
+    Bye(&'a [String]),
 }
 
 /// What a decoded [`ToClient`] is held in, for the same reason [`crate::OwnedFrame`] exists:
@@ -221,4 +222,6 @@ pub enum OwnedToClient {
     Done(OwnedDone),
     Reading(Reading),
     Refused(String),
+    Clip(String),
+    Bye(Vec<String>),
 }
