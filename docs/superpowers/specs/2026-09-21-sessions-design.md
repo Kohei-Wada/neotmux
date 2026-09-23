@@ -109,8 +109,16 @@ state, its modes and registers, its bands and floats.
 - **Output is shared.** The tick and the done of every frame reach every attached client.
 - **A client's mode is its own.** Whether one terminal is in copy mode says nothing to the
   other; the second types straight through, because the first's plugins are not the second's.
-  That is tmux's arrangement, and it costs nothing extra, because unconsumed was always the
-  line at which a key becomes the session's.
+  It costs nothing extra, because unconsumed was always the line at which a key becomes the
+  session's.
+
+  **Corrected, 2026-09-23.** This bullet claimed the behaviour was "tmux's arrangement". It is
+  not. tmux's modes are pane state — `pane_in_mode` is "Number of modes pane is in" and
+  `pane_mode` is "Name of pane mode, if any", both pane formats, with no counterpart on a
+  client — so every client looking at a pane in copy mode sees copy mode. The behaviour
+  described above is a consequence of the Lua layer being the client's, not of following tmux,
+  and it is superseded by `2026-09-23-lua-on-the-server-design.md` §7, which moves the Lua
+  layer to the server and makes plugin state the session's.
 
 ### Geometry belongs to the session, not the client
 

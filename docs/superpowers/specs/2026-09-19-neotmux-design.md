@@ -924,7 +924,14 @@ deliberate act the trust model already permits.
 - **M3** server/client split, detach/attach. **Done** — see
   `docs/superpowers/specs/2026-09-21-detach-attach-design.md`. **Lua stays on the client**: the
   server holds other people's long-running jobs, so a frozen client should cost one client, not
-  every session. Promote `proto` to a crate here and close §2.1's open question
+  every session. Promote `proto` to a crate here and close §2.1's open question.
+
+  **Reversed, 2026-09-23** — see `docs/superpowers/specs/2026-09-23-lua-on-the-server-design.md`.
+  The Lua layer moves to the server. The reason recorded above is not dismissed: it is the cost
+  that spec accepts, bounded by making the tick budget actually interruptible (§4 there). What
+  changed is the goal — a plugin that watches a session while nobody is attached cannot be
+  written at any level of API quality while the runtime lives on the client, because the runtime
+  is not running.
 - **M4** scrollback and copy-mode, exposed to Lua as line access
 - **M5** distribution: single binary, nixpkgs, `neotmux plugin` subcommand, publish `proto`
 
