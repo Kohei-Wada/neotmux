@@ -2293,7 +2293,7 @@ fn the_shipped_watcher_is_off_by_default() {
 /// `plugin/sidebar.lua` takes its width from what there is to show, between a floor and a
 /// ceiling. One session called `default` running `cat` does not reach the floor, so these
 /// tests see the band at its narrowest.
-const SIDEBAR_COLS: u16 = 18;
+const SIDEBAR_COLS: u16 = 27;
 /// The state icon against a session: idle, working, or waiting for you. Which one it is
 /// depends on what the shell said and when, so a test that only cares that the band is there
 /// asks whether the cell holds any of them.

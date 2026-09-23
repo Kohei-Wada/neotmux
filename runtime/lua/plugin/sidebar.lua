@@ -28,10 +28,11 @@ local state = require("neotmux.state")
 local M = {}
 
 -- What the band is worth, in columns. The width is taken from what there is to show, between
--- these two, so a session called `w` does not spend a third of an eighty-column terminal and
--- one called `feature/long-branch-name` is not cut to nothing.
+-- these two, so a session called `feature/long-branch-name` is not cut to nothing — and `min`
+-- is what it settles at when there is nothing long to show, which is most of the time. Wide
+-- enough that a name and what it is running are both readable without the eye working for it.
 M.widths = {
-  min = 18,
+  min = 27,
   max = 36,
   -- What is left when it is folded: one column, so the markers still say how many sessions and
   -- panes there are and which of them you are in. A band of nothing would be a band you have to

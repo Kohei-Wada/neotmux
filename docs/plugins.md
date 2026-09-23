@@ -970,7 +970,7 @@ optional plugin and the prefix is the standard one.
 
 The sidebar is a tree: every session with what it is running, and under the one you are in, its
 windows and their panes. Its width is taken from what there is to show, between
-`require('plugin.sidebar').widths.min` (18) and `.max` (36). What is on which row is a table
+`require('plugin.sidebar').widths.min` (27) and `.max` (36). What is on which row is a table
 rather than a shape baked into the file — each level draws one entry as a list of rows, and each
 row is a list of tokens:
 
