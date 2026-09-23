@@ -268,8 +268,13 @@ mod tests {
 
     #[test]
     fn fitting_resizes_every_pane_to_its_own_rect() {
-        let mut layout =
-            PaneLayout::new(Size { rows: 24, cols: 80 }, Reserved::default(), 0, pane(1));
+        let mut layout = PaneLayout::new(
+            Size { rows: 24, cols: 80 },
+            Reserved::default(),
+            0,
+            pane(1),
+            Size { rows: 2, cols: 2 },
+        );
         layout.split(SplitDir::Vertical, pane(2)).expect("fits");
         let (_wakeup, mut shells) = two_panes(&layout);
 
@@ -284,8 +289,13 @@ mod tests {
     /// handle — and it is still there when the terminal grows back.
     #[test]
     fn a_pane_below_the_minimum_keeps_its_last_valid_size() {
-        let mut layout =
-            PaneLayout::new(Size { rows: 24, cols: 80 }, Reserved::default(), 0, pane(1));
+        let mut layout = PaneLayout::new(
+            Size { rows: 24, cols: 80 },
+            Reserved::default(),
+            0,
+            pane(1),
+            Size { rows: 2, cols: 2 },
+        );
         layout.split(SplitDir::Vertical, pane(2)).expect("fits");
         let (_wakeup, mut shells) = two_panes(&layout);
         shells.fit(layout.showable()).expect("fit");

@@ -86,6 +86,7 @@ impl Session {
             size: clamp_to_min_grid(attach.size),
             reserved: attach.reserved,
             gutter: attach.gutter,
+            minimum: neotmux_term::state::MIN_GRID,
         };
         let (windows, first) = Windows::new(attach.first_window, surface);
         let terminals = Rc::new(PaneTerminals::new());
@@ -810,6 +811,7 @@ mod tests {
             size,
             reserved: Reserved::default(),
             gutter: 0,
+            minimum: neotmux_term::state::MIN_GRID,
         };
         let (windows, first) = Windows::new(WindowId::from(1), surface);
         assert_eq!(

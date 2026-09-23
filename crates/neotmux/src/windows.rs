@@ -11,6 +11,7 @@ pub struct Surface {
     pub size: Size,
     pub reserved: Reserved,
     pub gutter: u16,
+    pub minimum: Size,
 }
 
 /// What closing a pane did.
@@ -72,7 +73,13 @@ impl Windows {
         let pane = self.take_pane_id();
         self.entries.push(Window {
             id,
-            layout: PaneLayout::new(surface.size, surface.reserved, surface.gutter, pane),
+            layout: PaneLayout::new(
+                surface.size,
+                surface.reserved,
+                surface.gutter,
+                pane,
+                surface.minimum,
+            ),
         });
         pane
     }
@@ -210,6 +217,7 @@ mod tests {
             size: Size { rows: 24, cols: 80 },
             reserved: Reserved::default(),
             gutter: 0,
+            minimum: Size { rows: 2, cols: 2 },
         }
     }
 
@@ -307,9 +315,10 @@ mod tests {
     fn a_window_hidden_through_a_resize_is_caught_up_when_it_is_shown() {
         let mut windows = windows();
         windows.create(ws(2), surface());
+        let smaller_base = surface();
         let smaller = Surface {
             size: Size { rows: 10, cols: 40 },
-            ..surface()
+            ..smaller_base
         };
         windows.resurface(smaller);
 
