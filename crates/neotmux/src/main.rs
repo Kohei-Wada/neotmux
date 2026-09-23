@@ -7,8 +7,10 @@ mod start;
 mod tty;
 mod tui;
 
+use std::cell::RefCell;
 use std::env;
 use std::path::PathBuf;
+use std::rc::Rc;
 
 use anyhow::Context as _;
 use neotmux::logging;
@@ -122,20 +124,24 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Cli {
             }
             "--help" | "-h" => help = true,
             "--version" | "-V" => version = true,
+            // `-t <name>` is read only as the first argument after the command word; every
+            // word after that is the command's own payload, taken verbatim. A command that
+            // wrote `-t` into its text — `send %1 echo -t MARK` — must not have it read back
+            // out as a session name.
             arg if !arg.is_empty() && command::NAMES.contains(&arg) => {
                 let name = arg.to_string();
-                let mut cargs = Vec::new();
-                while let Some(next) = args.next() {
-                    if next == "-t" {
-                        match args.next() {
-                            Some(value) => session = Some(value),
-                            None => {
-                                warnings.push("-t requires a session name argument".to_string())
-                            }
-                        }
-                    } else {
-                        cargs.push(next);
+                if args.peek().is_some_and(|next| next == "-t") {
+                    args.next();
+                    match args.next() {
+                        Some(value) => session = Some(value),
+                        None => warnings.push("-t requires a session name argument".to_string()),
                     }
+                }
+                let cargs: Vec<String> = args.by_ref().collect();
+                // `--help` after a command word is the same request it is anywhere else:
+                // the usage text, and exit 0 — not a question asked of a server.
+                if cargs.iter().any(|a| a == "--help" || a == "-h") {
+                    help = true;
                 }
                 action = Action::Command { name, args: cargs };
             }
@@ -211,9 +217,9 @@ commands:
   neotmux new [name]  start a session with no client attached
   neotmux rename <old> <new>
                       rename a session
-  neotmux windows [-t name]
+  neotmux windows [name] [-t name]
                       the session's windows, one per line
-  neotmux panes [-t name]
+  neotmux panes [name] [-t name]
                       the session's panes, one per line
   neotmux send <pane> <text> [--enter]
                       write text into that pane's shell
@@ -301,23 +307,12 @@ fn run_command(name: &str, args: &[String], session: Option<&str>) -> anyhow::Re
         name: name.to_string(),
         args: args.to_vec(),
     };
-    // `new` has nobody to ask yet where nothing is running — `ask` reads that as "nothing is
-    // running" rather than as a question to start a server over, which is right for every
-    // other command and wrong for this one.
-    let ran = if name == "new" {
-        let link = start::begin()?.finish()?;
-        let mut peer = link.borrow_mut();
-        peer.send(&neotmux_proto::wire::encode_to_server(&msg))
-            .context("ask the neotmux server")?;
-        let Some(message) = peer.recv().context("read the server's answer")? else {
-            anyhow::bail!("the neotmux server went away without answering");
-        };
-        neotmux_proto::wire::decode_to_client(&message).context("decode the server's answer")?
-    } else {
-        match ask(&msg)? {
-            Some(answer) => answer,
-            None => anyhow::bail!("no neotmux server is running"),
-        }
+    // `new` has nobody to ask yet where nothing is running — read as "nothing is running"
+    // rather than as a question to start a server over, which is right for every other
+    // command and wrong for this one, so it alone asks with a server started for it.
+    let ran = match ask(&msg, name == "new")? {
+        Some(answer) => answer,
+        None => anyhow::bail!("no neotmux server is running"),
     };
     match ran {
         neotmux_proto::OwnedToClient::Ran { ok: true, lines } => {
@@ -334,16 +329,31 @@ fn run_command(name: &str, args: &[String], session: Option<&str>) -> anyhow::Re
 }
 
 /// Asks the server one question and reads its one answer. `None` is nothing listening, which
-/// is not an error here: it is the answer to "what is running".
-fn ask(msg: &neotmux_proto::msg::ToServer) -> anyhow::Result<Option<neotmux_proto::OwnedToClient>> {
-    let paths = neotmux::sock::Paths::resolve(&|key| env::var_os(key))?;
-    let Some(stream) = neotmux::sock::connect(&paths.socket)? else {
+/// is not an error here: it is the answer to "what is running" — except when `start_if_needed`
+/// says a server should be started rather than reported absent, which is right for `new` and
+/// wrong for everything else that asks.
+fn ask(
+    msg: &neotmux_proto::msg::ToServer,
+    start_if_needed: bool,
+) -> anyhow::Result<Option<neotmux_proto::OwnedToClient>> {
+    let link = if start_if_needed {
+        Some(start::begin()?.finish()?)
+    } else {
+        let paths = neotmux::sock::Paths::resolve(&|key| env::var_os(key))?;
+        match neotmux::sock::connect(&paths.socket)? {
+            Some(stream) => Some(Rc::new(RefCell::new(
+                neotmux::link::Link::open(stream).context("greet the neotmux server")?,
+            ))),
+            None => None,
+        }
+    };
+    let Some(link) = link else {
         return Ok(None);
     };
-    let mut link = neotmux::link::Link::open(stream).context("greet the neotmux server")?;
-    link.send(&neotmux_proto::wire::encode_to_server(msg))
+    let mut peer = link.borrow_mut();
+    peer.send(&neotmux_proto::wire::encode_to_server(msg))
         .context("ask the neotmux server")?;
-    let Some(message) = link.recv().context("read the server's answer")? else {
+    let Some(message) = peer.recv().context("read the server's answer")? else {
         anyhow::bail!("the neotmux server went away without answering");
     };
     Ok(Some(
@@ -365,9 +375,12 @@ fn server_pid() -> Option<i32> {
 /// Ends one session, by asking the server holding it. It used to be a signal to a process,
 /// because a session was one and there was no protocol to ask through. There is now.
 fn kill_session(name: &str) -> anyhow::Result<()> {
-    let asked = ask(&neotmux_proto::msg::ToServer::Kill {
-        session: name.to_string(),
-    })?;
+    let asked = ask(
+        &neotmux_proto::msg::ToServer::Kill {
+            session: name.to_string(),
+        },
+        false,
+    )?;
     match asked {
         Some(neotmux_proto::OwnedToClient::Killed(true)) => {}
         Some(neotmux_proto::OwnedToClient::Killed(false)) | None => {
@@ -386,7 +399,7 @@ fn kill_session(name: &str) -> anyhow::Result<()> {
 /// a connect probe per file, because the sessions were processes; they are one server's now,
 /// and it is asked.
 fn list_sessions() -> anyhow::Result<()> {
-    let names = match ask(&neotmux_proto::msg::ToServer::List)? {
+    let names = match ask(&neotmux_proto::msg::ToServer::List, false)? {
         Some(neotmux_proto::OwnedToClient::Sessions(names)) => names,
         Some(other) => anyhow::bail!("the neotmux server answered {other:?}"),
         None => Vec::new(),
@@ -588,6 +601,64 @@ mod tests {
         assert_eq!(cli.session.as_deref(), Some("work"));
         assert_eq!(cli.warnings.len(), 1);
         assert!(cli.warnings[0].contains("home"), "{:?}", cli.warnings);
+    }
+
+    #[test]
+    fn a_command_s_t_right_after_it_names_the_session() {
+        let cli = parse_args(args(&["send", "-t", "work", "%1", "echo"]));
+        assert_eq!(cli.session.as_deref(), Some("work"));
+        match cli.action {
+            Action::Command { name, args } => {
+                assert_eq!(name, "send");
+                assert_eq!(args, vec!["%1".to_string(), "echo".to_string()]);
+            }
+            _ => panic!("expected a command"),
+        }
+    }
+
+    #[test]
+    fn a_command_s_t_later_in_its_arguments_is_payload_not_a_session() {
+        let cli = parse_args(args(&["send", "%1", "echo", "-t", "MARK", "--enter"]));
+        assert!(cli.session.is_none());
+        match cli.action {
+            Action::Command { name, args } => {
+                assert_eq!(name, "send");
+                assert_eq!(
+                    args,
+                    vec![
+                        "%1".to_string(),
+                        "echo".to_string(),
+                        "-t".to_string(),
+                        "MARK".to_string(),
+                        "--enter".to_string(),
+                    ],
+                    "-t past the first argument must survive verbatim, not be eaten"
+                );
+            }
+            _ => panic!("expected a command"),
+        }
+    }
+
+    #[test]
+    fn a_bare_word_that_is_not_a_command_is_still_the_session_name() {
+        let cli = parse_args(args(&["work"]));
+        assert!(matches!(cli.action, Action::Attach));
+        assert_eq!(cli.session.as_deref(), Some("work"));
+    }
+
+    #[test]
+    fn a_command_s_remaining_arguments_survive_verbatim() {
+        let cli = parse_args(args(&["capture", "%1", "--lines", "3"]));
+        match cli.action {
+            Action::Command { name, args } => {
+                assert_eq!(name, "capture");
+                assert_eq!(
+                    args,
+                    vec!["%1".to_string(), "--lines".to_string(), "3".to_string()]
+                );
+            }
+            _ => panic!("expected a command"),
+        }
     }
 
     #[test]
