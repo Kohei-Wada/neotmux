@@ -13,9 +13,9 @@ repository.workspace = true
 
 [dependencies]
 neotmux-proto.workspace = true
-neotmux-term.workspace = true
 anyhow.workspace = true
 mlua.workspace = true
 
 [dev-dependencies]
+neotmux-term.workspace = true
 tempfile.workspace = true

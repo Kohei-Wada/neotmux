@@ -78,6 +78,16 @@ Cargo workspace. Dependency edges point downward only.
 `neotmux-core` must stay testable with no terminal and no Lua. That property is the check on
 whether the boundaries are real.
 
+The table's `neotmux-core` row became true on 2026-09-23, when `PaneLayout` and the window
+set moved into it; before that it held layout alone. The same change took `neotmux-lua`'s
+dependency on `neotmux-term` out of `[dependencies]`, which the "must not know about" column
+had forbidden since this table was written. See
+`docs/superpowers/specs/2026-09-23-crate-boundaries-design.md`.
+
+Two entries in the row are still somewhere else and are meant to be. The event bus is
+`neotmux-proto`'s `Event`, and the op buffer is `neotmux-lua`'s: M3 put the Lua layer on the
+client, and the ops are the plugins'. The table is what is out of date there, not the code.
+
 ### 2.1 Boundary types live in `neotmux-core::proto`, not a separate crate yet
 
 All types that cross a boundary — `SessionId` / `WindowId` / `PaneId`, geometry, grid
@@ -96,6 +106,13 @@ have frozen the question below before it was answered.
 **Decision, taken 2026-09-20, closing the open question of whether the Lua-facing types are
 the wire types: they are the same types. One definition each, no conversion layer, and a
 protocol version that refuses a mismatch outright rather than trying to survive one.**
+
+That decision reached the reads on 2026-09-23. `Want`, `Trailing`, `Lines` and `Extent` had
+one definition for the process and another for the wire, with a conversion between them; they
+are now one each, here. `neotmux-proto` also holds `PaneRead`, and `width`, and one
+dependency (`unicode-width`) to go with the latter. The rule that put the trait here and left
+`Clipboard` in `neotmux-lua` is that **a contract lives in the lowest crate that both its
+consumer and every one of its implementors can see**.
 
 The two boundaries overlap less than the question assumes. Thirteen of the fifteen types
 `proto` exports reach `neotmux-lua`; seven are reachable from a frame; the intersection is

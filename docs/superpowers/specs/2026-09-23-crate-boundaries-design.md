@@ -249,6 +249,10 @@ revisit it.
 `base64` and `anyhow`, and drops `unicode-width`. `neotmux-proto` gains `unicode-width` and
 holds nothing else. `neotmux` drops its own `unicode-width`.
 
+`neotmux-term` stays in `neotmux-lua`'s `[dev-dependencies]`. Its tests build a real
+`PaneTerminals` as the host stand-in — a fake would be a re-implementation of `vt100` — and a
+dev-dependency is not an edge in the shipped graph.
+
 ## 9. Order, and the thing that says it worked
 
 | | change | needs |
