@@ -88,6 +88,10 @@ pub enum SessionOp {
     WindowFocus {
         window: WindowId,
     },
+    WindowRename {
+        window: WindowId,
+        name: Option<String>,
+    },
 }
 
 /// The client's half of a frame: what the tick asked for, and what it drew.

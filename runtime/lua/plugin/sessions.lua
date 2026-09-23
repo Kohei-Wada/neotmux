@@ -5,6 +5,7 @@
 --   j k         the cursor, one row
 --   Enter       go to the session under the cursor
 --   c           make one: type a name, Enter to make it and go there, Esc to think again
+--   r           rename the one under the cursor, the same way
 --   d           end the one under the cursor
 --   Esc q       leave
 --
@@ -41,6 +42,7 @@ M.keys = {
   ["k"] = "up",
   ["Enter"] = "choose",
   ["c"] = "create",
+  ["r"] = "rename",
   ["d"] = "kill",
   ["Esc"] = "cancel",
   ["q"] = "cancel",
@@ -52,7 +54,8 @@ M.width = 40
 M.rows = 10
 
 -- The picker's whole state while it is up, and nil the rest of the time. `typing` is nil
--- except while a name is being entered, when it is the string so far.
+-- except while a name is being entered, when it is the string so far; `typing_for` says what
+-- the name is for, since the field is the same one either way.
 local state = nil
 local win = nil
 local mode_handle = nil
@@ -146,6 +149,15 @@ M.commands = {
   end,
   ["create"] = function()
     state.typing = ""
+    state.typing_for = "create"
+  end,
+  ["rename"] = function()
+    local name = state.names[state.at]
+    if name then
+      state.typing = name
+      state.typing_for = "rename"
+      state.renaming = name
+    end
   end,
   ["kill"] = function()
     local name = state.names[state.at]
@@ -168,8 +180,17 @@ local function typing(key)
     state.typing = nil
   elseif key == "Enter" then
     local name = state.typing
+    local what = state.typing_for
     state.typing = nil
-    if name ~= "" then
+    if name == "" then
+      return
+    end
+    if what == "rename" then
+      if name ~= state.renaming then
+        neotmux.session.rename(state.renaming, name)
+      end
+      state.at = 1
+    else
       -- Two ops in one key, applied in the order they were raised: the session exists by the
       -- time the switch is applied, which is the frame after this one.
       neotmux.session.create(name)
@@ -302,7 +323,7 @@ neotmux.on_tick(function(ctx)
 
   local last = inner.y + inner.h - 1
   if state.typing then
-    local label = "name  "
+    local label = (state.typing_for == "rename" and "rename  " or "name  ")
     ctx:text(win, inner.x + 2, last, label .. state.typing, {
       fg = M.colors.name,
       bg = M.colors.frame,
@@ -318,7 +339,7 @@ neotmux.on_tick(function(ctx)
       { bg = M.colors.caret }
     )
   else
-    ctx:text(win, inner.x + 2, last, "j k  enter  c new  d kill  esc", {
+    ctx:text(win, inner.x + 2, last, "j k  enter  c new  r name  d kill", {
       fg = M.colors.hint,
       bg = M.colors.frame,
     })

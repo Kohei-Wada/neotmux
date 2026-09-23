@@ -107,7 +107,7 @@ M.sessions = {
   row_gap = 0,
 }
 M.windows = {
-  rows = { { "marker", "tree", "number" } },
+  rows = { { "marker", "tree", "number", "name" } },
   row_gap = 0,
 }
 M.panes = {
@@ -144,6 +144,10 @@ M.tokens = {
     end,
     number = function(it)
       return tostring(it.number), it.current and M.colors.current_window or M.colors.window
+    end,
+    -- Nothing for a window nobody has named: its number is what it is called until then.
+    name = function(it)
+      return it.name, it.current and M.colors.current_window or M.colors.window
     end,
   },
   panes = {
@@ -256,6 +260,7 @@ local function subtree(out)
     end
     entry(M.windows, "windows", {
       number = window_at,
+      name = neotmux.window.name(window),
       current = current,
       guide = guide({ last_window }),
     }, out)

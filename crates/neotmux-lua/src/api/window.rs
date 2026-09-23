@@ -66,6 +66,7 @@ pub(crate) fn install(
     }
 
     {
+        let geometry = geometry.clone();
         let current = lua.create_function(move |_, ()| {
             Ok(match geometry.borrow().window {
                 Some(id) => Value::Integer(i64::from(id.get())),
@@ -87,6 +88,43 @@ pub(crate) fn install(
             Ok(id.get())
         })?;
         window.set("create", create)?;
+    }
+
+    {
+        // What a window is called, or nil for one nobody has named. A number is what it has
+        // until then, and a number is the one thing about a window that changes when another
+        // one closes.
+        let geometry = geometry.clone();
+        let name = lua.create_function(move |_lua, id: u32| {
+            let id = WindowId::from(id);
+            Ok::<Option<String>, mlua::Error>(
+                geometry
+                    .borrow()
+                    .windows
+                    .iter()
+                    .find(|window| window.id == id)
+                    .and_then(|window| window.name.clone()),
+            )
+        })?;
+        window.set("name", name)?;
+    }
+
+    {
+        let sources = sources.clone();
+        let ops = ops.clone();
+        // `nil` takes the name away and leaves the window its number, which is what a rename
+        // to nothing means.
+        let rename = lua.create_function(move |lua, (id, name): (u32, Option<String>)| {
+            ops.push(
+                source::caller(lua, &sources),
+                Op::WindowRename {
+                    window: WindowId::from(id),
+                    name,
+                },
+            );
+            Ok(())
+        })?;
+        window.set("rename", rename)?;
     }
 
     {

@@ -60,10 +60,12 @@ fn publish(sub: &LuaSubsystem) {
                 Window {
                     id: WindowId::from(1),
                     panes: vec![pane(1)],
+                    name: None,
                 },
                 Window {
                     id: WindowId::from(2),
                     panes: vec![pane(2)],
+                    name: None,
                 },
             ],
             window: Some(WindowId::from(1)),

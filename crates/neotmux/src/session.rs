@@ -331,6 +331,20 @@ impl Session {
                     self.apply_window_create(tag, *window)?;
                 }
                 SessionOp::WindowFocus { window } => self.apply_window_focus(tag, *window)?,
+                SessionOp::WindowRename { window, name } => {
+                    if !self.windows.rename(*window, name.clone()) {
+                        logging::log(
+                            Level::Error,
+                            tag,
+                            &format!("window.rename({window}, ...) refused: no such window"),
+                        );
+                    } else {
+                        // The name is in the geometry, so a plugin that asks for it in the
+                        // same frame is told the new one.
+                        self.publish_geometry();
+                        self.dirty = true;
+                    }
+                }
             }
         }
         Ok(ended)
@@ -553,9 +567,9 @@ impl Session {
             focus: layout.focus(),
             windows: self
                 .windows
-                .panes()
+                .named_panes()
                 .into_iter()
-                .map(|(id, panes)| LuaWindow { id, panes })
+                .map(|(id, panes, name)| LuaWindow { id, panes, name })
                 .collect(),
             window: Some(self.windows.current_id()),
         }

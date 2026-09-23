@@ -602,11 +602,17 @@ neotmux.window.panes(id)  -- { pane, ... }, in layout order, or nil
 neotmux.window.current()  -- id
 neotmux.window.create()   -- the new window's id
 neotmux.window.focus(id)  -- show that one
+neotmux.window.name(id)   -- what somebody called it, or nil
+neotmux.window.rename(id, name)  -- call it that; nil takes the name away again
 ```
 
 A `WindowId` is stable and never reused, exactly as a `PaneId` is, and the same rule follows:
 show the position in `list()`, not the id, or your window numbers climb for ever as windows
 are opened and closed.
+
+A name is the thing that does *not* change when another window closes, which is why a window
+has one at all. `nil` is a window nobody has named, and its position is what it is called until
+then. `rename` is an op like every other: raised in your tick, applied after it.
 
 A window is an independent pane tree. Switching between them is what a multiplexer is mostly
 for, and it is the only level of grouping above a pane there is: tmux's session, the thing you
@@ -660,6 +666,7 @@ neotmux.session.with(name, fn)     -- run fn against that session, and give back
 neotmux.session.create(name)       -- a new session, at the size of the one that asked
 neotmux.session.switch(name)       -- move to it
 neotmux.session.kill(name)         -- end it, and every shell in it
+neotmux.session.rename(from, to)   -- give it another name
 ```
 
 `with` is the interesting one, and it is how the shipped sidebar says what each session is
@@ -945,9 +952,9 @@ neotmux ships eight plugins in the runtime layer an install puts on the search p
 | plugin | what it does |
 |---|---|
 | `status` | the default status bar, on one reserved top row |
-| `prefix` | a `C-b` prefix over `v`, `-`, `o`, `h/j/k/l`, `r`, `c`, `n`, `p` and `[` |
+| `prefix` | a `C-b` prefix over `v`, `-`, `o`, `h/j/k/l`, `r`, `c`, `n`, `p`, `,` and `[` |
 | `copy` | copy mode: read back over a pane's scrollback, select a region, yank it |
-| `sessions` | the session picker on `C-b s`: every session and what it is running, `Enter` to go, `c` to make one, `d` to end one |
+| `sessions` | the session picker on `C-b s`: every session and what it is running, `Enter` to go, `c` to make one, `r` to rename one, `d` to end one |
 | `borders` | a rule along every boundary between two panes |
 | `watch` | notifies you when a pane looks like it is waiting for you, on `neotmux.state`'s guess — **off by default** |
 | `sidebar` | a tree of every session, and the windows and panes of the one you are in, down a reserved left band, folded by `C-b b` — **off by default** |
@@ -1228,6 +1235,26 @@ columns would push every name on its row across by one.
 The **width** is not in that table. It is a `local` at the top of the file, because the
 reservation is made once while the file is being required and the host is never told a band
 changed width. Edit it there, or leave the sidebar off.
+
+### The prompt convention
+
+One line of text, asked for in a float. The host has none of this — a float, a mode, an
+`on_key` over a local and a caret drawn as a rect are the whole of it — so `neotmux.prompt` is
+where the shipped one lives, beside `neotmux.mode` and `neotmux.box`.
+
+```lua
+require('neotmux.prompt').open({
+  title = 'name window',
+  value = neotmux.window.name(id) or '',
+  done = function(text) neotmux.window.rename(id, text ~= '' and text or nil) end,
+})
+```
+
+`done` is called with what was typed when Enter is pressed, and not at all when Esc is. The
+caret is drawn rather than placed: the terminal's own cursor belongs to the focused pane, and a
+float cannot take it — which is what a text field does everywhere else too.
+
+`C-b ,` is the shipped use of it, naming the window you are in.
 
 ### The state convention
 

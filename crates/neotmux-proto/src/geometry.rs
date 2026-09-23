@@ -7,6 +7,10 @@ pub struct Window {
     /// Left to right, top to bottom. A hidden window's order is the one it was last
     /// assigned, which is the arrangement it will be shown in.
     pub panes: Vec<PaneId>,
+    /// What somebody called it, or `None` for one nobody has named. A number is what a window
+    /// has until then, and a number is the one thing about it that changes when another window
+    /// closes.
+    pub name: Option<String>,
 }
 
 /// The session as Lua sees it: published by `begin_frame` and republished whenever the host

@@ -131,6 +131,7 @@ fn frame(
                     } else {
                         Vec::new()
                     },
+                    name: None,
                 })
                 .collect(),
             window: Some(WindowId::from(current)),

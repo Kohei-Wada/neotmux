@@ -47,6 +47,7 @@ fn window(id: u32, panes: &[u32]) -> Window {
     Window {
         id: WindowId::from(id),
         panes: panes.iter().copied().map(pane).collect(),
+        name: None,
     }
 }
 
@@ -133,4 +134,68 @@ fn a_published_geometry_moves_the_window_id_counter_past_what_it_names() {
         },
     );
     assert_eq!(sub.reserve_window_id(), WindowId::from(5));
+}
+
+/// A window has a number until somebody names it, and the number is the one thing about it
+/// that changes when another window closes. The name is the thing that does not.
+#[test]
+fn a_window_can_be_named_and_the_name_is_read_back() {
+    let (_dir, sub) = built(
+        "neotmux.log.info('one=' .. tostring(neotmux.window.name(1))\n\
+         \x20 .. ' two=' .. tostring(neotmux.window.name(2)))",
+    );
+    publish(&sub);
+    assert_eq!(
+        ticked(&sub),
+        vec!["one=nil two=nil"],
+        "a window nobody has named has no name"
+    );
+
+    // What the host publishes once it has applied the rename.
+    sub.republish_geometry(
+        support::one(),
+        Geometry {
+            size: SIZE,
+            panes: vec![(pane(1), Rect::new(0, 0, 80, 24))],
+            focus: Some(pane(1)),
+            windows: vec![
+                Window {
+                    id: WindowId::from(1),
+                    panes: vec![pane(1), pane(3)],
+                    name: Some("編集".to_string()),
+                },
+                window(2, &[2, 4]),
+            ],
+            window: Some(WindowId::from(1)),
+        },
+    );
+    assert_eq!(ticked(&sub), vec!["one=編集 two=nil"]);
+}
+
+/// `rename` is an op like every other: raised in the tick, applied after it. `nil` takes the
+/// name away and leaves the window its number.
+#[test]
+fn renaming_a_window_is_an_op_with_the_name_on_it() {
+    let (_dir, sub) = built(
+        "neotmux.window.rename(2, '作業')\n\
+         neotmux.window.rename(1, nil)",
+    );
+    publish(&sub);
+    sub.dispatch_tick(support::one());
+    assert_eq!(
+        sub.drain_ops(Some(support::one()))
+            .into_iter()
+            .map(|(_, op)| op)
+            .collect::<Vec<_>>(),
+        vec![
+            Op::WindowRename {
+                window: WindowId::from(2),
+                name: Some("作業".to_string()),
+            },
+            Op::WindowRename {
+                window: WindowId::from(1),
+                name: None,
+            },
+        ]
+    );
 }

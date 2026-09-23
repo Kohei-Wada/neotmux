@@ -38,6 +38,7 @@ pub enum Shown {
 struct Window {
     id: WindowId,
     layout: PaneLayout,
+    name: Option<String>,
 }
 
 /// Every pane tree there is, and which one is being shown.
@@ -103,12 +104,33 @@ impl Windows {
                 pane,
                 surface.minimum,
             ),
+            name: None,
         });
         pane
     }
 
     pub fn take_pane_id(&mut self) -> PaneId {
         self.ids.take()
+    }
+
+    /// What a window is called, or `None` for one nobody has named.
+    pub fn name(&self, id: WindowId) -> Option<&str> {
+        self.entries
+            .iter()
+            .find(|window| window.id == id)
+            .and_then(|window| window.name.as_deref())
+    }
+
+    /// Names a window, or takes its name away. `false` is no window by that id, which is not
+    /// an error: one can close between a plugin asking for the list and acting on it.
+    pub fn rename(&mut self, id: WindowId, name: Option<String>) -> bool {
+        match self.entries.iter_mut().find(|window| window.id == id) {
+            Some(window) => {
+                window.name = name;
+                true
+            }
+            None => false,
+        }
     }
 
     /// Every window in creation order, with its panes in layout order. A hidden window's
@@ -120,6 +142,18 @@ impl Windows {
             .map(|entry| {
                 let panes = entry.layout.panes().into_iter().map(|(id, _)| id).collect();
                 (entry.id, panes)
+            })
+            .collect()
+    }
+
+    /// The same, with what each window is called: what the geometry a plugin reads is built
+    /// from.
+    pub fn named_panes(&self) -> Vec<(WindowId, Vec<PaneId>, Option<String>)> {
+        self.entries
+            .iter()
+            .map(|entry| {
+                let panes = entry.layout.panes().into_iter().map(|(id, _)| id).collect();
+                (entry.id, panes, entry.name.clone())
             })
             .collect()
     }

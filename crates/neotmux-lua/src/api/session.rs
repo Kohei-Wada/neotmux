@@ -66,6 +66,19 @@ pub(crate) fn install(
         session.set(word, call)?;
     }
 
+    {
+        let sources = sources.clone();
+        let ops = ops.clone();
+        let rename = lua.create_function(move |lua, (from, to): (String, String)| {
+            ops.push(
+                source::caller(lua, &sources),
+                Op::SessionRename { from, to },
+            );
+            Ok(())
+        })?;
+        session.set("rename", rename)?;
+    }
+
     Ok(session)
 }
 

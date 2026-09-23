@@ -660,6 +660,7 @@ const OP_PANE_RESIZE: u8 = 3;
 const OP_WINDOW_CREATE: u8 = 4;
 const OP_WINDOW_FOCUS: u8 = 5;
 const OP_DETACH: u8 = 6;
+const OP_WINDOW_RENAME: u8 = 7;
 
 const SPLIT_HORIZONTAL: u8 = 0;
 const SPLIT_VERTICAL: u8 = 1;
@@ -899,6 +900,7 @@ impl Writer {
             for pane in &window.panes {
                 self.u32(pane.get());
             }
+            self.opt_str(window.name.as_deref());
         }
         self.opt_window(v.window);
     }
@@ -1014,6 +1016,11 @@ impl Writer {
             SessionOp::WindowFocus { window } => {
                 self.u8(OP_WINDOW_FOCUS);
                 self.u32(window.get());
+            }
+            SessionOp::WindowRename { window, name } => {
+                self.u8(OP_WINDOW_RENAME);
+                self.u32(window.get());
+                self.opt_str(name.as_deref());
             }
         }
     }
@@ -1275,7 +1282,12 @@ impl Reader<'_> {
             for _ in 0..self.len()? {
                 held.push(self.pane()?);
             }
-            windows.push(Window { id, panes: held });
+            let name = self.opt_string()?;
+            windows.push(Window {
+                id,
+                panes: held,
+                name,
+            });
         }
         Ok(Geometry {
             size,
@@ -1382,6 +1394,10 @@ impl Reader<'_> {
             },
             OP_WINDOW_FOCUS => SessionOp::WindowFocus {
                 window: self.window()?,
+            },
+            OP_WINDOW_RENAME => SessionOp::WindowRename {
+                window: self.window()?,
+                name: self.opt_string()?,
             },
             _ => return Err(WireError::Malformed("op discriminant")),
         })
@@ -1999,10 +2015,12 @@ mod tests {
                 Window {
                     id: WindowId::from(1),
                     panes: vec![PaneId::from(1), PaneId::from(2)],
+                    name: Some("編集".to_string()),
                 },
                 Window {
                     id: WindowId::from(2),
                     panes: vec![PaneId::from(3)],
+                    name: None,
                 },
             ],
             window: Some(WindowId::from(1)),
@@ -2223,6 +2241,21 @@ mod tests {
                         window: WindowId::from(4),
                     },
                 ),
+                (
+                    "init".to_string(),
+                    SessionOp::WindowRename {
+                        window: WindowId::from(4),
+                        name: Some("編集".to_string()),
+                    },
+                ),
+                (
+                    "init".to_string(),
+                    SessionOp::WindowRename {
+                        window: WindowId::from(4),
+                        name: None,
+                    },
+                ),
+                ("init".to_string(), SessionOp::Detach),
             ],
             overlay: vec![DrawCmd::Text {
                 pane: None,

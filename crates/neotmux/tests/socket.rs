@@ -1132,3 +1132,41 @@ fn a_session_can_be_named_in_japanese() {
     client.send("\x19"); // C-y
     wait_for_log(runtime.path(), "in 作業");
 }
+
+/// herdr renames a workspace and a tab; these are the same two things. A window has a number
+/// until somebody names it, and a session has the name it was started under until somebody
+/// changes it — both from the keyboard, both in whatever language the person thinks in.
+#[test]
+fn a_window_and_a_session_can_both_be_renamed_from_the_keyboard() {
+    let runtime = TestRuntime::new();
+    let layer = layer_with(&[(
+        "init.lua",
+        "local said = {}\n\
+         neotmux.on_tick(function()\n\
+           local line = neotmux.session.current()\n\
+             .. ' / ' .. tostring(neotmux.window.name(neotmux.window.current()))\n\
+           if not said[line] then\n\
+             said[line] = true\n\
+             neotmux.log.info('at ' .. line)\n\
+           end\n\
+         end)\n",
+    )]);
+
+    let mut client = Client::start_with_prefix_and_layer(runtime.path(), "/bin/cat", layer.path());
+    wait_for_socket(&socket_in(runtime.path()));
+    wait_for_log(runtime.path(), "at default / nil");
+
+    // `C-b ,` opens the prompt the prefix binds, and Enter applies what was typed.
+    client.send("\x02,");
+    client.send("編集\r");
+    wait_for_log(runtime.path(), "at default / 編集");
+
+    // `C-b s` opens the picker; `r` renames the session under the cursor, with the name it
+    // already has in the field — so the seven backspaces are a person clearing it.
+    client.send("\x02s");
+    client.send("r");
+    client.send("\x7f\x7f\x7f\x7f\x7f\x7f\x7f");
+    client.send("作業\r");
+    client.send("q");
+    wait_for_log(runtime.path(), "at 作業 / 編集");
+}

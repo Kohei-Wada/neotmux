@@ -18,9 +18,11 @@
 --   h j k l     the pane to the left, below, above, to the right
 --   r           resize mode: h/j/k/l move the boundary, anything else leaves
 --   c  n  p     a new window, the next one, the one before
+--   ,           name the window you are in; an empty name leaves it its number
 --   d           leave the session running and let go of this terminal
 local nav = require("neotmux.nav")
 local modes = require("neotmux.mode")
+local prompt = require("neotmux.prompt")
 
 -- Two modes, not one: the armed prefix and resize mode are different states, and a reader
 -- should be able to tell them apart. Each local holds the handle `neotmux.mode.raise` hands
@@ -111,6 +113,22 @@ local M = {
     end,
     ["n"] = next_window,
     ["p"] = prev_window,
+    [","] = function()
+      local id = neotmux.window.current()
+      if id == nil then
+        return
+      end
+      prompt.open({
+        title = "name window",
+        value = neotmux.window.name(id) or "",
+        mode = "rename",
+        -- An empty name is not a name: it takes the one there was away and leaves the window
+        -- the number it had before anybody called it anything.
+        done = function(text)
+          neotmux.window.rename(id, text ~= "" and text or nil)
+        end,
+      })
+    end,
     ["d"] = function()
       neotmux.detach()
     end,

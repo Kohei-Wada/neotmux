@@ -34,6 +34,11 @@ pub enum Op {
     WindowFocus {
         window: WindowId,
     },
+    /// A window's name, or `None` to take it away and leave it a number.
+    WindowRename {
+        window: WindowId,
+        name: Option<String>,
+    },
     /// The set of sessions changing, which is the server's rather than a session's: these
     /// three never reach `Session::apply`.
     SessionCreate {
@@ -44,6 +49,10 @@ pub enum Op {
     },
     SessionKill {
         name: String,
+    },
+    SessionRename {
+        from: String,
+        to: String,
     },
 }
 

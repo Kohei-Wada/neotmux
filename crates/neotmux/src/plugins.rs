@@ -26,6 +26,7 @@ pub enum ServerOp {
     Create { name: String },
     Switch { name: String },
     Kill { name: String },
+    Rename { from: String, to: String },
 }
 
 /// The Lua subsystem and the notification surface that goes with it, driven a frame at a
@@ -127,6 +128,7 @@ impl Plugins {
                 Op::PaneResize { dir, cells } => SessionOp::PaneResize { dir, cells },
                 Op::WindowCreate { window } => SessionOp::WindowCreate { window },
                 Op::WindowFocus { window } => SessionOp::WindowFocus { window },
+                Op::WindowRename { window, name } => SessionOp::WindowRename { window, name },
                 Op::SessionCreate { name } => {
                     server.push((tag, ServerOp::Create { name }));
                     continue;
@@ -137,6 +139,10 @@ impl Plugins {
                 }
                 Op::SessionKill { name } => {
                     server.push((tag, ServerOp::Kill { name }));
+                    continue;
+                }
+                Op::SessionRename { from, to } => {
+                    server.push((tag, ServerOp::Rename { from, to }));
                     continue;
                 }
             };
@@ -164,6 +170,10 @@ impl Plugins {
                 ),
                 ServerOp::Kill { name } => (
                     format!("session.kill('{name}')"),
+                    "no session exists until one starts",
+                ),
+                ServerOp::Rename { from, to } => (
+                    format!("session.rename('{from}', '{to}')"),
                     "no session exists until one starts",
                 ),
             };
@@ -200,6 +210,11 @@ impl Plugins {
                 SessionOp::WindowFocus { window } => refuse(
                     &tag,
                     &format!("window.focus({window})"),
+                    "no windows exist until the session starts",
+                ),
+                SessionOp::WindowRename { window, .. } => refuse(
+                    &tag,
+                    &format!("window.rename({window}, ...)"),
                     "no windows exist until the session starts",
                 ),
             }

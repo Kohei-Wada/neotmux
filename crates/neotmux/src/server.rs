@@ -611,6 +611,41 @@ fn apply_server_ops(
                     &format!("session.switch('{name}') refused: no session by that name"),
                 ),
             },
+            ServerOp::Rename { from, to } => {
+                if let Err(why) = neotmux::sock::validate_session_name(&to) {
+                    logging::log(
+                        Level::Error,
+                        &tag,
+                        &format!("session.rename refused: {why}"),
+                    );
+                    continue;
+                }
+                if sessions.id_of(&to).is_some() {
+                    logging::log(
+                        Level::Error,
+                        &tag,
+                        &format!("session.rename to '{to}' refused: it already exists"),
+                    );
+                    continue;
+                }
+                match sessions.id_of(&from) {
+                    Some(id) => {
+                        if let Some(held) = sessions.live.get_mut(&id) {
+                            held.name = to.clone();
+                        }
+                        // The Lua layer keeps its own copy, for `session.current()` and for
+                        // the list a picker draws.
+                        plugins.lua().name_session(id, &to);
+                    }
+                    None => logging::log(
+                        Level::Error,
+                        &tag,
+                        &format!(
+                            "session.rename('{from}', '{to}') refused: no session by that name"
+                        ),
+                    ),
+                }
+            }
             ServerOp::Kill { name } => match sessions.id_of(&name) {
                 Some(id) => end_session(id, plugins, sessions, clients),
                 None => logging::log(
