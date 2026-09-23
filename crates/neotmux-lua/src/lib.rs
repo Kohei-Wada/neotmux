@@ -54,6 +54,13 @@ pub enum KeyOutcome {
     Fallthrough,
 }
 
+/// What the handlers said about a write. `Refused` carries the sentence the caller is told.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WriteVerdict {
+    Pass,
+    Refused(String),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoadFailure {
     pub source: String,
@@ -561,6 +568,84 @@ impl LuaSubsystem {
                 KeyOutcome::Fallthrough
             }
         }
+    }
+
+    /// Whether anything is listening. Answered off the registry, so the door can ask it
+    /// without entering Lua — which is what keeps a server with no handler on the path it
+    /// has today.
+    pub fn has_write_hooks(&self) -> bool {
+        !self.registry.snapshot(KindTag::Write).is_empty()
+    }
+
+    /// Offers a write to every handler in registration order, stopping at the first refusal.
+    ///
+    /// Everything that is not a pass is a refusal: a handler that returns `false`, one that
+    /// raises, one that overruns its budget, and a table this cannot be built in. A
+    /// guardrail that fails open is useless exactly when something is wrong.
+    pub fn dispatch_write(
+        &self,
+        session: SessionId,
+        pane: PaneId,
+        text: &str,
+        from: &str,
+    ) -> WriteVerdict {
+        let _bound = self.ambient.bind(session);
+        if let Err(err) = Budget::arm(&self.lua, &self.budget) {
+            self.report_text(source::ANONYMOUS, format!("the budget is off: {err}"));
+        }
+        let budget_ms = self.opts.borrow().tick_budget_ms;
+        self.budget.enter(Duration::from_millis(budget_ms));
+        let verdict = self.offer_write(pane, text, from);
+        let outcome = self.budget.leave();
+        self.budget.disarm(&self.lua);
+        if outcome != Outcome::WithinBudget {
+            return WriteVerdict::Refused(format!(
+                "a write handler exceeded the {budget_ms} ms budget"
+            ));
+        }
+        verdict
+    }
+
+    fn offer_write(&self, pane: PaneId, text: &str, from: &str) -> WriteVerdict {
+        for id in self.registry.snapshot(KindTag::Write) {
+            let Some(callback) = self.registry.callback(id) else {
+                continue;
+            };
+            let Some(owner) = self.registry.owner(id) else {
+                continue;
+            };
+            let tag = self.sources.name(owner).unwrap_or_default();
+            let Ok(func) = self.lua.registry_value::<Function>(&callback) else {
+                return WriteVerdict::Refused(format!("{tag}: the handler could not be read"));
+            };
+            let write = match self.lua.create_table() {
+                Ok(write) => write,
+                Err(err) => {
+                    return WriteVerdict::Refused(format!("{tag}: {err}"));
+                }
+            };
+            if write.set("pane", pane.get()).is_err()
+                || write.set("text", text).is_err()
+                || write.set("from", from).is_err()
+            {
+                return WriteVerdict::Refused(format!("{tag}: the write could not be described"));
+            }
+            match func.call::<(Value, Value)>(write) {
+                Ok((Value::Boolean(false), why)) => {
+                    let why = match why {
+                        Value::String(why) => why.to_string_lossy().to_string(),
+                        _ => format!("refused by {tag}"),
+                    };
+                    return WriteVerdict::Refused(why);
+                }
+                Ok(_) => continue,
+                Err(err) => {
+                    self.report(owner, &err);
+                    return WriteVerdict::Refused(format!("{tag}: {err}"));
+                }
+            }
+        }
+        WriteVerdict::Pass
     }
 
     pub fn dispatch_event(&self, session: SessionId, event: &Event) {

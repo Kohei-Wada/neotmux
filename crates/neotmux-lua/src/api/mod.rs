@@ -247,6 +247,19 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
     }
 
     {
+        let sources = sources.clone();
+        let registry = registry.clone();
+        let buffers = buffers.clone();
+        // Every write of text into a pane, before it is written. A handler answers nothing to
+        // pass it and `false, why` to refuse it; `on_key` is the other half of this, for the
+        // keys a person types, which are not writes.
+        let on_write = lua.create_function(move |lua, callback: Function| {
+            Ok(register(lua, &sources, &registry, &buffers, Kind::Write, callback)?.1)
+        })?;
+        neotmux.set("on_write", on_write)?;
+    }
+
+    {
         let keymap = keymap::install(
             lua,
             sources.clone(),

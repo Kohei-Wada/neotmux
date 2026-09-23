@@ -12,6 +12,7 @@ pub enum Kind {
     Event(String),
     Key,
     Keymap(String),
+    Write,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,6 +21,7 @@ pub enum KindTag {
     Event,
     Key,
     Keymap,
+    Write,
 }
 
 impl Kind {
@@ -29,6 +31,7 @@ impl Kind {
             Kind::Event(_) => KindTag::Event,
             Kind::Key => KindTag::Key,
             Kind::Keymap(_) => KindTag::Keymap,
+            Kind::Write => KindTag::Write,
         }
     }
 }
