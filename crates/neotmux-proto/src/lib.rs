@@ -21,7 +21,7 @@ pub use frame::{Frame, Notice, OwnedFrame, OwnedPaneFrame, PaneFrame};
 pub use geom::{Dir, Size, SplitDir};
 pub use geometry::{Geometry, Window};
 pub use grid::{Color, GridSnapshot, SnapCell};
-pub use ids::{PaneId, WindowId};
+pub use ids::{PaneId, SessionId, WindowId};
 pub use keys::{Key, KeyCode, Modifiers};
 pub use level::Level;
 pub use msg::{OwnedToClient, ToClient, ToServer};
