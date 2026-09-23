@@ -633,6 +633,8 @@ const TO_CLIENT_TICK: u8 = 0;
 const TO_CLIENT_DONE: u8 = 1;
 const TO_CLIENT_READING: u8 = 2;
 const TO_CLIENT_REFUSED: u8 = 3;
+const TO_CLIENT_CLIP: u8 = 4;
+const TO_CLIENT_BYE: u8 = 5;
 
 const STEP_GEOMETRY: u8 = 0;
 const STEP_BANDS: u8 = 1;
@@ -687,10 +689,6 @@ pub fn encode_to_server(msg: &ToServer) -> Vec<u8> {
         ToServer::Attach(attach) => {
             w.u8(TO_SERVER_ATTACH);
             w.size(attach.size);
-            w.u32(attach.first_window.get());
-            w.reserved(attach.reserved);
-            w.u16(attach.gutter);
-            w.bool(attach.wants_pane_output);
         }
         ToServer::Key(key) => {
             w.u8(TO_SERVER_KEY);
@@ -715,13 +713,7 @@ pub fn encode_to_server(msg: &ToServer) -> Vec<u8> {
 pub fn decode_to_server(bytes: &[u8]) -> Result<ToServer, WireError> {
     let mut r = Reader::new(bytes);
     let msg = match r.u8()? {
-        TO_SERVER_ATTACH => ToServer::Attach(Attach {
-            size: r.size()?,
-            first_window: r.window()?,
-            reserved: r.reserved()?,
-            gutter: r.u16()?,
-            wants_pane_output: r.bool()?,
-        }),
+        TO_SERVER_ATTACH => ToServer::Attach(Attach { size: r.size()? }),
         TO_SERVER_KEY => ToServer::Key(r.key()?),
         TO_SERVER_RESIZE => ToServer::Resize(r.size()?),
         TO_SERVER_READ => ToServer::Read(r.read()?),
@@ -751,6 +743,17 @@ pub fn encode_to_client(msg: &ToClient<'_>) -> Vec<u8> {
             w.u8(TO_CLIENT_REFUSED);
             w.str(why);
         }
+        ToClient::Clip(text) => {
+            w.u8(TO_CLIENT_CLIP);
+            w.str(text);
+        }
+        ToClient::Bye(lines) => {
+            w.u8(TO_CLIENT_BYE);
+            w.len(lines.len());
+            for line in *lines {
+                w.str(line);
+            }
+        }
     }
     w.finish()
 }
@@ -762,6 +765,15 @@ pub fn decode_to_client(bytes: &[u8]) -> Result<OwnedToClient, WireError> {
         TO_CLIENT_DONE => OwnedToClient::Done(r.done()?),
         TO_CLIENT_READING => OwnedToClient::Reading(r.reading()?),
         TO_CLIENT_REFUSED => OwnedToClient::Refused(r.string()?),
+        TO_CLIENT_CLIP => OwnedToClient::Clip(r.string()?),
+        TO_CLIENT_BYE => {
+            let n = r.len()?;
+            let mut lines = Vec::with_capacity(n.min(64));
+            for _ in 0..n {
+                lines.push(r.string()?);
+            }
+            OwnedToClient::Bye(lines)
+        }
         _ => return Err(WireError::Malformed("server message discriminant")),
     };
     r.finish()?;
@@ -1969,10 +1981,6 @@ mod tests {
     fn an_attach_round_trips() {
         round_trip_to_server(ToServer::Attach(Attach {
             size: Size { rows: 24, cols: 80 },
-            first_window: WindowId::from(7),
-            reserved: Reserved::horizontal(1, 2),
-            gutter: 1,
-            wants_pane_output: true,
         }));
     }
 
@@ -2271,6 +2279,25 @@ mod tests {
             decode_to_client(&bytes),
             Ok(OwnedToClient::Refused("already attached".to_string()))
         );
+    }
+
+    /// Encoded and decoded inline, the way the `Refused` case beside it is: `ToClient`
+    /// borrows and `OwnedToClient` does not, so the two sides of a round trip are not the
+    /// same type and there is no helper to hand them both to.
+    #[test]
+    fn the_clipboard_and_the_goodbye_round_trip() {
+        let bytes = encode_to_client(&ToClient::Clip("yanked 日本語"));
+        assert_eq!(
+            decode_to_client(&bytes),
+            Ok(OwnedToClient::Clip("yanked 日本語".to_string()))
+        );
+
+        let lines = vec!["a: one".to_string(), String::new()];
+        let bytes = encode_to_client(&ToClient::Bye(&lines));
+        assert_eq!(decode_to_client(&bytes), Ok(OwnedToClient::Bye(lines)));
+
+        let bytes = encode_to_client(&ToClient::Bye(&[]));
+        assert_eq!(decode_to_client(&bytes), Ok(OwnedToClient::Bye(Vec::new())));
     }
 
     #[test]

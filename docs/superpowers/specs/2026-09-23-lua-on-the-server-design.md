@@ -174,6 +174,26 @@ a version mismatch and for a connection the server turns away.
 `PROTOCOL_VERSION` goes up. There is no compatibility path and none is wanted: the client and
 the server are the same binary, and the handshake already names both numbers when they differ.
 
+**Amended, 2026-09-23 (stage 2).** The table above is short by two, and both are side effects
+that need a terminal:
+
+```
+server → client :  Frame, End, Clip, Bye
+```
+
+`Clip` carries text a plugin yanked, because `neotmux.clipboard.set` writes OSC 52 to a
+terminal and the code that calls it now runs in the process that has none. It goes to every
+attached client; a yank with nobody attached is refused, with that as the reason. `Bye` carries
+the notifications raised while one client was attached, for it to replay on stderr once its
+terminal is restored — `docs/plugins.md` promises that replay, and the `Notifications` that
+hold the transcript moved into the process whose stderr is `/dev/null`.
+
+One more thing the move settled: the client attaches and reads the session's first word
+**before** it enters the alternate screen. A plugin that calls `neotmux.quit()` while loading
+used to be the client's own discovery, made before it touched the screen; the client loads
+nothing now, so it asks instead. A session that was over before it began is an `End` and not a
+`Refused`, so that client exits cleanly and the terminal is never switched.
+
 The round disappears. Today the client may not touch its keyboard between sending a `Tock` and
 reading the `Done`, because the ops it just sent have been applied at the far end and a key
 handler running in that window would see a session that had already moved on. With the handler
@@ -241,6 +261,12 @@ a connection that sends a command is not an `Attach`, which the doorstep already
    task needs its own decomposition when it is planned; it does not decompose at this level,
    because there is no useful intermediate state between the runtime being on one side and
    being on the other.
+
+   **Done, 2026-09-23**, planned in `plans/2026-09-23-the-vm-moves-to-the-server.md`. The
+   `Attach` shrink and the `PROTOCOL_VERSION` bump came with it rather than with stage 3: a
+   client with no Lua layer cannot fill `first_window`, `reserved`, `gutter` or
+   `wants_pane_output`, so the shrink is forced by the move. What is left for stage 3 is the
+   dead vocabulary, which is what that stage was always mostly about.
 3. **The sweep** (§5, §6). The wire types nothing references any more come out, `reads.rs`
    goes, `Attach` shrinks, `PROTOCOL_VERSION` goes up.
 4. **Two clients, corrected** (§7, §8). After 3 the state is already shared, so this is mostly

@@ -40,7 +40,7 @@ pub fn serve(session: Option<String>) -> anyhow::Result<()> {
         return Ok(());
     };
     let shutdown = ShutdownSignal::install()?;
-    let served = server::serve(&listener, &shutdown);
+    let served = server::serve(name, &listener, &shutdown);
     // Taken away on the way out, so the next client does not connect to a server that is
     // gone — and only if it is still this server's, so one that outlived a replacement does
     // not take the replacement's name with it.
@@ -59,10 +59,9 @@ pub fn serve(session: Option<String>) -> anyhow::Result<()> {
 
 /// A server being started, or one that was already there.
 ///
-/// Split in two so that the two slow things a client does at startup happen at the same
-/// time rather than one after the other: starting a server is a fork, an exec and a bind,
-/// and building the Lua layer is every plugin's `init.lua`. Neither needs the other to have
-/// finished, and on a busy machine doing them in series is what a person feels.
+/// Split in two so that the client can get on with whatever else it has to do while the
+/// server forks, execs and binds. That used to be loading the plugins; the plugins are the
+/// server's now, and what is left is the terminal.
 pub struct Starting {
     paths: Paths,
     connected: Option<UnixStream>,

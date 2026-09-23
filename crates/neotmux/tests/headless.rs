@@ -8,14 +8,14 @@ use std::fs;
 use std::time::{Duration, Instant};
 
 use neotmux::plugins::Plugins;
-use neotmux::session::Session;
+use neotmux::session::{Session, Setup};
 use neotmux_lua::KeyOutcome;
 use neotmux_lua::LuaSubsystem;
 use neotmux_lua::runtime::Layers;
 use neotmux_proto::Level;
 use neotmux_proto::frame::{Frame, Notice};
 use neotmux_proto::keys::{Key, KeyCode};
-use neotmux_proto::msg::{Attach, End};
+use neotmux_proto::msg::End;
 use neotmux_proto::{DrawCmd, Reserved, Size, WindowId};
 use neotmux_term::wakeup::{Wakeup, wakeup};
 
@@ -35,8 +35,9 @@ fn halves(files: &[(&str, &str)]) -> (tempfile::TempDir, Wakeup, Session, Plugin
         fs::write(path, body).expect("write layer file");
     }
     let (wakeup, waker) = wakeup().expect("wakeup");
+    let terminals = std::rc::Rc::new(neotmux_term::terminals::PaneTerminals::new());
     let session = Session::new(
-        &Attach {
+        &Setup {
             size: SURFACE,
             first_window: WindowId::from(1),
             reserved: Reserved::default(),
@@ -44,11 +45,12 @@ fn halves(files: &[(&str, &str)]) -> (tempfile::TempDir, Wakeup, Session, Plugin
             wants_pane_output: false,
         },
         waker,
+        terminals.clone(),
     )
     .expect("start a session");
     let lua = LuaSubsystem::build(
         Layers::from_paths(vec![dir.path().to_path_buf()]),
-        session.terminals().clone(),
+        terminals,
     )
     .expect("build the Lua subsystem");
     assert!(lua.run_init().is_empty(), "the layer failed to load");
