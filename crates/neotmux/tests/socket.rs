@@ -1205,3 +1205,33 @@ fn a_pane_that_asked_for_application_cursor_keys_is_sent_them() {
     client.send("\x1b[A");
     client.wait_for_output("^[OA");
 }
+
+/// The whole path a `ToServer::Command` takes, with nothing implemented at the end of it: a
+/// name the host does not know is `Ran { ok: false, .. }`, not a silent success. `NAMES` is
+/// empty this task, so this is asked over the wire directly rather than through the CLI —
+/// `parse_args` would read `frobnicate` as a session name until `NAMES` has entries.
+#[test]
+fn a_command_nobody_implements_fails_and_says_which_name() {
+    let runtime = TestRuntime::new();
+    let client = started(runtime.path());
+
+    let mut stream = greeted(&socket_in(runtime.path()));
+    send_message(
+        &mut stream,
+        &wire::encode_to_server(&neotmux_proto::ToServer::Command {
+            session: None,
+            name: "frobnicate".to_string(),
+            args: Vec::new(),
+        }),
+    );
+    let answer = read_message(&mut stream);
+    drop(client);
+
+    match answer {
+        OwnedToClient::Ran { ok, lines } => {
+            assert!(!ok);
+            assert_eq!(lines, vec!["unknown command 'frobnicate'".to_string()]);
+        }
+        other => panic!("expected Ran, got {other:?}"),
+    }
+}

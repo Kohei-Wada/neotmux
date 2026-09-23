@@ -1,3 +1,4 @@
+mod command;
 mod draw;
 mod overlay;
 mod server;
@@ -21,6 +22,8 @@ enum Action {
     Ls,
     /// End one of them and its shells.
     Kill,
+    /// A host command, answered by the server without touching the Lua layer.
+    Command { name: String, args: Vec<String> },
 }
 
 /// What the command line asked for. One binary is both halves of neotmux: with no arguments
@@ -119,6 +122,23 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Cli {
             }
             "--help" | "-h" => help = true,
             "--version" | "-V" => version = true,
+            arg if !arg.is_empty() && command::NAMES.contains(&arg) => {
+                let name = arg.to_string();
+                let mut cargs = Vec::new();
+                while let Some(next) = args.next() {
+                    if next == "-t" {
+                        match args.next() {
+                            Some(value) => session = Some(value),
+                            None => {
+                                warnings.push("-t requires a session name argument".to_string())
+                            }
+                        }
+                    } else {
+                        cargs.push(next);
+                    }
+                }
+                action = Action::Command { name, args: cargs };
+            }
             arg if !arg.starts_with('-') && !arg.is_empty() => {
                 if session.is_some() {
                     warnings.push(format!(
@@ -256,6 +276,30 @@ fn main() -> anyhow::Result<()> {
         Action::Ls => list_sessions(),
         Action::Kill => kill_session(cli.session_name()),
         Action::Attach => client(cli.session.clone()),
+        Action::Command { name, args } => run_command(&name, &args, cli.session.as_deref()),
+    }
+}
+
+/// Runs a host command and prints what it said. Lines on stdout where it worked, the one
+/// sentence on stderr where it did not, and the exit status says which.
+fn run_command(name: &str, args: &[String], session: Option<&str>) -> anyhow::Result<()> {
+    let asked = ask(&neotmux_proto::msg::ToServer::Command {
+        session: session.map(str::to_string),
+        name: name.to_string(),
+        args: args.to_vec(),
+    })?;
+    match asked {
+        Some(neotmux_proto::OwnedToClient::Ran { ok: true, lines }) => {
+            for line in lines {
+                println!("{line}");
+            }
+            Ok(())
+        }
+        Some(neotmux_proto::OwnedToClient::Ran { ok: false, lines }) => {
+            anyhow::bail!("{}", lines.join("\n"))
+        }
+        Some(other) => anyhow::bail!("the neotmux server answered {other:?}"),
+        None => anyhow::bail!("no neotmux server is running"),
     }
 }
 

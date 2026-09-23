@@ -341,7 +341,14 @@ enum Doorstep {
 /// What a connection that is not a client wanted.
 enum Ask {
     List,
-    Kill { session: String },
+    Kill {
+        session: String,
+    },
+    Command {
+        session: Option<String>,
+        name: String,
+        args: Vec<String>,
+    },
 }
 
 /// One look at one connection at the door, which never waits.
@@ -440,6 +447,15 @@ fn doorstep(pending: &mut Pending) -> Doorstep {
             }
             Ok(ToServer::List) => Doorstep::Asking(Ask::List),
             Ok(ToServer::Kill { session }) => Doorstep::Asking(Ask::Kill { session }),
+            Ok(ToServer::Command {
+                session,
+                name,
+                args,
+            }) => Doorstep::Asking(Ask::Command {
+                session,
+                name,
+                args,
+            }),
             Ok(other) => {
                 logging::log(
                     Level::Warn,
@@ -690,6 +706,17 @@ fn answer(
                 None => false,
             };
             let _ = link.send(&wire::encode_to_client(&ToClient::Killed(found)));
+        }
+        Ask::Command {
+            session: _session,
+            name,
+            args: _args,
+        } => {
+            let ran = crate::command::unknown(&name);
+            let _ = link.send(&wire::encode_to_client(&ToClient::Ran {
+                ok: ran.ok,
+                lines: &ran.lines,
+            }));
         }
     }
 }
