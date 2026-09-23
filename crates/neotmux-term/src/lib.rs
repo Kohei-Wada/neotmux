@@ -3,7 +3,6 @@ pub mod lines;
 pub mod osc52;
 pub mod pty;
 pub mod query;
-pub mod read;
 pub mod scrollback;
 pub mod state;
 pub mod terminals;

@@ -19,10 +19,9 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use neotmux_proto::msg::{Read, Reading, ToServer};
+use neotmux_proto::read::{Extent, Lines, PaneRead, Want};
 use neotmux_proto::wire;
 use neotmux_proto::{OwnedToClient, PaneId};
-use neotmux_term::lines::Trailing;
-use neotmux_term::read::{History, PaneRead, Text, Want};
 
 use crate::link::Link;
 
@@ -80,9 +79,9 @@ impl RemotePanes {
         reading
     }
 
-    fn text(&self, pane: PaneId, read: Read) -> Option<Text> {
+    fn text(&self, pane: PaneId, read: Read) -> Option<Lines> {
         match self.ask(read)? {
-            Reading::Text(text) => text.map(|text| Text {
+            Reading::Text(text) => text.map(|text| Lines {
                 lines: text.lines,
                 wrapped: text.wrapped,
                 // This frame's stamp, not the one the pane is at as the answer is written.
@@ -102,46 +101,30 @@ impl RemotePanes {
     }
 }
 
-fn pad(want: Want) -> bool {
-    matches!(want.trailing, Trailing::Pad)
-}
-
 impl PaneRead for RemotePanes {
     fn revision(&self, pane: PaneId) -> Option<u64> {
         self.revisions.borrow().get(&pane).copied()
     }
 
-    fn content(&self, pane: PaneId, last: Option<usize>, want: Want) -> Option<Text> {
-        self.text(
-            pane,
-            Read::Content {
-                pane,
-                last: last.map(|n| n as u64),
-                pad: pad(want),
-                wrapped: want.wrapped,
-            },
-        )
+    fn content(&self, pane: PaneId, last: Option<u64>, want: Want) -> Option<Lines> {
+        self.text(pane, Read::Content { pane, last, want })
     }
 
-    fn history_extent(&self, pane: PaneId) -> Option<History> {
+    fn history_extent(&self, pane: PaneId) -> Option<Extent> {
         match self.ask(Read::HistoryExtent { pane })? {
-            Reading::Extent(extent) => extent.map(|extent| History {
-                len: extent.len as usize,
-                dropped: extent.dropped as usize,
-            }),
+            Reading::Extent(extent) => extent,
             _ => None,
         }
     }
 
-    fn history(&self, pane: PaneId, from: usize, count: usize, want: Want) -> Option<Text> {
+    fn history(&self, pane: PaneId, from: u64, count: u64, want: Want) -> Option<Lines> {
         self.text(
             pane,
             Read::History {
                 pane,
-                from: from as u64,
-                count: count as u64,
-                pad: pad(want),
-                wrapped: want.wrapped,
+                from,
+                count,
+                want,
             },
         )
     }
@@ -163,43 +146,20 @@ impl PaneRead for RemotePanes {
 }
 
 /// The other side of [`RemotePanes`]: one read, answered out of the session's own terminals.
+///
+/// One line per question, because there is one vocabulary now: what the socket asks in is
+/// what the terminals answer in.
 pub fn answer(panes: &dyn PaneRead, read: Read) -> Reading {
-    let lines = |text: Option<Text>| {
-        Reading::Text(text.map(|text| neotmux_proto::msg::Lines {
-            lines: text.lines,
-            wrapped: text.wrapped,
-            revision: text.revision,
-        }))
-    };
-    let want = |pad: bool, wrapped: bool| Want {
-        trailing: if pad { Trailing::Pad } else { Trailing::Trim },
-        wrapped,
-    };
     match read {
         Read::Revision { pane } => Reading::Revision(panes.revision(pane)),
-        Read::Content {
-            pane,
-            last,
-            pad,
-            wrapped,
-        } => lines(panes.content(pane, last.map(|n| n as usize), want(pad, wrapped))),
-        Read::HistoryExtent { pane } => {
-            Reading::Extent(
-                panes
-                    .history_extent(pane)
-                    .map(|extent| neotmux_proto::msg::Extent {
-                        len: extent.len as u64,
-                        dropped: extent.dropped as u64,
-                    }),
-            )
-        }
+        Read::Content { pane, last, want } => Reading::Text(panes.content(pane, last, want)),
+        Read::HistoryExtent { pane } => Reading::Extent(panes.history_extent(pane)),
         Read::History {
             pane,
             from,
             count,
-            pad,
-            wrapped,
-        } => lines(panes.history(pane, from as usize, count as usize, want(pad, wrapped))),
+            want,
+        } => Reading::Text(panes.history(pane, from, count, want)),
         Read::Freeze { pane } => Reading::Did(panes.freeze(pane)),
         Read::Unfreeze { pane } => Reading::Did(panes.unfreeze(pane)),
         Read::IsFrozen { pane } => Reading::Frozen(panes.is_frozen(pane)),
@@ -257,7 +217,7 @@ mod tests {
         assert_eq!(text.lines, vec!["two".to_string(), "three".to_string()]);
         assert_eq!(remote.history_extent(pane()).expect("extent").len, 1);
         let history = remote
-            .history(pane(), 0, usize::MAX, Want::default())
+            .history(pane(), 0, u64::MAX, Want::default())
             .expect("a live pane");
         assert_eq!(history.lines, vec!["one".to_string()]);
         assert!(remote.freeze(pane()));

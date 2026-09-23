@@ -67,7 +67,7 @@ pub fn lines(
     screen: &mut vt100::Screen,
     from: usize,
     count: usize,
-    trailing: crate::lines::Trailing,
+    trailing: neotmux_proto::read::Trailing,
 ) -> Vec<String> {
     walk(screen, from, count, |screen, row, cols| {
         crate::lines::row(screen, row, cols, trailing)
@@ -86,11 +86,11 @@ mod tests {
     }
 
     fn visible(parser: &vt100::Parser) -> Vec<String> {
-        crate::lines::visible(parser.screen(), None, crate::lines::Trailing::Trim)
+        crate::lines::visible(parser.screen(), None, neotmux_proto::read::Trailing::Trim)
     }
 
     fn lines(screen: &mut vt100::Screen, from: usize, count: usize) -> Vec<String> {
-        super::lines(screen, from, count, crate::lines::Trailing::Trim)
+        super::lines(screen, from, count, neotmux_proto::read::Trailing::Trim)
     }
 
     #[test]

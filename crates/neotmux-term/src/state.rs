@@ -1,7 +1,5 @@
+use neotmux_proto::read::{Extent, Trailing};
 use neotmux_proto::{Color, GridSnapshot, Size};
-
-use crate::lines::Trailing;
-use crate::read::History;
 
 pub struct TermState {
     parser: vt100::Parser,
@@ -152,14 +150,14 @@ impl TermState {
     /// How many lines the pane holds above its visible screen, and how many have fallen out
     /// of the front of it. `&mut` because reading the length goes through the screen's own
     /// position in the scrollback — see [`crate::scrollback`].
-    pub fn history_extent(&mut self) -> History {
+    pub fn history_extent(&mut self) -> Extent {
         let dropped = match &self.frozen {
             Some(frozen) => frozen.dropped,
             None => self.dropped,
         };
-        History {
-            len: crate::scrollback::len(self.reading_mut()),
-            dropped,
+        Extent {
+            len: crate::scrollback::len(self.reading_mut()) as u64,
+            dropped: dropped as u64,
         }
     }
 
@@ -321,7 +319,7 @@ mod tests {
     fn a_history_with_room_left_has_dropped_nothing() {
         let mut s = ringed();
         s.feed(b"1\r\n2\r\n3\r\n4\r\n5");
-        assert_eq!(s.history_extent(), History { len: 3, dropped: 0 });
+        assert_eq!(s.history_extent(), Extent { len: 3, dropped: 0 });
     }
 
     /// The number the whole thing exists for: the history stops growing and nothing else
@@ -330,11 +328,11 @@ mod tests {
     fn a_full_ring_counts_the_lines_it_pushed_out_of_the_front() {
         let mut s = ringed();
         s.feed(b"1\r\n2\r\n3\r\n4\r\n5");
-        assert_eq!(s.history_extent(), History { len: 3, dropped: 0 });
+        assert_eq!(s.history_extent(), Extent { len: 3, dropped: 0 });
         s.feed(b"\r\n6\r\n7\r\n8");
         assert_eq!(
             s.history_extent(),
-            History { len: 4, dropped: 2 },
+            Extent { len: 4, dropped: 2 },
             "the history stopped growing and nothing said the numbers had moved"
         );
         assert_eq!(
@@ -358,7 +356,7 @@ mod tests {
         let after = s.history_extent();
         assert_eq!(after.dropped, 1);
         assert_eq!(
-            s.history(anchor - after.dropped, 1, Trailing::Trim),
+            s.history((anchor - after.dropped) as usize, 1, Trailing::Trim),
             vec!["2"],
             "the anchor stopped naming the line it was taken on"
         );
@@ -406,12 +404,12 @@ mod tests {
     fn a_feed_that_appends_a_whole_ring_undercounts() {
         let mut s = TermState::new(Size { rows: 2, cols: 8 }, 2);
         s.feed(b"1\r\n2\r\n3\r\n4");
-        assert_eq!(s.history_extent(), History { len: 2, dropped: 0 });
+        assert_eq!(s.history_extent(), Extent { len: 2, dropped: 0 });
         s.feed(b"\r\n5\r\n6\r\n7");
         assert_eq!(s.history(0, 10, Trailing::Trim), vec!["4", "5"]);
         assert_eq!(
             s.history_extent(),
-            History { len: 2, dropped: 1 },
+            Extent { len: 2, dropped: 1 },
             "three lines went; this is the undercount the module documents"
         );
     }
@@ -486,7 +484,7 @@ mod tests {
         let mut s = TermState::new(Size { rows: 2, cols: 8 }, 100);
         s.freeze();
         s.feed(b"1\r\n2\r\n3\r\n4");
-        assert_eq!(s.history_extent(), History { len: 0, dropped: 0 });
+        assert_eq!(s.history_extent(), Extent { len: 0, dropped: 0 });
         s.unfreeze();
         assert_eq!(s.history(0, 10, Trailing::Trim), vec!["1", "2"]);
         assert_eq!(s.lines(None, Trailing::Trim), vec!["3", "4"]);
@@ -500,9 +498,9 @@ mod tests {
         s.feed(b"1\r\n2\r\n3\r\n4\r\n5");
         s.freeze();
         s.feed(b"\r\n6\r\n7\r\n8");
-        assert_eq!(s.history_extent(), History { len: 3, dropped: 0 });
+        assert_eq!(s.history_extent(), Extent { len: 3, dropped: 0 });
         s.unfreeze();
-        assert_eq!(s.history_extent(), History { len: 4, dropped: 2 });
+        assert_eq!(s.history_extent(), Extent { len: 4, dropped: 2 });
     }
 
     /// Re-taking the snapshot would move an anchor a caller had already taken against it.

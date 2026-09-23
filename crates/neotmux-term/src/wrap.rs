@@ -56,7 +56,12 @@ mod tests {
         let parser = parser(3, 4, 0, b"abcdef");
         assert_eq!(visible(parser.screen(), Some(2)), vec![false, false]);
         assert_eq!(
-            crate::lines::visible(parser.screen(), Some(2), crate::lines::Trailing::Trim).len(),
+            crate::lines::visible(
+                parser.screen(),
+                Some(2),
+                neotmux_proto::read::Trailing::Trim
+            )
+            .len(),
             2
         );
     }
@@ -66,7 +71,12 @@ mod tests {
         let mut parser = parser(2, 4, 100, b"abcdef\r\n\r\nxy");
         assert_eq!(history(parser.screen_mut(), 0, 10), vec![true, false]);
         assert_eq!(
-            crate::scrollback::lines(parser.screen_mut(), 0, 10, crate::lines::Trailing::Trim),
+            crate::scrollback::lines(
+                parser.screen_mut(),
+                0,
+                10,
+                neotmux_proto::read::Trailing::Trim
+            ),
             vec!["abcd", "ef"]
         );
     }

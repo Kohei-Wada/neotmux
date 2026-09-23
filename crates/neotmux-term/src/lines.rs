@@ -1,13 +1,4 @@
-/// What to do with the blank rest of a row.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Trailing {
-    /// Cut it, so an untouched row is `""`. What reading a line of text wants.
-    #[default]
-    Trim,
-    /// Keep it, so every row is exactly as wide as the pane. What a rectangle wants: the
-    /// interior spacing of a short line is where its columns are.
-    Pad,
-}
+use neotmux_proto::read::Trailing;
 
 /// One row of a terminal as plain text, and the rules a plugin matching a pattern against it
 /// can rely on.

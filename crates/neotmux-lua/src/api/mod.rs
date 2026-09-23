@@ -15,7 +15,7 @@ use std::rc::Rc;
 
 use mlua::{Function, Lua, Table, Value};
 
-use neotmux_term::read::PaneRead;
+use neotmux_proto::read::PaneRead;
 
 use crate::LoadFailure;
 use crate::draw::Buffers;

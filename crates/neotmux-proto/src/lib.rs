@@ -10,6 +10,7 @@ pub mod level;
 pub mod msg;
 pub mod paneinfo;
 pub mod panerects;
+pub mod read;
 pub mod reserve;
 pub mod width;
 pub mod wire;
@@ -26,6 +27,7 @@ pub use level::Level;
 pub use msg::{OwnedToClient, ToClient, ToServer};
 pub use paneinfo::PaneInfo;
 pub use panerects::PaneRects;
+pub use read::{Extent, Lines, PaneRead, Trailing, Want};
 pub use reserve::{Axis, Edge, Reserved};
 pub use wire::WireError;
 

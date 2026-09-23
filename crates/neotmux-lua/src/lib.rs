@@ -22,10 +22,10 @@ use std::time::Duration;
 use mlua::chunk::ChunkMode;
 use mlua::{Function, Lua, Value};
 
+use neotmux_proto::read::PaneRead;
 use neotmux_proto::{
     DrawCmd, Epoch, Event, Geometry, Level, PaneId, PaneInfo, Reserved, Size, WindowId,
 };
-use neotmux_term::read::PaneRead;
 
 pub use api::Opts;
 pub use api::keymap;

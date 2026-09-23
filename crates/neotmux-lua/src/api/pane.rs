@@ -3,9 +3,8 @@ use std::rc::Rc;
 
 use mlua::{Lua, Table, Value};
 
+use neotmux_proto::read::{Lines, PaneRead, Trailing, Want};
 use neotmux_proto::{Dir, Geometry, PaneId, SplitDir};
-use neotmux_term::lines::Trailing;
-use neotmux_term::read::{PaneRead, Text, Want};
 
 use crate::api::rect;
 use crate::ops::{Op, OpBuffer};
@@ -14,10 +13,10 @@ use crate::source::{self, Sources};
 
 /// A count a caller gave in Lua, where the only wrong value is a negative one: that is a
 /// typo rather than a refusal, as a resize by a negative number of cells is.
-fn count(call: &str, field: &str, value: Option<i64>) -> mlua::Result<Option<usize>> {
+fn count(call: &str, field: &str, value: Option<i64>) -> mlua::Result<Option<u64>> {
     value
         .map(|value| {
-            usize::try_from(value).map_err(|_| {
+            u64::try_from(value).map_err(|_| {
                 mlua::Error::RuntimeError(format!(
                     "pane.{call} takes a {field} of zero or more, got {value}"
                 ))
@@ -50,7 +49,7 @@ fn want(opts: Option<&Table>) -> mlua::Result<Want> {
 
 /// One read of a pane's text as Lua sees it: the lines, the revision they were read at, and
 /// the continuation flags where they were asked for — `nil` where they were not.
-fn answer(lua: &Lua, text: Text) -> mlua::Result<(Value, Value, Value)> {
+fn answer(lua: &Lua, text: Lines) -> mlua::Result<(Value, Value, Value)> {
     let wrapped = match text.wrapped {
         Some(wrapped) => Value::Table(lua.create_sequence_from(wrapped)?),
         None => Value::Nil,
@@ -218,7 +217,7 @@ pub(crate) fn install(
             };
             let from = count("scrollback", "from", from)?.unwrap_or(0);
             // No count is the rest of the history, as no `lines` is the whole screen.
-            let lines = count("scrollback", "lines count", lines)?.unwrap_or(usize::MAX);
+            let lines = count("scrollback", "lines count", lines)?.unwrap_or(u64::MAX);
             let want = want(opts.as_ref())?;
             let Some(text) = terminals.history(PaneId::from(pane), from, lines, want) else {
                 return Ok((Value::Nil, Value::Nil, Value::Nil));

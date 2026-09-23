@@ -150,8 +150,7 @@ pub enum Read {
     Content {
         pane: PaneId,
         last: Option<u64>,
-        pad: bool,
-        wrapped: bool,
+        want: Want,
     },
     HistoryExtent {
         pane: PaneId,
@@ -160,8 +159,7 @@ pub enum Read {
         pane: PaneId,
         from: u64,
         count: u64,
-        pad: bool,
-        wrapped: bool,
+        want: Want,
     },
     Freeze {
         pane: PaneId,
@@ -174,21 +172,7 @@ pub enum Read {
     },
 }
 
-/// One read of a pane's text.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Lines {
-    pub lines: Vec<String>,
-    /// Whether each line runs on into the next — `None` where it was not asked for.
-    pub wrapped: Option<Vec<bool>>,
-    pub revision: u64,
-}
-
-/// Where a pane's history begins and how long it is.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct Extent {
-    pub len: u64,
-    pub dropped: u64,
-}
+pub use crate::read::{Extent, Lines, Want};
 
 /// The answer to a [`Read`]. `None` throughout is a pane that does not exist, which is not
 /// an error: a shell that exited between two passes of a watcher's loop is not the caller's

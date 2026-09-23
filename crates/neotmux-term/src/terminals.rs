@@ -1,10 +1,10 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
+use neotmux_proto::read::{Extent, Lines, PaneRead, Want};
 use neotmux_proto::{GridSnapshot, PaneId, Size};
 
 use crate::query::Queries;
-use crate::read::{History, PaneRead, Text, Want};
 use crate::state::TermState;
 
 /// One pane's terminal: the screen its child writes into, the reply path that answers the
@@ -142,7 +142,7 @@ impl PaneTerminals {
     /// How many lines the pane holds above its visible screen, and how many have already
     /// fallen out of the front of it. `None` for a pane that does not exist. This is the cheap half of reading the history, the way `revision` is the
     /// cheap half of reading the screen: it builds no lines.
-    pub fn history_extent(&self, pane: PaneId) -> Option<History> {
+    pub fn history_extent(&self, pane: PaneId) -> Option<Extent> {
         self.panes
             .borrow_mut()
             .get_mut(&pane)
@@ -152,10 +152,10 @@ impl PaneTerminals {
     /// Lines from above the pane's visible screen, oldest first, with the revision they were
     /// read at. The read moves the screen's position in the scrollback and puts it back
     /// before returning, all inside this one borrow — see `crate::scrollback`.
-    pub fn history(&self, pane: PaneId, from: usize, count: usize, want: Want) -> Option<Text> {
+    pub fn history(&self, pane: PaneId, from: usize, count: usize, want: Want) -> Option<Lines> {
         let mut panes = self.panes.borrow_mut();
         let terminal = panes.get_mut(&pane)?;
-        Some(Text {
+        Some(Lines {
             lines: terminal.state.history(from, count, want.trailing),
             wrapped: want
                 .wrapped
@@ -166,10 +166,10 @@ impl PaneTerminals {
 
     /// What the pane is showing, as lines, together with the revision they were read at.
     /// `None` for a pane that does not exist.
-    pub fn content(&self, pane: PaneId, last: Option<usize>, want: Want) -> Option<Text> {
+    pub fn content(&self, pane: PaneId, last: Option<usize>, want: Want) -> Option<Lines> {
         let panes = self.panes.borrow();
         let terminal = panes.get(&pane)?;
-        Some(Text {
+        Some(Lines {
             lines: terminal.state.lines(last, want.trailing),
             wrapped: want.wrapped.then(|| terminal.state.wrapped(last)),
             revision: terminal.read_revision(),
@@ -184,16 +184,16 @@ impl PaneRead for PaneTerminals {
         PaneTerminals::revision(self, pane)
     }
 
-    fn content(&self, pane: PaneId, last: Option<usize>, want: Want) -> Option<Text> {
-        PaneTerminals::content(self, pane, last, want)
+    fn content(&self, pane: PaneId, last: Option<u64>, want: Want) -> Option<Lines> {
+        PaneTerminals::content(self, pane, last.map(|n| n as usize), want)
     }
 
-    fn history_extent(&self, pane: PaneId) -> Option<History> {
+    fn history_extent(&self, pane: PaneId) -> Option<Extent> {
         PaneTerminals::history_extent(self, pane)
     }
 
-    fn history(&self, pane: PaneId, from: usize, count: usize, want: Want) -> Option<Text> {
-        PaneTerminals::history(self, pane, from, count, want)
+    fn history(&self, pane: PaneId, from: u64, count: u64, want: Want) -> Option<Lines> {
+        PaneTerminals::history(self, pane, from as usize, count as usize, want)
     }
 
     fn freeze(&self, pane: PaneId) -> bool {

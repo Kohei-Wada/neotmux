@@ -172,7 +172,7 @@ fn scrolling_above_the_screen_draws_lines_the_pane_no_longer_shows() {
     scrolled(&sub);
     let screen = sub
         .terminals()
-        .content(pane(), None, neotmux_term::read::Want::default())
+        .content(pane(), None, neotmux_proto::read::Want::default())
         .unwrap()
         .lines;
     assert!(!screen.contains(&"four".to_string()), "{screen:?}");

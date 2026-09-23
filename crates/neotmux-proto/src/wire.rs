@@ -21,6 +21,7 @@ use crate::msg::{
     Attach, End, Extent, Lines, OwnedToClient, Read, Reading, SessionOp, Step, Tick, ToClient,
     ToServer, Tock,
 };
+use crate::read::{Trailing, Want};
 use crate::{
     Color, Dir, DrawCmd, Edge, Epoch, Event, Geometry, GridSnapshot, Level, PROTOCOL_VERSION,
     PaneId, PaneInfo, PaneRects, Rect, Reserved, Size, SnapCell, SplitDir, Window, WindowId,
@@ -994,17 +995,12 @@ impl Writer {
                 self.u8(READ_REVISION);
                 self.u32(pane.get());
             }
-            Read::Content {
-                pane,
-                last,
-                pad,
-                wrapped,
-            } => {
+            Read::Content { pane, last, want } => {
                 self.u8(READ_CONTENT);
                 self.u32(pane.get());
                 self.opt_u64(last);
-                self.bool(pad);
-                self.bool(wrapped);
+                self.bool(matches!(want.trailing, Trailing::Pad));
+                self.bool(want.wrapped);
             }
             Read::HistoryExtent { pane } => {
                 self.u8(READ_HISTORY_EXTENT);
@@ -1014,15 +1010,14 @@ impl Writer {
                 pane,
                 from,
                 count,
-                pad,
-                wrapped,
+                want,
             } => {
                 self.u8(READ_HISTORY);
                 self.u32(pane.get());
                 self.u64(from);
                 self.u64(count);
-                self.bool(pad);
-                self.bool(wrapped);
+                self.bool(matches!(want.trailing, Trailing::Pad));
+                self.bool(want.wrapped);
             }
             Read::Freeze { pane } => {
                 self.u8(READ_FREEZE);
@@ -1373,16 +1368,28 @@ impl Reader<'_> {
             READ_CONTENT => Read::Content {
                 pane: self.pane()?,
                 last: self.opt_u64()?,
-                pad: self.bool()?,
-                wrapped: self.bool()?,
+                want: Want {
+                    trailing: if self.bool()? {
+                        Trailing::Pad
+                    } else {
+                        Trailing::Trim
+                    },
+                    wrapped: self.bool()?,
+                },
             },
             READ_HISTORY_EXTENT => Read::HistoryExtent { pane: self.pane()? },
             READ_HISTORY => Read::History {
                 pane: self.pane()?,
                 from: self.u64()?,
                 count: self.u64()?,
-                pad: self.bool()?,
-                wrapped: self.bool()?,
+                want: Want {
+                    trailing: if self.bool()? {
+                        Trailing::Pad
+                    } else {
+                        Trailing::Trim
+                    },
+                    wrapped: self.bool()?,
+                },
             },
             READ_FREEZE => Read::Freeze { pane: self.pane()? },
             READ_UNFREEZE => Read::Unfreeze { pane: self.pane()? },
@@ -1981,14 +1988,18 @@ mod tests {
             Read::Content {
                 pane: PaneId::from(1),
                 last: Some(4),
-                pad: true,
-                wrapped: false,
+                want: Want {
+                    trailing: Trailing::Pad,
+                    wrapped: false,
+                },
             },
             Read::Content {
                 pane: PaneId::from(1),
                 last: None,
-                pad: false,
-                wrapped: true,
+                want: Want {
+                    trailing: Trailing::Trim,
+                    wrapped: true,
+                },
             },
             Read::HistoryExtent {
                 pane: PaneId::from(2),
@@ -1997,8 +2008,10 @@ mod tests {
                 pane: PaneId::from(2),
                 from: 3,
                 count: u64::MAX,
-                pad: false,
-                wrapped: true,
+                want: Want {
+                    trailing: Trailing::Trim,
+                    wrapped: true,
+                },
             },
             Read::Freeze {
                 pane: PaneId::from(3),
@@ -2012,6 +2025,37 @@ mod tests {
         ] {
             round_trip_to_server(ToServer::Read(read));
         }
+    }
+
+    /// The bytes did not move when `pad: bool, wrapped: bool` became `want: Want`.
+    ///
+    /// A `Trailing` has two variants, so it encodes as the one byte the `pad` bool encoded as,
+    /// and `Want` is that byte followed by the `wrapped` byte — the order the two were already
+    /// written in. The fixture is the encoding as it was before the change, recorded by hand, so
+    /// that this is a claim about bytes and not about the code that produces them: if it fails,
+    /// `PROTOCOL_VERSION` moves and the design's §4 is wrong.
+    #[test]
+    fn a_content_read_encodes_the_bytes_it_encoded_before_want() {
+        let read = Read::Content {
+            pane: PaneId::from(7),
+            last: Some(3),
+            want: Want {
+                trailing: Trailing::Pad,
+                wrapped: false,
+            },
+        };
+        let encoded = encode_to_server(&ToServer::Read(read));
+
+        // pad = true, wrapped = false — the last two bytes of the message, unchanged.
+        assert_eq!(
+            &encoded[encoded.len() - 2..],
+            &[1, 0],
+            "the two option bytes moved: {encoded:?}"
+        );
+        assert_eq!(
+            decode_to_server(&encoded).expect("decodes"),
+            ToServer::Read(read)
+        );
     }
 
     #[test]
