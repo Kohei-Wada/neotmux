@@ -858,7 +858,7 @@ impl Writer {
     }
 
     fn geometry(&mut self, v: &Geometry) {
-        self.size(v.size);
+        self.rect(v.area);
         self.len(v.panes.len());
         for (pane, rect) in &v.panes {
             self.u32(pane.get());
@@ -1233,7 +1233,7 @@ impl Reader<'_> {
     }
 
     fn geometry(&mut self) -> Result<Geometry, WireError> {
-        let size = self.size()?;
+        let area = self.rect()?;
         let mut panes = Vec::new();
         for _ in 0..self.len()? {
             panes.push((self.pane()?, self.rect()?));
@@ -1254,7 +1254,7 @@ impl Reader<'_> {
             });
         }
         Ok(Geometry {
-            size,
+            area,
             panes,
             focus,
             windows,
@@ -1732,8 +1732,8 @@ mod tests {
             bg: Color::Default,
         }];
         let mut bytes = encode_frame(&frame.frame());
-        // The one command, past the empty notice count: tag, pane, rect, fg, bg.
-        let tag = bytes.len() - 16;
+        // The one command, which is the last thing in a frame: tag, pane, rect, fg, bg.
+        let tag = bytes.len() - 12;
         assert_eq!(bytes[tag], CMD_RECT);
         bytes[tag] = 200;
         assert_eq!(
@@ -1922,7 +1922,7 @@ mod tests {
 
     fn geometry_of() -> Geometry {
         Geometry {
-            size: Size { rows: 24, cols: 80 },
+            area: Rect::new(0, 0, 80, 24),
             panes: vec![
                 (PaneId::from(1), Rect::new(0, 0, 40, 24)),
                 (PaneId::from(2), Rect::new(40, 0, 40, 24)),

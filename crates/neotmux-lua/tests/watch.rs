@@ -53,7 +53,7 @@ fn publish(sub: &LuaSubsystem) {
         support::one(),
         Epoch::new(SIZE, vec![pane(1)], Some(pane(1))),
         Geometry {
-            size: SIZE,
+            area: Rect::new(0, 0, SIZE.cols, SIZE.rows),
             panes: vec![(pane(1), Rect::new(0, 0, 40, 4))],
             focus: Some(pane(1)),
             windows: vec![

@@ -1,4 +1,4 @@
-use crate::{PaneId, Rect, Size, WindowId};
+use crate::{PaneId, Rect, WindowId};
 
 /// A window as Lua can ask about it: its id, and the panes it holds in layout order.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,7 +23,10 @@ pub struct Window {
 /// know what else exists asks `window.list()` and `window.panes(id)`.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Geometry {
-    pub size: Size,
+    /// The pane area, in the surface's own coordinates: a band reserved at the top pushes
+    /// its `y` down and one at the left pushes its `x` across. A `pane = nil` draw is in
+    /// those same coordinates, so this — not a bare size — is what a plugin anchors to.
+    pub area: Rect,
     pub panes: Vec<(PaneId, Rect)>,
     pub focus: Option<PaneId>,
     /// Every window, in creation order, with the panes it holds.

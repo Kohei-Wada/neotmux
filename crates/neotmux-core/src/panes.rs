@@ -94,7 +94,7 @@ impl PaneLayout {
     /// The pane area, in the surface's own coordinates: a top band pushes the panes down and
     /// a left band pushes them across, so a pane rect is never relative to anything but the
     /// terminal itself.
-    fn surface(&self) -> PRect {
+    pub fn area(&self) -> PRect {
         PRect::new(
             self.applied.left,
             self.applied.top,
@@ -104,14 +104,14 @@ impl PaneLayout {
     }
 
     fn reassign(&mut self) {
-        self.order = assign(&self.tree, self.surface(), self.gutter);
+        self.order = assign(&self.tree, self.area(), self.gutter);
         self.rects = self.order.iter().copied().collect();
     }
 
     /// Splits the focused pane, and focuses the new one — a split is made to be typed into.
     pub fn split(&mut self, dir: SplitDir, new: PaneId) -> Result<(), SplitRefused> {
         let target = self.focus.ok_or(SplitRefused::UnknownPane)?;
-        let surface = self.surface();
+        let surface = self.area();
         self.tree
             .split(target, dir, new, surface, self.minimum, self.gutter)?;
         self.reassign();
@@ -122,7 +122,7 @@ impl PaneLayout {
     /// Moves the boundary between the focused pane and its neighbour in `dir` by `cells`.
     pub fn resize(&mut self, dir: Dir, cells: u16) -> Result<(), ResizeRefused> {
         let target = self.focus.ok_or(ResizeRefused::UnknownPane)?;
-        let surface = self.surface();
+        let surface = self.area();
         self.tree
             .resize(target, dir, cells, surface, self.minimum, self.gutter)?;
         self.reassign();

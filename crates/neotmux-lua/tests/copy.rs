@@ -69,7 +69,7 @@ fn built_named(
         support::one(),
         Epoch::new(SIZE, vec![pane()], Some(pane())),
         Geometry {
-            size: SIZE,
+            area: Rect::new(0, 0, SIZE.cols, SIZE.rows),
             panes: vec![(pane(), Rect::new(0, 0, SIZE.cols, SIZE.rows))],
             focus: Some(pane()),
             ..Default::default()

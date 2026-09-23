@@ -46,7 +46,7 @@ fn frame(sub: &LuaSubsystem, applied: bool) {
         support::one(),
         Epoch::new(content, vec![pane], Some(pane)),
         Geometry {
-            size: content,
+            area: rect,
             panes: vec![(pane, rect)],
             focus: Some(pane),
             ..Default::default()
@@ -559,4 +559,30 @@ fn resizing_to_zero_or_past_the_bound_raises() {
         "{reported:?}"
     );
     assert_eq!(sub.reserved(), Reserved::vertical(10, 0));
+}
+
+/// The bug this answers: a plugin drawing into the bottom-right corner put its box where
+/// `ctx:size()` said the right edge was, which is the pane area's *size* — so every column a
+/// sidebar reserved on the left moved the box that far off the corner. `ctx:area()` carries
+/// the origin the size leaves out.
+#[test]
+fn the_area_a_tick_is_given_is_placed_where_the_bands_left_it() {
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.rail')"),
+        (
+            "lua/plugin/rail.lua",
+            r#"
+            neotmux.reserve('left', 12)
+            neotmux.on_tick(function(ctx)
+              local a = ctx:area()
+              local s = ctx:size()
+              ctx:text(nil, 0, 0, a.x .. ',' .. a.y .. ' ' .. a.w .. 'x' .. a.h
+                .. ' size=' .. s.cols .. 'x' .. s.rows)
+            end)
+            return {}
+            "#,
+        ),
+    ]);
+    frame(&sub, true);
+    assert_eq!(texts(&sub), vec!["12,0 68x24 size=68x24".to_string()]);
 }

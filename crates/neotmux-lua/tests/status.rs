@@ -113,7 +113,7 @@ fn frame(
         support::one(),
         Epoch::new(content, ids.clone(), Some(PaneId::from(focus))),
         Geometry {
-            size: content,
+            area: Rect::new(0, reserved.top, COLS, content.rows),
             panes: ids
                 .iter()
                 .map(|id| (*id, Rect::new(0, reserved.top, COLS, content.rows)))

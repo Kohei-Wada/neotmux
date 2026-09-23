@@ -162,7 +162,7 @@ fn a_text_run_is_recorded_whole_and_a_rect_carries_no_text() {
         support::one(),
         Epoch::new(size, vec![pane], Some(pane)),
         Geometry {
-            size,
+            area: Rect::new(0, 0, size.cols, size.rows),
             panes: vec![(pane, Rect::new(0, 0, 80, 24))],
             focus: Some(pane),
             ..Default::default()

@@ -337,7 +337,7 @@ impl LuaSubsystem {
                     Ctx::new(
                         owner,
                         self.buffers.clone(),
-                        geometry.size,
+                        geometry.area,
                         geometry.panes.clone(),
                         self.reservations.band(owner),
                         self.floats.by_owner(owner),

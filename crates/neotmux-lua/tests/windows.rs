@@ -61,7 +61,7 @@ fn publish(sub: &LuaSubsystem) {
         support::one(),
         Epoch::new(SIZE, vec![pane(1), pane(3)], Some(pane(1))),
         Geometry {
-            size: SIZE,
+            area: Rect::new(0, 0, SIZE.cols, SIZE.rows),
             panes: shown,
             focus: Some(pane(1)),
             windows: vec![window(1, &[1, 3]), window(2, &[2, 4])],
@@ -126,7 +126,7 @@ fn a_published_geometry_moves_the_window_id_counter_past_what_it_names() {
     sub.republish_geometry(
         support::one(),
         Geometry {
-            size: SIZE,
+            area: Rect::new(0, 0, SIZE.cols, SIZE.rows),
             panes: vec![(pane(1), Rect::new(0, 0, 80, 24))],
             focus: Some(pane(1)),
             windows: vec![window(4, &[1])],
@@ -155,7 +155,7 @@ fn a_window_can_be_named_and_the_name_is_read_back() {
     sub.republish_geometry(
         support::one(),
         Geometry {
-            size: SIZE,
+            area: Rect::new(0, 0, SIZE.cols, SIZE.rows),
             panes: vec![(pane(1), Rect::new(0, 0, 80, 24))],
             focus: Some(pane(1)),
             windows: vec![

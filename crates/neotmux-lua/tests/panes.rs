@@ -31,7 +31,7 @@ fn publish(sub: &LuaSubsystem, session: SessionId, panes: Vec<(PaneId, Rect)>, f
         session,
         Epoch::new(size, panes.iter().map(|(id, _)| *id).collect(), Some(focus)),
         Geometry {
-            size,
+            area: Rect::new(0, 0, size.cols, size.rows),
             panes,
             focus: Some(focus),
             ..Default::default()

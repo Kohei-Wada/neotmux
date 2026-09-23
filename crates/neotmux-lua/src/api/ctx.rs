@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use mlua::{Function, Table, UserData, UserDataMethods, Value};
 
-use neotmux_proto::{Color, DrawCmd, PaneId, Rect, Size};
+use neotmux_proto::{Color, DrawCmd, PaneId, Rect};
 
 use crate::api::rect;
 use crate::draw::Buffers;
@@ -14,7 +14,10 @@ use crate::source::SourceId;
 pub struct Ctx {
     owner: SourceId,
     buffers: Rc<Buffers>,
-    size: Size,
+    /// The pane area, in surface coordinates. `size()` is its size and `area()` is the
+    /// whole of it: a plugin that anchors to an edge needs the origin as well, because a
+    /// reserved band moves the edge without changing the size.
+    area: Rect,
     panes: Vec<(PaneId, Rect)>,
     /// This source's own band, in surface coordinates. Per source: two sources reserving the
     /// same edge get different bands, and a source that reserved nothing gets none.
@@ -29,7 +32,7 @@ impl Ctx {
     pub fn new(
         owner: SourceId,
         buffers: Rc<Buffers>,
-        size: Size,
+        area: Rect,
         panes: Vec<(PaneId, Rect)>,
         band: Option<Rect>,
         floats: BTreeMap<FloatId, Rect>,
@@ -37,7 +40,7 @@ impl Ctx {
         Self {
             owner,
             buffers,
-            size,
+            area,
             panes,
             band,
             floats,
@@ -199,9 +202,16 @@ impl UserData for Ctx {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         methods.add_method("size", |lua, this, ()| {
             let table = lua.create_table()?;
-            table.set("rows", this.size.rows)?;
-            table.set("cols", this.size.cols)?;
+            table.set("rows", this.area.h)?;
+            table.set("cols", this.area.w)?;
             Ok(table)
+        });
+
+        // The same area, with the corner it starts at. What `size` leaves out, and what a
+        // plugin drawing into a corner of the surface is off by for every band anybody
+        // reserved.
+        methods.add_method("area", |lua, this, ()| {
+            Ok(Value::Table(rect::to_table(lua, this.area)?))
         });
 
         // The pane's own cells, at another place in its own history, for this frame only.

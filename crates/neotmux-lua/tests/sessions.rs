@@ -32,7 +32,7 @@ fn make(sub: &LuaSubsystem, id: SessionId, name: &str, panes: u32) {
         id,
         Epoch::new(size, panes.iter().map(|(id, _)| *id).collect(), focus),
         Geometry {
-            size,
+            area: Rect::new(0, 0, size.cols, size.rows),
             panes,
             focus,
             ..Default::default()

@@ -130,7 +130,7 @@ impl Drop for Bound<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use neotmux_proto::Size;
+    use neotmux_proto::Rect;
 
     fn ambient() -> (Ambient, Rc<RefCell<Geometry>>) {
         let geometry = Rc::new(RefCell::new(Geometry::default()));
@@ -140,7 +140,7 @@ mod tests {
 
     fn sized(rows: u16) -> Geometry {
         Geometry {
-            size: Size { rows, cols: 80 },
+            area: Rect::new(0, 0, 80, rows),
             ..Geometry::default()
         }
     }
@@ -166,14 +166,14 @@ mod tests {
         {
             let _bound = ambient.bind(two);
             assert_eq!(
-                live.borrow().size.rows,
+                live.borrow().area.h,
                 0,
                 "session two was shown session one's geometry"
             );
             *live.borrow_mut() = sized(20);
         }
         let _bound = ambient.bind(one);
-        assert_eq!(live.borrow().size.rows, 10);
+        assert_eq!(live.borrow().area.h, 10);
     }
 
     #[test]
@@ -190,7 +190,7 @@ mod tests {
             *live.borrow_mut() = sized(20);
         }
         assert_eq!(ambient.current(), Some(outer));
-        assert_eq!(live.borrow().size.rows, 10);
+        assert_eq!(live.borrow().area.h, 10);
     }
 
     /// The guard is what restores, so an early return or an error on the way out of a dispatch
@@ -205,7 +205,7 @@ mod tests {
         }
         assert_eq!(ambient.current(), None);
         assert_eq!(
-            live.borrow().size.rows,
+            live.borrow().area.h,
             0,
             "the unbound cell still held a session's geometry"
         );

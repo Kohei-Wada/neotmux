@@ -31,7 +31,7 @@ fn frame(sub: &LuaSubsystem) {
         support::one(),
         Epoch::new(size, vec![pane], Some(pane)),
         Geometry {
-            size,
+            area: Rect::new(0, 0, size.cols, size.rows),
             panes: vec![(pane, Rect::new(0, 0, 80, 24))],
             focus: Some(pane),
             ..Default::default()

@@ -559,7 +559,7 @@ impl Session {
     fn geometry(&self) -> Geometry {
         let layout = self.windows.current();
         Geometry {
-            size: layout.content,
+            area: layout.area(),
             panes: layout.panes(),
             focus: layout.focus(),
             windows: self
