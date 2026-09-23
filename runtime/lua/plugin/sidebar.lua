@@ -1,5 +1,6 @@
--- A sidebar down the left: every window, every window's panes, and what each pane is
--- running. `C-b b` folds it to the markers column and back, when the prefix is loaded.
+-- A sidebar down the left: every session, every window of the one you are in, every window's
+-- panes, and what each pane is running. `C-b b` folds it to the markers column and back, and
+-- `C-b s` moves to the next session, when the prefix is loaded.
 --
 -- Off by default, unlike the status bar: a status line spends a row nobody was using for
 -- anything else, while a sidebar is an opinion about screen real estate — twenty-four columns
@@ -29,6 +30,8 @@ M.widths = {
 -- tick, so assigning to one from your own init.lua takes effect.
 M.colors = {
   bar = "#181825", -- mantle: the band everything else sits on
+  session = "#9399b2", -- overlay2: a session you are not in
+  current_session = "#f9e2af", -- yellow, so a session reads as a different kind of row
   window = "#cdd6f4",
   current_window = "#cba6f7", -- mauve, the status bar's accent for the window being shown
   pane = "#6c7086", -- overlay0: a pane in a window you are not looking at
@@ -39,6 +42,8 @@ M.colors = {
 -- One cell each, and never a combining or double-width glyph: a marker that measures two
 -- columns would push every name on that row out by one.
 M.markers = {
+  current_session = "\u{25cf}", -- ●
+  session = "\u{25cb}", -- ○
   current_window = "\u{25b8}", -- ▸
   window = " ",
   focused_pane = "\u{2022}", -- •
@@ -70,6 +75,40 @@ end
 -- sidebar loads unless it was turned off.
 if package.loaded["plugin.prefix"] then
   require("plugin.prefix").commands["b"] = M.toggle
+  require("plugin.prefix").commands["s"] = function()
+    M.next_session()
+  end
+end
+
+-- The next session round, in the order `session.list` gives, which is name order. A picker is
+-- what this wants eventually; a cycle is what it can have while nothing can take the cursor.
+function M.next_session()
+  local names = neotmux.session.list()
+  if #names < 2 then
+    return
+  end
+  local current = neotmux.session.current()
+  for at, name in ipairs(names) do
+    if name == current then
+      neotmux.session.switch(names[at % #names + 1])
+      return
+    end
+  end
+end
+
+-- What a session is doing: how many panes it has, and what the one somebody is looking at is
+-- running. Read through `session.with`, because a session that is not the one this tick is for
+-- is still a session this plugin can see — which is the whole reason the sidebar can say this
+-- at all.
+local function doing(name)
+  local panes, command = 0, nil
+  neotmux.session.with(name, function()
+    panes = #neotmux.pane.list()
+    local focus = neotmux.pane.current()
+    local info = focus and neotmux.pane.info(focus)
+    command = info and info.command
+  end)
+  return panes, command
 end
 
 -- What a pane is running, or nil where the host has not got it. Every pane the session
@@ -98,6 +137,20 @@ local function rows()
   local current_window = neotmux.window.current()
   local focused = neotmux.pane.current()
   local out = {}
+  -- The sessions first, and every one of them, including the ones nobody is looking at: what
+  -- each is running is the thing you came to the sidebar to find out.
+  local here = neotmux.session.current()
+  for _, name in ipairs(neotmux.session.list()) do
+    local panes, command = doing(name)
+    local is_here = name == here
+    out[#out + 1] = row(
+      is_here and M.markers.current_session or M.markers.session,
+      0,
+      name,
+      command or (panes .. "p"),
+      is_here and M.colors.current_session or M.colors.session
+    )
+  end
   for window_at, window in ipairs(neotmux.window.list()) do
     local is_current = window == current_window
     out[#out + 1] = row(

@@ -998,3 +998,39 @@ fn a_plugin_can_make_a_session_and_move_into_it() {
     client.send("\x19"); // C-y
     wait_for_log(runtime.path(), "tick in made");
 }
+
+/// The payoff, end to end: the shipped sidebar knows about every session, including one
+/// nobody is looking at, and `C-b s` moves between them.
+#[test]
+fn the_sidebar_knows_every_session_and_c_b_s_moves_between_them() {
+    let runtime = TestRuntime::new();
+    let layer = layer_with(&[(
+        "init.lua",
+        "require('neotmux.defaults').sidebar = true\n\
+         local said = {}\n\
+         neotmux.on_tick(function()\n\
+           local names = table.concat(neotmux.session.list(), ',')\n\
+           local line = neotmux.session.current() .. ' sees ' .. names\n\
+           if not said[line] then\n\
+             said[line] = true\n\
+             neotmux.log.info(line)\n\
+           end\n\
+         end)\n\
+         neotmux.keymap.set('C-y', function()\n\
+           neotmux.session.create('second')\n\
+           return true\n\
+         end)\n",
+    )]);
+
+    let mut client = Client::start_with_prefix_and_layer(runtime.path(), "/bin/cat", layer.path());
+    wait_for_socket(&socket_in(runtime.path()));
+    wait_for_log(runtime.path(), "default sees default");
+
+    client.send("\x19"); // C-y: a second session nobody is looking at
+    wait_for_log(runtime.path(), "default sees default,second");
+
+    // `C-b s` is the sidebar's, and it moves this client to the one it is not in.
+    client.send("\x02"); // C-b
+    client.send("s");
+    wait_for_log(runtime.path(), "second sees default,second");
+}
