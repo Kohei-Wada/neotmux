@@ -729,6 +729,68 @@ fn kill_with_nothing_running_says_so_and_fails() {
     );
 }
 
+/// What an agent asks before it sends anything: which pane is which.
+#[test]
+fn panes_names_the_pane_and_what_it_is_running() {
+    let runtime = TestRuntime::new();
+    let client = Client::start(runtime.path(), "/bin/cat");
+    wait_for_socket(&socket_in(runtime.path()));
+
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .arg("panes")
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run panes");
+    drop(client);
+    let rows = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(rows.starts_with("%1 @1 "), "{rows}");
+    assert!(rows.contains("cat"), "{rows}");
+}
+
+#[test]
+fn windows_names_the_window_and_counts_its_panes() {
+    let runtime = TestRuntime::new();
+    let client = Client::start(runtime.path(), "/bin/cat");
+    wait_for_socket(&socket_in(runtime.path()));
+
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .arg("windows")
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run windows");
+    drop(client);
+    assert!(out.status.success());
+    let rows = String::from_utf8_lossy(&out.stdout);
+    assert!(rows.contains("@1"), "{rows}");
+    assert!(rows.contains("panes=1"), "{rows}");
+}
+
+#[test]
+fn panes_of_a_session_that_is_not_running_fails() {
+    let runtime = TestRuntime::new();
+    let client = started(runtime.path());
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .args(["panes", "-t", "nowhere"])
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run panes");
+    drop(client);
+    assert!(!out.status.success());
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        said.contains("neotmux session 'nowhere' is not running"),
+        "{said}"
+    );
+}
+
 /// Two terminals in the session, and a word typed on one that the other has typed
 /// nothing: the one the first's plugins did not consume, the one the second sees — the
 /// whole of the feature in one sentence. The shell is `cat`, so the word is the pane's

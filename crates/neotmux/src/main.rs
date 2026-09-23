@@ -211,6 +211,10 @@ commands:
   neotmux new [name]  start a session with no client attached
   neotmux rename <old> <new>
                       rename a session
+  neotmux windows [-t name]
+                      the session's windows, one per line
+  neotmux panes [-t name]
+                      the session's panes, one per line
 
 options:
   --log <path>    write the log somewhere other than the default

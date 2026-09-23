@@ -16,6 +16,8 @@ use neotmux_term::wakeup::Waker;
 
 use neotmux::plugins::Plugins;
 
+use neotmux::session::Session;
+
 use crate::server::{RenameFailure, Sessions, StartFailure, rename_session, start_session};
 
 /// What a command did.
@@ -47,7 +49,7 @@ impl Ran {
 }
 
 /// Every name the host answers. The CLI reads it to tell a command from a session name.
-pub const NAMES: &[&str] = &["new", "rename"];
+pub const NAMES: &[&str] = &["new", "rename", "windows", "panes"];
 
 pub fn unknown(name: &str) -> Ran {
     Ran::failed(format!("unknown command '{name}'"))
@@ -66,6 +68,8 @@ pub fn run(name: &str, args: &[String], session: Option<&str>, ctx: &mut Ctx<'_>
     match name {
         "new" => new(args, session, ctx),
         "rename" => rename(args, ctx),
+        "windows" => windows(session, ctx),
+        "panes" => panes(session, ctx),
         other => unknown(other),
     }
 }
@@ -113,6 +117,64 @@ fn rename(args: &[String], ctx: &mut Ctx<'_>) -> Ran {
             Ran::failed(format!("neotmux session '{from}' is not running"))
         }
     }
+}
+
+/// The session a command is addressed to, or the sentence that says there is none.
+fn addressed<'a>(session: Option<&str>, ctx: &'a mut Ctx<'_>) -> Result<&'a mut Session, Ran> {
+    let name = session.unwrap_or(neotmux::sock::DEFAULT_SESSION);
+    match ctx.sessions.id_of(name) {
+        Some(id) => Ok(ctx.sessions.get_mut(id).expect("a session it just named")),
+        None => Err(Ran::failed(format!(
+            "neotmux session '{name}' is not running"
+        ))),
+    }
+}
+
+fn windows(session: Option<&str>, ctx: &mut Ctx<'_>) -> Ran {
+    let held = match addressed(session, ctx) {
+        Ok(held) => held,
+        Err(no) => return no,
+    };
+    Ran::ok(
+        held.windows_list()
+            .into_iter()
+            .map(|(id, panes, name)| {
+                format!(
+                    "@{} {} panes={}",
+                    id.get(),
+                    name.as_deref().unwrap_or("-"),
+                    panes.len()
+                )
+            })
+            .collect(),
+    )
+}
+
+fn panes(session: Option<&str>, ctx: &mut Ctx<'_>) -> Ran {
+    let terminals = ctx.terminals.clone();
+    let held = match addressed(session, ctx) {
+        Ok(held) => held,
+        Err(no) => return no,
+    };
+    Ran::ok(
+        held.pane_rows()
+            .into_iter()
+            .map(|row| {
+                let size = terminals
+                    .size(row.pane)
+                    .map(|size| format!("{}x{}", size.cols, size.rows))
+                    .unwrap_or_else(|| "-".to_string());
+                format!(
+                    "%{} @{} {} {} {}",
+                    row.pane.get(),
+                    row.window.get(),
+                    size,
+                    row.command.as_deref().unwrap_or("-"),
+                    row.cwd.as_deref().unwrap_or("-"),
+                )
+            })
+            .collect(),
+    )
 }
 
 #[cfg(test)]
