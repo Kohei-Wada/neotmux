@@ -609,10 +609,10 @@ impl LuaSubsystem {
     fn offer_write(&self, pane: PaneId, text: &str, from: &str) -> WriteVerdict {
         for id in self.registry.snapshot(KindTag::Write) {
             let Some(callback) = self.registry.callback(id) else {
-                continue;
+                return WriteVerdict::Refused("the handler could not be read".to_string());
             };
             let Some(owner) = self.registry.owner(id) else {
-                continue;
+                return WriteVerdict::Refused("the handler's owner could not be read".to_string());
             };
             let tag = self.sources.name(owner).unwrap_or_default();
             let Ok(func) = self.lua.registry_value::<Function>(&callback) else {

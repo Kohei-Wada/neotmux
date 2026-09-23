@@ -156,6 +156,31 @@ fn a_handler_that_overruns_its_budget_refuses_the_write() {
     ));
 }
 
+/// A handler earlier in the snapshot can remove a later one's registration before the
+/// dispatch reaches it — the same mutation `registry.rs`'s
+/// `snapshot_is_stable_while_a_callback_mutates_the_registry` pins from the registry's own
+/// side. From `offer_write`'s side the removed id's callback and owner are simply gone, and
+/// that is "cannot be reached", which refuses rather than silently passing.
+#[test]
+fn a_handler_removed_from_under_the_dispatch_refuses_rather_than_passing() {
+    let (_dir, sub) = built(&[(
+        "init.lua",
+        "local b
+         neotmux.on_write(function() b:remove() end)
+         b = neotmux.on_write(function() neotmux.log.info('b ran') end)",
+    )]);
+    side_by_side(&sub);
+    let verdict = sub.dispatch_write(support::one(), PaneId::from(1), "x", "tool");
+    assert!(
+        matches!(verdict, WriteVerdict::Refused(_)),
+        "a handler pulled out from under the dispatch passed the write: {verdict:?}"
+    );
+    assert!(
+        logged(&sub, Some(support::one())).is_empty(),
+        "the removed handler ran anyway"
+    );
+}
+
 /// The cheap question the door asks before it decides which path a `send` takes.
 #[test]
 fn nothing_registered_is_nothing_listening() {
