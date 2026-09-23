@@ -441,10 +441,17 @@ fn spinner_is_dropped_while_the_rest_of_the_program_carries_on(module: &str, ech
         screen.contains(echo),
         "the shell stopped answering after the overrun:\n{screen}"
     );
-    assert!(
-        screen.contains("CLOCK 80x23"),
-        "the status row went with the offender:\n{screen}"
-    );
+    // Waited for, not asserted on the frame above. The notification naming the offender is
+    // drawn along the bottom edge of the host surface (`notices.rs`) and the clock fixture
+    // reserves that same row, so for the notice's four seconds the band is covered by it —
+    // by design, since a source's own draw buffer cannot carry a notification about the
+    // source. What this is asking is that the well-behaved neighbour is still drawing, and
+    // that is the band coming back when the notice goes, not the band being visible at
+    // whichever instant the capture landed on. Asserting the instant passed only by luck:
+    // the wait above blocks for the notice's whole lifetime when the notice is already up,
+    // and the once in six that it caught the frame before the notice was drawn, the capture
+    // two seconds later was still inside those four and this failed (issue #6).
+    nt.wait_for_screen("CLOCK 80x23", PATIENCE);
 }
 
 #[test]
