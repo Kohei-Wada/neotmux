@@ -3,10 +3,17 @@ use std::rc::Rc;
 use mlua::{Lua, Table};
 
 use crate::ambient::Ambient;
+use crate::ops::{Op, OpBuffer};
+use crate::source::{self, Sources};
 
 /// `neotmux.session`: which sessions there are, which one the work in hand is for, and a way
 /// to read one that is not.
-pub(crate) fn install(lua: &Lua, ambient: Rc<Ambient>) -> mlua::Result<Table> {
+pub(crate) fn install(
+    lua: &Lua,
+    ambient: Rc<Ambient>,
+    sources: Rc<Sources>,
+    ops: Rc<OpBuffer>,
+) -> mlua::Result<Table> {
     let session = lua.create_table()?;
 
     {
@@ -42,5 +49,34 @@ pub(crate) fn install(lua: &Lua, ambient: Rc<Ambient>) -> mlua::Result<Table> {
         session.set("with", with)?;
     }
 
+    // The three that change the set of sessions. Ops like every other, applied after the
+    // tick (§4.6), so a callback never sees its own request take effect synchronously — a
+    // `create` followed by a `list` in the same tick does not name the new one.
+    for (word, make) in [
+        ("create", make_create as fn(String) -> Op),
+        ("switch", make_switch),
+        ("kill", make_kill),
+    ] {
+        let sources = sources.clone();
+        let ops = ops.clone();
+        let call = lua.create_function(move |lua, name: String| {
+            ops.push(source::caller(lua, &sources), make(name));
+            Ok(())
+        })?;
+        session.set(word, call)?;
+    }
+
     Ok(session)
+}
+
+fn make_create(name: String) -> Op {
+    Op::SessionCreate { name }
+}
+
+fn make_switch(name: String) -> Op {
+    Op::SessionSwitch { name }
+}
+
+fn make_kill(name: String) -> Op {
+    Op::SessionKill { name }
 }

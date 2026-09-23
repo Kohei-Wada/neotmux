@@ -109,7 +109,8 @@ fn screen(frame: &Frame) -> String {
 /// that cross the socket in the real thing.
 fn frame<'a>(session: &'a mut Session, plugins: &mut Plugins) -> neotmux::session::Pass<'a> {
     let tick = session.tick().expect("tick");
-    let tock = plugins.respond(one(), tick);
+    // The server ops are the set of sessions changing, and there is one session here.
+    let (tock, _server) = plugins.respond(one(), tick);
     let mut pass = session.advance(&tock).expect("advance");
     // What the ops did, told to the plugins before anything else happens — the same round
     // the client keeps its keyboard out of.
@@ -238,7 +239,7 @@ fn frame_showing<'a>(
     notices: Vec<Notice>,
 ) -> neotmux::session::Pass<'a> {
     let tick = session.tick().expect("tick");
-    let mut tock = plugins.respond(one(), tick);
+    let (mut tock, _server) = plugins.respond(one(), tick);
     tock.notices = notices;
     let mut pass = session.advance(&tock).expect("advance");
     plugins.catch_up(one(), std::mem::take(&mut pass.steps));

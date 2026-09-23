@@ -969,3 +969,32 @@ fn two_clients_naming_the_same_session_are_given_the_same_one() {
         "the named client was given a fresh session rather than the one it named"
     );
 }
+
+/// A plugin makes a session, moves its client into it, and the client ends up looking at the
+/// new one. All three are the set of sessions changing, which is the server's to do and a
+/// plugin's to ask for.
+#[test]
+fn a_plugin_can_make_a_session_and_move_into_it() {
+    let runtime = TestRuntime::new();
+    let layer = layer_with(&[(
+        "init.lua",
+        "local done = false\n\
+         neotmux.keymap.set('C-y', function()\n\
+           if done then return true end\n\
+           done = true\n\
+           neotmux.session.create('made')\n\
+           neotmux.session.switch('made')\n\
+           return true\n\
+         end)\n\
+         neotmux.on_tick(function()\n\
+           neotmux.log.info('tick in ' .. neotmux.session.current())\n\
+         end)\n",
+    )]);
+
+    let mut client = Client::start_with_prefix_and_layer(runtime.path(), "/bin/cat", layer.path());
+    wait_for_socket(&socket_in(runtime.path()));
+    wait_for_log(runtime.path(), "tick in default");
+
+    client.send("\x19"); // C-y
+    wait_for_log(runtime.path(), "tick in made");
+}

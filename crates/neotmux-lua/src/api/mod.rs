@@ -274,7 +274,7 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
     }
 
     {
-        let session = session::install(lua, ambient.clone())?;
+        let session = session::install(lua, ambient.clone(), sources.clone(), ops.clone())?;
         let session = seal(lua, session, "neotmux.session")?;
         neotmux.set("session", session)?;
     }

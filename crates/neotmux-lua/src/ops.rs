@@ -10,13 +10,41 @@ use crate::source::SourceId;
 pub enum Op {
     Quit,
     Detach,
-    Notify { level: Level, text: String },
-    Log { level: Level, text: String },
-    PaneSplit { dir: SplitDir },
-    PaneFocus { pane: PaneId },
-    PaneResize { dir: Dir, cells: u16 },
-    WindowCreate { window: WindowId },
-    WindowFocus { window: WindowId },
+    Notify {
+        level: Level,
+        text: String,
+    },
+    Log {
+        level: Level,
+        text: String,
+    },
+    PaneSplit {
+        dir: SplitDir,
+    },
+    PaneFocus {
+        pane: PaneId,
+    },
+    PaneResize {
+        dir: Dir,
+        cells: u16,
+    },
+    WindowCreate {
+        window: WindowId,
+    },
+    WindowFocus {
+        window: WindowId,
+    },
+    /// The set of sessions changing, which is the server's rather than a session's: these
+    /// three never reach `Session::apply`.
+    SessionCreate {
+        name: String,
+    },
+    SessionSwitch {
+        name: String,
+    },
+    SessionKill {
+        name: String,
+    },
 }
 
 /// Where the buffer ended before a source's tick group ran, so that group's own ops can be

@@ -131,6 +131,12 @@ impl Session {
         Ok(session)
     }
 
+    /// How big this session's surface is. What a session made beside this one is made at:
+    /// nobody is looking at a new one yet, and a surface has to be some size.
+    pub fn surface_size(&self) -> Size {
+        self.surface.size
+    }
+
     /// The pane terminals, which answer the reads the Lua layer asks across the socket.
     pub fn terminals(&self) -> &Rc<PaneTerminals> {
         &self.terminals
