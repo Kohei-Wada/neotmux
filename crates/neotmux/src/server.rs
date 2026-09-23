@@ -138,20 +138,17 @@ pub fn serve(name: &str, listener: &UnixListener, shutdown: &ShutdownSignal) -> 
         if shutdown.raised().is_some() {
             return Ok(());
         }
-        if clients.is_empty() {
-            match await_client(
-                &mut clients,
-                &mut pending,
-                &mut plugins,
-                &mut session,
-                &serving,
-                born,
-            )? {
-                true => continue,
-                // Over: signalled, out of its patience with no session, or the last
-                // shell of a session no client is holding went.
-                false => return Ok(()),
-            }
+        // Only ever about a server that has no session yet: past that, a frame runs whether
+        // or not anybody is attached to see it.
+        if !await_client(
+            &mut clients,
+            &mut pending,
+            &mut plugins,
+            &mut session,
+            &serving,
+            born,
+        )? {
+            return Ok(());
         }
         if frame(
             &mut session,
@@ -214,12 +211,15 @@ fn nothing_to_serve(serving: &Serving<'_>, plugins: &Plugins) -> anyhow::Result<
     Ok(())
 }
 
-/// A session with no client is kept for as long as its children go, and a server that
-/// never got a client is not a session worth keeping. Both of those are decided here,
-/// and the one that decided them is the one that says the server is over.
+/// Waiting for the client a server with no session was started for.
 ///
-/// `true` is a client that came in and the session going on; `false` is the server being
-/// over, and the loop does not run again.
+/// A server that never got one is not a session worth keeping, and that is the whole of what
+/// is waited for here. A session whose client has left is not waiting for anything: it goes
+/// on running frames — the panes drained, the plugins ticked — because that is what detach
+/// means now that the plugins are here.
+///
+/// `true` is the session going on; `false` is the server being over, and the loop does not
+/// run again.
 fn await_client(
     clients: &mut Vec<Attached>,
     pending: &mut Vec<Pending>,
@@ -228,41 +228,25 @@ fn await_client(
     serving: &Serving<'_>,
     born: Instant,
 ) -> anyhow::Result<bool> {
-    // A session with a client that has left waits for ever: that is what detach means.
-    // A server that never had one is not a session worth keeping, so `STARTUP` still
-    // applies.
-    let give_up = session.is_none().then_some(born + STARTUP);
-    loop {
-        if serving.shutdown.raised().is_some() {
-            return Ok(false);
-        }
-        let frame_end = Instant::now() + FRAME;
-        let ready = crate::tty::wait_on(
-            std::os::fd::AsFd::as_fd(serving.listener),
-            session.is_some().then(|| serving.wakeup.as_fd()),
-            give_up.map_or(frame_end, |at| at.min(frame_end)),
-        )
-        .context("wait for a client")?;
-        if ready == crate::tty::Ready::Idle && give_up.is_some_and(|at| Instant::now() >= at) {
-            return Ok(false);
-        }
-        if let Some(session) = session.as_mut() {
-            // Only once the poll has said so: the nudge is a pipe, and reading an empty
-            // one is a wait with nothing to end it.
-            if ready == crate::tty::Ready::Output {
-                serving.wakeup.clear();
-            }
-            if session.idle()? {
-                return Ok(false);
-            }
-        }
-        // The door, looked at every pass rather than only on a ready listener: a connection
-        // taken in on an earlier pass is still half-way through its handshake, and the poll
-        // above answered for the listener, not for it. Nothing here waits.
-        if door(pending, clients, plugins, session, serving)? {
-            return Ok(true);
-        }
+    if serving.shutdown.raised().is_some() {
+        return Ok(false);
     }
+    if session.is_some() {
+        return Ok(true);
+    }
+    if Instant::now() >= born + STARTUP {
+        return Ok(false);
+    }
+    // The door, looked at every pass rather than only on a ready listener: a connection taken
+    // in on an earlier pass is still half-way through its handshake, and a poll answers for
+    // the listener, not for it. Nothing here waits.
+    door(pending, clients, plugins, session, serving)?;
+    if session.is_none() {
+        let until = (born + STARTUP).min(Instant::now() + FRAME);
+        crate::tty::wait_on(std::os::fd::AsFd::as_fd(serving.listener), None, until)
+            .context("wait for a client")?;
+    }
+    Ok(true)
 }
 
 /// A client waiting on the socket, if there is one. The listener is non-blocking, so this

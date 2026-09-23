@@ -653,27 +653,6 @@ impl Session {
         self.wants_pane_output = wanted;
     }
 
-    /// Keeps the session running with nobody looking at it: the children go on being read,
-    /// so one that fills its pipe is not blocked by a client that closed its terminal.
-    /// `true` means the last of them is gone and the session is over.
-    ///
-    /// Whatever happened is kept rather than thrown away, so whoever looks next is told.
-    pub fn idle(&mut self) -> anyhow::Result<bool> {
-        if self.drain_panes()? == Drained::Eof {
-            self.ended = true;
-        }
-        Ok(self.ended)
-    }
-
-    /// Nobody is subscribed to anything any more, because nobody is running any plugins.
-    /// Without this an unattached session would go on copying every pane's output into a
-    /// record no client has asked for.
-    pub fn forget_pane_output(&mut self) {
-        self.wants_output(false);
-        self.steps
-            .retain(|step| !matches!(step, Step::Event(Event::PaneOutput { .. })));
-    }
-
     /// The first half of a frame: the panes' output, and everything the client's Lua layer
     /// has to be told before it ticks. The tick itself happens in the other process.
     pub fn tick(&mut self) -> anyhow::Result<Tick> {

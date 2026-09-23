@@ -898,3 +898,48 @@ fn a_read_is_answered_on_the_link_that_asked_it_only() {
         );
     }
 }
+
+/// What the whole move is for: a plugin goes on running when nobody is looking at it, and it
+/// is the same plugin — one Lua layer for the session, not one per client, so its count
+/// carries across the client that left.
+#[test]
+fn a_plugin_ticks_while_no_client_is_attached() {
+    let runtime = TestRuntime::new();
+    let layer = layer_with(&[(
+        "init.lua",
+        "local n = 0\n\
+         neotmux.on_tick(function()\n\
+           n = n + 1\n\
+           if n % 10 == 0 then neotmux.log.info('ticked ' .. n) end\n\
+         end)\n",
+    )]);
+
+    let mut first = Client::start_with_prefix_and_layer(runtime.path(), "/bin/cat", layer.path());
+    wait_for_socket(&socket_in(runtime.path()));
+    wait_for_log(runtime.path(), "ticked 10");
+
+    first.kill();
+    drop(first);
+
+    // Nobody is attached for this second. The old server drained its panes and did nothing
+    // else; this one is still ticking the plugin.
+    let before = log_text(runtime.path()).matches("ticked ").count();
+    std::thread::sleep(Duration::from_secs(1));
+    let after = log_text(runtime.path()).matches("ticked ").count();
+    assert!(
+        after > before,
+        "the plugin stopped when the client did: {before} lines before, {after} after\n{}",
+        log_text(runtime.path())
+    );
+
+    // And it is the same one: a second Lua layer would have started counting at one again.
+    let second = Client::start_with_prefix_and_layer(runtime.path(), "/bin/cat", layer.path());
+    wait_for_socket(&socket_in(runtime.path()));
+    drop(second);
+    let seen = log_text(runtime.path());
+    assert_eq!(
+        seen.matches("ticked 10\n").count(),
+        1,
+        "the count started again, so the session got a second Lua layer:\n{seen}"
+    );
+}
