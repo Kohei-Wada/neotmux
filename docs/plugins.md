@@ -949,8 +949,8 @@ neotmux ships eight plugins in the runtime layer an install puts on the search p
 | `copy` | copy mode: read back over a pane's scrollback, select a region, yank it |
 | `sessions` | the session picker on `C-b s`: every session and what it is running, `Enter` to go, `c` to make one, `d` to end one |
 | `borders` | a rule along every boundary between two panes |
-| `watch` | says which pane looks like it is waiting for you — **off by default** |
-| `sidebar` | the windows and their panes, down a reserved left band, folded by `C-b b` — **off by default** |
+| `watch` | notifies you when a pane looks like it is waiting for you, on `neotmux.state`'s guess — **off by default** |
+| `sidebar` | a tree of every session, and the windows and panes of the one you are in, down a reserved left band, folded by `C-b b` — **off by default** |
 | `footer` | whichever mode is raised through `neotmux.mode`, on one reserved bottom row — **off by default** |
 
 None of them is a host feature — all eight are ordinary files making ordinary API calls, and
@@ -967,6 +967,25 @@ the picker, copy mode, pane focus and resize, so a hand that has learned one has
 them. The arrows are deliberately not bound.
 With the sidebar on, `C-b b` folds it — the sidebar adds that one itself, since it is the
 optional plugin and the prefix is the standard one.
+
+The sidebar is a tree: every session with what it is running, and under the one you are in, its
+windows and their panes. Its width is taken from what there is to show, between
+`require('plugin.sidebar').widths.min` (18) and `.max` (36). What is on which row is a table
+rather than a shape baked into the file — each level draws one entry as a list of rows, and each
+row is a list of tokens:
+
+```lua
+local sidebar = require('plugin.sidebar')
+sidebar.sessions.rows = { { 'state_icon', 'name' }, { 'command', 'panes' } }
+sidebar.panes.rows = { { 'marker', 'tree', 'number', 'command' } }
+sidebar.tree.on = false          -- indent without the lines
+sidebar.tokens.sessions.age = function(it) ... end   -- a token of your own
+```
+
+so moving what is where, or dropping what you do not care about, is an assignment rather than a
+fork of the file. The first column is left to the markers on purpose: it is the whole of the
+band when the sidebar is folded, and a fold showing a run of `│` says nothing about where you
+are.
 
 `h/j/k/l` are geometry, not list order: the pane you get is the one whose edge faces most of
 yours on that side, which is what you would point at however deeply the splits are nested.
@@ -1209,6 +1228,34 @@ columns would push every name on its row across by one.
 The **width** is not in that table. It is a `local` at the top of the file, because the
 reservation is made once while the file is being required and the host is never told a band
 changed width. Edit it there, or leave the sidebar off.
+
+### The state convention
+
+The host knows a pane's bytes and a stamp that moves when they change. Whether that means the
+thing in it is *working*, *blocked* on a question, or *idle* is a guess about text on a screen,
+and `neotmux.state` is where the shipped guess lives — so the plugin that notifies you and the
+sidebar that draws you a list agree about what a pane is doing.
+
+```lua
+local state = require('neotmux.state')
+
+state.of(pane)          --> 'working' | 'blocked' | 'idle', or nil for a pane that went away
+state.worst(panes)      --> the same three, for a set: blocked beats working beats idle
+state.icon('blocked')   --> ◉
+
+state.patterns          -- the Lua patterns that mean "this is a question"; replace the table
+state.lines = 5         -- how many of a pane's last non-blank lines to match against
+state.working_for = 2   -- seconds after a pane last said something that it still reads as working
+```
+
+The expensive half — reading the pane's text — happens only for a pane whose revision has moved
+since it was last asked about, so a session nobody is typing into costs one stamp per pane per
+tick and nothing else. `of` is answered on demand rather than on a tick of its own: every caller
+is already in one.
+
+The three words are herdr's, and so is what they are for: an agent you are running is either
+getting on with it, waiting for you, or doing nothing, and which of those it is, is the thing
+you open a sidebar to find out.
 
 ### The box convention
 

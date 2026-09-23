@@ -16,6 +16,7 @@
 -- text field is anywhere else too.
 local modes = require("neotmux.mode")
 local box = require("neotmux.box")
+local pane_state = require("neotmux.state")
 
 local M = {}
 
@@ -24,6 +25,9 @@ M.colors = {
   frame = "#181825", -- mantle, the same ground the status bar and the sidebar sit on
   name = "#cdd6f4",
   current = "#a6e3a1", -- green: the session you are in
+  working = "#a6e3a1", -- green
+  blocked = "#f9e2af", -- yellow: the one that wants you
+  idle = "#585b70", -- surface2
   doing = "#6c7086", -- overlay0: what it is running, quieter than its name
   cursor = "#313244", -- surface0: the row under the caret, dark enough to read over
   caret = "#f9e2af", -- yellow, for the block in the name field
@@ -70,14 +74,16 @@ end
 -- running. Read through `with`, which is what lets a picker say anything at all about a
 -- session nobody is attached to.
 local function doing(name)
-  local panes, command = 0, nil
+  local panes, command, worst = 0, nil, "idle"
   neotmux.session.with(name, function()
-    panes = #neotmux.pane.list()
+    local list = neotmux.pane.list()
+    panes = #list
     local focus = neotmux.pane.current()
     local info = focus and neotmux.pane.info(focus)
     command = info and info.command
+    worst = pane_state.worst(list)
   end)
-  return panes, command
+  return panes, command, worst
 end
 
 local function leave()
@@ -260,17 +266,24 @@ neotmux.on_tick(function(ctx)
       ctx:rect(win, inner.x, row, inner.w, 1, { bg = M.colors.cursor })
     end
     local background = chosen and M.colors.cursor or M.colors.frame
-    local panes, command = doing(name)
+    local panes, command, worst = doing(name)
     local said = (command or "-") .. "  " .. panes .. "p"
+    ctx:text(win, inner.x, row, pane_state.icon(worst), {
+      fg = M.colors[worst],
+      bg = background,
+    })
     -- The name on the left and what it is running on the right, so the two read as columns
     -- rather than as one run of words. A name too long for the row keeps the row: the right
     -- column is dropped instead, because it is the one you can do without.
-    ctx:text(win, inner.x + 1, row, name, {
+    -- The icon owns the first column and the names start after it, so a list of them reads as
+    -- a column rather than as a run of words with punctuation in front.
+    local label = inner.x + 2
+    ctx:text(win, label, row, name, {
       fg = name == here and M.colors.current or M.colors.name,
       bg = background,
     })
     local at_col = inner.x + inner.w - neotmux.width(said) - 1
-    if at_col > inner.x + neotmux.width(name) + 2 then
+    if at_col > label + neotmux.width(name) + 1 then
       ctx:text(win, at_col, row, said, { fg = M.colors.doing, bg = background })
     end
   end
@@ -278,7 +291,7 @@ neotmux.on_tick(function(ctx)
   local last = inner.y + inner.h - 1
   if state.typing then
     local label = "name  "
-    ctx:text(win, inner.x + 1, last, label .. state.typing, {
+    ctx:text(win, inner.x + 2, last, label .. state.typing, {
       fg = M.colors.name,
       bg = M.colors.frame,
     })
@@ -286,14 +299,14 @@ neotmux.on_tick(function(ctx)
     -- pane, and a float cannot take it.
     ctx:rect(
       win,
-      inner.x + 1 + neotmux.width(label) + neotmux.width(state.typing),
+      inner.x + 2 + neotmux.width(label) + neotmux.width(state.typing),
       last,
       1,
       1,
       { bg = M.colors.caret }
     )
   else
-    ctx:text(win, inner.x + 1, last, "j k  enter  c new  d kill  esc", {
+    ctx:text(win, inner.x + 2, last, "j k  enter  c new  d kill  esc", {
       fg = M.colors.hint,
       bg = M.colors.frame,
     })

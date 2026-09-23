@@ -2290,11 +2290,19 @@ fn the_shipped_watcher_is_off_by_default() {
     );
 }
 
-/// The columns `plugin/sidebar.lua` reserves, and the markers it puts against the session
-/// you are in and the window being shown. The sessions come first, so the session marker is
-/// what the band's top row holds.
-const SIDEBAR_COLS: u16 = 24;
-const CURRENT_SESSION_MARKER: &str = "\u{25cf}";
+/// `plugin/sidebar.lua` takes its width from what there is to show, between a floor and a
+/// ceiling. One session called `default` running `cat` does not reach the floor, so these
+/// tests see the band at its narrowest.
+const SIDEBAR_COLS: u16 = 18;
+/// The state icon against a session: idle, working, or waiting for you. Which one it is
+/// depends on what the shell said and when, so a test that only cares that the band is there
+/// asks whether the cell holds any of them.
+const IDLE_SESSION_ICON: &str = "\u{25cb}";
+const SESSION_ICONS: [&str; 3] = ["\u{25cb}", "\u{25cf}", "\u{25c9}"];
+
+fn is_a_state_icon(cell: &str) -> bool {
+    SESSION_ICONS.contains(&cell)
+}
 const CURRENT_WINDOW_MARKER: &str = "\u{25b8}";
 
 /// The sidebar's rows are two columns — a label on the left and what the thing is running
@@ -2325,9 +2333,10 @@ fn the_shipped_sidebar_lists_the_session_and_narrows_the_panes() {
     let mut nt = Neotmux::start_layered(&[init.path(), &shipped_layer()], "cat");
 
     nt.wait_for_status("cat", PATIENCE);
-    nt.wait_for_cell(PANE_TOP, 0, CURRENT_SESSION_MARKER, PATIENCE);
-    // The sessions, a blank row, then the windows: the gap is what tells the two groups
-    // apart, and it folds to nothing rather than to a glyph in the marker column.
+    nt.wait_for_cell(PANE_TOP, 0, IDLE_SESSION_ICON, PATIENCE);
+    // A session is two rows — its name, then what it is running — and its windows hang under
+    // it, because that is where they are: a window belongs to a session and a pane to a
+    // window, and the sidebar draws what the thing is.
     nt.wait_for_cell(PANE_TOP + 2, 0, CURRENT_WINDOW_MARKER, PATIENCE);
     sidebar_row_naming(&mut nt, "1.1", "cat", PATIENCE);
 
@@ -2379,18 +2388,16 @@ fn the_shipped_sidebar_folds_to_a_rail_and_back() {
             .any(|line| line.contains("1.1")),
         "the rail is too narrow to read and still had the names on it:\n{folded}"
     );
-    assert_eq!(
-        nt.cell(PANE_TOP, 0),
-        CURRENT_SESSION_MARKER,
+    assert!(
+        is_a_state_icon(&nt.cell(PANE_TOP, 0)),
         "the fold took the markers column too:\n{folded}"
     );
 
     nt.send("\x02b");
     nt.wait_for_cell(PANE_TOP, SIDEBAR_COLS, "X", PATIENCE);
     sidebar_row_naming(&mut nt, "1.1", "cat", PATIENCE);
-    assert_eq!(
-        nt.cell(PANE_TOP, 0),
-        CURRENT_SESSION_MARKER,
+    assert!(
+        is_a_state_icon(&nt.cell(PANE_TOP, 0)),
         "the band came back somewhere other than the left edge:\n{}",
         nt.screen_after(Duration::ZERO)
     );
@@ -2404,7 +2411,7 @@ fn the_shipped_sidebar_keeps_the_pane_you_are_in_on_screen() {
     let init = harness::runtime(&[("init.lua", "require('neotmux.defaults').sidebar = true")]);
     // Short on purpose: five windows do not fit in what is left of ten rows.
     let mut nt = Neotmux::start_sized(&[init.path(), &shipped_layer()], "cat", 10, 80);
-    nt.wait_for_cell(PANE_TOP, 0, CURRENT_SESSION_MARKER, PATIENCE);
+    nt.wait_for_cell(PANE_TOP, 0, IDLE_SESSION_ICON, PATIENCE);
 
     for _ in 0..4 {
         nt.send("\x02c"); // C-b c
