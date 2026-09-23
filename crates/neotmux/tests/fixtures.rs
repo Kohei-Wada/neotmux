@@ -2839,3 +2839,23 @@ end)
         "something was still raised after both sides lowered their own:\n{screen}"
     );
 }
+
+/// Issue #9, at the layer it broke: a program that positions with HVP (`ESC [ y ; x f`) draws
+/// where it meant to. `vt100` implements CUP and drops HVP, so btop — which positions
+/// everything with `f` — came out as one run of text with no gaps in it, boxes and all.
+///
+/// Driven with `printf` rather than with btop: what broke is the emulation, and a test that
+/// needs btop installed to say so is a test about this machine.
+#[test]
+fn a_pane_positioned_with_hvp_draws_where_it_meant_to() {
+    let (mut nt, _init) = start("", "/bin/sh");
+    nt.settle(Duration::from_millis(600));
+    nt.send("printf '\\033[2J\\033[3;5fLEFT\\033[3;40fRIGHT\\033[6;5fBELOW'\r");
+
+    // Each run on its own row, at the column it asked for — the pane is the whole terminal
+    // here, so the sequence's own 1-based row and column are the screen's. An unhandled HVP
+    // would have put all three together where the cursor happened to be.
+    nt.wait_for_cell(2, 4, "L", PATIENCE);
+    nt.wait_for_cell(2, 39, "R", PATIENCE);
+    nt.wait_for_cell(5, 4, "B", PATIENCE);
+}

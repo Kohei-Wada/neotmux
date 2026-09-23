@@ -3,6 +3,8 @@ use neotmux_proto::{Color, GridSnapshot, Size};
 
 pub struct TermState {
     parser: vt100::Parser,
+    /// `ESC [ y ; x f` on the way in, which the parser does not implement. See [`crate::hvp`].
+    hvp: crate::hvp::Hvp,
     /// Lines that have fallen out of the front of the history, counted as they go: nothing
     /// downstream can work it out afterwards. See [`crate::evictions`].
     dropped: usize,
@@ -52,6 +54,7 @@ impl TermState {
         let size = clamp_to_min_grid(size);
         Self {
             parser: vt100::Parser::new(size.rows, size.cols, scrollback),
+            hvp: crate::hvp::Hvp::new(),
             dropped: 0,
             frozen: None,
         }
@@ -67,7 +70,10 @@ impl TermState {
         screen.set_scrollback(resting.max(1));
         let offset_before = screen.scrollback();
 
-        self.parser.process(bytes);
+        // The one rewrite on the way in, and the reason it is here rather than at the pipe:
+        // it is about what the bytes mean to a terminal, which is this file's subject.
+        let parser = &mut self.parser;
+        self.hvp.rewrite(bytes, |piece| parser.process(piece));
 
         let screen = self.parser.screen_mut();
         let offset_after = screen.scrollback();
@@ -561,6 +567,18 @@ mod tests {
         s.freeze();
         s.feed(b"\r\ncd");
         assert_eq!(s.cursor(), (1, 2));
+    }
+
+    /// A program that positions with HVP rather than CUP — btop does — puts its text where it
+    /// meant to. The parser implements only one of the two; `crate::hvp` is the other.
+    #[test]
+    fn a_pane_positioned_with_hvp_lands_where_cup_would_have() {
+        let mut state = TermState::new(Size { rows: 4, cols: 12 }, 0);
+        state.feed(b"\x1b[1;1fone\x1b[2;5ftwo\x1b[3;9fthree");
+        let lines = state.lines(None, Trailing::Trim);
+        assert_eq!(lines[0], "one");
+        assert_eq!(lines[1], "    two");
+        assert_eq!(lines[2], "        thre");
     }
 
     /// DECCKM is the pane asking to be sent `ESC O A` rather than `ESC [ A`. Reading it is the
