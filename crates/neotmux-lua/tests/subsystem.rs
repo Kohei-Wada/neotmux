@@ -124,7 +124,7 @@ fn ops_reach_the_host_with_their_owner() {
     )
     .unwrap();
     assert!(sub.run_init().is_empty());
-    let ops = sub.drain_ops();
+    let ops = sub.drain_ops(None);
     assert_eq!(ops.len(), 2);
     assert_eq!(sub.sources().name(ops[0].0).as_deref(), Some("plugin/loud"));
     assert_eq!(
@@ -304,7 +304,7 @@ fn a_registration_made_during_a_dispatch_is_owned_by_the_chunk_it_was_written_in
     let before = sub.registry().snapshot(KindTag::Tick);
     assert_eq!(before.len(), 1);
 
-    sub.dispatch_tick();
+    sub.dispatch_tick(support::one());
 
     let after = sub.registry().snapshot(KindTag::Tick);
     assert_eq!(after.len(), 2);
@@ -333,7 +333,7 @@ fn a_callback_written_in_a_library_and_registered_during_a_dispatch_is_the_libra
     )
     .unwrap();
     assert!(sub.run_init().is_empty());
-    sub.dispatch_tick();
+    sub.dispatch_tick(support::one());
 
     let after = sub.registry().snapshot(KindTag::Tick);
     assert_eq!(after.len(), 2);
@@ -509,7 +509,7 @@ fn sealed_subtable_functions_still_work_through_the_proxy() {
     )
     .unwrap();
     assert!(sub.run_init().is_empty());
-    let ops = sub.drain_ops();
+    let ops = sub.drain_ops(None);
     assert!(ops.iter().any(|(_, op)| matches!(
         op,
         Op::Log { text, .. } if text == "from log"
@@ -534,7 +534,7 @@ fn pairs_over_the_sealed_top_level_table_sees_the_real_fields() {
     )
     .unwrap();
     assert!(sub.run_init().is_empty());
-    let ops = sub.drain_ops();
+    let ops = sub.drain_ops(None);
     let (_, op) = ops
         .into_iter()
         .find(|(_, op)| matches!(op, Op::Notify { .. }))
@@ -566,7 +566,7 @@ fn pairs_over_a_sealed_subtable_sees_its_real_fields() {
     )
     .unwrap();
     assert!(sub.run_init().is_empty());
-    let ops = sub.drain_ops();
+    let ops = sub.drain_ops(None);
     let (_, op) = ops
         .into_iter()
         .find(|(_, op)| matches!(op, Op::Notify { .. }))
@@ -579,8 +579,10 @@ fn pairs_over_a_sealed_subtable_sees_its_real_fields() {
 
 /// The owner of an op is the chunk it was written in, so this and the two tests below all
 /// read the tag the host would put on the log line.
+/// Every caller loads a layer and asks who the log came from, so the op it looks for was
+/// raised during the load — before any session, and filed under none.
 fn log_owner(sub: &LuaSubsystem) -> String {
-    let ops = sub.drain_ops();
+    let ops = sub.drain_ops(None);
     let (id, _) = ops
         .iter()
         .find(|(_, op)| matches!(op, Op::Log { .. }))
@@ -689,9 +691,9 @@ fn a_notify_from_a_plugin_tick_callback_is_attributed_to_the_plugin() {
     )
     .unwrap();
     assert!(sub.run_init().is_empty());
-    sub.dispatch_tick();
+    sub.dispatch_tick(support::one());
 
-    let ops = sub.drain_ops();
+    let ops = sub.drain_ops(Some(support::one()));
     let (id, _) = ops
         .iter()
         .find(|(_, op)| matches!(op, Op::Notify { .. }))
@@ -775,9 +777,9 @@ fn a_require_outside_init_raises_instead_of_returning_nil() {
     )
     .unwrap();
     assert!(sub.run_init().is_empty());
-    sub.dispatch_tick();
+    sub.dispatch_tick(support::one());
 
-    let text = format!("{:?}", sub.drain_ops());
+    let text = format!("{:?}", sub.drain_ops(Some(support::one())));
     assert!(
         text.contains("ok=false"),
         "a require at runtime should raise, not be swallowed by the load convention: {text}"
@@ -794,7 +796,7 @@ fn a_quit_called_through_pcall_is_attributed_to_the_calling_chunk() {
     .unwrap();
     assert!(sub.run_init().is_empty());
 
-    let ops = sub.drain_ops();
+    let ops = sub.drain_ops(None);
     let (id, _) = ops
         .iter()
         .find(|(_, op)| matches!(op, Op::Quit))
@@ -816,7 +818,7 @@ fn a_quit_called_through_xpcall_is_attributed_to_the_calling_chunk() {
     .unwrap();
     assert!(sub.run_init().is_empty());
 
-    let ops = sub.drain_ops();
+    let ops = sub.drain_ops(None);
     let (id, _) = ops
         .iter()
         .find(|(_, op)| matches!(op, Op::Quit))
@@ -839,9 +841,9 @@ fn a_log_call_from_inside_a_resumed_coroutine_is_attributed_to_its_chunk() {
     )
     .unwrap();
     assert!(sub.run_init().is_empty());
-    sub.dispatch_tick();
+    sub.dispatch_tick(support::one());
 
-    let ops = sub.drain_ops();
+    let ops = sub.drain_ops(Some(support::one()));
     let (id, _) = ops
         .iter()
         .find(|(_, op)| matches!(op, Op::Log { text, .. } if text == "from the coroutine"))
@@ -863,7 +865,7 @@ fn a_chunk_built_with_load_can_reach_the_host_api() {
     let failures = sub.run_init();
     assert!(failures.is_empty(), "{failures:?}");
 
-    let ops = sub.drain_ops();
+    let ops = sub.drain_ops(None);
     let text = format!("{ops:?}");
     assert!(text.contains("from a loaded chunk"), "{text}");
 }
@@ -910,8 +912,8 @@ fn a_failed_loads_rollback_does_not_reach_a_callback_it_got_from_a_library() {
         Some("plugin/lib".to_string())
     );
 
-    sub.dispatch_tick();
-    let text = format!("{:?}", sub.drain_ops());
+    sub.dispatch_tick(support::one());
+    let text = format!("{:?}", sub.drain_ops(Some(support::one())));
     assert!(text.contains("library callback ran"), "{text}");
     assert!(!text.contains("own callback ran"), "{text}");
 }
@@ -969,8 +971,8 @@ fn a_float_owner_beats_earlier_on_key_registrations_and_without_a_float_registra
     )
     .unwrap();
     assert!(sub.run_init().is_empty());
-    assert_eq!(sub.dispatch_key("x"), KeyOutcome::Consumed);
-    let text = format!("{:?}", sub.drain_ops());
+    assert_eq!(sub.dispatch_key(support::one(), "x"), KeyOutcome::Consumed);
+    let text = format!("{:?}", sub.drain_ops(Some(support::one())));
     assert!(
         text.contains("b won"),
         "the later-registered float owner should have taken the key: {text}"
@@ -999,8 +1001,8 @@ fn a_float_owner_beats_earlier_on_key_registrations_and_without_a_float_registra
     )
     .unwrap();
     assert!(sub.run_init().is_empty());
-    assert_eq!(sub.dispatch_key("x"), KeyOutcome::Consumed);
-    let text = format!("{:?}", sub.drain_ops());
+    assert_eq!(sub.dispatch_key(support::one(), "x"), KeyOutcome::Consumed);
+    let text = format!("{:?}", sub.drain_ops(Some(support::one())));
     assert!(
         text.contains("a won"),
         "with no floats, the earlier on_key must win as it always has: {text}"
@@ -1034,8 +1036,8 @@ fn removing_the_float_restores_registration_order() {
     .unwrap();
     assert!(sub.run_init().is_empty());
 
-    assert_eq!(sub.dispatch_key("x"), KeyOutcome::Consumed);
-    let text = format!("{:?}", sub.drain_ops());
+    assert_eq!(sub.dispatch_key(support::one(), "x"), KeyOutcome::Consumed);
+    let text = format!("{:?}", sub.drain_ops(Some(support::one())));
     assert!(
         text.contains("b won"),
         "the holding float owner takes the first key: {text}"
@@ -1043,8 +1045,8 @@ fn removing_the_float_restores_registration_order() {
     assert!(!text.contains("a won"), "{text}");
 
     // B's callback removed its float, so its owner is no longer offered first.
-    assert_eq!(sub.dispatch_key("x"), KeyOutcome::Consumed);
-    let text = format!("{:?}", sub.drain_ops());
+    assert_eq!(sub.dispatch_key(support::one(), "x"), KeyOutcome::Consumed);
+    let text = format!("{:?}", sub.drain_ops(Some(support::one())));
     assert!(
         text.contains("a won"),
         "the canary must be restored once B's float is gone: {text}"
@@ -1090,8 +1092,8 @@ fn the_topmost_float_among_float_owners_wins() {
 
     // C's float is newer than B's, so C is offered first — A holds nothing and waits on
     // its ordinary turn, which never comes.
-    assert_eq!(sub.dispatch_key("x"), KeyOutcome::Consumed);
-    let text = format!("{:?}", sub.drain_ops());
+    assert_eq!(sub.dispatch_key(support::one(), "x"), KeyOutcome::Consumed);
+    let text = format!("{:?}", sub.drain_ops(Some(support::one())));
     assert!(
         text.contains("c won"),
         "the owner of the newest float should take the key: {text}"
@@ -1156,8 +1158,8 @@ fn a_declining_topmost_hands_the_key_to_the_lower_float_owner() {
     )
     .unwrap();
     assert!(sub.run_init().is_empty());
-    assert_eq!(sub.dispatch_key("x"), KeyOutcome::Consumed);
-    let text = format!("{:?}", sub.drain_ops());
+    assert_eq!(sub.dispatch_key(support::one(), "x"), KeyOutcome::Consumed);
+    let text = format!("{:?}", sub.drain_ops(Some(support::one())));
     assert!(
         text.contains("lower won"),
         "the declined topmost should hand the key to the lower float owner: {text}"
@@ -1188,8 +1190,8 @@ fn a_declining_topmost_hands_the_key_to_the_lower_float_owner() {
     )
     .unwrap();
     assert!(sub.run_init().is_empty());
-    assert_eq!(sub.dispatch_key("x"), KeyOutcome::Consumed);
-    let text = format!("{:?}", sub.drain_ops());
+    assert_eq!(sub.dispatch_key(support::one(), "x"), KeyOutcome::Consumed);
+    let text = format!("{:?}", sub.drain_ops(Some(support::one())));
     assert!(
         text.contains("a won"),
         "both float owners declining should fall to registration order: {text}"
@@ -1221,8 +1223,8 @@ fn a_float_without_an_on_key_steals_nothing() {
     )
     .unwrap();
     assert!(sub.run_init().is_empty());
-    assert_eq!(sub.dispatch_key("x"), KeyOutcome::Consumed);
-    let text = format!("{:?}", sub.drain_ops());
+    assert_eq!(sub.dispatch_key(support::one(), "x"), KeyOutcome::Consumed);
+    let text = format!("{:?}", sub.drain_ops(Some(support::one())));
     assert!(
         text.contains("k won"),
         "K should take the key over F's bare float: {text}"
@@ -1236,8 +1238,8 @@ fn a_float_without_an_on_key_steals_nothing() {
     )
     .unwrap();
     assert!(sub.run_init().is_empty());
-    assert_eq!(sub.dispatch_key("x"), KeyOutcome::Consumed);
-    let text = format!("{:?}", sub.drain_ops());
+    assert_eq!(sub.dispatch_key(support::one(), "x"), KeyOutcome::Consumed);
+    let text = format!("{:?}", sub.drain_ops(Some(support::one())));
     assert!(
         text.contains("k won"),
         "without F loaded at all, K takes the key: {text}"
@@ -1266,8 +1268,8 @@ fn a_float_owners_binding_still_waits_behind_every_on_key() {
     )
     .unwrap();
     assert!(sub.run_init().is_empty());
-    assert_eq!(sub.dispatch_key("x"), KeyOutcome::Consumed);
-    let text = format!("{:?}", sub.drain_ops());
+    assert_eq!(sub.dispatch_key(support::one(), "x"), KeyOutcome::Consumed);
+    let text = format!("{:?}", sub.drain_ops(Some(support::one())));
     assert!(
         text.contains("k won"),
         "on_key callbacks always come before bindings, float or not: {text}"

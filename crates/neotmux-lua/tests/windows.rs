@@ -57,6 +57,7 @@ fn publish(sub: &LuaSubsystem) {
         (pane(3), Rect::new(40, 0, 40, 24)),
     ];
     sub.begin_frame(
+        support::one(),
         Epoch::new(SIZE, vec![pane(1), pane(3)], Some(pane(1))),
         Geometry {
             size: SIZE,
@@ -69,8 +70,8 @@ fn publish(sub: &LuaSubsystem) {
 }
 
 fn ticked(sub: &LuaSubsystem) -> Vec<String> {
-    sub.dispatch_tick();
-    sub.drain_ops()
+    sub.dispatch_tick(support::one());
+    sub.drain_ops(Some(support::one()))
         .into_iter()
         .filter_map(|(_, op)| match op {
             Op::Log { text, .. } => Some(text),
@@ -121,12 +122,15 @@ fn pane_list_stays_the_shown_windows_panes() {
 #[test]
 fn a_published_geometry_moves_the_window_id_counter_past_what_it_names() {
     let (_dir, sub) = built("");
-    sub.republish_geometry(Geometry {
-        size: SIZE,
-        panes: vec![(pane(1), Rect::new(0, 0, 80, 24))],
-        focus: Some(pane(1)),
-        windows: vec![window(4, &[1])],
-        window: Some(WindowId::from(4)),
-    });
+    sub.republish_geometry(
+        support::one(),
+        Geometry {
+            size: SIZE,
+            panes: vec![(pane(1), Rect::new(0, 0, 80, 24))],
+            focus: Some(pane(1)),
+            windows: vec![window(4, &[1])],
+            window: Some(WindowId::from(4)),
+        },
+    );
     assert_eq!(sub.reserve_window_id(), WindowId::from(5));
 }

@@ -124,11 +124,24 @@ design that pays a real price for nothing is not a trade-off.
 
 What it does cost is that state which was implicitly per-session — implicitly, because a server
 *was* a session — has to become so explicitly. In `LuaSubsystem` today, `geometry`, `pane_info`,
-`reservations`, `window_ids`, `floats` and the draw `buffers` are one each. They become one per
-session. `sources`, `registry`, `opts`, the budget and the overrun record stay server-wide,
-because a subscription, a source name and a budget are the plugin's rather than the session's.
-`ops` gains a session tag: an op raised during a tick has to be applied to the session whose
-tick it was.
+`reservations`, `window_ids`, `floats` and the draw `buffers` are one each. `sources`,
+`registry`, `opts`, the budget and the overrun record stay server-wide, because a subscription,
+a source name and a budget are the plugin's rather than the session's. `ops` gains a session
+tag: an op raised during a tick has to be applied to the session whose tick it was.
+
+**Corrected, 2026-09-23.** Of those six, two need it. Building it said so:
+
+- `reservations` and `floats` are already a declaration plus a per-frame placement — `add`,
+  `totals` and `lay_out(surface, applied)` — which is the rule §7 states from the other side.
+  Nothing to key.
+- the draw `buffers` are scratch for the dispatch in hand: `begin`, `record`, `commit` and
+  `applicable` all happen inside one session's tick.
+- `window_ids` is a counter, and server-wide makes an id name one window for the life of the
+  server, which is what a `$1:@3` display would want anyway.
+
+What is left is `geometry` and `pane_info`, and those need no change to the API's closures
+either: they capture one `Rc<RefCell<Geometry>>` between them, so that cell is defined as the
+current session's view and binding a session swaps the stored one in.
 
 **The session a dispatch is for is ambient.** The host binds it around every tick, every key
 and every event, and every existing call — `neotmux.pane.list()`, `window.current()`,
@@ -270,6 +283,18 @@ and is the same code — a picture is composed per client out of the session tha
 
 Stage 2 is the one to be careful with, and the one to plan on its own. Stages 1 and 3 are
 mostly moving a boundary that is already drawn.
+
+**Reordered, 2026-09-23.** Stage 1 as written puts the socket first, and it cannot go first:
+`crates/neotmux/tests/sessions.rs` runs `work` and `default` at the same time and pins that
+`ls` lists both and that `kill work` leaves `default` alone. One socket over a map that can
+hold one entry breaks that, and it would stay broken until the whole of stage 2 had landed.
+So the internals go first and the socket goes with N sessions:
+
+1. **The word, with one session.** `SessionId`, the map, the ambient binding, ops tagged.
+   Nothing observable changes. Done, in `plans/2026-09-23-the-word-session.md`.
+2. **The socket, the CLI and N sessions**, in one step, so the two-name behaviour moves from
+   two servers to two sessions in one server rather than being absent in between.
+3. **`neotmux.session.*`**, including `with`, and the sidebar that uses it.
 
 ## 12. Tests
 

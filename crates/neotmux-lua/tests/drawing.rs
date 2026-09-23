@@ -33,6 +33,7 @@ fn frame(sub: &LuaSubsystem, rows: u16) {
     let pane = PaneId::from(1);
     let rect = Rect::new(0, 0, 80, rows);
     sub.begin_frame(
+        support::one(),
         Epoch::new(size, vec![pane], Some(pane)),
         Geometry {
             size,
@@ -41,7 +42,7 @@ fn frame(sub: &LuaSubsystem, rows: u16) {
             ..Default::default()
         },
     );
-    sub.dispatch_tick();
+    sub.dispatch_tick(support::one());
 }
 
 #[test]
@@ -144,7 +145,7 @@ fn a_tick_error_is_reported_with_the_source_name() {
         ),
     ]);
     frame(&sub, 24);
-    let ops = sub.drain_ops();
+    let ops = sub.drain_ops(Some(support::one()));
     assert_eq!(ops.len(), 1, "expected one op, got {ops:?}");
     assert_eq!(
         sub.sources().name(ops[0].0).as_deref(),
@@ -261,7 +262,7 @@ fn same_frame_cross_source_isolation_survives_dispatch_tick() {
         "the raising tick's half-drawn frame leaked through: {texts:?}"
     );
 
-    let ops = sub.drain_ops();
+    let ops = sub.drain_ops(Some(support::one()));
     assert_eq!(ops.len(), 1, "expected exactly one error op, got {ops:?}");
     assert_eq!(
         sub.sources().name(ops[0].0).as_deref(),
@@ -279,7 +280,7 @@ fn a_bad_colour_raises_at_the_call() {
         ),
     ]);
     frame(&sub, 24);
-    let ops = sub.drain_ops();
+    let ops = sub.drain_ops(Some(support::one()));
     assert_eq!(ops.len(), 1, "a bad colour should have raised");
 }
 
@@ -293,7 +294,7 @@ fn a_bg_on_line_is_refused_rather_than_discarded() {
         ),
     ]);
     frame(&sub, 24);
-    let ops = sub.drain_ops();
+    let ops = sub.drain_ops(Some(support::one()));
     assert_eq!(ops.len(), 1, "a bg on line should have raised");
     assert!(sub.frame_output().is_empty(), "the line was still drawn");
 }
@@ -308,7 +309,7 @@ fn a_line_still_takes_an_fg() {
         ),
     ]);
     frame(&sub, 24);
-    assert!(sub.drain_ops().is_empty());
+    assert!(sub.drain_ops(Some(support::one())).is_empty());
     match &sub.frame_output()[..] {
         [DrawCmd::Line { fg, .. }] => assert_eq!(*fg, Color::Idx(4)),
         other => panic!("unexpected commands: {other:?}"),
@@ -325,7 +326,7 @@ fn a_line_drawn_with_no_glyph_keeps_the_one_it_always_had() {
         ),
     ]);
     frame(&sub, 24);
-    assert!(sub.drain_ops().is_empty());
+    assert!(sub.drain_ops(Some(support::one())).is_empty());
     match &sub.frame_output()[..] {
         [DrawCmd::Line { glyph, .. }] => assert_eq!(*glyph, '#'),
         other => panic!("unexpected commands: {other:?}"),
@@ -344,7 +345,7 @@ fn a_line_draws_with_the_glyph_it_was_given() {
         ),
     ]);
     frame(&sub, 24);
-    assert!(sub.drain_ops().is_empty());
+    assert!(sub.drain_ops(Some(support::one())).is_empty());
     match &sub.frame_output()[..] {
         [DrawCmd::Line { glyph, .. }] => assert_eq!(*glyph, '\u{2502}'),
         other => panic!("unexpected commands: {other:?}"),
@@ -364,7 +365,7 @@ fn a_glyph_of_more_than_one_character_is_refused_rather_than_truncated() {
             ),
         ]);
         frame(&sub, 24);
-        let ops = sub.drain_ops();
+        let ops = sub.drain_ops(Some(support::one()));
         assert_eq!(ops.len(), 1, "{glyph} should have raised");
         assert!(
             sub.frame_output().is_empty(),
@@ -419,7 +420,7 @@ fn a_tint_naming_no_colour_is_refused() {
     for colours in ["", ", {}", ", { fg = nil }"] {
         let (_dir, sub) = tinter(&format!("ctx:tint(nil, 0, 0, 1, 1{colours})"));
         frame(&sub, 24);
-        let ops = sub.drain_ops();
+        let ops = sub.drain_ops(Some(support::one()));
         assert_eq!(ops.len(), 1, "{colours:?} should have raised");
         assert!(sub.frame_output().is_empty(), "{colours:?} was still drawn");
     }
@@ -569,7 +570,10 @@ fn removing_the_last_tick_registration_stops_the_last_frame_replaying() {
     frame(&sub, 24);
     assert_eq!(lines(&sub), vec![(0, "transient".to_string())]);
 
-    assert_eq!(sub.dispatch_key("C-q"), KeyOutcome::Consumed);
+    assert_eq!(
+        sub.dispatch_key(support::one(), "C-q"),
+        KeyOutcome::Consumed
+    );
     frame(&sub, 24);
     assert!(
         lines(&sub).is_empty(),
@@ -965,7 +969,7 @@ fn a_failed_loads_own_float_grant_does_not_survive_the_rollback() {
 
 /// One tick's worth of `neotmux.log.info` lines, in emission order.
 fn log_lines(sub: &LuaSubsystem) -> Vec<String> {
-    sub.drain_ops()
+    sub.drain_ops(Some(support::one()))
         .into_iter()
         .filter_map(|(_, op)| match op {
             Op::Log { text, .. } => Some(text),

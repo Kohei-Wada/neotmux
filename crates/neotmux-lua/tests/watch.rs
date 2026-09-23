@@ -50,6 +50,7 @@ fn pane(id: u32) -> PaneId {
 /// Window 1 is shown with pane 1 focused; window 2 is hidden, holding pane 2.
 fn publish(sub: &LuaSubsystem) {
     sub.begin_frame(
+        support::one(),
         Epoch::new(SIZE, vec![pane(1)], Some(pane(1))),
         Geometry {
             size: SIZE,
@@ -71,8 +72,8 @@ fn publish(sub: &LuaSubsystem) {
 }
 
 fn notifications(sub: &LuaSubsystem) -> Vec<String> {
-    sub.dispatch_tick();
-    sub.drain_ops()
+    sub.dispatch_tick(support::one());
+    sub.drain_ops(Some(support::one()))
         .into_iter()
         .filter_map(|(_, op)| match op {
             Op::Notify { text, .. } => Some(text),

@@ -27,9 +27,9 @@ fn the_named_client_is_told_its_name() {
     )
     .unwrap();
     assert!(sub.run_init().is_empty());
-    sub.dispatch_tick();
+    sub.dispatch_tick(support::one());
     let line = sub
-        .drain_ops()
+        .drain_ops(Some(support::one()))
         .into_iter()
         .filter_map(|(_, op)| match op {
             neotmux_lua::ops::Op::Log { text, .. } => Some(text),

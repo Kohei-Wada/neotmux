@@ -30,7 +30,10 @@ fn returning_true_consumes_the_key() {
         ),
     ]);
     assert!(sub.run_init().is_empty());
-    assert_eq!(sub.dispatch_key("C-x"), KeyOutcome::Consumed);
+    assert_eq!(
+        sub.dispatch_key(support::one(), "C-x"),
+        KeyOutcome::Consumed
+    );
 }
 
 #[test]
@@ -47,15 +50,24 @@ fn returning_false_or_nil_falls_through() {
         ),
     ]);
     assert!(sub.run_init().is_empty());
-    assert_eq!(sub.dispatch_key("C-x"), KeyOutcome::Fallthrough);
-    assert_eq!(sub.dispatch_key("C-y"), KeyOutcome::Fallthrough);
+    assert_eq!(
+        sub.dispatch_key(support::one(), "C-x"),
+        KeyOutcome::Fallthrough
+    );
+    assert_eq!(
+        sub.dispatch_key(support::one(), "C-y"),
+        KeyOutcome::Fallthrough
+    );
 }
 
 #[test]
 fn an_unbound_key_falls_through() {
     let (_d, sub) = built(&[("init.lua", "")]);
     assert!(sub.run_init().is_empty());
-    assert_eq!(sub.dispatch_key("C-z"), KeyOutcome::Fallthrough);
+    assert_eq!(
+        sub.dispatch_key(support::one(), "C-z"),
+        KeyOutcome::Fallthrough
+    );
 }
 
 #[test]
@@ -75,7 +87,10 @@ fn key_specs_are_normalised_for_conflict_purposes() {
         sub.run_init().is_empty(),
         "the conflicting registration should not raise"
     );
-    assert_eq!(sub.dispatch_key("C-x"), KeyOutcome::Consumed);
+    assert_eq!(
+        sub.dispatch_key(support::one(), "C-x"),
+        KeyOutcome::Consumed
+    );
 }
 
 #[test]
@@ -99,7 +114,7 @@ fn a_conflict_returns_nil_and_a_message_and_logs_both_names() {
         ),
     ]);
     assert!(sub.run_init().is_empty());
-    let ops = sub.drain_ops();
+    let ops = sub.drain_ops(None);
     let text = format!("{ops:?}");
     assert!(text.contains("handle=nil"), "{text}");
     assert!(
@@ -125,7 +140,10 @@ fn the_loser_of_a_conflict_does_not_shadow_the_winner() {
         ),
     ]);
     assert!(sub.run_init().is_empty());
-    assert_eq!(sub.dispatch_key("C-x"), KeyOutcome::Consumed);
+    assert_eq!(
+        sub.dispatch_key(support::one(), "C-x"),
+        KeyOutcome::Consumed
+    );
 }
 
 #[test]
@@ -143,14 +161,20 @@ fn no_key_is_reserved_by_the_host() {
     ]);
     let failures = sub.run_init();
     assert!(failures.is_empty(), "{failures:?}");
-    assert_eq!(sub.dispatch_key("C-b"), KeyOutcome::Consumed);
+    assert_eq!(
+        sub.dispatch_key(support::one(), "C-b"),
+        KeyOutcome::Consumed
+    );
 }
 
 #[test]
 fn a_key_the_host_once_reserved_falls_through_when_nothing_binds_it() {
     let (_d, sub) = built(&[("init.lua", "")]);
     assert!(sub.run_init().is_empty());
-    assert_eq!(sub.dispatch_key("C-b"), KeyOutcome::Fallthrough);
+    assert_eq!(
+        sub.dispatch_key(support::one(), "C-b"),
+        KeyOutcome::Fallthrough
+    );
 }
 
 #[test]
@@ -183,8 +207,15 @@ fn a_raising_callback_falls_through_rather_than_swallowing_the_key() {
         ),
     ]);
     assert!(sub.run_init().is_empty());
-    assert_eq!(sub.dispatch_key("C-x"), KeyOutcome::Fallthrough);
-    assert_eq!(sub.drain_ops().len(), 1, "the error should be reported");
+    assert_eq!(
+        sub.dispatch_key(support::one(), "C-x"),
+        KeyOutcome::Fallthrough
+    );
+    assert_eq!(
+        sub.drain_ops(Some(support::one())).len(),
+        1,
+        "the error should be reported"
+    );
 }
 
 #[test]
@@ -204,7 +235,10 @@ fn removing_a_binding_frees_the_key_for_another_plugin() {
         ),
     ]);
     assert!(sub.run_init().is_empty());
-    assert_eq!(sub.dispatch_key("C-x"), KeyOutcome::Consumed);
+    assert_eq!(
+        sub.dispatch_key(support::one(), "C-x"),
+        KeyOutcome::Consumed
+    );
 }
 
 #[test]
@@ -234,12 +268,12 @@ fn an_uppercase_key_and_its_lowercase_are_two_bindings_that_each_fire() {
     let failures = sub.run_init();
     assert!(failures.is_empty(), "'X' collided with 'x': {failures:?}");
 
-    assert_eq!(sub.dispatch_key("x"), KeyOutcome::Consumed);
-    let text = format!("{:?}", sub.drain_ops());
+    assert_eq!(sub.dispatch_key(support::one(), "x"), KeyOutcome::Consumed);
+    let text = format!("{:?}", sub.drain_ops(Some(support::one())));
     assert!(text.contains("lower") && !text.contains("upper"), "{text}");
 
-    assert_eq!(sub.dispatch_key("X"), KeyOutcome::Consumed);
-    let text = format!("{:?}", sub.drain_ops());
+    assert_eq!(sub.dispatch_key(support::one(), "X"), KeyOutcome::Consumed);
+    let text = format!("{:?}", sub.drain_ops(Some(support::one())));
     assert!(text.contains("upper") && !text.contains("lower"), "{text}");
 }
 
@@ -257,8 +291,11 @@ fn a_modified_uppercase_key_and_its_lowercase_are_also_distinct() {
         ),
     ]);
     assert!(sub.run_init().is_empty());
-    assert_eq!(sub.dispatch_key("C-X"), KeyOutcome::Consumed);
-    let text = format!("{:?}", sub.drain_ops());
+    assert_eq!(
+        sub.dispatch_key(support::one(), "C-X"),
+        KeyOutcome::Consumed
+    );
+    let text = format!("{:?}", sub.drain_ops(Some(support::one())));
     assert!(text.contains("upper") && !text.contains("lower"), "{text}");
 }
 
@@ -290,8 +327,11 @@ fn on_key_sees_a_key_nothing_has_bound() {
         ),
     ]);
     assert!(sub.run_init().is_empty());
-    assert_eq!(sub.dispatch_key("c-X"), KeyOutcome::Fallthrough);
-    let text = format!("{:?}", sub.drain_ops());
+    assert_eq!(
+        sub.dispatch_key(support::one(), "c-X"),
+        KeyOutcome::Fallthrough
+    );
+    let text = format!("{:?}", sub.drain_ops(Some(support::one())));
     assert!(
         text.contains("saw C-X"),
         "on_key should receive the normalised spec: {text}"
@@ -315,8 +355,11 @@ fn an_on_key_that_returns_true_consumes_the_key_before_the_binding_runs() {
         ),
     ]);
     assert!(sub.run_init().is_empty());
-    assert_eq!(sub.dispatch_key("C-x"), KeyOutcome::Consumed);
-    let text = format!("{:?}", sub.drain_ops());
+    assert_eq!(
+        sub.dispatch_key(support::one(), "C-x"),
+        KeyOutcome::Consumed
+    );
+    let text = format!("{:?}", sub.drain_ops(Some(support::one())));
     assert!(
         !text.contains("binding ran"),
         "the keymap lookup ran although on_key consumed the key: {text}"
@@ -340,9 +383,15 @@ fn an_on_key_that_returns_false_falls_through_to_the_binding() {
         ),
     ]);
     assert!(sub.run_init().is_empty());
-    assert_eq!(sub.dispatch_key("C-x"), KeyOutcome::Consumed);
-    assert_eq!(sub.dispatch_key("C-z"), KeyOutcome::Fallthrough);
-    let text = format!("{:?}", sub.drain_ops());
+    assert_eq!(
+        sub.dispatch_key(support::one(), "C-x"),
+        KeyOutcome::Consumed
+    );
+    assert_eq!(
+        sub.dispatch_key(support::one(), "C-z"),
+        KeyOutcome::Fallthrough
+    );
+    let text = format!("{:?}", sub.drain_ops(Some(support::one())));
     assert!(text.contains("binding ran"), "{text}");
 }
 
@@ -363,8 +412,11 @@ fn on_key_callbacks_run_in_registration_order_and_the_first_to_consume_stops_the
         ),
     ]);
     assert!(sub.run_init().is_empty());
-    assert_eq!(sub.dispatch_key("C-x"), KeyOutcome::Consumed);
-    let text = format!("{:?}", sub.drain_ops());
+    assert_eq!(
+        sub.dispatch_key(support::one(), "C-x"),
+        KeyOutcome::Consumed
+    );
+    let text = format!("{:?}", sub.drain_ops(Some(support::one())));
     assert!(text.contains("first"), "{text}");
     assert!(
         !text.contains("second"),
@@ -389,8 +441,11 @@ fn a_raising_on_key_is_blamed_by_name_and_does_not_swallow_the_key() {
         ),
     ]);
     assert!(sub.run_init().is_empty());
-    assert_eq!(sub.dispatch_key("C-x"), KeyOutcome::Consumed);
-    let text = format!("{:?}", sub.drain_ops());
+    assert_eq!(
+        sub.dispatch_key(support::one(), "C-x"),
+        KeyOutcome::Consumed
+    );
+    let text = format!("{:?}", sub.drain_ops(Some(support::one())));
     assert!(
         text.contains("boom") && text.contains("plugin/flaky"),
         "{text}"

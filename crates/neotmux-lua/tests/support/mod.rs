@@ -39,3 +39,9 @@ impl Deref for Built {
         &self.lua
     }
 }
+
+/// The session every test in this crate drives. They are about the Lua layer rather than
+/// about sessions, and the layer's callers name one for every dispatch.
+pub fn one() -> neotmux_proto::SessionId {
+    neotmux_proto::SessionId::from(1)
+}

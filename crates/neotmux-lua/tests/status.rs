@@ -96,12 +96,13 @@ fn frame(
     current: u32,
 ) -> Vec<DrawCmd> {
     let reserved = sub.reserved();
-    sub.lay_out_reservations(SURFACE, reserved);
+    sub.lay_out_reservations(support::one(), SURFACE, reserved);
     let content = Size {
         rows: SURFACE.rows - reserved.rows(),
         cols: COLS,
     };
     sub.publish_pane_info(
+        support::one(),
         panes
             .iter()
             .map(|(id, info)| (PaneId::from(*id), info.clone()))
@@ -109,6 +110,7 @@ fn frame(
     );
     let ids: Vec<PaneId> = panes.iter().map(|(id, _)| PaneId::from(*id)).collect();
     sub.begin_frame(
+        support::one(),
         Epoch::new(content, ids.clone(), Some(PaneId::from(focus))),
         Geometry {
             size: content,
@@ -134,7 +136,7 @@ fn frame(
             window: Some(WindowId::from(current)),
         },
     );
-    sub.dispatch_tick();
+    sub.dispatch_tick(support::one());
     sub.frame_output()
 }
 

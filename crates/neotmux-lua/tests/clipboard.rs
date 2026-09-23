@@ -22,8 +22,8 @@ fn built(body: &str) -> (tempfile::TempDir, LuaSubsystem) {
 }
 
 fn ticked(sub: &LuaSubsystem) -> Vec<String> {
-    sub.dispatch_tick();
-    sub.drain_ops()
+    sub.dispatch_tick(support::one());
+    sub.drain_ops(Some(support::one()))
         .into_iter()
         .filter_map(|(_, op)| match op {
             Op::Log { text, .. } => Some(text),

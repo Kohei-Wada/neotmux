@@ -35,7 +35,7 @@ fn frame(sub: &LuaSubsystem, applied: bool) {
     } else {
         Reserved::default()
     };
-    sub.lay_out_reservations(SURFACE, reserved);
+    sub.lay_out_reservations(support::one(), SURFACE, reserved);
     let content = Size {
         rows: SURFACE.rows - reserved.rows(),
         cols: SURFACE.cols - reserved.cols(),
@@ -43,6 +43,7 @@ fn frame(sub: &LuaSubsystem, applied: bool) {
     let pane = PaneId::from(1);
     let rect = Rect::new(reserved.left, reserved.top, content.cols, content.rows);
     sub.begin_frame(
+        support::one(),
         Epoch::new(content, vec![pane], Some(pane)),
         Geometry {
             size: content,
@@ -51,7 +52,7 @@ fn frame(sub: &LuaSubsystem, applied: bool) {
             ..Default::default()
         },
     );
-    sub.dispatch_tick();
+    sub.dispatch_tick(support::one());
 }
 
 /// Every `Text` command's text, in the order the frame composed them.
@@ -241,7 +242,7 @@ fn releasing_a_band_gives_the_rows_back_and_moves_the_survivor_out() {
     frame(&sub, true);
     assert_eq!(texts(&sub), vec!["b=22+1".to_string()]);
 
-    sub.dispatch_key("C-r");
+    sub.dispatch_key(support::one(), "C-r");
     assert_eq!(sub.reserved(), Reserved::horizontal(0, 1));
     frame(&sub, true);
     assert_eq!(
@@ -431,7 +432,7 @@ fn a_resize_changes_the_band_and_what_the_panes_get_on_the_next_frame() {
     frame(&sub, true);
     assert_eq!(texts(&sub), vec!["side=0+20 panes=60".to_string()]);
 
-    sub.dispatch_key("C-b");
+    sub.dispatch_key(support::one(), "C-b");
     assert_eq!(
         sub.reserved(),
         Reserved::vertical(4, 0),
@@ -473,7 +474,7 @@ fn a_band_that_folds_and_unfolds_keeps_its_place_on_the_edge() {
         vec!["outer=0+10".to_string(), "inner=10+6".to_string()]
     );
 
-    sub.dispatch_key("C-b");
+    sub.dispatch_key(support::one(), "C-b");
     frame(&sub, true);
     assert_eq!(
         texts(&sub),
@@ -481,7 +482,7 @@ fn a_band_that_folds_and_unfolds_keeps_its_place_on_the_edge() {
         "the folded band is still the outer one"
     );
 
-    sub.dispatch_key("C-b");
+    sub.dispatch_key(support::one(), "C-b");
     frame(&sub, true);
     assert_eq!(
         texts(&sub),

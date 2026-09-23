@@ -12,7 +12,7 @@
 use neotmux_lua::ops::Op;
 use neotmux_lua::{KeyOutcome, LuaSubsystem};
 use neotmux_proto::msg::{SessionOp, Step, Tick, Tock};
-use neotmux_proto::{Key, Level};
+use neotmux_proto::{Key, Level, SessionId};
 use std::time::Instant;
 
 use crate::input::key_spec;
@@ -45,32 +45,34 @@ impl Plugins {
 
     /// Offers a key to the plugins. `Fallthrough` means nobody wanted it, and it belongs to
     /// whichever pane has the focus — which is the session's to know, not this side's.
-    pub fn key(&self, key: Key) -> KeyOutcome {
-        self.lua.dispatch_key(&key_spec(&key))
+    pub fn key(&self, session: SessionId, key: Key) -> KeyOutcome {
+        self.lua.dispatch_key(session, &key_spec(&key))
     }
 
     /// What the session did, replayed into the Lua layer in the order it happened.
-    pub fn catch_up(&self, steps: Vec<Step>) {
+    pub fn catch_up(&self, session: SessionId, steps: Vec<Step>) {
         for step in steps {
             match step {
-                Step::Geometry(geometry) => self.lua.republish_geometry(geometry),
-                Step::Bands { surface, applied } => self.lua.lay_out_reservations(surface, applied),
-                Step::Event(event) => self.lua.dispatch_event(&event),
+                Step::Geometry(geometry) => self.lua.republish_geometry(session, geometry),
+                Step::Bands { surface, applied } => {
+                    self.lua.lay_out_reservations(session, surface, applied)
+                }
+                Step::Event(event) => self.lua.dispatch_event(session, &event),
             }
         }
     }
 
     /// One frame's worth of plugin work: catch the Lua layer up with what the session did,
     /// tick it, and answer with what it asked for and what it drew.
-    pub fn respond(&mut self, tick: Tick) -> Tock {
-        self.catch_up(tick.steps);
+    pub fn respond(&mut self, session: SessionId, tick: Tick) -> Tock {
+        self.catch_up(session, tick.steps);
         if let Some(info) = tick.pane_info {
-            self.lua.publish_pane_info(info);
+            self.lua.publish_pane_info(session, info);
         }
-        self.lua.begin_frame(tick.epoch, tick.geometry);
-        self.lua.dispatch_tick();
+        self.lua.begin_frame(session, tick.epoch, tick.geometry);
+        self.lua.dispatch_tick(session);
 
-        let ops = self.drain_ops();
+        let ops = self.drain_ops(Some(session));
         self.notifications.expire(Instant::now());
         Tock {
             ops,
@@ -85,9 +87,9 @@ impl Plugins {
     /// The ops the session has to apply, with the name of whoever raised each. `log` and
     /// `notify` never leave: the source that raised them and the transcript that replays
     /// them are both here.
-    fn drain_ops(&mut self) -> Vec<(String, SessionOp)> {
+    fn drain_ops(&mut self, session: Option<SessionId>) -> Vec<(String, SessionOp)> {
         let mut out = Vec::new();
-        for (id, op) in self.lua.drain_ops() {
+        for (id, op) in self.lua.drain_ops(session) {
             let tag = self
                 .lua
                 .sources()
@@ -121,7 +123,8 @@ impl Plugins {
     /// can be honoured: nothing is running yet, so there is nothing to split or focus.
     pub fn drain_load_ops(&mut self) -> bool {
         let mut quit = false;
-        for (tag, op) in self.drain_ops() {
+        // The load ran before any session existed, so what it raised belongs to none of them.
+        for (tag, op) in self.drain_ops(None) {
             match op {
                 SessionOp::Quit => quit = true,
                 SessionOp::Detach => refuse(
