@@ -201,7 +201,12 @@ and the session in one process there is no window and no rule.
 
 ## 7. One VM for the session
 
-There is one Lua VM per server, which is to say one per session. Plugin state is the session's:
+There is one Lua VM per server, which is to say one per session.
+
+**Amended, 2026-09-23.** Those were one sentence because a server was a session. They are two
+now: `2026-09-23-sessions-in-the-server-design.md` puts many sessions in one server and keeps
+the first half — one VM per server — while dropping the second. The reasoning below is about
+plugin state not being split per *client*, and it survives the change untouched. Plugin state is the session's:
 its modes, its registers, its floats, its reservations, its window id counter.
 
 This is the tmux arrangement, and today's is not. tmux's copy mode is a property of the pane —
@@ -300,7 +305,11 @@ today because it has never been possible.
 
 ## 12. What this does not touch
 
-The socket layer, the lock, the directory, one file per session, and the handshake's shape. The
+The socket layer, the lock, the directory, one file per session, and the handshake's shape.
+
+**Superseded, 2026-09-23.** `2026-09-23-sessions-in-the-server-design.md` touches exactly the
+first four: one server on one socket, holding many sessions. It was true that this spec did not
+touch them. The
 door — the non-blocking accept, the half-finished greeting, the grace poll — is untouched: it
 is about connections, not about what runs behind them. Pane management, layout, the pane tree,
 the terminal emulation and the scrollback are all already the server's and stay where they are.

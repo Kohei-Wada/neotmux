@@ -98,6 +98,13 @@ differently under `work` and under `default` branches on it. Nothing else is add
 
 ## 6. One session, two clients (M4b)
 
+**Superseded in part, 2026-09-23.** This spec's socket layer — one socket and one lock per
+session, `ls` as a directory walk with a connect probe, `kill` as a signal to the pid in a lock
+— is replaced by `2026-09-23-sessions-in-the-server-design.md`, which puts the sessions in one
+server behind one socket and makes both questions ones the server is asked. What that spec
+keeps is this one's reasoning about what a unix socket can be asked without a race, which is
+still what `sock.rs` runs on.
+
 The line is the one M3 drew. Shared, because it is the server's: every pane, every window,
 every shell and what it is running, the layout, the focus, and each pane's terminal state
 including its scrollback. Per client, because the Lua layer is the client's: every plugin's
