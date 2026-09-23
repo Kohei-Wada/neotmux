@@ -188,6 +188,16 @@ fn pane_id(word: &str) -> Option<PaneId> {
         .map(PaneId::from)
 }
 
+/// `--enter` is the flag only in the last position; anywhere else it is payload, the same as
+/// any other word. `send`'s whole job is putting exactly this text in that pane, so a flag it
+/// ate out of the middle of the line would be a payload it silently changed.
+fn split_enter(rest: &[String]) -> (String, bool) {
+    match rest.split_last() {
+        Some((last, body)) if last == "--enter" => (body.join(" "), true),
+        _ => (rest.join(" "), false),
+    }
+}
+
 fn send(args: &[String], ctx: &mut Ctx<'_>) -> Ran {
     let Some((first, rest)) = args.split_first() else {
         return Ran::failed("usage: neotmux send <pane> <text> [--enter]");
@@ -195,13 +205,7 @@ fn send(args: &[String], ctx: &mut Ctx<'_>) -> Ran {
     let Some(pane) = pane_id(first) else {
         return Ran::failed(format!("'{first}' is not a pane id"));
     };
-    let enter = rest.iter().any(|arg| arg == "--enter");
-    let text = rest
-        .iter()
-        .filter(|arg| *arg != "--enter")
-        .cloned()
-        .collect::<Vec<_>>()
-        .join(" ");
+    let (text, enter) = split_enter(rest);
     let mut bytes = text.into_bytes();
     if enter {
         bytes.push(b'\r');
@@ -267,5 +271,37 @@ mod tests {
         let ran = unknown("frobnicate");
         assert!(!ran.ok);
         assert_eq!(ran.lines, vec!["unknown command 'frobnicate'".to_string()]);
+    }
+
+    fn words(values: &[&str]) -> Vec<String> {
+        values.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn a_trailing_enter_is_the_flag_and_is_not_in_the_text() {
+        let (text, enter) = split_enter(&words(&["echo", "world", "--enter"]));
+        assert_eq!(text, "echo world");
+        assert!(enter);
+    }
+
+    #[test]
+    fn an_enter_in_the_middle_is_payload_not_the_flag() {
+        let (text, enter) = split_enter(&words(&["echo", "--enter", "world"]));
+        assert_eq!(text, "echo --enter world");
+        assert!(!enter);
+    }
+
+    #[test]
+    fn a_bare_enter_sends_an_empty_line() {
+        let (text, enter) = split_enter(&words(&["--enter"]));
+        assert_eq!(text, "");
+        assert!(enter);
+    }
+
+    #[test]
+    fn no_enter_at_all_is_just_the_text() {
+        let (text, enter) = split_enter(&words(&["echo", "world"]));
+        assert_eq!(text, "echo world");
+        assert!(!enter);
     }
 }
