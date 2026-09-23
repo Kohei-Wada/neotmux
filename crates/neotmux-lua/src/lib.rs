@@ -1,5 +1,6 @@
 pub mod api;
 pub mod budget;
+pub mod clipboard;
 pub mod draw;
 mod float;
 pub mod ops;
@@ -31,6 +32,7 @@ pub use api::keymap;
 
 use api::ctx::Ctx;
 use budget::{Budget, Outcome};
+use clipboard::Clipboard;
 use draw::Buffers;
 use float::Floats;
 use ops::{Op, OpBuffer};
@@ -75,7 +77,7 @@ pub struct LuaSubsystem {
 
 impl LuaSubsystem {
     pub fn build(layers: Layers, panes: Rc<dyn PaneRead>) -> anyhow::Result<Self> {
-        Self::build_named("default", layers, panes)
+        Self::build_named("default", layers, panes, Rc::new(clipboard::Absent))
     }
 
     /// The named half of `build`, which passes the default: `neotmux.session_name()` is
@@ -84,6 +86,7 @@ impl LuaSubsystem {
         session_name: impl Into<String>,
         layers: Layers,
         panes: Rc<dyn PaneRead>,
+        clipboard: Rc<dyn Clipboard>,
     ) -> anyhow::Result<Self> {
         let lua = vm::new_vm().map_err(|err| anyhow::anyhow!("{err:#}"))?;
         runtime::install(&lua, &layers).map_err(|err| anyhow::anyhow!("{err:#}"))?;
@@ -120,6 +123,7 @@ impl LuaSubsystem {
                 geometry: geometry.clone(),
                 pane_info: pane_info.clone(),
                 panes,
+                clipboard,
                 overrun: overrun.clone(),
                 reservations: reservations.clone(),
                 window_ids: window_ids.clone(),

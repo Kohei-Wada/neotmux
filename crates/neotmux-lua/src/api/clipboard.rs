@@ -20,61 +20,27 @@
 //! to the terminal" — or say nothing. Whether the paste buffer it keeps beside this got the
 //! text is its own question, and one it can answer.
 
+use std::rc::Rc;
+
 use mlua::{Lua, Table};
-use std::io::{self, Write};
 
-/// Writes the sequence for `text` and flushes it. Flushing is not optional: the sequence has
-/// no newline in it, so a line-buffered terminal would otherwise hold it until something
-/// else came along.
-pub(crate) fn write_to(mut sink: impl Write, text: &str) -> io::Result<()> {
-    sink.write_all(&neotmux_term::osc52::set(text))?;
-    sink.flush()
-}
+use crate::clipboard::Clipboard;
 
-pub(crate) fn install(lua: &Lua) -> mlua::Result<Table> {
-    let clipboard = lua.create_table()?;
+pub(crate) fn install(lua: &Lua, clipboard: Rc<dyn Clipboard>) -> mlua::Result<Table> {
+    let table = lua.create_table()?;
 
     {
-        // Standard output, because that is where the renderer draws: if this is not the
-        // client's terminal then neotmux has no screen either. Written between frames, from
-        // a tick, into the same handle ratatui flushes through, so it cannot land inside a
-        // frame's own output.
+        // The host's, because the terminal is the host's: this crate has none to write to.
+        // Called from a tick, between frames, so whatever the host does with it cannot land
+        // inside a frame's own output.
         let set = lua.create_function(move |_, text: String| {
-            Ok(match write_to(io::stdout().lock(), &text) {
+            Ok(match clipboard.set(&text) {
                 Ok(()) => (true, None),
                 Err(err) => (false, Some(err.to_string())),
             })
         })?;
-        clipboard.set("set", set)?;
+        table.set("set", set)?;
     }
 
-    Ok(clipboard)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_sequence_reaches_the_sink() {
-        let mut out = Vec::new();
-        write_to(&mut out, "hi").expect("write");
-        assert_eq!(out, b"\x1b]52;c;aGk=\x07");
-    }
-
-    /// The sequence carries no newline, so a sink that is only flushed on one would hold it.
-    #[test]
-    fn a_sink_that_cannot_be_written_to_is_an_error_rather_than_a_silence() {
-        struct Broken;
-        impl Write for Broken {
-            fn write(&mut self, _: &[u8]) -> io::Result<usize> {
-                Err(io::Error::other("no terminal"))
-            }
-            fn flush(&mut self) -> io::Result<()> {
-                Ok(())
-            }
-        }
-        let err = write_to(Broken, "hi").expect_err("a broken sink reported success");
-        assert_eq!(err.to_string(), "no terminal");
-    }
+    Ok(table)
 }

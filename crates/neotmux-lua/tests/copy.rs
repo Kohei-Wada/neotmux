@@ -29,6 +29,23 @@ fn pane() -> PaneId {
 /// The shipped runtime with the prefix and copy mode on and everything else off, so every
 /// draw command in a frame is copy mode's.
 fn built(extra: &str) -> (tempfile::TempDir, Built) {
+    built_named(extra, std::rc::Rc::new(neotmux_lua::clipboard::Absent))
+}
+
+/// A clipboard that always accepts the write. For the tests that check what the mode says
+/// when the terminal's clipboard is there to offer to, which `Absent` can never let happen.
+struct WorkingClipboard;
+
+impl neotmux_lua::clipboard::Clipboard for WorkingClipboard {
+    fn set(&self, _text: &str) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+fn built_named(
+    extra: &str,
+    clipboard: std::rc::Rc<dyn neotmux_lua::clipboard::Clipboard>,
+) -> (tempfile::TempDir, Built) {
     let dir = tempfile::tempdir().unwrap();
     fs::write(
         dir.path().join("init.lua"),
@@ -41,9 +58,11 @@ fn built(extra: &str) -> (tempfile::TempDir, Built) {
     )
     .unwrap();
     let terminals = support::panes();
-    let sub = LuaSubsystem::build(
+    let sub = LuaSubsystem::build_named(
+        "default",
         Layers::from_paths(vec![dir.path().to_path_buf(), shipped_layer()]),
         terminals.clone(),
+        clipboard,
     )
     .unwrap();
     assert!(sub.run_init().is_empty());
@@ -258,7 +277,7 @@ const REPORT: &str = "require('plugin.prefix').commands['R'] = function()\n\
 /// screen, because the mode does not have two buffers.
 #[test]
 fn yanking_puts_the_selected_text_in_the_register() {
-    let (_dir, sub) = built(REPORT);
+    let (_dir, sub) = built_named(REPORT, std::rc::Rc::new(WorkingClipboard));
     scrolled(&sub);
     enter(&sub);
     // To the top of the history, select `one` and the two lines under it.
@@ -469,7 +488,7 @@ fn a_user_config_can_switch_copy_mode_off() {
 /// the clipboard holds the text is the false-success other multiplexers ship.
 #[test]
 fn a_yank_claims_the_register_and_only_offers_the_clipboard() {
-    let (_dir, sub) = built("");
+    let (_dir, sub) = built_named("", std::rc::Rc::new(WorkingClipboard));
     scrolled(&sub);
     enter(&sub);
     keys(&sub, &[" ", "l", "y"]);

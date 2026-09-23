@@ -43,6 +43,7 @@ pub(crate) struct Shared {
     pub(crate) geometry: Rc<RefCell<Geometry>>,
     pub(crate) pane_info: Rc<RefCell<PaneInfos>>,
     pub(crate) panes: Rc<dyn PaneRead>,
+    pub(crate) clipboard: Rc<dyn crate::clipboard::Clipboard>,
     pub(crate) overrun: Rc<Overrun>,
     pub(crate) reservations: Rc<Reservations>,
     pub(crate) window_ids: Rc<WindowIds>,
@@ -188,6 +189,7 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
         geometry,
         pane_info,
         panes,
+        clipboard,
         overrun,
         reservations,
         window_ids,
@@ -271,7 +273,7 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
     }
 
     {
-        let clipboard = clipboard::install(lua)?;
+        let clipboard = clipboard::install(lua, clipboard)?;
         let clipboard = seal(lua, clipboard, "neotmux.clipboard")?;
         neotmux.set("clipboard", clipboard)?;
     }

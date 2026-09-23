@@ -23,6 +23,7 @@ fn the_named_client_is_told_its_name() {
         "work",
         Layers::from_paths(vec![dir.path().to_path_buf()]),
         support::panes(),
+        std::rc::Rc::new(neotmux_lua::clipboard::Absent),
     )
     .unwrap();
     assert!(sub.run_init().is_empty());

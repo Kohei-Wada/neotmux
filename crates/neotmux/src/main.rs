@@ -323,6 +323,20 @@ fn list_sessions() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The client's clipboard: the OSC 52 sequence, written to the terminal the renderer draws
+/// on and flushed. Flushing is not optional — the sequence carries no newline, so a
+/// line-buffered terminal would otherwise hold it until something else came along.
+struct TerminalClipboard;
+
+impl neotmux_lua::clipboard::Clipboard for TerminalClipboard {
+    fn set(&self, text: &str) -> std::io::Result<()> {
+        use std::io::Write as _;
+        let mut out = std::io::stdout().lock();
+        out.write_all(&neotmux_term::osc52::set(text))?;
+        out.flush()
+    }
+}
+
 fn client(session: Option<String>) -> anyhow::Result<()> {
     // First, and before the socket: until the terminal is in raw mode the line discipline is
     // answering the keyboard, and starting a server is not fast.
@@ -340,7 +354,12 @@ fn client(session: Option<String>) -> anyhow::Result<()> {
     // The session the client was started under, default taken: the Lua layer is told it
     // as a fact it could not otherwise know (`neotmux.session_name()`).
     let name = session.unwrap_or_else(|| neotmux::sock::DEFAULT_SESSION.to_string());
-    let lua = LuaSubsystem::build_named(name, layers, panes.clone())?;
+    let lua = LuaSubsystem::build_named(
+        name,
+        layers,
+        panes.clone(),
+        std::rc::Rc::new(TerminalClipboard),
+    )?;
     let mut plugins = Plugins::new(lua);
     for failure in plugins.lua().run_init() {
         logging::log(Level::Warn, &failure.source, &failure.message);
