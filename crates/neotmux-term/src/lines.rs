@@ -167,7 +167,7 @@ mod tests {
     fn a_padded_row_is_the_panes_width_in_columns() {
         let line = padded(1, 6, "\u{3042}b".as_bytes()).remove(0);
         assert_eq!(line, "\u{3042}b   ");
-        assert_eq!(crate::width::of_str(&line), 6);
+        assert_eq!(neotmux_proto::width::of_str(&line), 6);
     }
 
     /// Output that scrolled off the top is gone from the visible screen; reaching it is

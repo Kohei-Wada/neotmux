@@ -11,6 +11,7 @@ pub mod msg;
 pub mod paneinfo;
 pub mod panerects;
 pub mod reserve;
+pub mod width;
 pub mod wire;
 
 pub use draw::{DrawCmd, Epoch, Rect};

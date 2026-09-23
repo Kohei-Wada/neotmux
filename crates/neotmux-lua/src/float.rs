@@ -2,7 +2,6 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 
 use neotmux_proto::{Color, DrawCmd, Rect};
-use unicode_width::UnicodeWidthChar;
 
 use crate::source::SourceId;
 
@@ -120,9 +119,10 @@ pub fn place(cmd: &DrawCmd, float: &Rect) -> Vec<DrawCmd> {
     }
 }
 
-/// Identical truncation rule to the renderer's `overlay.rs::draw_text`: a zero-width
-/// (combining) char rides the previous cell rather than being measured, and a wide char
-/// that would straddle the cap drops as a whole rather than being half-drawn.
+/// Same truncation rule as the renderer's `overlay.rs::draw_text`, because both call
+/// `neotmux_proto::width`: a zero-width (combining) char rides the previous cell rather than
+/// being measured, and a wide char that would straddle the cap drops as a whole rather than
+/// being half-drawn.
 fn clip_text(x: u16, y: u16, text: &str, fg: Color, bg: Color, float: &Rect) -> Vec<DrawCmd> {
     if x >= float.w || y >= float.h {
         return Vec::new();
@@ -131,7 +131,7 @@ fn clip_text(x: u16, y: u16, text: &str, fg: Color, bg: Color, float: &Rect) -> 
     let mut acc: u16 = 0;
     let mut out = String::new();
     for ch in text.chars() {
-        let width = UnicodeWidthChar::width(ch).unwrap_or(0) as u16;
+        let width = neotmux_proto::width::of_char(ch) as u16;
         if width == 0 {
             out.push(ch);
             continue;

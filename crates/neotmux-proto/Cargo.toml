@@ -12,3 +12,4 @@ categories.workspace = true
 repository.workspace = true
 
 [dependencies]
+unicode-width.workspace = true

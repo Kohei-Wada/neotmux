@@ -2,7 +2,6 @@ use neotmux_proto::{Color as PColor, DrawCmd, PaneId, PaneRects, Rect as PRect};
 use ratatui::Frame;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use unicode_width::UnicodeWidthChar;
 
 use crate::draw::color;
 
@@ -91,7 +90,7 @@ fn draw_text(
     let (x, y) = pos;
     let mut cx = x;
     for ch in text.chars() {
-        let width = UnicodeWidthChar::width(ch).unwrap_or(0) as u16;
+        let width = neotmux_proto::width::of_char(ch) as u16;
         // A combining mark belongs to the cell before it and claims none of its own. Nothing
         // here can attach it, so it is dropped rather than given a cell it would corrupt.
         if width == 0 {

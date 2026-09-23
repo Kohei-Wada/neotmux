@@ -16,7 +16,6 @@ neotmux-proto.workspace = true
 neotmux-term.workspace = true
 anyhow.workspace = true
 mlua.workspace = true
-unicode-width.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
