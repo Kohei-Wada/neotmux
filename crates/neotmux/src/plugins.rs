@@ -146,9 +146,9 @@ impl Plugins {
     ) -> (Vec<(String, SessionOp)>, Vec<(String, ServerOp)>) {
         let mut out = Vec::new();
         let mut server = Vec::new();
-        // Collected first, and only converted in a second pass below: a write check needs
-        // `&mut self`, which the tag lookup above (`&self.lua`) cannot be held across.
-        let mut pending = Vec::new();
+        // `drain_ops` hands back an owned Vec, so no borrow of `self.lua` survives into this
+        // loop — a `PaneSend` is checked right here, at the position it sits, rather than
+        // moved to a second pass that would reorder it past whatever came after it.
         for (id, op) in self.lua.drain_ops(session) {
             let tag = self
                 .lua
@@ -175,8 +175,16 @@ impl Plugins {
                 Op::PaneFocus { pane } => SessionOp::PaneFocus { pane },
                 Op::PaneResize { dir, cells } => SessionOp::PaneResize { dir, cells },
                 Op::PaneSend { pane, text } => {
-                    pending.push((tag, pane, text));
-                    continue;
+                    // After the tick has returned, so the VM is idle: a handler is never
+                    // re-entered from inside the tick that queued this. With no session yet
+                    // (a load op), there is nothing to check against and no pane for it to
+                    // land in either, so it passes through unchecked.
+                    if let Some(session) = session
+                        && self.check_write(session, pane, &text, "plugin").is_err()
+                    {
+                        continue;
+                    }
+                    SessionOp::PaneSend { pane, text }
                 }
                 Op::WindowCreate { window } => SessionOp::WindowCreate { window },
                 Op::WindowFocus { window } => SessionOp::WindowFocus { window },
@@ -199,18 +207,6 @@ impl Plugins {
                 }
             };
             out.push((tag, op));
-        }
-        for (tag, pane, text) in pending {
-            // After the tick has returned, so the VM is idle: a handler is never re-entered
-            // from inside the tick that queued this. With no session yet (a load op), there
-            // is nothing to check against and no pane for it to land in either.
-            let checked = match session {
-                Some(session) => self.check_write(session, pane, &text, "plugin").is_ok(),
-                None => true,
-            };
-            if checked {
-                out.push((tag, SessionOp::PaneSend { pane, text }));
-            }
         }
         (out, server)
     }
@@ -294,4 +290,76 @@ impl Plugins {
 
 fn refuse(tag: &str, call: &str, why: &str) {
     logging::log(Level::Error, tag, &format!("{call} refused: {why}"));
+}
+
+#[cfg(test)]
+mod tests {
+    use std::rc::Rc;
+
+    use neotmux_lua::LuaSubsystem;
+    use neotmux_lua::runtime::Layers;
+    use neotmux_proto::geometry::Window;
+    use neotmux_proto::{Epoch, Geometry, PaneId, Rect, SessionId, Size, WindowId};
+    use neotmux_term::terminals::PaneTerminals;
+
+    use super::*;
+
+    fn built(script: &str) -> (tempfile::TempDir, Plugins) {
+        let dir = tempfile::tempdir().expect("layer dir");
+        std::fs::write(dir.path().join("init.lua"), script).expect("write layer file");
+        let terminals = Rc::new(PaneTerminals::new());
+        let lua = LuaSubsystem::build(
+            Layers::from_paths(vec![dir.path().to_path_buf()]),
+            terminals,
+        )
+        .expect("lua");
+        assert!(lua.run_init().is_empty());
+        (dir, Plugins::new(lua))
+    }
+
+    /// `Op::PaneSend` used to be converted in a second pass, after every other op in the
+    /// tick — a plugin doing split, then send, then focus in one tick would see its send
+    /// arrive last. The conversion has to happen where the op sits, or op order (which is
+    /// load-bearing for a session) is not what a plugin raised.
+    #[test]
+    fn a_pane_send_is_converted_in_the_order_it_was_raised() {
+        let (_dir, mut plugins) = built(
+            "neotmux.on_tick(function()
+               neotmux.pane.split('horizontal')
+               neotmux.pane.send(1, 'hi')
+               neotmux.pane.focus(1)
+             end)",
+        );
+        let session = SessionId::from(1);
+        let pane = PaneId::from(1);
+        let size = Size { rows: 24, cols: 80 };
+        plugins.lua.begin_frame(
+            session,
+            Epoch::new(size, vec![pane], Some(pane)),
+            Geometry {
+                area: Rect::new(0, 0, size.cols, size.rows),
+                windows: vec![Window {
+                    id: WindowId::from(1),
+                    panes: vec![pane],
+                    name: None,
+                }],
+                window: Some(WindowId::from(1)),
+                panes: vec![(pane, Rect::new(0, 0, size.cols, size.rows))],
+                focus: Some(pane),
+            },
+        );
+        plugins.lua.dispatch_tick(session);
+        let (ops, _server) = plugins.drain_ops(Some(session));
+
+        let kinds: Vec<&str> = ops
+            .iter()
+            .map(|(_, op)| match op {
+                SessionOp::PaneSplit { .. } => "split",
+                SessionOp::PaneSend { .. } => "send",
+                SessionOp::PaneFocus { .. } => "focus",
+                _ => "other",
+            })
+            .collect();
+        assert_eq!(kinds, vec!["split", "send", "focus"], "{ops:?}");
+    }
 }
