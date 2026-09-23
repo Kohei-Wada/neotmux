@@ -68,10 +68,9 @@ impl Keyboard {
     }
 }
 
-/// Why the client stopped, and what the session asked it to say once the terminal is back.
+/// Why the client stopped.
 pub struct Left {
     pub signal: Option<i32>,
-    pub transcript: Vec<String>,
 }
 
 /// What the session said when this client attached.
@@ -129,7 +128,6 @@ pub fn run(
 ) -> anyhow::Result<Left> {
     let mut keyboard = Keyboard::open()?;
     let winch = signals::WindowChange::install()?;
-    let mut transcript = Vec::new();
     if let Some(frame) = &first.frame {
         draw::show(terminal, &frame.frame())?;
     }
@@ -143,7 +141,6 @@ pub fn run(
         if let Some(signal) = shutdown.raised() {
             return Ok(Left {
                 signal: Some(signal),
-                transcript,
             });
         }
         if winch.taken() {
@@ -163,14 +160,12 @@ pub fn run(
             Ready::HangUp => {
                 return Ok(Left {
                     signal: Some(signals::HANGUP),
-                    transcript,
                 });
             }
             Ready::Input => match keyboard.typed()? {
                 Typed::HangUp => {
                     return Ok(Left {
                         signal: Some(signals::HANGUP),
-                        transcript,
                     });
                 }
                 Typed::Keys(keys) => {
@@ -197,14 +192,14 @@ pub fn run(
                         draw::show(terminal, &frame.frame())?;
                     }
                     if done.end.is_some() {
-                        return Ok(Left {
-                            signal: None,
-                            transcript,
-                        });
+                        return Ok(Left { signal: None });
                     }
                 }
                 OwnedToClient::Clip(text) => yank(&text),
-                OwnedToClient::Bye(lines) => transcript = lines,
+                // Only ever sent at the door, to a client whose session was over before it
+                // had a screen. An attached client is told nothing on its way out: every
+                // notification it could be told is in the log file already.
+                OwnedToClient::Bye(_) => {}
                 OwnedToClient::Refused(why) => anyhow::bail!("{why}"),
                 // The vocabulary of the frame that was a conversation, and the two answers
                 // only ever given at the door. Nothing sends any of these to a client that

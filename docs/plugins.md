@@ -122,6 +122,7 @@ and you show nothing. There is no clear call because you never need one.
 ```lua
 neotmux.on_tick(function(ctx)
   local size = ctx:size()                      -- { rows = , cols = }: what the panes have
+  local area = ctx:area()                      -- { x = , y = , w = , h = }: the same, placed
   ctx:text(nil, x, y, 'text', { fg = 2 })      -- nil pane = the whole surface
   ctx:rect(nil, x, y, w, h, { bg = '#202020' })
   ctx:tint(nil, x, y, w, h, { bg = 4 })        -- recolours, writes no glyph
@@ -142,7 +143,10 @@ terminal's defaults.
 rather than being truncated.
 
 `ctx:size()` is the area available to the shells, so it shrinks by whatever is reserved at the
-edges. Read it every tick rather than caching it.
+edges. Read it every tick rather than caching it. `ctx:area()` is that same area with the
+corner it starts at: a band reserved at the left moves the pane area across without changing
+its size, so anything anchored to an edge — a box in the bottom-right corner, say — is drawn
+from `area.x + area.w`, never from `size.cols`.
 
 **Coordinates are the surface's.** A `nil` pane means the whole terminal, reserved bands
 included, and `ctx:pane_rect` answers in those same coordinates — a band at the top moves the
@@ -787,9 +791,11 @@ the host's alone — so this is the one value out of it a plugin ever sees, and 
 read the `~/.config/neotmux` layer is resolved from. It is `nil`, not `''`, where the process
 had no `HOME`.
 
-Logs go to `$XDG_STATE_HOME/neotmux/neotmux.log`, or wherever `--log` says. Notifications also
-replay on stderr when a client exits, so a message from a frame you never saw is not lost. A
-client is replayed what was raised while it was attached, not the session's whole life.
+Logs go to `$XDG_STATE_HOME/neotmux/neotmux.log`, or wherever `--log` says — every
+notification goes there too. A client that leaves a running session is told nothing on stderr:
+the log has it, and a terminal handed back covered in what a plugin said an hour ago is noise.
+The one exception is a session that ended before the client had a screen, which is said on
+stderr because there was nowhere else to say it.
 
 ## How your code is identified
 
@@ -957,7 +963,7 @@ neotmux ships nine plugins in the runtime layer an install puts on the search pa
 | `status` | the default status bar, on one reserved top row |
 | `prefix` | a `C-b` prefix over `v`, `-`, `o`, `h/j/k/l`, `r`, `c`, `n`, `p`, `,` and `[` |
 | `copy` | copy mode: read back over a pane's scrollback, select a region, yank it |
-| `notify` | draws the notifications, bottom-right, in a frame of their own |
+| `notify` | draws each notification in a frame of its own, stacked up from the bottom-right |
 | `sessions` | the session picker on `C-b s`: every session and what it is running, `Enter` to go, `c` to make one, `r` to rename one, `d` to end one |
 | `borders` | a rule along every boundary between two panes |
 | `watch` | notifies you when a pane looks like it is waiting for you, on `neotmux.state`'s guess — **off by default** |
@@ -1268,7 +1274,7 @@ overran leaves no pane scrolled.
 ### The notification surface
 
 `neotmux.notify` raises one and the host holds it: it expires them on its own clock and keeps
-the transcript replayed on stderr when a client leaves. What one *looks like* is a plugin's,
+the transcript a client attaching is told. What one *looks like* is a plugin's,
 the same way a status bar is — `plugin.notify` is the shipped one, and
 `neotmux.notifications.list()` is what it reads.
 

@@ -75,9 +75,6 @@ struct Attached {
     /// How big its terminal is, so a session it switches to can be refitted to it — the same
     /// `window-size latest` rule an attach follows.
     size: Size,
-    /// Where the session's transcript was when this client attached: what it is told on its
-    /// way out is what was raised while it was here.
-    mark: usize,
     /// The client has gone, in this frame. Recorded rather than dropped, because the frame's
     /// slot is still a slot the wait is waiting over, and dropping it out from under a wait
     /// is what this flag prevents.
@@ -706,10 +703,6 @@ fn end_session(
     clients: &mut Vec<Attached>,
 ) {
     for client in clients.iter_mut().filter(|client| client.session == id) {
-        let lines = plugins.notifications().since(client.mark);
-        let _ = client
-            .link
-            .send(&wire::encode_to_client(&ToClient::Bye(&lines)));
         let _ = client
             .link
             .send(&wire::encode_to_client(&ToClient::Done(&Done {
@@ -772,7 +765,6 @@ fn admit(
         link,
         session,
         size: attach.size,
-        mark: plugins.notifications().mark(),
         gone: false,
     })
 }
@@ -930,18 +922,6 @@ fn frame(
         {
             for bytes in &yanked {
                 if client.link.send(bytes).is_err() {
-                    client.gone = true;
-                }
-            }
-            // Before the frame that carries the end, so a client that reads its end and stops
-            // reading has already been told what to say on its way out.
-            if end.is_some() && !client.gone {
-                let lines = plugins.notifications().since(client.mark);
-                if client
-                    .link
-                    .send(&wire::encode_to_client(&ToClient::Bye(&lines)))
-                    .is_err()
-                {
                     client.gone = true;
                 }
             }

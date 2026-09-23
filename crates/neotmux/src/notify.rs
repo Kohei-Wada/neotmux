@@ -1,5 +1,4 @@
 use std::collections::VecDeque;
-use std::io::Write;
 use std::time::{Duration, Instant};
 
 use neotmux_proto::Level;
@@ -9,8 +8,8 @@ use neotmux_proto::frame::Notice;
 
 const TTL: Duration = Duration::from_secs(4);
 const MAX_VISIBLE: usize = 5;
-/// The exit transcript is held for the life of the session, so a plugin notifying every
-/// frame would otherwise grow it without bound. Oldest lines go first.
+/// The transcript is held for the life of the session, so a plugin notifying every frame
+/// would otherwise grow it without bound. Oldest lines go first.
 const MAX_TRANSCRIPT: usize = 1000;
 
 struct Notification {
@@ -28,8 +27,8 @@ pub struct Notifications {
     items: Vec<Notification>,
     transcript: VecDeque<String>,
     dropped: usize,
-    /// Everything ever pushed, the dropped included. A client's mark is one of these, so a
-    /// mark stays meaningful after the cap has thrown the line it pointed at away.
+    /// Everything ever pushed, the dropped included: what `since` counts from, so a mark
+    /// stays meaningful after the cap has thrown the line it pointed at away.
     pushed: usize,
 }
 
@@ -49,7 +48,7 @@ impl Notifications {
                     Level::Warn,
                     "neotmux",
                     &format!(
-                        "the exit transcript is full at {MAX_TRANSCRIPT} lines; \
+                        "the transcript is full at {MAX_TRANSCRIPT} lines; \
                          older notifications are being dropped from it"
                     ),
                 );
@@ -63,31 +62,8 @@ impl Notifications {
         });
     }
 
-    /// Every notification raised this session, replayed once the terminal has been restored.
-    /// A full-screen TUI cannot use stderr while it is running, so without this a notification
-    /// that expired, scrolled past or was never drawn at all is only ever in the log file.
-    pub fn flush(&self, out: &mut impl Write) {
-        if self.dropped > 0 {
-            let _ = writeln!(
-                out,
-                "neotmux: {} earlier notifications were dropped from this transcript \
-                 (capped at {MAX_TRANSCRIPT})",
-                self.dropped
-            );
-        }
-        for line in &self.transcript {
-            let _ = writeln!(out, "neotmux: {line}");
-        }
-    }
-
-    /// Where the transcript is now: what a client attaching takes, and gives back on its
-    /// way out.
-    pub fn mark(&self) -> usize {
-        self.pushed
-    }
-
-    /// Everything raised since `mark`, as `flush` would write it, without the `neotmux: `
-    /// each line is printed behind.
+    /// Everything raised since `mark`. The one caller asks from zero: a client whose session
+    /// ended while it was loading has no screen to be told on, so it is told on stderr.
     pub fn since(&self, mark: usize) -> Vec<String> {
         let oldest = self.pushed - self.transcript.len();
         let from = mark.saturating_sub(oldest);
@@ -126,26 +102,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn flush_replays_every_notification_including_expired_ones() {
-        let mut n = Notifications::new();
-        n.push(Level::Info, "clock", "hi");
-        n.push(Level::Error, "clock", "bye");
-        n.expire(Instant::now() + Duration::from_secs(10));
-        let mut out = Vec::new();
-        n.flush(&mut out);
-        assert_eq!(
-            String::from_utf8(out).unwrap(),
-            "neotmux: clock: hi\nneotmux: clock: bye\n"
-        );
-    }
-
-    #[test]
     fn a_mark_replays_only_what_was_raised_after_it() {
         let mut n = Notifications::new();
         n.push(Level::Info, "a", "one");
-        let mark = n.mark();
         n.push(Level::Info, "b", "two");
-        assert_eq!(n.since(mark), vec!["b: two".to_string()]);
+        assert_eq!(n.since(1), vec!["b: two".to_string()]);
         assert_eq!(
             n.since(0),
             vec!["a: one".to_string(), "b: two".to_string()],
@@ -164,36 +125,5 @@ mod tests {
         let lines = n.since(0);
         assert_eq!(lines.len(), MAX_TRANSCRIPT);
         assert_eq!(lines[0], "loud: line 3");
-    }
-
-    #[test]
-    fn flush_writes_nothing_when_nothing_was_notified() {
-        let mut out = Vec::new();
-        Notifications::new().flush(&mut out);
-        assert!(out.is_empty());
-    }
-
-    #[test]
-    fn the_transcript_is_capped_and_says_so_when_it_drops_lines() {
-        let mut n = Notifications::new();
-        for i in 0..MAX_TRANSCRIPT + 3 {
-            n.push(Level::Info, "loud", &format!("line {i}"));
-        }
-        let mut out = Vec::new();
-        n.flush(&mut out);
-        let text = String::from_utf8(out).unwrap();
-        assert_eq!(text.lines().count(), MAX_TRANSCRIPT + 1, "{text}");
-        assert!(
-            text.lines()
-                .next()
-                .unwrap()
-                .contains("3 earlier notifications were dropped"),
-            "{text}"
-        );
-        assert!(
-            !text.contains("line 2\n"),
-            "the oldest line survived the cap"
-        );
-        assert!(text.contains("line 1002"), "the newest line was dropped");
     }
 }

@@ -364,11 +364,6 @@ fn client(session: Option<String>) -> anyhow::Result<()> {
         );
     }
     let left = result?;
-    // The notifications raised while this client was attached, said now that there is a
-    // terminal to say them on: a full-screen TUI cannot use stderr while it is running.
-    for line in &left.transcript {
-        eprintln!("neotmux: {line}");
-    }
     match left.signal {
         Some(signal) => signals::die_of(signal),
         None => Ok(()),
