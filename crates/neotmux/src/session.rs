@@ -4,7 +4,7 @@ use std::rc::Rc;
 use std::time::Instant;
 
 use anyhow::Context as _;
-use neotmux_proto::msg::{Attach, End, SessionOp, Step, Tick, Tock};
+use neotmux_proto::msg::{End, SessionOp, Step, Tick, Tock};
 use neotmux_proto::{
     DrawCmd, Event, Geometry, Level, PaneId, PaneInfo, Rect as PRect, Reserved, Size,
     Window as LuaWindow, WindowId,
@@ -77,19 +77,31 @@ enum Drained {
     Eof,
 }
 
+/// What a session is started with, or refitted to.
+///
+/// The size is the attaching client's, because the terminal is. The other four are the Lua
+/// layer's — the window id counter, the bands the plugins reserved, the gutter between panes
+/// and whether anything is watching pane output — and this file has no way to reach it.
+pub struct Setup {
+    pub size: Size,
+    pub first_window: WindowId,
+    pub reserved: Reserved,
+    pub gutter: u16,
+    pub wants_pane_output: bool,
+}
+
 impl Session {
-    /// Starts the session a client has just asked for. The size, the reservations, the
-    /// gutter and the first window's id all come from the client, because all four are the
-    /// client's to know: the terminal is its, and window ids are the Lua layer's.
-    pub fn new(attach: &Attach, waker: Waker) -> anyhow::Result<Self> {
+    /// Starts the session a client has just asked for. The size is the client's, because the
+    /// terminal is; the reservations, the gutter and the first window's id are the Lua
+    /// layer's, and reach here through whoever can see it.
+    pub fn new(setup: &Setup, waker: Waker, terminals: Rc<PaneTerminals>) -> anyhow::Result<Self> {
         let surface = Surface {
-            size: clamp_to_min_grid(attach.size),
-            reserved: attach.reserved,
-            gutter: attach.gutter,
+            size: clamp_to_min_grid(setup.size),
+            reserved: setup.reserved,
+            gutter: setup.gutter,
             minimum: neotmux_term::state::MIN_GRID,
         };
-        let (windows, first) = Windows::new(attach.first_window, surface);
-        let terminals = Rc::new(PaneTerminals::new());
+        let (windows, first) = Windows::new(setup.first_window, surface);
         let mut shells = Shells::new(waker, terminals.clone());
         // The session's own directory: the server is a grandchild of the directory neotmux
         // was started from, and `start_dir` cannot be asked for it yet — there is no pane
@@ -108,7 +120,7 @@ impl Session {
             last_overlay: Vec::new(),
             last_notices: Vec::new(),
             steps: Vec::new(),
-            wants_pane_output: attach.wants_pane_output,
+            wants_pane_output: setup.wants_pane_output,
             ended: false,
             terminals,
         };
@@ -235,17 +247,17 @@ impl Session {
         self.apply_geometry()
     }
 
-    /// A new client taking over a session that is already running. `Attach`'s fields are
+    /// A new client taking over a session that is already running. A [`Setup`]'s fields are
     /// values to apply here rather than arguments to build from: the terminal is this
-    /// client's, and so are the bands, the gutter and the subscriptions, because the Lua
-    /// layer that declared them is new.
+    /// client's, and the bands, the gutter and the subscriptions are whatever the Lua layer
+    /// says they are now.
     ///
     /// `first_window` is ignored — the windows already have ids.
-    pub fn adopt(&mut self, attach: &Attach) -> anyhow::Result<()> {
-        self.surface.size = clamp_to_min_grid(attach.size);
-        self.surface.reserved = attach.reserved;
-        self.surface.gutter = attach.gutter;
-        self.wants_pane_output = attach.wants_pane_output;
+    pub fn adopt(&mut self, setup: &Setup) -> anyhow::Result<()> {
+        self.surface.size = clamp_to_min_grid(setup.size);
+        self.surface.reserved = setup.reserved;
+        self.surface.gutter = setup.gutter;
+        self.wants_pane_output = setup.wants_pane_output;
         // What happened while nobody was looking is not news for a client that was not
         // there: geometry is how a plugin learns what exists, events how it learns what
         // changed, and everything here is the former.

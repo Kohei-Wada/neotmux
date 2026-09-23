@@ -31,7 +31,7 @@ use neotmux::link::Link;
 use neotmux::logging;
 use neotmux::reads;
 use neotmux::session::Apply;
-use neotmux::session::Session;
+use neotmux::session::{Session, Setup};
 
 /// The frame's cadence, and so the closest together two frames can be. The same number
 /// the one-process loop used, for the same reason: it is a property of the loop rather
@@ -403,13 +403,24 @@ fn admit(
     session: &mut Option<Session>,
     waker: &Waker,
 ) -> anyhow::Result<Attached> {
+    let setup = Setup {
+        size: attach.size,
+        first_window: attach.first_window,
+        reserved: attach.reserved,
+        gutter: attach.gutter,
+        wants_pane_output: attach.wants_pane_output,
+    };
     match session.as_mut() {
-        Some(session) => session.adopt(attach)?,
+        Some(session) => session.adopt(&setup)?,
         None => {
             // Assign through the parameter: a fresh `let session` would shadow the
             // `&mut Option<Session>` with an owned `Session` and `*session` could not
             // dereference it.
-            *session = Some(Session::new(attach, waker.clone())?);
+            *session = Some(Session::new(
+                &setup,
+                waker.clone(),
+                std::rc::Rc::new(neotmux_term::terminals::PaneTerminals::new()),
+            )?);
         }
     }
     Ok(Attached {
