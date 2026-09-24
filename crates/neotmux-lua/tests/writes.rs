@@ -311,3 +311,25 @@ fn plain_blocks_the_literal_and_not_a_near_miss() {
         WriteVerdict::Pass
     );
 }
+
+/// The same rule table from the write side: a rule narrowed to the person's Enter is not one
+/// an agent's write answers to, and one narrowed to agents is.
+#[test]
+fn a_rule_carries_which_writer_it_is_for() {
+    let (_dir, sub) = shipped(&[(
+        "init.lua",
+        "local guard = require('neotmux.guard')
+         guard.block('for%-the%-person', 'not from the keyboard', 'terminal')
+         guard.only('tool')
+         guard.block('for%-the%-agent', 'not from an agent')",
+    )]);
+    side_by_side(&sub);
+    assert_eq!(
+        sub.dispatch_write(support::one(), PaneId::from(1), "for-the-person\n", "tool"),
+        WriteVerdict::Pass
+    );
+    assert_eq!(
+        sub.dispatch_write(support::one(), PaneId::from(1), "for-the-agent\n", "tool"),
+        WriteVerdict::Refused("not from an agent".to_string())
+    );
+}

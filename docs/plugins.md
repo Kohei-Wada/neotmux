@@ -691,14 +691,22 @@ has never heard of it, and replacing the file changes nothing about neotmux.
 
 ```lua
 local guard = require('neotmux.guard')
-guard.only('tool')                                 -- agents, not the person's plugins
-guard.block('rm%s+%-%w*[rf]', 'rm -rf is blocked')
+guard.block('rm%s+%-%w*[rf]', 'rm -rf is blocked')          -- everyone
+guard.block('terraform%s+destroy', 'ask first', 'tool')     -- agents only
 ```
 
-`block` takes a Lua pattern and what to say when it matches; `only` narrows every rule to one
-kind of writer, `'tool'` or `'plugin'`, leaving the other alone. One handler is registered, the
-first time either is called, so a rule added later from your own `init.lua` needs no new
-subscription — it is read off `M.patterns` on the next write.
+`block` takes a Lua pattern, what to say when it matches, and optionally which writer it is for
+— `'tool'` for a connection that is not a client, `'plugin'` for a plugin's own write,
+`'terminal'` for a person's own Enter. `guard.only(from)` sets that for every rule added after
+it, so a file full of agent rules writes it once.
+
+**`only` is a default for what follows, not a filter over the table**, and the difference
+matters because the table has two readers. A layer that narrowed the whole table to `'tool'`
+would silently switch off the rules a person's Enter is checked against — one file turning off
+another's guard, which is the failure this exists to prevent.
+
+One handler is registered, the first time a rule is added, so a rule added later from your own
+`init.lua` needs no new subscription — it is read off the table on the next ask.
 
 `block`'s first argument is a pattern, not the literal it looks like, and the two disagree
 about what a character like `-` means. `guard.block('rm -rf', 'blocked')` never matches
@@ -712,6 +720,31 @@ otherwise read specially:
 ```lua
 guard.block(guard.plain('git push --force'), 'no force pushes')
 ```
+
+A rule can also be a function, for the case a pattern cannot express — `guard.rule(fn)` hands it
+`{ pane, text, from }` and takes back a sentence or nothing, so "anything at all typed into a
+pane running `ssh prod-…`" is written by reading `neotmux.pane.info(what.pane).command`. The
+host has no notion of production and this is where one belongs.
+
+#### The same rules, on the keys you type
+
+`plugin.guard` is the other half, and the reason the rules live in a table rather than inside an
+`on_write` handler: what an agent writes is checked before it is written, and what *you* type is
+checked when you press Enter. The mechanisms have to differ — a key is not a write, and the host
+will never know what is half-typed into a program — so the plugin reads the row the cursor is on
+and asks the same `guard.verdict`. A match swallows that Enter, raises the mode `guard` for
+whoever draws modes, and says why; pressing Enter again within `plugin.guard.grace` seconds runs
+it.
+
+It is **off by default**, and it declines to act in two states, which is what `pane.mode` is for:
+a pane reading a line without echoing it is a password prompt, and a pane on the alternate screen
+is a full-screen program where Enter is not a command at all. In neither does it read the screen
+or take the key.
+
+What it can see is the limit worth knowing: the row as drawn, prompt and all. A prompt with
+`rm -rf` in it matches, a command wrapped across two rows is seen in part, and text a program
+never echoed is not seen. It is a second pair of eyes, not a proof — unlike the write side, where
+the bytes are known exactly.
 
 ### Windows
 
@@ -1080,6 +1113,7 @@ neotmux ships nine plugins in the runtime layer an install puts on the search pa
 | `notify` | draws each notification in a frame of its own, stacked up from the bottom-right |
 | `sessions` | the session picker on `C-b s`: every session and what it is running, `Enter` to go, `c` to make one, `r` to rename one, `d` to end one |
 | `borders` | a rule along every boundary between two panes |
+| `guard` | holds back the Enter that would run a line `neotmux.guard`'s rules name, until you press it again — **off by default** |
 | `watch` | notifies you when a pane looks like it is waiting for you, on `neotmux.state`'s guess — **off by default** |
 | `sidebar` | a tree of every session, and the windows and panes of the one you are in, down a reserved left band, folded by `C-b b` — **off by default** |
 | `footer` | whichever mode is raised through `neotmux.mode`, on one reserved bottom row — **off by default** |
