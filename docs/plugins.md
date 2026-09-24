@@ -1399,6 +1399,18 @@ it gives up any session's name, and says `… n more` where it cut them. With mo
 rows it keeps one row each and scrolls them around the one you are in, with `↑ n` and `↓ n` for
 the ones out of sight.
 
+Under the tree is every agent in every session — every pane a ruleset in
+`neotmux.detect.agents` answered for — blocked first, then working, then idle, with how long each
+has been in the state it is in:
+
+    ◉ work:2.1 claude 3m
+
+It is `require('plugin.sidebar.agents')`, with `rows` and `tokens` shaped like the tree's
+(`state_icon`, `location`, `command`, `age`). With no agents it takes no room at all; with many
+it takes at most half the band (`share = 0.5`) and the tree keeps the rest. An age starts when
+the sidebar first sees the state, so one that was already going when neotmux started reads as at
+least that long.
+
 A section is a table, and `require('plugin.sidebar').sections` is the list of them, top to
 bottom:
 

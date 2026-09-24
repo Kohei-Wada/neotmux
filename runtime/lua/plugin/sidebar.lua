@@ -1,5 +1,6 @@
 -- A sidebar down the left: a stack of sections, each a table saying what rows it has and how to
--- cut them to a height. The shipped one is the session tree, `plugin.sidebar.sessions`.
+-- cut them to a height. The shipped ones are the session tree, `plugin.sidebar.sessions`, and
+-- under it every agent in every session, `plugin.sidebar.agents`.
 -- `C-b b` folds the band to its first column and back, when the prefix is loaded.
 --
 -- Off by default, unlike the status bar: a status line spends a row nobody was using for
@@ -294,6 +295,7 @@ end)
 -- Last, so a section's own file can already find everything above in the module it is handed.
 M.sections = {
   require("plugin.sidebar.sessions"),
+  require("plugin.sidebar.agents"),
 }
 
 return M

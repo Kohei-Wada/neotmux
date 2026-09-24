@@ -41,6 +41,11 @@ impl Sess {
         self.focus = pane;
         self
     }
+
+    fn agents(mut self, panes: &[u32]) -> Self {
+        self.agents = panes.to_vec();
+        self
+    }
 }
 
 /// The shipped runtime with only the sidebar on, and no agent rulesets: a test about the tree
@@ -388,4 +393,151 @@ fn more_sessions_than_rows_scroll_around_the_one_you_are_in() {
     assert_eq!(lines[0], "\u{2191} 5", "{lines:#?}");
     assert_eq!(lines[11], "\u{2193} 5", "{lines:#?}");
     line_with(&lines, "s10");
+}
+
+/// A ruleset that knows three screens by their last line, and speaks only for panes running
+/// `agent`; and a clock the test moves by three minutes on `T`.
+const AGENTS: &str = "local detect = require('neotmux.detect')\n\
+    detect.agents = { fake = {\n\
+      claims = function(info) return info ~= nil and info.command == 'agent' end,\n\
+      { id = 'ask', state = 'blocked', priority = 3, visible = 'blocked',\n\
+        match = function(v) return v.lines[#v.lines] == 'ASK' end },\n\
+      { id = 'busy', state = 'working', priority = 2,\n\
+        match = function(v) return v.lines[#v.lines] == 'BUSY' end },\n\
+      { id = 'done', state = 'idle', priority = 1, visible = 'idle',\n\
+        match = function(v) return v.lines[#v.lines] == 'DONE' end },\n\
+    } }\n\
+    T = 0\n\
+    require('plugin.sidebar.agents').clock = function() return T end\n\
+    neotmux.on_key(function(key)\n\
+      if key == 'T' then T = T + 180000 return true end\n\
+      if key == 'B' then require('plugin.sidebar').toggle() return true end\n\
+      return false\n\
+    end)\n";
+
+fn show(sub: &Built, pane: u32, text: &str) {
+    sub.terminals().feed(
+        PaneId::from(pane),
+        format!("\x1b[2J\x1b[H{text}").as_bytes(),
+    );
+}
+
+#[test]
+fn agents_are_listed_across_sessions_in_state_order() {
+    let (_dir, sub) = built(AGENTS);
+    let s = [
+        Sess::new(1, "work", vec![vec![101, 102]]).agents(&[101, 102]),
+        Sess::new(2, "home", vec![vec![201, 202]]).agents(&[201]),
+    ];
+    open(&sub, &s);
+    show(&sub, 101, "BUSY");
+    show(&sub, 102, "ASK");
+    show(&sub, 201, "DONE");
+    show(&sub, 202, "DONE");
+    let lines = settled(&sub, &s, 1);
+    let header = line_with(&lines, "\u{2500} agents \u{2500}");
+    let blocked = line_with(&lines, "\u{25c9} work:1.2 agent 0s");
+    let working = line_with(&lines, "\u{25cf} work:1.1 agent 0s");
+    let idle = line_with(&lines, "\u{25cb} home:1.1 agent 0s");
+    assert!(
+        header < blocked && blocked < working && working < idle,
+        "{lines:#?}"
+    );
+    assert!(!lines.iter().any(|l| l.contains("home:1.2")), "{lines:#?}");
+}
+
+#[test]
+fn an_age_moves_on_with_the_clock_and_starts_over_on_a_change() {
+    let (_dir, sub) = built(AGENTS);
+    let s = [Sess::new(1, "work", vec![vec![101]]).agents(&[101])];
+    open(&sub, &s);
+    show(&sub, 101, "BUSY");
+    line_with(&settled(&sub, &s, 1), "\u{25cf} work:1.1 agent 0s");
+    support::keys(&sub, &["T"]);
+    line_with(&settled(&sub, &s, 1), "\u{25cf} work:1.1 agent 3m");
+    show(&sub, 101, "DONE");
+    line_with(&settled(&sub, &s, 1), "\u{25cb} work:1.1 agent 0s");
+    support::keys(&sub, &["T"]);
+    line_with(&settled(&sub, &s, 1), "\u{25cb} work:1.1 agent 3m");
+}
+
+/// Review focus 5: an agent that quits leaves the list, and one that comes back is new.
+#[test]
+fn an_agent_that_quits_leaves_and_comes_back_new() {
+    let (_dir, sub) = built(AGENTS);
+    let s = [Sess::new(1, "work", vec![vec![101]]).agents(&[101])];
+    open(&sub, &s);
+    show(&sub, 101, "BUSY");
+    line_with(&settled(&sub, &s, 1), "work:1.1 agent 0s");
+    support::keys(&sub, &["T"]);
+    show(&sub, 101, "$ ");
+    let gone = settled(&sub, &s, 1);
+    assert!(!gone.iter().any(|l| l.contains("agents")), "{gone:#?}");
+    support::keys(&sub, &["T"]);
+    show(&sub, 101, "BUSY");
+    line_with(&settled(&sub, &s, 1), "work:1.1 agent 0s");
+}
+
+#[test]
+fn no_agents_no_section() {
+    let (_dir, sub) = built(AGENTS);
+    let s = [Sess::new(1, "work", vec![vec![101]])];
+    open(&sub, &s);
+    show(&sub, 101, "BUSY");
+    let lines = settled(&sub, &s, 1);
+    assert!(!lines.iter().any(|l| l.contains("agents")), "{lines:#?}");
+}
+
+/// Review focus 3: twelve agents in twelve rows. The list is held to half — a header and five,
+/// the last of them `↓ 8` — and the tree keeps its session name in the other half.
+#[test]
+fn more_agents_than_half_the_band_stop_at_half() {
+    let (_dir, sub) = built(AGENTS);
+    let panes: Vec<u32> = (101..=112).collect();
+    let s = [Sess::new(1, "work", vec![panes.clone()]).agents(&panes)];
+    open(&sub, &s);
+    for pane in &panes {
+        show(&sub, *pane, "BUSY");
+    }
+    let lines = settled(&sub, &s, 1);
+    assert!(lines.iter().any(|l| l.ends_with(" work")), "{lines:#?}");
+    let header = line_with(&lines, "\u{2500} agents \u{2500}");
+    assert_eq!(header, 6, "{lines:#?}");
+    assert_eq!(lines[11], "\u{2193} 8", "{lines:#?}");
+    let listed = lines.iter().filter(|l| l.contains("work:1.")).count();
+    assert_eq!(listed, 4, "{lines:#?}");
+}
+
+/// Review focus 4: folded, the band is one column whatever the agent list has in it.
+#[test]
+fn a_folded_sidebar_is_one_column_with_agents_listed() {
+    let (_dir, sub) = built(AGENTS);
+    let s = [Sess::new(1, "work", vec![vec![101]]).agents(&[101])];
+    open(&sub, &s);
+    show(&sub, 101, "BUSY");
+    settled(&sub, &s, 1);
+    support::keys(&sub, &["B"]);
+    let lines = settled(&sub, &s, 1);
+    assert!(lines.iter().all(|l| l.chars().count() <= 1), "{lines:#?}");
+    assert!(lines.iter().any(|l| l == "\u{25cf}"), "{lines:#?}");
+}
+
+/// Review focus 2: two rows. The agent list gets one, which is not room for its header and a
+/// row, so it draws nothing; the tree gets the other and shows its session. Nothing is raised.
+#[test]
+fn a_terminal_too_short_for_a_header_draws_what_fits_and_raises_nothing() {
+    let (_dir, sub) = built(AGENTS);
+    let tiny = Size { rows: 2, cols: 80 };
+    let s = [Sess::new(1, "work", vec![vec![101]]).agents(&[101])];
+    open(&sub, &s);
+    show(&sub, 101, "BUSY");
+    frame_in(&sub, tiny, &s, 1);
+    let lines = frame_in(&sub, tiny, &s, 1);
+    assert!(lines[0].ends_with(" work"), "{lines:#?}");
+    assert_eq!(lines[1], "", "{lines:#?}");
+    let said: Vec<String> = support::notified(&sub)
+        .into_iter()
+        .filter(|t| t.contains("plugin.sidebar"))
+        .collect();
+    assert!(said.is_empty(), "{said:?}");
 }

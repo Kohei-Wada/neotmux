@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### The sidebar is a stack of sections, and the second one lists your agents
+
+`plugin.sidebar` is a container now: `require('plugin.sidebar').sections` is a list of tables,
+each with a `build` that says what rows it has and an optional `fit` that cuts them to a height,
+and a user adds, drops or reorders them from `init.lua`. The session tree is the first; its
+layout fields (`sessions`, `windows`, `panes`, `tokens`, `tree`, `markers`) moved with it to
+`plugin.sidebar.sessions`, with no aliases left behind. The tree also stops losing sessions off
+the top when the one you are in has many panes: it gives up those panes first, saying `… n more`
+where it cut them. The second section, `plugin.sidebar.agents`, lists every pane an agent
+ruleset answers for, in every session, blocked first, with how long it has been in its state —
+which needed `neotmux.detect.agent(pane)`, the name of the ruleset that answered.
+
 ### A pane that starts waiting for you says so out loud
 
 `neotmux.state` used to guess with eight patterns over a pane's last five lines — enough to
