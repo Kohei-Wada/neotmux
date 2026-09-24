@@ -3,6 +3,7 @@ pub mod command;
 pub mod ctx;
 pub mod event;
 pub mod float;
+pub mod job;
 pub mod keymap;
 pub mod log;
 pub mod opt;
@@ -50,7 +51,7 @@ pub(crate) struct Shared {
     pub(crate) notices: Rc<RefCell<Vec<neotmux_proto::frame::Notice>>>,
     pub(crate) panes: Rc<dyn PaneRead>,
     pub(crate) clipboard: Rc<dyn crate::clipboard::Clipboard>,
-    pub(crate) runner: Rc<dyn crate::runner::Runner>,
+    pub(crate) jobs: Rc<crate::jobs::Jobs>,
     pub(crate) overrun: Rc<Overrun>,
     pub(crate) reservations: Rc<Reservations>,
     pub(crate) window_ids: Rc<WindowIds>,
@@ -200,7 +201,7 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
         notices,
         panes,
         clipboard,
-        runner: _runner,
+        jobs,
         overrun,
         reservations,
         window_ids,
@@ -477,6 +478,12 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
     {
         let float = float::install(lua, sources.clone(), floats.clone())?;
         neotmux.set("float", float)?;
+    }
+
+    {
+        let job = job::install(lua, jobs, sources.clone(), ambient.clone(), opts.clone())?;
+        let job = seal(lua, job, "neotmux.job")?;
+        neotmux.set("job", job)?;
     }
 
     let neotmux = seal(lua, neotmux, "neotmux")?;

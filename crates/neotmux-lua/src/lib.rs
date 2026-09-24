@@ -5,6 +5,7 @@ pub mod clipboard;
 pub mod commands;
 pub mod draw;
 mod float;
+pub mod jobs;
 pub mod ops;
 pub mod overrun;
 mod paneinfo;
@@ -42,6 +43,7 @@ use clipboard::Clipboard;
 use commands::Commands;
 use draw::Buffers;
 use float::Floats;
+use jobs::{Delivery, Jobs};
 use ops::{Op, OpBuffer};
 use overrun::Overrun;
 use paneinfo::{PaneInfos, PaneTtys};
@@ -113,7 +115,7 @@ pub struct LuaSubsystem {
     reservations: Rc<Reservations>,
     window_ids: Rc<WindowIds>,
     floats: Rc<Floats>,
-    runner: Rc<dyn Runner>,
+    jobs: Rc<Jobs>,
 }
 
 impl LuaSubsystem {
@@ -169,6 +171,7 @@ impl LuaSubsystem {
         let floats = Rc::new(Floats::new());
         let buffers = Rc::new(Buffers::new());
 
+        let jobs = Rc::new(Jobs::new(runner));
         let overrun = Rc::new(Overrun::new());
         let budget = Budget::new(opts.clone());
         Budget::seal(&lua, &budget).map_err(|err| anyhow::anyhow!("{err:#}"))?;
@@ -189,7 +192,7 @@ impl LuaSubsystem {
                 notices: notices.clone(),
                 panes,
                 clipboard,
-                runner: runner.clone(),
+                jobs: jobs.clone(),
                 overrun: overrun.clone(),
                 reservations: reservations.clone(),
                 window_ids: window_ids.clone(),
@@ -221,7 +224,7 @@ impl LuaSubsystem {
             reservations,
             window_ids,
             floats,
-            runner,
+            jobs,
         })
     }
 
@@ -357,6 +360,44 @@ impl LuaSubsystem {
     pub fn publish_pane_tty(&self, session: SessionId, tty: BTreeMap<PaneId, PaneTty>) {
         let _bound = self.ambient.bind(session);
         *self.pane_tty.borrow_mut() = tty;
+    }
+
+    /// What this session's jobs have to say, before the tick that will draw it. Each callback
+    /// is its own budgeted region, and the session is bound so that an op a callback raises
+    /// reaches the frame that is running.
+    pub fn dispatch_jobs(&self, session: SessionId) {
+        let deliveries = self.jobs.deliver(session);
+        if deliveries.is_empty() {
+            return;
+        }
+        let _bound = self.ambient.bind(session);
+        for delivery in deliveries {
+            self.run_delivery(delivery);
+        }
+    }
+
+    /// One callback, with the arguments its delivery carries. A `None` is passed as `nil`
+    /// rather than skipped: `on_exit` is written against four parameters, and dropping the
+    /// middle one would shift `err` into `stdout`'s place.
+    fn run_delivery(&self, delivery: Delivery) {
+        let Delivery::Exit {
+            owner,
+            callback,
+            code,
+            stdout,
+            stderr,
+            err,
+            ..
+        } = delivery;
+        let Some(callback) = callback else {
+            return;
+        };
+        let Ok(func) = self.lua.registry_value::<Function>(&callback) else {
+            return;
+        };
+        if let Err(err) = func.call::<()>((code, stdout, stderr, err)) {
+            self.report(owner, &err);
+        }
     }
 
     /// The unit of commit is the source, not the callback: a source's frame is the union of
@@ -917,11 +958,5 @@ impl LuaSubsystem {
 
     pub fn opt(&self) -> Opts {
         self.opts.borrow().clone()
-    }
-
-    /// The way the host starts a program, for the host and for tests: nothing in this crate
-    /// reads through it yet — Task 2's `neotmux.job.start` is the first caller.
-    pub fn runner(&self) -> &Rc<dyn Runner> {
-        &self.runner
     }
 }

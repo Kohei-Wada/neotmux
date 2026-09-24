@@ -20,6 +20,10 @@ pub struct Opts {
     /// and neotmux shows nothing until the load returns.
     pub config_budget_ms: u64,
     pub tick_overrun_limit: u32,
+    /// How many jobs one source may have running at once. A plugin that starts one per tick
+    /// and never hears the end of them would otherwise take the machine down with it; the
+    /// limit is per source so that one plugin's runaway cannot starve another's.
+    pub job_concurrency: usize,
     /// Cells left between panes. The host reserves them; what goes in them is a plugin's
     /// business and the host never learns.
     pub pane_gutter: u16,
@@ -31,6 +35,7 @@ impl Default for Opts {
             tick_budget_ms: 8,
             config_budget_ms: 5_000,
             tick_overrun_limit: 5,
+            job_concurrency: 8,
             pane_gutter: 0,
         }
     }
@@ -65,6 +70,17 @@ pub fn install(lua: &Lua, opts: Rc<RefCell<Opts>>) -> mlua::Result<Table> {
                         ));
                     }
                     opts.borrow_mut().tick_overrun_limit = value;
+                }
+                "job_concurrency" => {
+                    let value = lua.unpack::<usize>(value)?;
+                    // Zero refuses every job while still answering as though a job could be
+                    // started, which reads as a broken plugin rather than as configuration.
+                    if value == 0 {
+                        return Err(mlua::Error::RuntimeError(
+                            "neotmux.opt.job_concurrency must be at least 1".to_string(),
+                        ));
+                    }
+                    opts.borrow_mut().job_concurrency = value;
                 }
                 "pane_gutter" => {
                     let value = lua.unpack::<u16>(value)?;
