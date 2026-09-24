@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use neotmux_lua::LuaSubsystem;
 use neotmux_lua::ops::Op;
 use neotmux_lua::runtime::Layers;
-use neotmux_proto::{Epoch, Geometry, PaneId, Rect, Size};
+use neotmux_proto::{Epoch, Geometry, PaneId, Rect, SessionId, Size};
 
 mod support;
 
@@ -60,8 +60,26 @@ fn built(extra: &str) -> (tempfile::TempDir, Built) {
     (dir, Built::new(sub, terminals))
 }
 
+/// The first frame of a session other than the one `built` already began.
+fn begin(sub: &LuaSubsystem, session: SessionId) {
+    sub.begin_frame(
+        session,
+        Epoch::new(SIZE, vec![pane()], Some(pane())),
+        Geometry {
+            area: Rect::new(0, 0, SIZE.cols, SIZE.rows),
+            panes: vec![(pane(), Rect::new(0, 0, SIZE.cols, SIZE.rows))],
+            focus: Some(pane()),
+            ..Default::default()
+        },
+    );
+}
+
 fn logged(sub: &Built) -> Vec<String> {
-    sub.drain_ops(Some(support::one()))
+    logged_in(sub, support::one())
+}
+
+fn logged_in(sub: &Built, session: SessionId) -> Vec<String> {
+    sub.drain_ops(Some(session))
         .into_iter()
         .filter_map(|(_, op)| match op {
             Op::Log { text, .. } | Op::Notify { text, .. } => Some(text),
@@ -183,5 +201,92 @@ fn an_interval_below_a_frame_fires_every_frame() {
     frame(&sub, start + Duration::from_millis(16));
     assert_eq!(logged(&sub), vec!["fired"]);
     frame(&sub, start + Duration::from_millis(32));
+    assert_eq!(logged(&sub), vec!["fired"]);
+}
+
+/// Adoption is a handover, not a broadcast: once a session has picked a timer up it is that
+/// session's, and every other session's frame walks past it. The session that arms nothing is
+/// the one that must never hear it — an implementation where any session fires any timer
+/// passes the single-session test above and fails this one.
+#[test]
+fn a_session_that_did_not_adopt_a_timer_never_sees_it() {
+    let two = SessionId::from(2);
+    let (_dir, sub) = built("neotmux.timer.every(10, function() neotmux.log.info('fired') end)\n");
+    begin(&sub, two);
+    let start = Instant::now();
+
+    // Session two's frame gets there first, so the timer is two's from here on.
+    sub.dispatch_timers(two, start + Duration::from_millis(50));
+    assert_eq!(logged_in(&sub, two), vec!["fired"]);
+
+    sub.dispatch_timers(support::one(), start + Duration::from_millis(500));
+    assert!(
+        logged_in(&sub, support::one()).is_empty(),
+        "session one heard a timer it never adopted"
+    );
+
+    sub.dispatch_timers(two, start + Duration::from_millis(500));
+    assert_eq!(logged_in(&sub, two), vec!["fired"]);
+}
+
+/// Two one-shots come due in the same frame and the first cancels the second. The second's
+/// callback must not run — and `stop` must say so, because a plugin reads `false` as "too
+/// late, it already ran", which is the opposite of what happened.
+#[test]
+fn stopping_a_due_timer_before_it_is_called_cancels_it_and_says_so() {
+    let (_dir, sub) = built(
+        "local second\n\
+         neotmux.timer.after(50, function()\n\
+           neotmux.log.info('first')\n\
+           neotmux.log.info('stop=' .. tostring(second:stop()))\n\
+         end)\n\
+         second = neotmux.timer.after(50, function() neotmux.log.info('second') end)\n",
+    );
+    let start = Instant::now();
+
+    frame(&sub, start + Duration::from_millis(60));
+    let said = logged(&sub);
+    assert!(
+        !said.iter().any(|line| line == "second"),
+        "a timer stopped before it was called ran anyway: {said:?}"
+    );
+    assert!(
+        said.iter().any(|line| line == "stop=true"),
+        "cancelling a call that then did not happen answered false: {said:?}"
+    );
+}
+
+/// Stopping an `after` before its deadline answers true, and it never fires.
+#[test]
+fn stopping_a_one_shot_before_it_fires_answers_true() {
+    let (_dir, sub) = built(
+        "local t = neotmux.timer.after(100, function() neotmux.log.info('fired') end)\n\
+         neotmux.on_key(function(key)\n\
+           if key == 'S' then\n\
+             neotmux.log.info('stop=' .. tostring(t:stop()))\n\
+             return true\n\
+           end\n\
+           return false\n\
+         end)\n",
+    );
+    let start = Instant::now();
+
+    sub.dispatch_key(support::one(), "S");
+    let said = logged(&sub);
+    assert!(said.iter().any(|line| line == "stop=true"), "{said:?}");
+    frame(&sub, start + Duration::from_millis(400));
+    assert!(logged(&sub).is_empty(), "a stopped one-shot fired");
+}
+
+/// Zero is the same ask as one: there is nothing shorter than a frame to fire on, so it is a
+/// frame.
+#[test]
+fn a_zero_interval_is_clamped_to_the_frame() {
+    let (_dir, sub) = built("neotmux.timer.every(0, function() neotmux.log.info('fired') end)\n");
+    let start = Instant::now();
+
+    frame(&sub, start + Duration::from_millis(8));
+    assert!(logged(&sub).is_empty(), "fired inside the first frame");
+    frame(&sub, start + Duration::from_millis(16));
     assert_eq!(logged(&sub), vec!["fired"]);
 }

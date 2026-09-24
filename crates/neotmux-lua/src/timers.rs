@@ -34,15 +34,16 @@ struct Timer {
     repeating: bool,
     due_at: Instant,
     callback: Rc<RegistryKey>,
-    /// A one-shot that has fired. It is kept until the next frame rather than dropped where
-    /// it fired, so that everything asked about it during that pass — `is_armed` before its
-    /// own call, a `stop` from another callback — answers about the same entry.
+    /// A one-shot whose callback has been *called*, not merely listed as due. It is kept
+    /// until the next frame rather than dropped where it fired, so that a `stop` during the
+    /// rest of that pass is answered by the same entry. Marked by `called`, never by `due`:
+    /// between the two a stop can still cancel the call, and it has to be able to say so.
     spent: bool,
 }
 
 /// One timer this frame owes a call, and who to report a raising callback against.
 pub struct Due {
-    pub timer: TimerId,
+    pub id: TimerId,
     pub owner: SourceId,
     pub callback: Rc<RegistryKey>,
 }
@@ -84,8 +85,10 @@ impl Timers {
         id
     }
 
-    /// Disarms one, answering whether there was anything to disarm. A one-shot that has
-    /// already fired, and a second stop, both answer false: there is no timer left to name.
+    /// Disarms one, answering whether the call it was armed for will now not happen. A
+    /// one-shot whose callback has already run, and a second stop, both answer false: there
+    /// is nothing left that this cancelled. A one-shot cancelled after `due` listed it but
+    /// before it was called answers true, because the call really does not happen.
     pub fn stop(&self, id: TimerId) -> bool {
         match self.armed.borrow_mut().remove(&id) {
             Some(timer) => !timer.spent,
@@ -95,21 +98,32 @@ impl Timers {
 
     /// Whether the timer has not been stopped. `due` takes its whole list before any callback
     /// runs, so the caller asks this again between calls: a timer that stopped itself — or
-    /// another one — from inside a callback must not be called in the pass it stopped in. A
-    /// one-shot that is spent but unstopped is still owed the call it was listed for.
-    pub fn is_armed(&self, id: TimerId) -> bool {
-        self.armed.borrow().contains_key(&id)
+    /// another one — from inside a callback must not be called in the pass it stopped in.
+    pub fn is_stopped(&self, id: TimerId) -> bool {
+        !self.armed.borrow().contains_key(&id)
+    }
+
+    /// Records that a due timer's callback has now been called. A one-shot is spent by this
+    /// and by nothing else, which is what lets `stop` tell "cancelled in time" from "too
+    /// late". A repeating one has nothing to record: `due` already moved its deadline.
+    pub fn called(&self, id: TimerId) {
+        if let Some(timer) = self.armed.borrow_mut().get_mut(&id)
+            && !timer.repeating
+        {
+            timer.spent = true;
+        }
     }
 
     /// The timers of `session` that are due at `now`, and the bookkeeping that goes with
-    /// having fired them: a repeating one's next deadline is `now + interval` — not
-    /// `due_at + interval`, which is what would produce the catch-up burst — and a one-shot
-    /// is spent.
+    /// having listed them: a repeating one's next deadline is `now + interval` — not
+    /// `due_at + interval`, which is what would produce the catch-up burst. A one-shot is
+    /// left alone until `called`, since until then it may still be stopped.
     pub fn due(&self, session: SessionId, now: Instant) -> Vec<Due> {
         let mut out = Vec::new();
         let mut armed = self.armed.borrow_mut();
         // Last frame's one-shots, whose pass is over and who therefore have nothing left to
-        // answer for.
+        // answer for. A one-shot that was listed but never called — stopped mid-pass — is
+        // already gone, removed by the stop itself.
         armed.retain(|_, timer| !timer.spent);
         for (id, timer) in armed.iter_mut() {
             // A timer armed before any session existed is adopted by the first frame to
@@ -123,16 +137,50 @@ impl Timers {
                 continue;
             }
             out.push(Due {
-                timer: *id,
+                id: *id,
                 owner: timer.owner,
                 callback: Rc::clone(&timer.callback),
             });
             if timer.repeating {
                 timer.due_at = now + timer.interval;
-            } else {
-                timer.spent = true;
             }
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::source::ANONYMOUS;
+
+    fn callback(lua: &mlua::Lua) -> Rc<RegistryKey> {
+        let function = lua.create_function(|_, ()| Ok(())).unwrap();
+        Rc::new(lua.create_registry_value(function).unwrap())
+    }
+
+    fn session() -> SessionId {
+        SessionId::from(1)
+    }
+
+    /// The deadline is reached, not passed: a frame landing exactly on it is the frame the
+    /// timer comes due in. A frame is only ever *near* the deadline in the real thing, so the
+    /// boundary is pinned here, where the clock is the test's.
+    #[test]
+    fn a_frame_landing_exactly_on_the_deadline_fires() {
+        let lua = mlua::Lua::new();
+        let timers = Timers::default();
+        let start = Instant::now();
+        let id = timers.arm(16, false, ANONYMOUS, Some(session()), callback(&lua), start);
+
+        assert!(
+            timers
+                .due(session(), start + Duration::from_millis(15))
+                .is_empty(),
+            "fired a millisecond early"
+        );
+        let due = timers.due(session(), start + Duration::from_millis(16));
+        assert_eq!(due.len(), 1);
+        assert_eq!(due[0].id, id);
     }
 }

@@ -393,11 +393,13 @@ impl LuaSubsystem {
         let _bound = self.ambient.bind(session);
         for timer in due {
             // The whole due list was taken before any of it ran, so a callback that stopped a
-            // later timer — or itself, if it is repeating — has to be honoured here.
-            if !self.timers.is_armed(timer.timer) {
+            // later timer — or itself — has to be honoured here. Marking it called only after
+            // the call is what lets that stop answer that it cancelled something.
+            if self.timers.is_stopped(timer.id) {
                 continue;
             }
-            self.run_job_callback(timer.owner, &timer.callback, ());
+            self.run_callback(timer.owner, &timer.callback, ());
+            self.timers.called(timer.id);
         }
     }
 
@@ -414,7 +416,7 @@ impl LuaSubsystem {
                 let Ok(lines) = self.lua.create_sequence_from(lines) else {
                     return;
                 };
-                self.run_job_callback(owner, &callback, lines);
+                self.run_callback(owner, &callback, lines);
             }
             Delivery::Exit {
                 owner,
@@ -428,12 +430,12 @@ impl LuaSubsystem {
                 let Some(callback) = callback else {
                     return;
                 };
-                self.run_job_callback(owner, &callback, (code, stdout, stderr, err));
+                self.run_callback(owner, &callback, (code, stdout, stderr, err));
             }
         }
     }
 
-    fn run_job_callback(
+    fn run_callback(
         &self,
         owner: SourceId,
         callback: &mlua::RegistryKey,
