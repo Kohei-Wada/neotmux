@@ -638,6 +638,40 @@ fn hint_send_types_the_target_into_the_focused_pane() {
     );
 }
 
+/// A target holding a `;` and a backtick — the shipped `url` finder's tail excludes only
+/// whitespace and a few closing brackets, so both survive into `target.text` — reaching the
+/// pane quoted rather than read as shell syntax, and without a newline: typed and left on the
+/// line, not run, since the point of the quoting is a person still looking at it before Enter.
+#[test]
+fn hint_open_writes_the_opener_quoted_and_does_not_press_enter() {
+    let (_dir, sub) = built_plugin(
+        &run_on("X", "hint-open"),
+        Rc::new(neotmux_lua::clipboard::Absent),
+    );
+    feed(&sub, b"see http://x/;`id` now");
+
+    keys(&sub, &["X"]);
+    let marks = labels(&frame(&sub));
+    assert_eq!(marks.len(), 1, "{marks:?}");
+
+    let label = marks[0].2.clone();
+    keys(&sub, &[&label]);
+
+    let sends: Vec<_> = sub
+        .drain_ops(Some(support::one()))
+        .into_iter()
+        .filter_map(|(_, op)| match op {
+            Op::PaneSend { pane, text } => Some((pane, text)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        sends,
+        vec![(pane(), "xdg-open 'http://x/;`id`'".to_string())],
+        "hint-open did not quote the target and leave it unsubmitted"
+    );
+}
+
 #[test]
 fn the_commands_are_registered_for_the_palette() {
     let (_dir, sub) = built_plugin(
