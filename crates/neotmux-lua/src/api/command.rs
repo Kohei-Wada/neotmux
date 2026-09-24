@@ -85,8 +85,12 @@ pub fn install(
     {
         let sources = sources.clone();
         let commands = commands.clone();
-        // Called from Lua, so already inside whatever region is measuring the caller — no
-        // budget of its own, the same way one plain Lua call does not open one either.
+        // Opens no budget region of its own: every path that can reach a Lua call at all —
+        // `dispatch_key`, `dispatch_tick`, `offer_write`, `run_init`, and a command calling
+        // another command through this very function — arms one before it runs any Lua, so
+        // `run` is always already inside its caller's region. A dispatch path added later
+        // that reaches Lua without arming one first would leave this uncovered too; the
+        // budget belongs to whoever enters Lua, not to each thing Lua then calls.
         let run = lua.create_function(move |lua, (name, args): (String, Option<Table>)| {
             let Some((callback, owner)) = commands.get(&name) else {
                 let message = format!("'{name}' is not a registered command");

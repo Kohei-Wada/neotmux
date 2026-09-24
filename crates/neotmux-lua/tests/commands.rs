@@ -84,6 +84,42 @@ fn a_handler_that_raises_is_a_failure_naming_its_source() {
 }
 
 #[test]
+fn a_map_shaped_table_is_a_failure_naming_its_source() {
+    let (_dir, sub) = built(&[(
+        "init.lua",
+        "neotmux.command.add('m', function() return { foo = 'bar' } end)",
+    )]);
+    let CommandOutcome::Failed(why) = sub.run_command(support::one(), "m", &[]) else {
+        panic!("a map-shaped return did not fail");
+    };
+    assert!(why.contains("init"), "{why}");
+}
+
+#[test]
+fn a_mixed_table_is_a_failure_naming_its_source() {
+    let (_dir, sub) = built(&[(
+        "init.lua",
+        "neotmux.command.add('m', function() return { 'a', extra = 1 } end)",
+    )]);
+    let CommandOutcome::Failed(why) = sub.run_command(support::one(), "m", &[]) else {
+        panic!("a mixed table return did not fail");
+    };
+    assert!(why.contains("init"), "{why}");
+}
+
+#[test]
+fn an_array_holding_a_number_is_a_failure_naming_its_source() {
+    let (_dir, sub) = built(&[(
+        "init.lua",
+        "neotmux.command.add('m', function() return { 1, 2, 3 } end)",
+    )]);
+    let CommandOutcome::Failed(why) = sub.run_command(support::one(), "m", &[]) else {
+        panic!("an array of numbers did not fail");
+    };
+    assert!(why.contains("init"), "{why}");
+}
+
+#[test]
 fn a_second_registration_of_a_name_is_refused_and_the_first_holds() {
     let (_dir, sub) = built(&[(
         "init.lua",

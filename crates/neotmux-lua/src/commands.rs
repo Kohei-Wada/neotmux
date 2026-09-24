@@ -89,16 +89,23 @@ pub fn lines_from(value: Value) -> Result<Vec<String>, String> {
         Value::Nil => Ok(Vec::new()),
         Value::String(s) => Ok(vec![s.to_string_lossy().to_string()]),
         Value::Table(table) => {
-            let mut lines = Vec::new();
+            let refuse = || -> Result<Vec<String>, String> {
+                Err("a command must return nil, a string, or an array of strings".to_string())
+            };
+            // A table is an array of strings only if every key it has is part of its
+            // sequence part: `{ foo = 'bar' }` has no sequence at all, and `{ 'a', extra = 1
+            // }` has one alongside a key that is not, and both are refused rather than
+            // silently answering the sequence prefix they happen to have.
+            let sequence_len = table.raw_len();
+            let pair_count = table.pairs::<Value, Value>().count();
+            if pair_count != sequence_len {
+                return refuse();
+            }
+            let mut lines = Vec::with_capacity(sequence_len);
             for item in table.sequence_values::<Value>() {
                 match item {
                     Ok(Value::String(s)) => lines.push(s.to_string_lossy().to_string()),
-                    _ => {
-                        return Err(
-                            "a command must return nil, a string, or an array of strings"
-                                .to_string(),
-                        );
-                    }
+                    _ => return refuse(),
                 }
             }
             Ok(lines)
@@ -111,6 +118,7 @@ pub fn lines_from(value: Value) -> Result<Vec<String>, String> {
 mod tests {
     use super::*;
     use crate::source::{SourceId, Sources};
+    use mlua::Table;
 
     fn key(lua: &mlua::Lua, body: &str) -> Rc<mlua::RegistryKey> {
         let f: mlua::Function = lua.load(body).eval().unwrap();
@@ -193,5 +201,19 @@ mod tests {
     #[test]
     fn lines_from_anything_else_is_an_error() {
         assert!(lines_from(Value::Boolean(true)).is_err());
+    }
+
+    #[test]
+    fn lines_from_a_map_shaped_table_is_an_error() {
+        let lua = crate::vm::new_vm().unwrap();
+        let table: Table = lua.load("return { foo = 'bar' }").eval().unwrap();
+        assert!(lines_from(Value::Table(table)).is_err());
+    }
+
+    #[test]
+    fn lines_from_a_mixed_table_is_an_error() {
+        let lua = crate::vm::new_vm().unwrap();
+        let table: Table = lua.load("return { 'a', extra = 1 }").eval().unwrap();
+        assert!(lines_from(Value::Table(table)).is_err());
     }
 }
