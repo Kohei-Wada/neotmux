@@ -628,3 +628,118 @@ fn a_job_that_failed_calls_on_exit_once() {
     frame(&sub);
     assert!(logged(&sub).is_empty(), "a failed job ended twice");
 }
+
+/// A raising callback is reported and the job keeps running: the next chunk may well be one
+/// the plugin handles, and a plugin that wants out calls `kill`.
+#[test]
+fn a_raising_callback_does_not_end_the_job() {
+    let runner = FakeRunner::new();
+    runner.will_say(vec![
+        vec![JobChunk::Stdout(b"one\n".to_vec())],
+        vec![JobChunk::Stdout(b"two\n".to_vec())],
+        vec![JobChunk::Exited(0)],
+    ]);
+    let (_dir, sub) = built(
+        &on_key(
+            "    neotmux.job.start({ 'tail' }, {\n\
+                   buffered = false,\n\
+                   on_stdout = function(lines)\n\
+                     neotmux.log.info('saw ' .. lines[1])\n\
+                     error('boom')\n\
+                   end,\n\
+                   on_exit = function() neotmux.log.info('exited') end,\n\
+                 })",
+        ),
+        Rc::clone(&runner),
+    );
+
+    keys(&sub, &["J"]);
+    frame(&sub);
+    frame(&sub);
+    frame(&sub);
+    let said = logged(&sub);
+    assert!(said.iter().any(|l| l == "saw one"), "{said:?}");
+    assert!(said.iter().any(|l| l == "saw two"), "{said:?}");
+    assert!(said.iter().any(|l| l == "exited"), "{said:?}");
+}
+
+/// A plugin whose load fails takes its jobs with it: the callbacks belong to a chunk that is
+/// not there, so nothing is left that could be told how the job ended. The require-failure
+/// sweep does it — the same sweep that drops registrations, reservations and floats.
+#[test]
+fn a_require_that_fails_takes_its_sources_jobs_with_it() {
+    let runner = FakeRunner::new();
+    runner.will_say(vec![vec![JobChunk::Stdout(b"working\n".to_vec())]]);
+    let dir = tempfile::tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("lua/plugin")).unwrap();
+    fs::write(
+        dir.path().join("lua/plugin/worker.lua"),
+        "neotmux.job.start({ 'sleep' }, {\n\
+           on_exit = function() neotmux.log.info('exited') end,\n\
+         })\n\
+         error('nope')\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("init.lua"),
+        "local defaults = require('neotmux.defaults')\n\
+         for _, name in ipairs({ 'status', 'prefix', 'copy', 'sessions', 'palette',\n\
+           'notify', 'borders', 'sync', 'hints' }) do\n\
+           defaults[name] = false\n\
+         end\n\
+         require('plugin.worker')\n",
+    )
+    .unwrap();
+
+    let terminals = support::panes();
+    let sub = LuaSubsystem::build_with_runner(
+        Layers::from_paths(vec![dir.path().to_path_buf(), shipped_layer()]),
+        terminals.clone(),
+        Rc::new(neotmux_lua::clipboard::Absent),
+        Rc::clone(&runner) as Rc<dyn Runner>,
+    )
+    .unwrap();
+    let failures = sub.run_init();
+    assert_eq!(failures.len(), 1, "the load did not fail: {failures:?}");
+    begin(&sub, support::one());
+    let sub = Built::new(sub, terminals);
+
+    assert_eq!(runner.started.borrow().len(), 1, "the job never started");
+    assert!(
+        *runner.killed.borrow(),
+        "the failed require left its source's job running"
+    );
+    frame(&sub);
+    assert!(
+        logged(&sub).is_empty(),
+        "a job whose source is gone reported its ending to it"
+    );
+}
+
+/// A session that is gone takes the jobs it adopted with it: the frame those callbacks belong
+/// in will never happen again.
+#[test]
+fn forgetting_a_session_kills_the_jobs_it_adopted() {
+    let runner = FakeRunner::new();
+    runner.will_say(vec![vec![JobChunk::Stdout(b"working\n".to_vec())]]);
+    let (_dir, sub) = built(
+        &on_key(
+            "    neotmux.job.start({ 'sleep' }, {\n\
+                   on_exit = function() neotmux.log.info('exited') end,\n\
+                 })",
+        ),
+        Rc::clone(&runner),
+    );
+
+    keys(&sub, &["J"]);
+    frame(&sub);
+    assert!(!*runner.killed.borrow(), "a live job was killed");
+
+    sub.forget_session(support::one());
+    assert!(*runner.killed.borrow(), "a forgotten session's job ran on");
+    frame(&sub);
+    assert!(
+        logged(&sub).is_empty(),
+        "a forgotten session was still called back"
+    );
+}

@@ -290,3 +290,56 @@ fn a_zero_interval_is_clamped_to_the_frame() {
     frame(&sub, start + Duration::from_millis(16));
     assert_eq!(logged(&sub), vec!["fired"]);
 }
+
+/// A timer whose callback keeps overrunning is stopped — and only it. The source's drawing is
+/// not the thing that misbehaved, so the source's drawing is left alone.
+#[test]
+fn a_timer_that_keeps_overrunning_is_stopped_and_the_tick_is_not() {
+    let (_dir, sub) = built(
+        "neotmux.opt.tick_budget_ms = 1\n\
+         neotmux.opt.tick_overrun_limit = 2\n\
+         neotmux.timer.every(10, function()\n\
+           neotmux.log.info('timer')\n\
+           local t = os.clock()\n\
+           while os.clock() - t < 0.05 do end\n\
+         end)\n\
+         neotmux.on_tick(function() neotmux.log.info('tick') end)\n",
+    );
+    let start = Instant::now();
+
+    for step in 1..=4 {
+        frame(&sub, start + Duration::from_millis(100 * step));
+    }
+    let said = logged(&sub);
+    assert_eq!(
+        said.iter().filter(|line| *line == "timer").count(),
+        2,
+        "the timer was not stopped after two overruns: {said:?}"
+    );
+    assert!(
+        said.iter().filter(|line| *line == "tick").count() >= 4,
+        "stopping the timer took the source's tick with it: {said:?}"
+    );
+}
+
+/// A session that is gone takes its timers with it, including a one-shot that has already
+/// fired and is lingering for the frame it fired in. Nothing is left to fire into a session
+/// nobody will draw again.
+#[test]
+fn forgetting_a_session_stops_the_timers_it_adopted() {
+    let (_dir, sub) = built(
+        "neotmux.timer.after(50, function() neotmux.log.info('once') end)\n\
+         neotmux.timer.every(50, function() neotmux.log.info('again') end)\n",
+    );
+    let start = Instant::now();
+
+    frame(&sub, start + Duration::from_millis(60));
+    assert_eq!(logged(&sub), vec!["once", "again"]);
+
+    sub.forget_session(support::one());
+    frame(&sub, start + Duration::from_millis(400));
+    assert!(
+        logged(&sub).is_empty(),
+        "a forgotten session's timers went on firing"
+    );
+}

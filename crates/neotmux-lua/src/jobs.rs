@@ -28,6 +28,7 @@ pub struct Callbacks {
 }
 
 struct Job {
+    id: JobId,
     owner: SourceId,
     /// None only between a load-time `start` and the first frame, which adopts it.
     session: Option<SessionId>,
@@ -44,6 +45,9 @@ struct Job {
     /// next `deliver`, so that every path — exited, failed, killed, over its limit — ends the
     /// job in one place and therefore exactly once.
     ending: Option<(Option<i32>, Option<String>)>,
+    /// Budget overruns in a row by this job's callbacks. Per job rather than per source,
+    /// because what is killed for them is the job and not its owner's other work.
+    overruns: u32,
 }
 
 impl Job {
@@ -74,6 +78,7 @@ impl Job {
                 continue;
             };
             out.push(Delivery::Lines {
+                job: self.id,
                 owner: self.owner,
                 callback: Rc::clone(callback),
                 lines,
@@ -97,6 +102,7 @@ impl Job {
                 continue;
             };
             out.push(Delivery::Lines {
+                job: self.id,
                 owner: self.owner,
                 callback: Rc::clone(callback),
                 lines: vec![line],
@@ -138,6 +144,7 @@ fn split_lines(held: &mut Vec<u8>) -> Vec<String> {
 /// One thing the frame has to do for a job: call a callback, or end it.
 pub enum Delivery {
     Lines {
+        job: JobId,
         owner: SourceId,
         callback: Rc<RegistryKey>,
         lines: Vec<String>,
@@ -151,6 +158,22 @@ pub enum Delivery {
         stderr: Option<String>,
         err: Option<String>,
     },
+}
+
+impl Delivery {
+    /// Which job this is for, so an overrunning callback is counted against it and no other.
+    pub fn job(&self) -> JobId {
+        match self {
+            Delivery::Lines { job, .. } | Delivery::Exit { job, .. } => *job,
+        }
+    }
+
+    /// Who a raising or overrunning callback is reported against.
+    pub fn owner(&self) -> SourceId {
+        match self {
+            Delivery::Lines { owner, .. } | Delivery::Exit { owner, .. } => *owner,
+        }
+    }
 }
 
 pub struct Jobs {
@@ -197,6 +220,7 @@ impl Jobs {
         self.live.borrow_mut().insert(
             id,
             Job {
+                id,
                 owner,
                 session,
                 buffered,
@@ -207,6 +231,7 @@ impl Jobs {
                 held_stdout: Vec::new(),
                 held_stderr: Vec::new(),
                 ending: None,
+                overruns: 0,
             },
         );
         Ok(id)
@@ -225,6 +250,57 @@ impl Jobs {
             }
             _ => false,
         }
+    }
+
+    /// Counts one overrunning callback against a job, and ends the job once it has run over
+    /// `limit` times in a row. True only for the delivery that ended it, so the caller says so
+    /// once. The ending is the same `ending` marker every other ending uses, so `on_exit` is
+    /// still owed exactly one call — with no code, and `budget` as the reason.
+    pub fn overran(&self, id: JobId, limit: u32) -> bool {
+        let mut live = self.live.borrow_mut();
+        let Some(job) = live.get_mut(&id) else {
+            return false;
+        };
+        if job.ending.is_some() {
+            return false;
+        }
+        job.overruns += 1;
+        if job.overruns < limit {
+            return false;
+        }
+        job.running.kill();
+        job.ending = Some((None, Some("budget".to_string())));
+        true
+    }
+
+    /// A callback that stayed inside its budget wipes its own job's slate, the way a tick
+    /// inside its budget wipes its source's.
+    pub fn forgive(&self, id: JobId) {
+        if let Some(job) = self.live.borrow_mut().get_mut(&id) {
+            job.overruns = 0;
+        }
+    }
+
+    /// Kills and drops every job of a source that is going away, with no `Exit` delivery: the
+    /// callback that would receive it belongs to the chunk that is not there any more.
+    pub fn remove_all_of(&self, owner: SourceId) {
+        self.remove_matching(|job| job.owner == owner);
+    }
+
+    /// The same for a session that is over. A job still waiting to be adopted belongs to no
+    /// session yet and is left alone.
+    pub fn remove_all_for(&self, session: SessionId) {
+        self.remove_matching(|job| job.session == Some(session));
+    }
+
+    fn remove_matching(&self, doomed: impl Fn(&Job) -> bool) {
+        self.live.borrow_mut().retain(|_, job| {
+            if !doomed(job) {
+                return true;
+            }
+            job.running.kill();
+            false
+        });
     }
 
     /// Everything this session's jobs have to say this frame, oldest job first. The limit is

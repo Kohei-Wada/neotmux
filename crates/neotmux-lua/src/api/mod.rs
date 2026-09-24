@@ -128,6 +128,31 @@ fn register(
     ))
 }
 
+/// Everything a source that failed to load has to be taken back out of, as one value: the
+/// wrapper otherwise takes nine collaborators.
+struct Sweep {
+    registry: Rc<Registry>,
+    buffers: Rc<Buffers>,
+    reservations: Rc<Reservations>,
+    floats: Rc<Floats>,
+    jobs: Rc<crate::jobs::Jobs>,
+    timers: Rc<crate::timers::Timers>,
+}
+
+impl Sweep {
+    /// What a chunk that is not there registered, reserved, drew, started and armed. Jobs and
+    /// timers are killed and stopped rather than left to finish: the callbacks that would hear
+    /// how they ended belong to the chunk that is going away.
+    fn remove_all_of(&self, id: SourceId) {
+        self.registry.remove_all_of(id);
+        self.reservations.remove_all_of(id);
+        self.floats.remove_all_of(id);
+        self.jobs.remove_all_of(id);
+        self.timers.remove_all_of(id);
+        forget_if_no_longer_drawing(&self.registry, &self.buffers, id);
+    }
+}
+
 /// The load convention, not `require`, owns isolation (§4.10). `loading` is set only while
 /// `run_init` is running and `depth` counts how deep the current `require` is nested, so the
 /// wrapper can tell a load-convention load — a `require` written in an init chain, with no
@@ -138,10 +163,7 @@ fn register(
 fn install_require_wrapper(
     lua: &Lua,
     sources: Rc<Sources>,
-    registry: Rc<Registry>,
-    buffers: Rc<Buffers>,
-    reservations: Rc<Reservations>,
-    floats: Rc<Floats>,
+    sweep: Sweep,
     load_failures: Rc<RefCell<Vec<LoadFailure>>>,
 ) -> mlua::Result<Rc<Cell<bool>>> {
     let loading = Rc::new(Cell::new(false));
@@ -169,10 +191,7 @@ fn install_require_wrapper(
         let failed = source::resolve_chunk_name(lua, &modname)?
             .map(|chunk_name| sources.intern(&chunk_name));
         if let Some(id) = failed {
-            registry.remove_all_of(id);
-            reservations.remove_all_of(id);
-            floats.remove_all_of(id);
-            forget_if_no_longer_drawing(&registry, &buffers, id);
+            sweep.remove_all_of(id);
         }
         load_failures.borrow_mut().push(LoadFailure {
             source: failed
@@ -484,13 +503,19 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
     }
 
     {
-        let job = job::install(lua, jobs, sources.clone(), ambient.clone(), opts.clone())?;
+        let job = job::install(
+            lua,
+            jobs.clone(),
+            sources.clone(),
+            ambient.clone(),
+            opts.clone(),
+        )?;
         let job = seal(lua, job, "neotmux.job")?;
         neotmux.set("job", job)?;
     }
 
     {
-        let timer = timer::install(lua, timers, sources.clone(), ambient.clone())?;
+        let timer = timer::install(lua, timers.clone(), sources.clone(), ambient.clone())?;
         let timer = seal(lua, timer, "neotmux.timer")?;
         neotmux.set("timer", timer)?;
     }
@@ -501,10 +526,14 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
     install_require_wrapper(
         lua,
         sources,
-        registry,
-        buffers,
-        reservations,
-        floats,
+        Sweep {
+            registry,
+            buffers,
+            reservations,
+            floats,
+            jobs,
+            timers,
+        },
         load_failures,
     )
 }

@@ -39,6 +39,9 @@ struct Timer {
     /// rest of that pass is answered by the same entry. Marked by `called`, never by `due`:
     /// between the two a stop can still cancel the call, and it has to be able to say so.
     spent: bool,
+    /// Budget overruns in a row by this timer's callback. Per timer rather than per source,
+    /// because what is stopped for them is the timer and not its owner's other work.
+    overruns: u32,
 }
 
 /// One timer this frame owes a call, and who to report a raising callback against.
@@ -80,6 +83,7 @@ impl Timers {
                 due_at: now + interval,
                 callback,
                 spent: false,
+                overruns: 0,
             },
         );
         id
@@ -112,6 +116,47 @@ impl Timers {
         {
             timer.spent = true;
         }
+    }
+
+    /// Counts one overrunning call against a timer, and disarms it once it has run over
+    /// `limit` times in a row. True only for the call that disarmed it, so the caller says so
+    /// once. A stopped timer does not come back: the plugin arms a new one or it does not.
+    pub fn overran(&self, id: TimerId, limit: u32) -> bool {
+        let mut armed = self.armed.borrow_mut();
+        let Some(timer) = armed.get_mut(&id) else {
+            return false;
+        };
+        timer.overruns += 1;
+        if timer.overruns < limit {
+            return false;
+        }
+        armed.remove(&id);
+        true
+    }
+
+    /// A call that stayed inside its budget wipes its own timer's slate, the way a tick inside
+    /// its budget wipes its source's.
+    pub fn forgive(&self, id: TimerId) {
+        if let Some(timer) = self.armed.borrow_mut().get_mut(&id) {
+            timer.overruns = 0;
+        }
+    }
+
+    /// Disarms every timer of a source that is going away: the callback belongs to a chunk
+    /// that is not there any more.
+    pub fn remove_all_of(&self, owner: SourceId) {
+        self.armed
+            .borrow_mut()
+            .retain(|_, timer| timer.owner != owner);
+    }
+
+    /// The same for a session that is over, spent one-shots included — a one-shot lingers a
+    /// frame past its call, and a session that is gone has no frame left to linger into. A
+    /// timer still waiting to be adopted belongs to no session yet and is left alone.
+    pub fn remove_all_for(&self, session: SessionId) {
+        self.armed
+            .borrow_mut()
+            .retain(|_, timer| timer.session != Some(session));
     }
 
     /// The timers of `session` that are due at `now`, and the bookkeeping that goes with

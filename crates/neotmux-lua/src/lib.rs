@@ -377,9 +377,24 @@ impl LuaSubsystem {
             return;
         }
         let _bound = self.ambient.bind(session);
+        self.arm_budget();
+        let overrun_limit = self.opts.borrow().tick_overrun_limit;
         for delivery in deliveries {
-            self.run_delivery(delivery);
+            let (job, owner) = (delivery.job(), delivery.owner());
+            if self.measured_callback(owner, || self.run_delivery(delivery)) {
+                // An `Exit` names a job that is already out of the map, so this counts for
+                // nothing there — which is right: there is no next call to spare.
+                if self.jobs.overran(job, overrun_limit) {
+                    self.notify_stopped(
+                        owner,
+                        format!("a job exceeded its budget {overrun_limit} times and was killed"),
+                    );
+                }
+            } else {
+                self.jobs.forgive(job);
+            }
         }
+        self.budget.disarm(&self.lua);
     }
 
     /// The timers this session owes a call at `now`, before the tick that will draw what they
@@ -391,6 +406,8 @@ impl LuaSubsystem {
             return;
         }
         let _bound = self.ambient.bind(session);
+        self.arm_budget();
+        let overrun_limit = self.opts.borrow().tick_overrun_limit;
         for timer in due {
             // The whole due list was taken before any of it ran, so a callback that stopped a
             // later timer — or itself — has to be honoured here. Marking it called only after
@@ -398,9 +415,59 @@ impl LuaSubsystem {
             if self.timers.is_stopped(timer.id) {
                 continue;
             }
-            self.run_callback(timer.owner, &timer.callback, ());
+            let overran = self.measured_callback(timer.owner, || {
+                self.run_callback(timer.owner, &timer.callback, ())
+            });
             self.timers.called(timer.id);
+            if !overran {
+                self.timers.forgive(timer.id);
+            } else if self.timers.overran(timer.id, overrun_limit) {
+                self.notify_stopped(
+                    timer.owner,
+                    format!("a timer exceeded its budget {overrun_limit} times and was stopped"),
+                );
+            }
         }
+        self.budget.disarm(&self.lua);
+    }
+
+    /// Arms the hook for a batch of job or timer callbacks. Once for the batch, never per
+    /// callback: `Budget::arm` costs the interpreter a hook for as long as it is on.
+    fn arm_budget(&self) {
+        if let Err(err) = Budget::arm(&self.lua, &self.budget) {
+            self.report_text(source::ANONYMOUS, format!("the budget is off: {err}"));
+        }
+    }
+
+    /// Runs one job or timer callback inside its own budgeted region and says whether it
+    /// overran. Arming is the caller's, once for the whole batch: a region is per callback
+    /// because the thing punished for it is per callback, but the hook is not.
+    fn measured_callback(&self, owner: SourceId, call: impl FnOnce()) -> bool {
+        let budget_ms = self.opts.borrow().tick_budget_ms;
+        self.budget.enter(Duration::from_millis(budget_ms));
+        call();
+        let outcome = self.budget.leave();
+        if outcome != Outcome::WithinBudget {
+            self.report_text(
+                owner,
+                format!("a callback exceeded the {budget_ms} ms budget"),
+            );
+        }
+        overrun::counts_toward_park(outcome, Duration::from_millis(budget_ms))
+    }
+
+    /// What the user is told when a runaway job or timer is taken away. Warn, where the
+    /// per-callback overrun is logged at error, for the reason `unsubscribe_overrunning`
+    /// gives: this is the one part the user has to see. Nothing is parked and nothing is
+    /// restored — a stopped timer and a killed job do not come back.
+    fn notify_stopped(&self, owner: SourceId, text: String) {
+        self.ops.push(
+            owner,
+            Op::Notify {
+                level: Level::Warn,
+                text,
+            },
+        );
     }
 
     /// One callback, with the arguments its delivery carries. A `None` is passed as `nil`
@@ -412,6 +479,7 @@ impl LuaSubsystem {
                 owner,
                 callback,
                 lines,
+                ..
             } => {
                 let Ok(lines) = self.lua.create_sequence_from(lines) else {
                     return;
@@ -902,6 +970,10 @@ impl LuaSubsystem {
     /// A session is over: what it was holding is not kept for a session that will never ask
     /// for it again.
     pub fn forget_session(&self, session: SessionId) {
+        // No `Exit` delivery and no last call: a callback belonging to a session runs in that
+        // session's frame, and there will not be another one.
+        self.jobs.remove_all_for(session);
+        self.timers.remove_all_for(session);
         self.ambient.forget(session);
     }
 
