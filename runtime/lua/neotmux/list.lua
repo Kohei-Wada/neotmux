@@ -12,7 +12,7 @@
 --   local handle = list.open({
 --     title = 'sessions',
 --     items = function() return neotmux.session.list() end,
---     row = function(item, chosen) return { { text = item } } end,
+--     row = function(item, chosen, width) return { { text = item } } end,
 --     done = function(item, handle) neotmux.session.switch(item) end,
 --   })
 --
@@ -20,6 +20,9 @@
 -- A stack of lists has no consumer here. `on_key` and `on_tick` are armed the first time a
 -- list opens, the way `neotmux.guard` arms itself — a layer that requires this file and never
 -- opens a list holds no subscription for it.
+--
+-- `width` is columns, or — at one or less — the share of the pane area to take, so a palette
+-- can ask for four fifths of whatever the terminal is.
 --
 -- `place` is where the window hangs: `'center'` over the pane area, which is the default and
 -- what a picker wants, or `'top'`, which drops it from the top edge and moves the input line to
@@ -287,7 +290,17 @@ local function wanted()
   -- lands on the frame.
   local shown = math.max(#state.items, state.opts.empty and 1 or 0)
   local rows = math.min(shown, state.opts.rows) + 3
-  local w = math.min(state.opts.width, area and area.w or state.opts.width)
+  -- A width of one or less is a share of the pane area rather than a column count, so a list
+  -- can ask to be most of the screen without knowing how wide the screen is. Before the first
+  -- tick there is no area to take a share of — a list opened by the very first key of a
+  -- session — so the share is taken against the width a terminal has when nobody has said
+  -- otherwise, and the next tick fits it to the real one.
+  local room = area and area.w
+  local want = state.opts.width
+  if want <= 1 then
+    want = math.max(1, math.floor((room or 80) * want))
+  end
+  local w = room and math.min(want, room) or want
   local h = math.min(rows, area and area.h or rows)
   local x = (area and area.x or 0) + math.max(0, math.floor(((area and area.w or w) - w) / 2))
   local y
@@ -423,7 +436,7 @@ local function arm()
       if chosen then
         ctx:rect(win, inner.x, row, inner.w, 1, { bg = M.colors.cursor })
       end
-      local ok, runs = pcall(state.opts.row, item, chosen)
+      local ok, runs = pcall(state.opts.row, item, chosen, inner.w)
       if not ok then
         fail("row", runs)
         return

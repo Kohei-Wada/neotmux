@@ -19,14 +19,16 @@ local M = {}
 
 M.colors = {
   name = "#cdd6f4",
+  match = "#89b4fa", -- blue: the letters you actually typed, lit in the name
   desc = "#a6adc8", -- subtext0: quieter than the name
   source = "#585b70", -- surface2: quieter still
 }
 
 -- Wide and shallow, hanging from the top: what you are doing here is reading a line you typed
--- and the handful of things it left, not surveying a list. `width` is the most columns it
--- takes; it fits itself to a narrower terminal on its own.
-M.width = 72
+-- and the handful of things it left, not surveying a list. A width of one or less is a share
+-- of the pane area, so this follows the terminal rather than sitting at some column count
+-- somebody picked once.
+M.width = 0.8
 M.rows = 12
 
 -- A query matches `name` when its characters appear in `name`, in order, gaps allowed —
@@ -38,12 +40,16 @@ M.rows = 12
 -- it the question.
 local function fuzzy(name, query)
   if query == "" then
-    return 1, 0
+    return 1, 0, {}
   end
   local hay = name:lower()
   local needle = query:lower()
   local first, last
   local at = 1
+  -- Where each character of the query landed, so the row can show its work: the letters you
+  -- typed are lit in the name, which is how you tell `window-new` from `window-next` when the
+  -- query is `wn` and both of them matched.
+  local where = {}
   for i = 1, #needle do
     local found = hay:find(needle:sub(i, i), at, true)
     if not found then
@@ -51,9 +57,10 @@ local function fuzzy(name, query)
     end
     first = first or found
     last = found
+    where[#where + 1] = found
     at = found + 1
   end
-  return first, last - first
+  return first, last - first, where
 end
 
 -- Ranked by `fuzzy`'s two numbers, then by name for anything still tied. Every non-match is
@@ -65,9 +72,12 @@ local function ranked(items, query)
   end
   local hits = {}
   for _, item in ipairs(items) do
-    local first, spread = fuzzy(item.name, query)
+    local first, spread, where = fuzzy(item.name, query)
     if first then
-      hits[#hits + 1] = { item = item, first = first, spread = spread }
+      -- A copy, not the registry's own table: `lit` belongs to this query and nothing else
+      -- should find it there on the next one.
+      local shown = { name = item.name, desc = item.desc, source = item.source, lit = where }
+      hits[#hits + 1] = { item = shown, first = first, spread = spread }
     end
   end
   table.sort(hits, function(a, b)
@@ -89,15 +99,43 @@ end
 -- One row: the name, its description in a quieter colour, and where the row is wide enough
 -- to hold it, the source that registered it, quieter still and pushed to the right — the same
 -- layout `plugin.sessions` draws its own row in.
-local function row(item)
+-- The name, split so the characters the query matched are in their own runs. A run per
+-- stretch rather than per character: adjacent letters read as a word that way, and the drawing
+-- does less work.
+local function name_runs(item)
+  local lit = item.lit
+  if not lit or #lit == 0 then
+    return { { text = item.name, fg = M.colors.name } }
+  end
+  local runs = {}
+  local at = 1
+  local on = {}
+  for _, where in ipairs(lit) do
+    on[where] = true
+  end
+  while at <= #item.name do
+    local start = at
+    -- `on` holds true or nothing, and nothing is not false: comparing them without settling
+    -- that first ends every stretch after one character.
+    local matched = on[at] or false
+    while at <= #item.name and (on[at] or false) == matched do
+      at = at + 1
+    end
+    runs[#runs + 1] = {
+      text = item.name:sub(start, at - 1),
+      fg = matched and M.colors.match or M.colors.name,
+    }
+  end
+  return runs
+end
+
+local function row(item, chosen, width)
   local desc = item.desc and ("  " .. item.desc) or ""
-  local runs = {
-    { text = item.name, fg = M.colors.name },
-    { text = desc, fg = M.colors.desc },
-  }
+  local runs = name_runs(item)
+  runs[#runs + 1] = { text = desc, fg = M.colors.desc }
   local source = item.source or ""
   local used = neotmux.width(item.name) + neotmux.width(desc)
-  local room = M.width - 2 - 2 - used - neotmux.width(source) - 1
+  local room = (width or 60) - 2 - used - neotmux.width(source) - 1
   if source ~= "" and room > 1 then
     runs[#runs + 1] = { text = string.rep(" ", room) }
     runs[#runs + 1] = { text = source, fg = M.colors.source }

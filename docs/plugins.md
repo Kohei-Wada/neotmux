@@ -1517,7 +1517,7 @@ local list = require('neotmux.list')
 local handle = list.open({
   title = 'sessions',
   items = function() return neotmux.session.list() end,
-  row = function(item, chosen) return { { text = item } } end,
+  row = function(item, chosen, width) return { { text = item } } end,
   done = function(item, handle) neotmux.session.switch(item) handle:close() end,
 })
 ```
@@ -1541,6 +1541,10 @@ eyes already are. `'top'` drops it from the top edge instead and moves the query
 first row, which is what a command palette wants, and what `plugin.palette` asks for: you are
 typing, and what you type should be where you are looking. `neotmux.list.drop` is how far down
 a `'top'` list hangs; `neotmux.list.prompt` is what a query line is introduced by.
+
+`row` is handed the item, whether it is the one under the cursor, and the columns it has to
+draw in — the last of these is what lets a row put something against its right edge without
+guessing at the width the list settled on.
 
 `empty` is one line to draw when there is nothing left to show. Without it a query that matched
 nothing leaves a frame with nothing in it, which says nothing about why.
