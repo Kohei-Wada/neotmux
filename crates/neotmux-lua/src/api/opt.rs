@@ -24,6 +24,10 @@ pub struct Opts {
     /// and never hears the end of them would otherwise take the machine down with it; the
     /// limit is per source so that one plugin's runaway cannot starve another's.
     pub job_concurrency: usize,
+    /// How much one job may hold before it is killed: what a buffered job has collected, or
+    /// what a streaming one is holding back for want of a line break. A program that says a
+    /// gigabyte is a program a plugin cannot have meant to read into memory.
+    pub job_output_bytes: usize,
     /// Cells left between panes. The host reserves them; what goes in them is a plugin's
     /// business and the host never learns.
     pub pane_gutter: u16,
@@ -36,6 +40,7 @@ impl Default for Opts {
             config_budget_ms: 5_000,
             tick_overrun_limit: 5,
             job_concurrency: 8,
+            job_output_bytes: 1_048_576,
             pane_gutter: 0,
         }
     }
@@ -81,6 +86,17 @@ pub fn install(lua: &Lua, opts: Rc<RefCell<Opts>>) -> mlua::Result<Table> {
                         ));
                     }
                     opts.borrow_mut().job_concurrency = value;
+                }
+                "job_output_bytes" => {
+                    let value = lua.unpack::<usize>(value)?;
+                    // Zero kills every job on its first byte, which is a job system that does
+                    // not work rather than one configured not to.
+                    if value == 0 {
+                        return Err(mlua::Error::RuntimeError(
+                            "neotmux.opt.job_output_bytes must be at least 1".to_string(),
+                        ));
+                    }
+                    opts.borrow_mut().job_output_bytes = value;
                 }
                 "pane_gutter" => {
                     let value = lua.unpack::<u16>(value)?;

@@ -286,3 +286,163 @@ fn a_session_that_did_not_adopt_a_job_never_sees_it() {
         "session one heard the end of a job it never adopted"
     );
 }
+/// A streaming job is handed complete lines and nothing else: a chunk that stops mid-line is
+/// held until the rest of it arrives, and what is still held at the end is flushed as one
+/// last line. A plugin never joins a fragment to its remainder because it is never given one.
+#[test]
+fn a_streaming_job_is_handed_whole_lines_and_the_last_fragment_is_flushed() {
+    let runner = FakeRunner::new();
+    runner.will_say(vec![
+        vec![JobChunk::Stdout(b"alpha\nbra".to_vec())],
+        vec![JobChunk::Stdout(b"vo\ncharlie".to_vec())],
+        vec![JobChunk::Exited(0)],
+    ]);
+    let (_dir, sub) = built(
+        &on_key(
+            "    neotmux.job.start({ 'tail' }, {\n\
+                   buffered = false,\n\
+                   on_stdout = function(lines)\n\
+                     neotmux.log.info('lines=[' .. table.concat(lines, '|') .. ']')\n\
+                   end,\n\
+                   on_exit = function(code, out)\n\
+                     neotmux.log.info('exit out=' .. tostring(out))\n\
+                   end,\n\
+                 })",
+        ),
+        Rc::clone(&runner),
+    );
+
+    keys(&sub, &["J"]);
+    frame(&sub);
+    assert_eq!(logged(&sub), vec!["lines=[alpha]"]);
+
+    frame(&sub);
+    assert_eq!(logged(&sub), vec!["lines=[bravo]"]);
+
+    frame(&sub);
+    let said = logged(&sub);
+    assert_eq!(
+        said,
+        vec!["lines=[charlie]", "exit out=nil"],
+        "the held fragment was not flushed before on_exit, or on_exit kept a copy"
+    );
+}
+
+/// `kill` ends it, and the caller hears the end of what it started: `code` nil, `err` set.
+#[test]
+fn killing_a_job_still_calls_on_exit_once() {
+    let runner = FakeRunner::new();
+    runner.will_say(vec![vec![JobChunk::Stdout(b"working\n".to_vec())]]);
+    let (_dir, sub) = built(
+        "local job\n\
+         neotmux.on_key(function(key)\n\
+           if key == 'J' then\n\
+             job = neotmux.job.start({ 'sleep' }, {\n\
+               on_exit = function(code, out, errout, err)\n\
+                 neotmux.log.info('exit code=' .. tostring(code) .. ' err=' .. tostring(err))\n\
+               end,\n\
+             })\n\
+             return true\n\
+           end\n\
+           if key == 'K' then\n\
+             neotmux.log.info('killed=' .. tostring(job:kill()))\n\
+             return true\n\
+           end\n\
+           return false\n\
+         end)\n",
+        Rc::clone(&runner),
+    );
+
+    keys(&sub, &["J"]);
+    frame(&sub);
+    sub.dispatch_key(support::one(), "K");
+    frame(&sub);
+    let said = logged(&sub);
+    assert!(said.iter().any(|line| line == "killed=true"), "{said:?}");
+    assert_eq!(
+        said.iter()
+            .filter(|line| line.starts_with("exit code=nil err=killed"))
+            .count(),
+        1,
+        "on_exit did not run exactly once for a killed job: {said:?}"
+    );
+
+    // A second kill is not a second ending.
+    sub.dispatch_key(support::one(), "K");
+    frame(&sub);
+    let said = logged(&sub);
+    assert!(said.iter().any(|line| line == "killed=false"), "{said:?}");
+    assert!(
+        !said.iter().any(|line| line.starts_with("exit ")),
+        "a dead job ended twice: {said:?}"
+    );
+}
+
+/// A job that says more than it is allowed to is killed, and says why.
+#[test]
+fn a_job_that_overruns_the_output_limit_is_killed_and_says_so() {
+    let runner = FakeRunner::new();
+    runner.will_say(vec![vec![JobChunk::Stdout(vec![b'x'; 64])]]);
+    let (_dir, sub) = built(
+        &format!(
+            "neotmux.opt.job_output_bytes = 16\n{}",
+            on_key(
+                "    neotmux.job.start({ 'yes' }, {\n\
+                       on_exit = function(code, out, errout, err)\n\
+                         neotmux.log.info('exit code=' .. tostring(code)\n\
+                           .. ' err=' .. tostring(err)\n\
+                           .. ' kept=' .. tostring(out and #out))\n\
+                       end,\n\
+                     })",
+            )
+        ),
+        Rc::clone(&runner),
+    );
+
+    keys(&sub, &["J"]);
+    frame(&sub);
+    let said = logged(&sub);
+    assert!(
+        said.iter()
+            .any(|line| line.starts_with("exit code=nil err=output limit")),
+        "{said:?}"
+    );
+    assert!(*runner.killed.borrow(), "the job was not killed");
+}
+
+/// The ninth job of one source is refused, and refusing is not raising.
+#[test]
+fn a_source_may_not_have_more_jobs_than_the_limit() {
+    let runner = FakeRunner::new();
+    let (_dir, sub) = built(
+        &format!(
+            "neotmux.opt.job_concurrency = 2\n{}",
+            on_key(
+                "    local kept = {}\n\
+                     for i = 1, 3 do\n\
+                       local job, why = neotmux.job.start({ 'sleep' }, {})\n\
+                       kept[i] = job\n\
+                       neotmux.log.info('start ' .. i .. ' = ' .. tostring(job ~= nil)\n\
+                         .. ' why=' .. tostring(why))\n\
+                     end",
+            )
+        ),
+        Rc::clone(&runner),
+    );
+    keys(&sub, &["J"]);
+
+    let said = logged(&sub);
+    assert!(
+        said.iter().any(|l| l == "start 1 = true why=nil"),
+        "{said:?}"
+    );
+    assert!(
+        said.iter().any(|l| l == "start 2 = true why=nil"),
+        "{said:?}"
+    );
+    assert!(
+        said.iter()
+            .any(|l| l.starts_with("start 3 = false why=too many jobs")),
+        "{said:?}"
+    );
+}

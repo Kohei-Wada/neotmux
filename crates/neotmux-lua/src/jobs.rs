@@ -36,10 +36,98 @@ struct Job {
     callbacks: Callbacks,
     stdout: Vec<u8>,
     stderr: Vec<u8>,
+    /// In streaming mode, what has arrived since the last line break: a chunk boundary is not
+    /// a line boundary, so a plugin is never handed the half of a line that came first.
+    held_stdout: Vec<u8>,
+    held_stderr: Vec<u8>,
+    /// Set the moment the job is over, whatever ended it. The `Exit` itself is left to the
+    /// next `deliver`, so that every path — exited, failed, killed, over its limit — ends the
+    /// job in one place and therefore exactly once.
+    ending: Option<(Option<i32>, Option<String>)>,
+}
+
+impl Job {
+    fn bytes_held(&self) -> usize {
+        if self.buffered {
+            self.stdout.len() + self.stderr.len()
+        } else {
+            self.held_stdout.len() + self.held_stderr.len()
+        }
+    }
+
+    /// Every complete line that has arrived, leaving the unterminated remainder held.
+    fn stream(&mut self, out: &mut Vec<Delivery>) {
+        for (held, callback) in [
+            (&mut self.held_stdout, &self.callbacks.on_stdout),
+            (&mut self.held_stderr, &self.callbacks.on_stderr),
+        ] {
+            let lines = split_lines(held);
+            if lines.is_empty() {
+                continue;
+            }
+            let Some(callback) = callback else {
+                continue;
+            };
+            out.push(Delivery::Lines {
+                owner: self.owner,
+                callback: Rc::clone(callback),
+                lines,
+            });
+        }
+    }
+
+    /// What is left when there will be no more line break: one last line rather than nothing,
+    /// since a program whose last line is unterminated still said it.
+    fn flush(&mut self, out: &mut Vec<Delivery>) {
+        for (held, callback) in [
+            (&mut self.held_stdout, &self.callbacks.on_stdout),
+            (&mut self.held_stderr, &self.callbacks.on_stderr),
+        ] {
+            if held.is_empty() {
+                continue;
+            }
+            let line = String::from_utf8_lossy(held).into_owned();
+            held.clear();
+            let Some(callback) = callback else {
+                continue;
+            };
+            out.push(Delivery::Lines {
+                owner: self.owner,
+                callback: Rc::clone(callback),
+                lines: vec![line],
+            });
+        }
+    }
+}
+
+/// Splits off every line that is complete, and leaves the rest. A `\r` immediately before the
+/// `\n` belongs to the break rather than to the line: a program that ends its lines the DOS way
+/// means the same lines as one that does not.
+fn split_lines(held: &mut Vec<u8>) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut start = 0;
+    for at in 0..held.len() {
+        if held[at] != b'\n' {
+            continue;
+        }
+        let mut end = at;
+        if end > start && held[end - 1] == b'\r' {
+            end -= 1;
+        }
+        lines.push(String::from_utf8_lossy(&held[start..end]).into_owned());
+        start = at + 1;
+    }
+    held.drain(..start);
+    lines
 }
 
 /// One thing the frame has to do for a job: call a callback, or end it.
 pub enum Delivery {
+    Lines {
+        owner: SourceId,
+        callback: Rc<RegistryKey>,
+        lines: Vec<String>,
+    },
     Exit {
         job: JobId,
         owner: SourceId,
@@ -102,28 +190,33 @@ impl Jobs {
                 callbacks,
                 stdout: Vec::new(),
                 stderr: Vec::new(),
+                held_stdout: Vec::new(),
+                held_stderr: Vec::new(),
+                ending: None,
             },
         );
         Ok(id)
     }
 
-    /// Signals the process, and answers whether there was one to signal. The job stays live
-    /// and says nothing: what it owes its caller arrives only when the runner reports it
-    /// ended, so a plugin that kills a job hears nothing back until Task 3, which is what
-    /// makes an ended job report itself exactly once.
+    /// Signals the process and marks the job as over, answering whether there was a live job
+    /// to end. The `Exit` itself is the next `deliver`'s: a killed job owes its caller the
+    /// same one ending every other job owes, and a second kill is not a second ending.
     pub fn kill(&self, id: JobId) -> bool {
         let mut live = self.live.borrow_mut();
         match live.get_mut(&id) {
-            Some(job) => {
+            Some(job) if job.ending.is_none() => {
                 job.running.kill();
+                job.ending = Some((None, Some("killed".to_string())));
                 true
             }
-            None => false,
+            _ => false,
         }
     }
 
-    /// Everything this session's jobs have to say this frame, oldest job first.
-    pub fn deliver(&self, session: SessionId) -> Vec<Delivery> {
+    /// Everything this session's jobs have to say this frame, oldest job first. The limit is
+    /// read per frame rather than kept, the way the tick budget is: a plugin that raises it
+    /// means it from the next frame on.
+    pub fn deliver(&self, session: SessionId, limit: usize) -> Vec<Delivery> {
         let mut out = Vec::new();
         let mut finished = Vec::new();
         for (id, job) in self.live.borrow_mut().iter_mut() {
@@ -134,25 +227,59 @@ impl Jobs {
                 Some(_) => {}
                 None => job.session = Some(session),
             }
-            for chunk in job.running.poll() {
-                match chunk {
-                    JobChunk::Stdout(bytes) => job.stdout.extend_from_slice(&bytes),
-                    JobChunk::Stderr(bytes) => job.stderr.extend_from_slice(&bytes),
-                    JobChunk::Exited(code) => {
-                        finished.push((*id, Some(code), None));
-                        break;
+            // A job marked as over is never polled again: what it has said is already what it
+            // will be reported as having said.
+            if job.ending.is_none() {
+                for chunk in job.running.poll() {
+                    match chunk {
+                        JobChunk::Stdout(bytes) => {
+                            if job.buffered {
+                                job.stdout.extend_from_slice(&bytes);
+                            } else {
+                                job.held_stdout.extend_from_slice(&bytes);
+                            }
+                        }
+                        JobChunk::Stderr(bytes) => {
+                            if job.buffered {
+                                job.stderr.extend_from_slice(&bytes);
+                            } else {
+                                job.held_stderr.extend_from_slice(&bytes);
+                            }
+                        }
+                        JobChunk::Exited(code) => {
+                            job.ending = Some((Some(code), None));
+                            break;
+                        }
+                        JobChunk::Failed(why) => {
+                            job.ending = Some((None, Some(why)));
+                            break;
+                        }
                     }
-                    JobChunk::Failed(why) => {
-                        finished.push((*id, None, Some(why)));
+                    if job.bytes_held() > limit {
+                        job.running.kill();
+                        job.ending = Some((None, Some("output limit".to_string())));
                         break;
                     }
                 }
             }
+            if !job.buffered {
+                job.stream(&mut out);
+            }
+            if job.ending.is_some() {
+                finished.push(*id);
+            }
         }
-        for (id, code, err) in finished {
-            let Some(job) = self.live.borrow_mut().remove(&id) else {
+        for id in finished {
+            let Some(mut job) = self.live.borrow_mut().remove(&id) else {
                 continue;
             };
+            let Some((code, err)) = job.ending.take() else {
+                continue;
+            };
+            // Before the ending, not after it: `on_exit` is the last thing a plugin hears.
+            if !job.buffered {
+                job.flush(&mut out);
+            }
             let text = |bytes: Vec<u8>| String::from_utf8_lossy(&bytes).into_owned();
             out.push(Delivery::Exit {
                 job: id,

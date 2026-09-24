@@ -365,7 +365,8 @@ impl LuaSubsystem {
     /// What this session's jobs have to say, before the tick that will draw it. The session is
     /// bound so that an op a callback raises reaches the frame that is running.
     pub fn dispatch_jobs(&self, session: SessionId) {
-        let deliveries = self.jobs.deliver(session);
+        let limit = self.opts.borrow().job_output_bytes;
+        let deliveries = self.jobs.deliver(session, limit);
         if deliveries.is_empty() {
             return;
         }
@@ -379,22 +380,44 @@ impl LuaSubsystem {
     /// rather than skipped: `on_exit` is written against four parameters, and dropping the
     /// middle one would shift `err` into `stdout`'s place.
     fn run_delivery(&self, delivery: Delivery) {
-        let Delivery::Exit {
-            owner,
-            callback,
-            code,
-            stdout,
-            stderr,
-            err,
-            ..
-        } = delivery;
-        let Some(callback) = callback else {
+        match delivery {
+            Delivery::Lines {
+                owner,
+                callback,
+                lines,
+            } => {
+                let Ok(lines) = self.lua.create_sequence_from(lines) else {
+                    return;
+                };
+                self.run_job_callback(owner, &callback, lines);
+            }
+            Delivery::Exit {
+                owner,
+                callback,
+                code,
+                stdout,
+                stderr,
+                err,
+                ..
+            } => {
+                let Some(callback) = callback else {
+                    return;
+                };
+                self.run_job_callback(owner, &callback, (code, stdout, stderr, err));
+            }
+        }
+    }
+
+    fn run_job_callback(
+        &self,
+        owner: SourceId,
+        callback: &mlua::RegistryKey,
+        args: impl mlua::IntoLuaMulti,
+    ) {
+        let Ok(func) = self.lua.registry_value::<Function>(callback) else {
             return;
         };
-        let Ok(func) = self.lua.registry_value::<Function>(&callback) else {
-            return;
-        };
-        if let Err(err) = func.call::<()>((code, stdout, stderr, err)) {
+        if let Err(err) = func.call::<()>(args) {
             self.report(owner, &err);
         }
     }
