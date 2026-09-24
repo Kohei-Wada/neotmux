@@ -417,6 +417,7 @@ const AGENTS: &str = "local detect = require('neotmux.detect')\n\
     require('plugin.sidebar.agents').clock = function() return T end\n\
     neotmux.on_key(function(key)\n\
       if key == 'T' then T = T + 180000 return true end\n\
+      if key == 'S' then T = T + 10000 return true end\n\
       if key == 'B' then require('plugin.sidebar').toggle() return true end\n\
       return false\n\
     end)\n";
@@ -442,9 +443,9 @@ fn agents_are_listed_across_sessions_in_state_order() {
     show(&sub, 202, "DONE");
     let lines = settled(&sub, &s, 1);
     let header = line_with(&lines, "\u{2500} agents \u{2500}");
-    let blocked = line_with(&lines, "\u{25c9} work:1.2 agent 0s");
-    let working = line_with(&lines, "\u{25cf} work:1.1 agent 0s");
-    let idle = line_with(&lines, "\u{25cb} home:1.1 agent 0s");
+    let blocked = line_with(&lines, "\u{25c9} work:1.2 fake  0s");
+    let working = line_with(&lines, "\u{25cf} work:1.1 fake  0s");
+    let idle = line_with(&lines, "\u{25cb} home:1.1 fake  0s");
     assert!(
         header < blocked && blocked < working && working < idle,
         "{lines:#?}"
@@ -458,13 +459,13 @@ fn an_age_moves_on_with_the_clock_and_starts_over_on_a_change() {
     let s = [Sess::new(1, "work", vec![vec![101]]).agents(&[101])];
     open(&sub, &s);
     show(&sub, 101, "BUSY");
-    line_with(&settled(&sub, &s, 1), "\u{25cf} work:1.1 agent 0s");
+    line_with(&settled(&sub, &s, 1), "\u{25cf} work:1.1 fake  0s");
     support::keys(&sub, &["T"]);
-    line_with(&settled(&sub, &s, 1), "\u{25cf} work:1.1 agent 3m");
+    line_with(&settled(&sub, &s, 1), "\u{25cf} work:1.1 fake  3m");
     show(&sub, 101, "DONE");
-    line_with(&settled(&sub, &s, 1), "\u{25cb} work:1.1 agent 0s");
+    line_with(&settled(&sub, &s, 1), "\u{25cb} work:1.1 fake  0s");
     support::keys(&sub, &["T"]);
-    line_with(&settled(&sub, &s, 1), "\u{25cb} work:1.1 agent 3m");
+    line_with(&settled(&sub, &s, 1), "\u{25cb} work:1.1 fake  3m");
 }
 
 /// Review focus 5: an agent that quits leaves the list, and one that comes back is new.
@@ -474,14 +475,14 @@ fn an_agent_that_quits_leaves_and_comes_back_new() {
     let s = [Sess::new(1, "work", vec![vec![101]]).agents(&[101])];
     open(&sub, &s);
     show(&sub, 101, "BUSY");
-    line_with(&settled(&sub, &s, 1), "work:1.1 agent 0s");
+    line_with(&settled(&sub, &s, 1), "work:1.1 fake  0s");
     support::keys(&sub, &["T"]);
     show(&sub, 101, "$ ");
     let gone = settled(&sub, &s, 1);
     assert!(!gone.iter().any(|l| l.contains("agents")), "{gone:#?}");
     support::keys(&sub, &["T"]);
     show(&sub, 101, "BUSY");
-    line_with(&settled(&sub, &s, 1), "work:1.1 agent 0s");
+    line_with(&settled(&sub, &s, 1), "work:1.1 fake  0s");
 }
 
 #[test]
@@ -546,4 +547,35 @@ fn a_terminal_too_short_for_a_header_draws_what_fits_and_raises_nothing() {
         .filter(|t| t.contains("plugin.sidebar"))
         .collect();
     assert!(said.is_empty(), "{said:?}");
+}
+
+/// The band's width follows its widest row, and an agent row can be it: an age that grows a
+/// digit must not widen the band, or every pane is resized each time a count rolls over.
+#[test]
+fn an_age_rolling_over_a_digit_does_not_move_the_band() {
+    let (_dir, sub) = built(AGENTS);
+    let s = [Sess::new(1, "workspace-long", vec![vec![101]]).agents(&[101])];
+    open(&sub, &s);
+    show(&sub, 101, "BUSY");
+    settled(&sub, &s, 1);
+    let before = sub.reserved().left;
+    support::keys(&sub, &["S"]);
+    settled(&sub, &s, 1);
+    assert_eq!(
+        sub.reserved().left,
+        before,
+        "the band moved when 0s became 10s"
+    );
+}
+
+/// An agent is named by the ruleset that answered, not by the process the pane reports — which
+/// is whatever the agent was started through.
+#[test]
+fn an_agent_row_names_the_ruleset_not_the_wrapper() {
+    let (_dir, sub) = built(AGENTS);
+    let s = [Sess::new(1, "work", vec![vec![101]]).agents(&[101])];
+    open(&sub, &s);
+    show(&sub, 101, "BUSY");
+    let lines = settled(&sub, &s, 1);
+    line_with(&lines, "work:1.1 fake");
 }

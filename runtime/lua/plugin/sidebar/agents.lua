@@ -3,7 +3,7 @@
 -- the list herdr keeps down its side, so the one waiting for you is found without looking.
 --
 --   local agents = require('plugin.sidebar.agents')
---   agents.rows = { { 'state_icon', 'location', 'age' } }
+--   agents.rows = { { 'state_icon', 'location', 'command', 'age' } }
 --   agents.tokens.cwd = function(it) ... end
 --
 -- A pane no ruleset answered for is not here: a shell guessed at by `neotmux.state`'s pattern
@@ -13,7 +13,9 @@ local state = require("neotmux.state")
 
 local M = { title = "agents", share = 0.5 }
 
-M.rows = { { "state_icon", "location", "command", "age" } }
+-- `agent` is the ruleset that answered — `claude` — where `command` is what the pane reports,
+-- which for an agent started through a wrapper is the wrapper.
+M.rows = { { "state_icon", "location", "agent", "age" } }
 
 -- What `age` counts against, in milliseconds. A field so a test can hold the clock still.
 M.clock = function()
@@ -31,6 +33,9 @@ M.tokens = {
     return it.session .. ":" .. it.window .. "." .. it.pane,
       it.focused and colors.focused_pane or colors.window
   end,
+  agent = function(it)
+    return it.agent, colors.detail
+  end,
   command = function(it)
     return it.command, colors.detail
   end,
@@ -46,15 +51,19 @@ local RANK = { blocked = 1, working = 2, idle = 3 }
 -- being an agent is dropped, and comes back new.
 local since = {}
 
+-- Three columns whatever the count, because the band is as wide as its widest row: an age that
+-- grew a digit would widen it, and every pane would be resized each time one rolled over.
 local function age(ms)
   local s = math.floor(ms / 1000)
+  local text
   if s < 60 then
-    return s .. "s"
+    text = s .. "s"
+  elseif s < 3600 then
+    text = math.floor(s / 60) .. "m"
+  else
+    text = math.floor(s / 3600) .. "h"
   end
-  if s < 3600 then
-    return math.floor(s / 60) .. "m"
-  end
-  return math.floor(s / 3600) .. "h"
+  return string.format("%3s", text)
 end
 
 local function before(a, b)
@@ -91,6 +100,7 @@ function M.build(sidebar)
               session = name,
               window = window_at,
               pane = pane_at,
+              agent = agent,
               command = info and info.command or agent,
               focused = pane == focused,
               age = age(now - was.at),

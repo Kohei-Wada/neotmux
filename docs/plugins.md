@@ -1403,10 +1403,13 @@ Under the tree is every agent in every session — every pane a ruleset in
 `neotmux.detect.agents` answered for — blocked first, then working, then idle, with how long each
 has been in the state it is in:
 
-    ◉ work:2.1 claude 3m
+    ◉ work:2.1 claude  3m
 
 It is `require('plugin.sidebar.agents')`, with `rows` and `tokens` shaped like the tree's
-(`state_icon`, `location`, `command`, `age`). With no agents it takes no room at all; with many
+(`state_icon`, `location`, `agent`, `command`, `age`). `agent` is the ruleset that answered and
+is what the row shows; `command` is what the pane reports, which for an agent started through a
+wrapper is the wrapper. The age is always three columns, so a count rolling over does not widen
+the band. With no agents it takes no room at all; with many
 it takes at most half the band (`share = 0.5`) and the tree keeps the rest. An age starts when
 the sidebar first sees the state, so one that was already going when neotmux started reads as at
 least that long.
