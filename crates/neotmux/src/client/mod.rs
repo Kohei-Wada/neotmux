@@ -1,14 +1,22 @@
 //! The half that drives a terminal, and owns no session.
 //!
-//! This is the client's loop: it attaches over a [`crate::link`] that [`start`] found or
-//! started a server for, reads the terminal through `tty`, turns what it read into keys
-//! with [`decode`], sends them, and paints the frame that comes back with `draw` and
+//! A client is asked for one of four things, and they are this half's front door:
+//! [`attach()`], [`ls`], [`kill`] and [`command`]. The last three say a sentence over the
+//! socket and print the answer; [`attach()`] is the one that takes a terminal, and what is
+//! in this file is the loop it then runs — it reads the terminal through `tty`, turns what
+//! it read into keys with [`decode`], sends them over a [`crate::link`] that [`start`]
+//! found or started a server for, and paints the frame that comes back with `draw` and
 //! `overlay`. It holds no session state — what it shows is what it was last sent.
 
+pub mod ask;
+pub mod attach;
 pub mod decode;
 pub(crate) mod draw;
 pub(crate) mod overlay;
 pub mod start;
+
+pub use ask::{command, kill, ls};
+pub use attach::attach;
 
 use std::cell::RefCell;
 use std::rc::Rc;

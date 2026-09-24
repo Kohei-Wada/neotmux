@@ -1,11 +1,7 @@
-use std::cell::RefCell;
 use std::env;
 use std::path::PathBuf;
-use std::rc::Rc;
 
-use anyhow::Context as _;
 use neotmux::logging;
-use neotmux_proto::Level;
 
 /// What the invocation asks for, before the name. A name is not a mode.
 enum Action {
@@ -233,36 +229,6 @@ options:
     )
 }
 
-/// Raw mode, taken before anything slow and given back however `main` leaves — a panic
-/// included, because unwinding runs this drop.
-///
-/// Until it is taken the line discipline is the one reading the keyboard, and it does not
-/// hand over what it understands as editing: `0x17` (`C-w`) is WERASE and is eaten rather
-/// than delivered, `0x03` raises SIGINT, and `\r` arrives as `\n`. Starting a server and
-/// loading the Lua layer both take long enough on a loaded machine for a key typed at the
-/// prompt to land inside that window, so the terminal is claimed first and everything else
-/// is done under it.
-struct RawMode;
-
-impl RawMode {
-    fn enter() -> Self {
-        if let Err(err) = ratatui::crossterm::terminal::enable_raw_mode() {
-            logging::log(
-                Level::Warn,
-                "neotmux",
-                &format!("could not put the terminal in raw mode: {err}"),
-            );
-        }
-        Self
-    }
-}
-
-impl Drop for RawMode {
-    fn drop(&mut self) {
-        let _ = ratatui::crossterm::terminal::disable_raw_mode();
-    }
-}
-
 fn main() -> anyhow::Result<()> {
     let cli = parse_args(env::args().skip(1));
     for warning in &cli.warnings {
@@ -287,168 +253,12 @@ fn main() -> anyhow::Result<()> {
         return neotmux::server::start::serve();
     }
     match cli.action {
-        Action::Ls => list_sessions(),
-        Action::Kill => kill_session(cli.session_name()),
-        Action::Attach => client(cli.session.clone()),
-        Action::Command { name, args } => run_command(&name, &args, cli.session.as_deref()),
-    }
-}
-
-/// Runs a host command and prints what it said. Lines on stdout where it worked, the one
-/// sentence on stderr where it did not, and the exit status says which.
-fn run_command(name: &str, args: &[String], session: Option<&str>) -> anyhow::Result<()> {
-    let msg = neotmux_proto::msg::ToServer::Command {
-        session: session.map(str::to_string),
-        name: name.to_string(),
-        args: args.to_vec(),
-    };
-    // `new` has nobody to ask yet where nothing is running — read as "nothing is running"
-    // rather than as a question to start a server over, which is right for every other
-    // command and wrong for this one, so it alone asks with a server started for it.
-    let ran = match ask(&msg, name == "new")? {
-        Some(answer) => answer,
-        None => anyhow::bail!("no neotmux server is running"),
-    };
-    match ran {
-        neotmux_proto::OwnedToClient::Ran { ok: true, lines } => {
-            for line in lines {
-                println!("{line}");
-            }
-            Ok(())
+        Action::Ls => neotmux::client::ls(),
+        Action::Kill => neotmux::client::kill(cli.session_name()),
+        Action::Attach => neotmux::client::attach(cli.session.clone()),
+        Action::Command { name, args } => {
+            neotmux::client::command(&name, &args, cli.session.as_deref())
         }
-        neotmux_proto::OwnedToClient::Ran { ok: false, lines } => {
-            anyhow::bail!("{}", lines.join("\n"))
-        }
-        other => anyhow::bail!("the neotmux server answered {other:?}"),
-    }
-}
-
-/// Asks the server one question and reads its one answer. `None` is nothing listening, which
-/// is not an error here: it is the answer to "what is running" — except when `start_if_needed`
-/// says a server should be started rather than reported absent, which is right for `new` and
-/// wrong for everything else that asks.
-fn ask(
-    msg: &neotmux_proto::msg::ToServer,
-    start_if_needed: bool,
-) -> anyhow::Result<Option<neotmux_proto::OwnedToClient>> {
-    let link = if start_if_needed {
-        Some(neotmux::client::start::begin()?.finish()?)
-    } else {
-        let paths = neotmux::sock::Paths::resolve(&|key| env::var_os(key))?;
-        match neotmux::sock::connect(&paths.socket)? {
-            Some(stream) => Some(Rc::new(RefCell::new(
-                neotmux::link::Link::open(stream).context("greet the neotmux server")?,
-            ))),
-            None => None,
-        }
-    };
-    let Some(link) = link else {
-        return Ok(None);
-    };
-    let mut peer = link.borrow_mut();
-    peer.send(&neotmux_proto::wire::encode_to_server(msg))
-        .context("ask the neotmux server")?;
-    let Some(message) = peer.recv().context("read the server's answer")? else {
-        anyhow::bail!("the neotmux server went away without answering");
-    };
-    Ok(Some(
-        neotmux_proto::wire::decode_to_client(&message).context("decode the server's answer")?,
-    ))
-}
-
-/// The pid of the server, out of its lock file: the process a person would signal, and the
-/// one `ls` has always put on the line.
-fn server_pid() -> Option<i32> {
-    let paths = neotmux::sock::Paths::resolve(&|key| env::var_os(key)).ok()?;
-    std::fs::read_to_string(paths.lock)
-        .ok()?
-        .trim()
-        .parse::<i32>()
-        .ok()
-}
-
-/// Ends one session, by asking the server holding it. It used to be a signal to a process,
-/// because a session was one and there was no protocol to ask through. There is now.
-fn kill_session(name: &str) -> anyhow::Result<()> {
-    let asked = ask(
-        &neotmux_proto::msg::ToServer::Kill {
-            session: name.to_string(),
-        },
-        false,
-    )?;
-    match asked {
-        Some(neotmux_proto::OwnedToClient::Killed(true)) => {}
-        Some(neotmux_proto::OwnedToClient::Killed(false)) | None => {
-            anyhow::bail!("neotmux session '{name}' is not running")
-        }
-        Some(other) => anyhow::bail!("the neotmux server answered {other:?}"),
-    }
-    match server_pid() {
-        Some(pid) => println!("neotmux: asked the session '{name}' (pid {pid}) to end"),
-        None => println!("neotmux: asked the session '{name}' to end"),
-    }
-    Ok(())
-}
-
-/// The running sessions, the way the server says they are. It used to be a directory walk and
-/// a connect probe per file, because the sessions were processes; they are one server's now,
-/// and it is asked.
-fn list_sessions() -> anyhow::Result<()> {
-    let names = match ask(&neotmux_proto::msg::ToServer::List, false)? {
-        Some(neotmux_proto::OwnedToClient::Sessions(names)) => names,
-        Some(other) => anyhow::bail!("the neotmux server answered {other:?}"),
-        None => Vec::new(),
-    };
-    if names.is_empty() {
-        anyhow::bail!("no neotmux sessions are running");
-    }
-    let pid = server_pid();
-    for name in names {
-        match pid {
-            Some(pid) => println!("{name}  pid {pid}"),
-            None => println!("{name}"),
-        }
-    }
-    Ok(())
-}
-
-fn client(session: Option<String>) -> anyhow::Result<()> {
-    // First, and before the socket: until the terminal is in raw mode the line discipline is
-    // answering the keyboard, and starting a server is not fast.
-    let _raw = RawMode::enter();
-    let name = session
-        .clone()
-        .unwrap_or_else(|| neotmux::sock::DEFAULT_SESSION.to_string());
-    let link = neotmux::client::start::begin()?.finish()?;
-
-    // The attach, and the session's answer, before the screen: a session that a plugin ended
-    // while it was loading must not flash the alternate screen on its way past.
-    let first = match neotmux::client::open(&link, neotmux::client::screen_size()?, name)? {
-        neotmux::client::Opened::Over(transcript) => {
-            for line in &transcript {
-                eprintln!("neotmux: {line}");
-            }
-            return Ok(());
-        }
-        neotmux::client::Opened::Running(done) => *done,
-    };
-
-    let shutdown = neotmux::signals::ShutdownSignal::install()?;
-    let mut terminal = ratatui::init();
-    let result = neotmux::client::run(&mut terminal, &shutdown, &link, first);
-    // Not `ratatui::restore`: it reports a failure with `eprintln!`, which panics when the
-    // terminal it is trying to restore is the one that has gone away.
-    if let Err(err) = ratatui::try_restore() {
-        logging::log(
-            Level::Warn,
-            "neotmux",
-            &format!("could not restore the terminal: {err}"),
-        );
-    }
-    let left = result?;
-    match left.signal {
-        Some(signal) => neotmux::signals::die_of(signal),
-        None => Ok(()),
     }
 }
 
