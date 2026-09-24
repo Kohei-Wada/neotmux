@@ -136,6 +136,15 @@ impl PaneTerminals {
         self.panes.borrow().get(&pane).map(Terminal::read_revision)
     }
 
+    /// The title the pane's program last set with OSC 0 or OSC 2, or `None` for a pane that
+    /// never set one, or that does not exist.
+    pub fn title(&self, pane: PaneId) -> Option<String> {
+        self.panes
+            .borrow()
+            .get(&pane)
+            .and_then(|terminal| terminal.state.title().map(str::to_owned))
+    }
+
     /// Holds the pane still: until [`PaneTerminals::unfreeze`] it draws, reads and numbers
     /// its history as it is at this moment, while its child's output goes on being parsed
     /// into the live screen underneath. `false` for a pane that does not exist.
@@ -208,11 +217,15 @@ impl PaneTerminals {
     }
 }
 
-/// The read half, as a trait: the Lua layer asks these seven questions and nothing else, and
+/// The read half, as a trait: the Lua layer asks these eight questions and nothing else, and
 /// when it is in another process it asks them of a socket instead.
 impl PaneRead for PaneTerminals {
     fn revision(&self, pane: PaneId) -> Option<u64> {
         PaneTerminals::revision(self, pane)
+    }
+
+    fn title(&self, pane: PaneId) -> Option<String> {
+        PaneTerminals::title(self, pane)
     }
 
     fn content(&self, pane: PaneId, last: Option<u64>, want: Want) -> Option<Lines> {

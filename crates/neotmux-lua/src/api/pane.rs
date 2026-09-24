@@ -62,9 +62,9 @@ fn answer(lua: &Lua, text: Lines) -> mlua::Result<(Value, Value, Value)> {
 }
 
 /// The M2 pane API (§6), signatures frozen now. `list`, `current` and `rect` read this
-/// frame's geometry; `content` and `revision` read the pane's own terminal; `split`, `focus`
-/// and `resize` are ops on the buffer (§4.6), applied after the tick, so a callback never
-/// sees its own request take effect synchronously.
+/// frame's geometry; `content`, `revision` and `title` read the pane's own terminal;
+/// `split`, `focus` and `resize` are ops on the buffer (§4.6), applied after the tick, so a
+/// callback never sees its own request take effect synchronously.
 pub(crate) fn install(
     lua: &Lua,
     sources: Rc<Sources>,
@@ -157,6 +157,15 @@ pub(crate) fn install(
             })
         })?;
         pane.set("revision", revision)?;
+    }
+
+    {
+        // The title, not the command: a program that sets one is saying what it is doing,
+        // which is a different fact from what `pane.info` reads out of `/proc`.
+        let terminals = terminals.clone();
+        let title =
+            lua.create_function(move |_, pane: u32| Ok(terminals.title(PaneId::from(pane))))?;
+        pane.set("title", title)?;
     }
 
     {

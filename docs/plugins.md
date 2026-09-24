@@ -362,6 +362,7 @@ neotmux.pane.info(id)    -- { command = ..., cwd = ... }, or nil
 neotmux.pane.cursor(id)  -- { x = , y = , visible = }, or nil
 neotmux.pane.mode(id)    -- { canonical = , echo = , alternate = , application_cursor = }, or nil
 neotmux.pane.revision(id)     -- a number that moves when the pane is fed, or nil
+neotmux.pane.title(id)        -- what the program itself last set as its title, or nil
 neotmux.pane.content(id, opts) -- { line, ... }, revision, wrapped — or nil, nil, nil
 neotmux.pane.history(id)      -- how many lines are above the screen, how many fell off
 neotmux.pane.scrollback(id, opts) -- { line, ... }, revision, wrapped — or nil, nil, nil
@@ -509,6 +510,18 @@ the arrangement that lets a plugin ask about every pane on every tick without pu
 pane's screen on every frame's bill. The revision says the pane's terminal **has been fed**,
 not that the screen looks different — a chunk that only moved the cursor moves it too. A
 resize moves it as well, because reflowing changes what the pane reads as.
+
+`title` is a different fact from either: not the screen, not a stamp that it moved, but what
+the pane's own program last claimed about itself with an OSC 0 or OSC 2 escape.
+
+```lua
+local title = neotmux.pane.title(id)
+```
+
+It is `nil` for a pane that has never set one, which is every pane until its shell or the
+program inside it does. It is the program's own word, not anything the host inferred from
+`/proc` — that is `pane.info`'s business — so a title can say something the command line
+never would.
 
 `opts.lines` bounds the work as well as the answer: the rows above it are never built. Ask for
 the few at the bottom if a prompt is what you are after.

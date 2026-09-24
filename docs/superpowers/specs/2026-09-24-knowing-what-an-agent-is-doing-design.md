@@ -57,12 +57,16 @@ it survives scrolling, resizing, a screen full of code, and a user typing a ques
 like a prompt.
 
 `neotmux-term` parses OSC 0 and OSC 2 today and throws them away. It keeps the last one
-instead, the host carries it beside the command and the cwd it already carries, and Lua reads
-it:
+instead, and Lua reads it:
 
 ```lua
-neotmux.pane.info(id).title   --> the last title the pane set, or nil
+neotmux.pane.title(id)   --> the last title the pane set, or nil
 ```
+
+Not `pane.info(id).title`: `PaneInfo` is what `/proc` says about a pane's process, cached with
+an age and published per frame, and a title is what the program said, which is a different
+kind of fact reached the way every other fact about a terminal is — through `PaneRead`,
+directly, with nothing on the wire.
 
 Nothing else changes: the title is not drawn, not put in a status bar, not used by the host.
 

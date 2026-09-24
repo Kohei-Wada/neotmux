@@ -1,4 +1,5 @@
-//! `neotmux.pane.content` and `neotmux.pane.revision`: what a pane is showing, read from Lua.
+//! `neotmux.pane.content`, `neotmux.pane.revision` and `neotmux.pane.title`: what a pane is
+//! showing, and what its program calls itself, read from Lua.
 
 use std::fs;
 
@@ -143,6 +144,22 @@ fn the_revision_content_reports_is_the_one_the_lines_were_read_at() {
     let logged = ticked(&sub);
     let reported = logged[0].rsplit("rev=").next().expect("a revision");
     assert_eq!(reported, logged[1]);
+}
+
+/// The one call that reads what the program itself said, rather than what the host observed
+/// about its process.
+#[test]
+fn title_reports_what_the_program_last_set_and_nil_for_a_pane_that_never_said() {
+    let (_dir, sub) = built("neotmux.log.info(tostring(neotmux.pane.title(1)))");
+    sub.terminals().open(pane(1), SIZE, 0);
+
+    assert_eq!(ticked(&sub).remove(0), "nil");
+
+    sub.terminals().feed(pane(1), b"\x1b]2;working\x07");
+    assert_eq!(ticked(&sub).remove(0), "working");
+
+    sub.terminals().close(pane(1));
+    assert_eq!(ticked(&sub).remove(0), "nil");
 }
 
 /// The blank rest of a short line is where a rectangle selection's columns are. Cutting it

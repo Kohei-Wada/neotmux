@@ -63,6 +63,9 @@ pub struct Extent {
 /// the Lua crate from having to know a terminal.
 pub trait PaneRead {
     fn revision(&self, pane: PaneId) -> Option<u64>;
+    /// The title the pane's program set on itself — the program's own claim, not anything
+    /// read out of `/proc`. `None` for a pane that never set one, or that does not exist.
+    fn title(&self, pane: PaneId) -> Option<String>;
     fn content(&self, pane: PaneId, last: Option<u64>, want: Want) -> Option<Lines>;
     fn history_extent(&self, pane: PaneId) -> Option<Extent>;
     fn history(&self, pane: PaneId, from: u64, count: u64, want: Want) -> Option<Lines>;

@@ -2,7 +2,7 @@ use neotmux_proto::read::{Extent, Trailing};
 use neotmux_proto::{Color, GridSnapshot, Size};
 
 pub struct TermState {
-    parser: vt100::Parser,
+    parser: vt100::Parser<Titles>,
     /// `ESC [ y ; x f` on the way in, which the parser does not implement. See [`crate::hvp`].
     hvp: crate::hvp::Hvp,
     /// Lines that have fallen out of the front of the history, counted as they go: nothing
@@ -26,6 +26,21 @@ pub struct TermState {
 struct Frozen {
     screen: vt100::Screen,
     dropped: usize,
+}
+
+/// What the program said its window is called. `vt100` parses OSC 0 and OSC 2 and then asks
+/// what to do with them; before this it was asked and answered nothing.
+#[derive(Default)]
+pub(crate) struct Titles {
+    title: Option<String>,
+}
+
+impl vt100::Callbacks for Titles {
+    fn set_window_title(&mut self, _: &mut vt100::Screen, title: &[u8]) {
+        // A title is whatever bytes the program sent. Lossy rather than refused: a title that
+        // is not UTF-8 is still a title, and the alternative is to forget it entirely.
+        self.title = Some(String::from_utf8_lossy(title).into_owned());
+    }
 }
 
 fn color_from_vt100(c: vt100::Color) -> Color {
@@ -53,7 +68,12 @@ impl TermState {
     pub fn new(size: Size, scrollback: usize) -> Self {
         let size = clamp_to_min_grid(size);
         Self {
-            parser: vt100::Parser::new(size.rows, size.cols, scrollback),
+            parser: vt100::Parser::new_with_callbacks(
+                size.rows,
+                size.cols,
+                scrollback,
+                Titles::default(),
+            ),
             hvp: crate::hvp::Hvp::new(),
             dropped: 0,
             frozen: None,
@@ -162,6 +182,11 @@ impl TermState {
         self.parser.screen().alternate_screen()
     }
 
+    /// The last title the program set, or `None` for one that never set any.
+    pub fn title(&self) -> Option<&str> {
+        self.parser.callbacks().title.as_deref()
+    }
+
     /// What the pane is showing, as plain-text lines (`crate::lines`). `last` bounds the work
     /// to the bottom of the screen rather than trimming an answer that was built in full.
     pub fn lines(&self, last: Option<usize>, trailing: Trailing) -> Vec<String> {
@@ -253,6 +278,30 @@ mod tests {
         let mut out = GridSnapshot::default();
         state.snapshot_into(&mut out);
         out
+    }
+
+    /// A program's title is a statement it made about itself, and the one thing on a screen
+    /// that survives the screen scrolling away. `vt100` hands it over only through a callback,
+    /// so this is a test that the callback is wired at all.
+    #[test]
+    fn a_pane_remembers_the_last_title_its_program_set() {
+        let mut state = TermState::new(Size { rows: 4, cols: 20 }, 10);
+        assert_eq!(state.title(), None);
+
+        state.feed(b"\x1b]2;first\x07");
+        assert_eq!(state.title(), Some("first"));
+
+        // OSC 0 sets the icon name and the title together; both forms are what a program uses.
+        state.feed(b"\x1b]0;second\x07");
+        assert_eq!(state.title(), Some("second"));
+
+        // A title is not text: it does not land on the screen.
+        assert!(
+            !state
+                .lines(None, Trailing::Trim)
+                .iter()
+                .any(|l| l.contains("second"))
+        );
     }
 
     #[test]
