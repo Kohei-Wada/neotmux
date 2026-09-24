@@ -201,7 +201,7 @@ pub fn run(
                 // notification it could be told is in the log file already.
                 OwnedToClient::Bye(_) => {}
                 OwnedToClient::Refused(why) => anyhow::bail!("{why}"),
-                // The vocabulary of the frame that was a conversation, and the two answers
+                // The vocabulary of the frame that was a conversation, and the three answers
                 // only ever given at the door. Nothing sends any of these to a client that
                 // has attached.
                 OwnedToClient::Tick(_)
