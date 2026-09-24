@@ -103,11 +103,16 @@ has nearly the whole band; with many agents each gets half.
 
 A section given less than its header plus one row draws nothing.
 
-### 3.3 `sidebar.scroll(model, height)`
+### 3.3 `sidebar.scroll(model, height, marks)`
 
-The default fit. When every row fits, all of them. Otherwise a window of `height` rows around
-`anchor` (the first row when there is none), moving no further than it has to, with the first
-and last rows of the window replaced by `↑ n` / `↓ n` where rows were cut on that side.
+The default fit. When every row fits, all of them. Otherwise a window of `height` rows centred
+on `anchor` (the first row when there is none) and clamped to the ends — the rule the tree
+scrolls by today — with the first and last rows of the window replaced by `marks.above(n)` /
+`marks.below(n)` where rows were cut on that side, `n` counting the replaced row too. A mark
+never replaces the anchor. `marks` defaults to `sidebar.marks`, which draws `↑ n` / `↓ n`.
+
+`sidebar.row(tokens, names, it)` is the other helper sections share: one row of runs from a
+token table, the way the tree has always built its rows.
 
 ### 3.4 Header
 
@@ -150,8 +155,8 @@ the section's own business; only `rows` and `anchor` are part of the contract.
 
 ### 4.4 Configuration moves
 
-`rows`, `row_gap`, `tokens`, `tree`, `markers` and the tree's colours move from
-`require('plugin.sidebar')` to `require('plugin.sidebar.sessions')`:
+`sessions`, `windows`, `panes` (the per-level `rows` and `row_gap`), `tokens`, `tree` and
+`markers` move from `require('plugin.sidebar')` to `require('plugin.sidebar.sessions')`:
 
 ```lua
 local sessions = require('plugin.sidebar.sessions')
@@ -160,7 +165,8 @@ sessions.panes.rows = { { 'marker', 'tree', 'number', 'command' } }
 sessions.tree.on = false
 ```
 
-`widths`, `colors.bar`, `open`, `toggle` and `next_session` stay on `plugin.sidebar`.
+`widths`, `colors` (every colour, shared by the sections), `open`, `toggle` and `next_session`
+stay on `plugin.sidebar`.
 
 ## 5. The agents section
 
@@ -192,7 +198,9 @@ The anchor is the focused pane when it is an agent.
 
 The section keeps `{ state, at }` per pane and moves `at` to `neotmux.now()` only when the state
 it reads differs from the one it kept. A pane seen for the first time starts at the moment it
-was seen, so an age is "at least this long". Entries are dropped on `pane_closed`.
+was seen, so an age is "at least this long". An entry is dropped by the first build that no
+longer finds its pane among the agents, which covers a pane closed in a session this tick is
+not for as well as one closed here.
 
 Shown as `12s` under a minute, `3m` under an hour, `2h` beyond.
 
