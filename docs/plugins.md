@@ -692,6 +692,19 @@ kind of writer, `'tool'` or `'plugin'`, leaving the other alone. One handler is 
 first time either is called, so a rule added later from your own `init.lua` needs no new
 subscription — it is read off `M.patterns` on the next write.
 
+`block`'s first argument is a pattern, not the literal it looks like, and the two disagree
+about what a character like `-` means. `guard.block('rm -rf', 'blocked')` never matches
+`rm -rf /tmp/x`: `-` means "zero or more of the previous item, preferring fewer", so the
+pattern reads as "rm, then any number of spaces, then rf" and the actual space before the `-`
+in the command breaks it — while the same pattern matches `rmrf`, which nobody meant to name.
+A rule that looks armed and silently is not is the worst failure a safety checkpoint can have,
+so a literal command is written with `guard.plain`, which escapes what a pattern would
+otherwise read specially:
+
+```lua
+guard.block(guard.plain('git push --force'), 'no force pushes')
+```
+
 ### Windows
 
 ```lua

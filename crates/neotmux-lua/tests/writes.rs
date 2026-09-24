@@ -251,3 +251,28 @@ fn a_guard_can_apply_to_one_kind_of_writer() {
         WriteVerdict::Pass
     );
 }
+
+/// `plain` is what makes the obvious rule work: a literal with `-`, `.` and `%` in it blocks
+/// exactly the text it names, and nothing that only looks like it.
+#[test]
+fn plain_blocks_the_literal_and_not_a_near_miss() {
+    let (_dir, sub) = shipped(&[(
+        "init.lua",
+        "local guard = require('neotmux.guard')
+         guard.block(guard.plain('git push --force%'), 'no force pushes')",
+    )]);
+    side_by_side(&sub);
+    assert_eq!(
+        sub.dispatch_write(
+            support::one(),
+            PaneId::from(1),
+            "git push --force%\n",
+            "tool"
+        ),
+        WriteVerdict::Refused("no force pushes".to_string())
+    );
+    assert_eq!(
+        sub.dispatch_write(support::one(), PaneId::from(1), "git pushforce\n", "tool"),
+        WriteVerdict::Pass
+    );
+}
