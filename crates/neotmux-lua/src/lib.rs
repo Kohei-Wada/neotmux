@@ -10,6 +10,7 @@ pub mod overrun;
 mod paneinfo;
 pub mod registry;
 pub mod reserve;
+pub mod runner;
 pub mod runtime;
 pub mod source;
 pub mod vm;
@@ -46,6 +47,7 @@ use overrun::Overrun;
 use paneinfo::{PaneInfos, PaneTtys};
 use registry::{Kind, KindTag, RegistrationId, Registry};
 use reserve::Reservations;
+use runner::Runner;
 use runtime::Layers;
 use source::{SourceId, Sources};
 use window::WindowIds;
@@ -111,6 +113,7 @@ pub struct LuaSubsystem {
     reservations: Rc<Reservations>,
     window_ids: Rc<WindowIds>,
     floats: Rc<Floats>,
+    runner: Rc<dyn Runner>,
 }
 
 impl LuaSubsystem {
@@ -125,6 +128,17 @@ impl LuaSubsystem {
         layers: Layers,
         panes: Rc<dyn PaneRead>,
         clipboard: Rc<dyn Clipboard>,
+    ) -> anyhow::Result<Self> {
+        Self::build_with_runner(layers, panes, clipboard, Rc::new(runner::NoRunner))
+    }
+
+    /// The half of `build_with` that takes a way to start a program. A host that has one
+    /// hands it over here; every other caller gets `NoRunner`, which refuses.
+    pub fn build_with_runner(
+        layers: Layers,
+        panes: Rc<dyn PaneRead>,
+        clipboard: Rc<dyn Clipboard>,
+        runner: Rc<dyn Runner>,
     ) -> anyhow::Result<Self> {
         let lua = vm::new_vm().map_err(|err| anyhow::anyhow!("{err:#}"))?;
         runtime::install(&lua, &layers).map_err(|err| anyhow::anyhow!("{err:#}"))?;
@@ -175,6 +189,7 @@ impl LuaSubsystem {
                 notices: notices.clone(),
                 panes,
                 clipboard,
+                runner: runner.clone(),
                 overrun: overrun.clone(),
                 reservations: reservations.clone(),
                 window_ids: window_ids.clone(),
@@ -206,6 +221,7 @@ impl LuaSubsystem {
             reservations,
             window_ids,
             floats,
+            runner,
         })
     }
 
@@ -901,5 +917,11 @@ impl LuaSubsystem {
 
     pub fn opt(&self) -> Opts {
         self.opts.borrow().clone()
+    }
+
+    /// The way the host starts a program, for the host and for tests: nothing in this crate
+    /// reads through it yet — Task 2's `neotmux.job.start` is the first caller.
+    pub fn runner(&self) -> &Rc<dyn Runner> {
+        &self.runner
     }
 }
