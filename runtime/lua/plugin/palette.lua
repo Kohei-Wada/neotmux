@@ -3,9 +3,9 @@
 --
 --   C-b :       open it
 --   type        narrow to commands whose name holds the query's characters in order
---   C-j C-k     the cursor, one row — plain `j`/`k` are query text while filtering
+--   C-j C-k     the cursor, one row — plain `j`/`k` are query text, `q` included
 --   Enter       run the command under the cursor and close
---   Esc q       close
+--   Esc         close
 --
 -- A composition on `neotmux.list`, the same shape `plugin.sessions` is: the float, the cursor,
 -- the caret and the input line are that module's. What is here is what makes this list a
@@ -54,7 +54,8 @@ local function fuzzy(name, query)
 end
 
 -- Ranked by `fuzzy`'s two numbers, then by name for anything still tied. Every non-match is
--- dropped here, so `filter`, below, has nothing left to reject.
+-- dropped here: `list.open` below gets `input = true` and no `filter`, so this is the only
+-- narrowing a query does.
 local function ranked(items, query)
   if query == "" then
     return items
@@ -113,9 +114,7 @@ function M.open()
     mode = "palette",
     width = M.width,
     rows = M.rows,
-    filter = function()
-      return true
-    end,
+    input = true,
     items = function()
       local query = handle and handle:query() or ""
       return ranked(neotmux.command.list(), query)
