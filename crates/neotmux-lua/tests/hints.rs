@@ -546,6 +546,44 @@ fn opening_a_second_session_cancels_the_first_rather_than_dropping_it() {
     );
 }
 
+/// A session is pre-empted only once there is one to put in its place: a pick cancelled for a
+/// screen that turns out to have nothing on it is a pick lost for nothing.
+#[test]
+fn a_session_that_opens_nothing_leaves_the_one_already_up_alone() {
+    let (_dir, sub) = built(&format!(
+        "{}\n\
+         neotmux.on_key(function(key)\n\
+           if key == 'E' then\n\
+             require('neotmux.hints').open({{ targets = {{ 'url' }} }})\n\
+             return true\n\
+           end\n\
+           return false\n\
+         end)\n",
+        default_trigger()
+    ));
+    // A path for the first session to label, and no url for the second one to find. The
+    // leading space is not decoration: the path finder anchors on `%f[%S]`, and at the very
+    // first column there is no non-space character before it for the frontier to cross.
+    feed(&sub, b" /etc/hosts");
+    open(&sub);
+    let marks = labels(&frame(&sub));
+    assert_eq!(marks.len(), 1, "{marks:?}");
+
+    keys(&sub, &["E"]);
+    assert!(
+        !logged(&sub).iter().any(|line| line == "cancelled"),
+        "a session that opened nothing cancelled the one that was up"
+    );
+    assert_eq!(labels(&frame(&sub)), marks, "the labels went away");
+    keys(&sub, &[&marks[0].2]);
+    assert!(
+        logged(&sub)
+            .iter()
+            .any(|line| line.starts_with("done pane=1")),
+        "the session that was up stopped answering"
+    );
+}
+
 /// A screen with nothing on it to label opens nothing: a session with no targets would take
 /// every key and show nothing for them, which reads as a terminal that has stopped answering.
 #[test]

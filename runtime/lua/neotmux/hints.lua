@@ -33,9 +33,11 @@
 -- `init.lua` can replace it before this ever runs. One character while there are few enough
 -- targets to letter them singly, two when there are not; a target never gets a label another
 -- target's label is a prefix of, which two-character labels get for free here since this
--- module never mixes the two lengths in one session. `Esc` and `q` are read before labels are,
--- so `M.keys` must not hold `q`: a target labelled with it could never be picked. Nearest targets get the shortest labels:
--- the focused pane first, then the row closest to the top of the screen. Past `#M.keys ^ 2`
+-- module never mixes the two lengths in one session. `Esc` and `q` are read before labels
+-- are, so `M.keys` must not hold `q`: a label holding one is unreachable wherever it sits, and
+-- a `q` typed while a prefix is pending cancels the session rather than completing it.
+-- Nearest targets get the shortest labels: the focused pane first, then the row closest to the
+-- top of the screen. Past `#M.keys ^ 2`
 -- targets there are no labels left to give out; the farthest ones are left unlabelled rather
 -- than handed a label that collides with another's.
 local modes = require("neotmux.mode")
@@ -404,11 +406,13 @@ local function arm()
     for _, hit in ipairs(state.targets) do
       local rect = ctx:pane_rect(hit.pane)
       if rect then
-        -- Held inside the pane: a two-character label on a target that starts in the last
-        -- column would otherwise be drawn over the border, or over the pane next door.
+        -- Held inside the pane, both ways: a two-character label on a target in the last
+        -- column, or a row a caller's `find` answered for a pane that has since been made
+        -- shorter, would otherwise be drawn over the border or over the pane next door.
         local room = rect.w - neotmux.width(hit.label)
         local col = math.max(0, math.min(hit.col, room))
-        ctx:text(nil, rect.x + col, rect.y + hit.line, hit.label, {
+        local line = math.max(0, math.min(hit.line, rect.h - 1))
+        ctx:text(nil, rect.x + col, rect.y + line, hit.label, {
           fg = M.colors.fg,
           bg = M.colors.bg,
         })
@@ -430,15 +434,20 @@ local function handle_for(my_generation)
   return handle
 end
 
--- Opens a hint session, closing one already up. See the module header for the shape of
--- `opts`.
-function M.open(opts)
-  -- Cancelled, not merely closed: the caller of the session being pre-empted has no other way
-  -- to learn that its pick is over, and one that yields the keyboard while a pick is up — as
-  -- `plugin.copy` does — would yield it forever.
+-- Cancels the session that is up, if one is, exactly as its own `Esc` would: the caller hears
+-- its own `cancel` and the keyboard goes back where it came from. What it is for is a mode
+-- taking the pane for itself — `plugin.copy` calls it on the way in — since a pick left drawn
+-- over a pane somebody else has claimed can be neither seen for what it is nor reached.
+function M.cancel()
   if state then
     finish_cancel()
   end
+end
+
+-- Opens a hint session, cancelling one already up. Answers nil, having opened nothing, when
+-- there was nothing on the screen to label or the caller's own `find` raised. See the module
+-- header for the shape of `opts`.
+function M.open(opts)
   opts = opts or {}
 
   local found, label, err = gather(opts)
@@ -451,6 +460,11 @@ function M.open(opts)
     neotmux.notify("info", "nothing to hint")
     return nil
   end
+
+  -- Only now that there is a session to put in its place: cancelled, not merely closed, since
+  -- the caller of the one being pre-empted has no other way to learn that its pick is over,
+  -- and one that yields the keyboard while a pick is up would yield it for good.
+  M.cancel()
 
   order(found, neotmux.pane.current())
 

@@ -1633,20 +1633,29 @@ screen.
 Every pane a target was found on is frozen for the life of the session and thawed on the way
 out — except a pane that was already frozen when the session opened (`plugin.copy`'s own `[`,
 say, got there first): that one is left exactly as it was found, neither frozen again nor
-thawed underneath whatever froze it first. The host's freeze is a flag and not a count, so the
-rule runs both ways: `plugin.copy` asks `pane.frozen` before it freezes too, and a copy mode
-entered over a hint session leaves without thawing the pane the labels are drawn on. That is
-what lets `f` inside copy mode open a hint session over the very pane copy mode is already
-holding still, without either one undoing the other's freeze.
+thawed underneath whatever froze it first. That is what lets `f` inside copy mode open a hint
+session over the very pane copy mode is already holding still, without either one undoing the
+other's freeze. The host's freeze is a flag and not a count, so the rule runs both ways:
+`plugin.copy` asks `pane.frozen` before it freezes too, and thaws on the way out only what it
+froze. The other direction — a copy mode entered over a live hint session — does not arise,
+because entering the mode calls `neotmux.hints.cancel()` first: the mode is taking the pane and
+the keyboard, and a pick drawn over a pane somebody else has claimed can be neither read for
+what it is nor typed at.
+
+`cancel()` is that call: it ends the session that is up, if one is, exactly as its own `Esc`
+would — the caller hears its own `cancel` and the keyboard goes back where it came from.
 
 One session at a time, the same rule `neotmux.list` follows — but opening another *cancels*
 the first rather than closing it quietly, so the caller that opened it hears its own `cancel`
 and can put the keyboard back the way it found it. A caller that yields the keyboard while a
 pick is up, as `plugin.copy` does, would otherwise yield it forever the first time a prefix key
-opened a second session over the top. `open` returns a handle with a `close()`, idempotent, and
-nil when there was nothing on the screen to label: a session with no targets is never opened,
-since it would take every key and show nothing for them. `Esc` and `q` are read before labels
-are, so a replacement `neotmux.hints.keys` must not hold `q`.
+opened a second session over the top. The one that is up is pre-empted only once there is a
+session to put in its place, so a pick is never cancelled for an `open` that turns out to have
+nothing to open. `open` returns a handle with a `close()`, idempotent, and nil when there was
+nothing on the screen to label: a session with no targets is never opened, since it would take
+every key and show nothing for them. `Esc` and `q` are read before labels are, so a replacement
+`neotmux.hints.keys` must not hold `q` — a label holding one is unreachable wherever it sits,
+and a `q` typed while a prefix is pending cancels the session rather than completing it.
 
 `plugin.hints` is the shipped use of it, one picker shared by three commands:
 

@@ -718,11 +718,16 @@ fn the_finder_stops_each_word_at_its_own_last_column() {
     );
 }
 
-/// A key that says whether the pane is being held still, bound in the test's own layer so it
-/// is offered the key before copy mode is and answers even while the mode owns the keyboard.
+/// Two keys of the test's own, bound in its own layer so they are offered the key before copy
+/// mode is and answer even while the mode owns the keyboard: one says whether the pane is being
+/// held still, the other holds it still.
 const FROZEN: &str = "neotmux.on_key(function(key)\n\
      if key == 'Q' then\n\
        neotmux.log.info('frozen=' .. tostring(neotmux.pane.frozen(1)))\n\
+       return true\n\
+     end\n\
+     if key == 'Z' then\n\
+       neotmux.pane.freeze(1)\n\
        return true\n\
      end\n\
      return false\n\
@@ -774,39 +779,53 @@ fn a_prefix_hint_opened_over_copy_modes_own_pick_still_leaves_copy_mode_reachabl
     );
 }
 
-/// The host's freeze is a flag and not a count: whoever thaws first thaws it for everyone. A
-/// copy mode entered over a hint session must therefore neither thaw the pane on the way out
-/// of a freeze it never took, nor let the cells start moving under the selection when the hint
-/// session lets go of its own. The mode holds the pane still for its whole life or it is not
-/// holding anything.
+/// The mode takes the pane and the keyboard, so a hint session drawn over that pane ends as
+/// the mode is entered: its labels would otherwise sit there unreadable and unreachable, and
+/// the freeze it is holding is not one this mode could rely on — the host's freeze is a flag
+/// and not a count, and the session would thaw the pane for everybody the moment it closed.
 #[test]
-fn copy_mode_holds_the_pane_still_across_a_hint_sessions_own_freeze() {
+fn entering_the_mode_ends_a_hint_session_drawn_over_the_pane() {
     let (_dir, sub) = built(FROZEN);
     sub.terminals().open(pane(), SIZE, 100);
-    sub.terminals().feed(pane(), b"see http://example.com");
+    sub.terminals().feed(pane(), b"see http://e.com");
 
     keys(&sub, &["C-b", "f"]);
     assert!(!labels(&frame(&sub)).is_empty(), "nothing got labelled");
-    keys(&sub, &["Q"]);
-    assert!(
-        logged(&sub).iter().any(|line| line == "frozen=true"),
-        "the hint session did not freeze the pane"
-    );
 
     enter(&sub);
-    // The hint session is still the one holding the keyboard, and Esc is its own way out.
-    keys(&sub, &["Esc"]);
-    frame(&sub);
+    assert!(
+        labels(&frame(&sub)).is_empty(),
+        "the hint session is still drawing over a pane copy mode has taken"
+    );
     keys(&sub, &["Q"]);
     assert!(
         logged(&sub).iter().any(|line| line == "frozen=true"),
-        "the pane started moving again under copy mode"
+        "copy mode did not take the pane's freeze for itself"
     );
 
+    // One Esc, because there is only one thing left up.
     keys(&sub, &["Esc"]);
     keys(&sub, &["Q"]);
     assert!(
         logged(&sub).iter().any(|line| line == "frozen=false"),
         "copy mode left without thawing the pane"
+    );
+}
+
+/// A pane held still by somebody else is not this mode's to let go of: it freezes what it
+/// finds live and thaws only what it froze.
+#[test]
+fn leaving_does_not_thaw_a_pane_the_mode_did_not_freeze() {
+    let (_dir, sub) = built(FROZEN);
+    sub.terminals().open(pane(), SIZE, 100);
+    sub.terminals().feed(pane(), b"anything");
+
+    keys(&sub, &["Z"]);
+    enter(&sub);
+    keys(&sub, &["Esc"]);
+    keys(&sub, &["Q"]);
+    assert!(
+        logged(&sub).iter().any(|line| line == "frozen=true"),
+        "copy mode thawed a pane it never froze"
     );
 }

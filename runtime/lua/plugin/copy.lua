@@ -70,8 +70,8 @@ local state = nil
 local mode_handle = nil
 -- The handle `hints.open` returns while a `f` pick is in progress, and nil the rest of the
 -- time. It is what closes a pick this mode started when the mode itself is leaving; which keys
--- go to `neotmux.hints` is a question the mode stack answers instead, since a session opened
--- over ours is still a session we must not be typing into.
+-- go somewhere else is a question the mode stack answers instead, since whatever is raised
+-- over this mode is something we must not be typing into, ours or not.
 local hint_handle = nil
 
 local function leave()
@@ -373,6 +373,12 @@ function M.enter()
   if pane == nil then
     return
   end
+  -- A hint session over this pane ends here, before the snapshot is taken: the mode is about
+  -- to take both the pane and the keyboard, and labels left drawn over a pane it has claimed
+  -- could be neither read for what they are nor typed at. Ending it first also hands back
+  -- whatever freeze it was holding, so the freeze this mode takes below is its own.
+  hints.cancel()
+
   local buffer = snapshot.take(pane)
   if buffer == nil then
     return
@@ -402,13 +408,13 @@ neotmux.on_key(function(key)
   if state == nil then
     return false
   end
-  if modes.current() == "hints" then
-    -- A pick is in progress: every key belongs to `neotmux.hints` until it lands or is
-    -- cancelled, not to this mode's own bindings, which would otherwise swallow the label
-    -- being typed before `neotmux.hints`'s own `on_key` — registered after this one — ever
-    -- saw it. The mode stack and not `hint_handle`, because the session up need not be this
-    -- mode's own: `C-b f` opens one over the top of ours, and a test for our own handle would
-    -- go back to swallowing keys the moment that happened.
+  if modes.current() ~= "copy" then
+    -- Something is raised over this mode — a pick, at the time of writing — and every key
+    -- belongs to it until it is done, not to this mode's own bindings, which would otherwise
+    -- swallow the label being typed before `neotmux.hints`'s own `on_key`, registered after
+    -- this one, ever saw it. Asked of the mode stack rather than of `hint_handle`, because
+    -- what is up need not be the session this mode opened: `C-b f` opens one over the top of
+    -- ours, and a test for our own handle would go back to swallowing keys the moment it did.
     return false
   end
   local rect = neotmux.pane.rect(state.pane)
@@ -444,13 +450,6 @@ end)
 neotmux.on_tick(function(ctx)
   if state == nil then
     return
-  end
-  if not neotmux.pane.frozen(state.pane) then
-    -- Taken back: the host's freeze is a flag and not a count, so a hint session that was
-    -- holding this pane when the mode was entered thaws it for everybody when it closes. The
-    -- mode holds the pane still for its whole life, so it takes the freeze over rather than
-    -- letting the cells start moving under the selection, and it is now the one that thaws.
-    state.froze = neotmux.pane.freeze(state.pane)
   end
   local rect = ctx:pane_rect(state.pane)
   if rect == nil then
