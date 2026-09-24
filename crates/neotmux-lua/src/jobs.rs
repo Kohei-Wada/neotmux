@@ -68,7 +68,6 @@ impl Jobs {
 
     /// Starts one, or says why not. The message is for a plugin to read: one line, no
     /// punctuation at the end, the shape `keymap.set` already answers with.
-    #[allow(clippy::too_many_arguments)]
     pub fn start(
         &self,
         spec: JobSpec,
@@ -108,10 +107,11 @@ impl Jobs {
         Ok(id)
     }
 
-    /// True when this call is what ended it. The `Exit` delivery it leaves behind is picked
-    /// up by the next `deliver`, so a caller hears the end of its own kill.
+    /// Signals the process, and answers whether there was one to signal. The job stays live
+    /// and says nothing: what it owes its caller arrives only when the runner reports it
+    /// ended, so a plugin that kills a job hears nothing back until Task 3, which is what
+    /// makes an ended job report itself exactly once.
     pub fn kill(&self, id: JobId) -> bool {
-        // Task 3 fills this in; Task 2 needs only the counter and `start`.
         let mut live = self.live.borrow_mut();
         match live.get_mut(&id) {
             Some(job) => {

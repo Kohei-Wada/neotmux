@@ -362,9 +362,8 @@ impl LuaSubsystem {
         *self.pane_tty.borrow_mut() = tty;
     }
 
-    /// What this session's jobs have to say, before the tick that will draw it. Each callback
-    /// is its own budgeted region, and the session is bound so that an op a callback raises
-    /// reaches the frame that is running.
+    /// What this session's jobs have to say, before the tick that will draw it. The session is
+    /// bound so that an op a callback raises reaches the frame that is running.
     pub fn dispatch_jobs(&self, session: SessionId) {
         let deliveries = self.jobs.deliver(session);
         if deliveries.is_empty() {
