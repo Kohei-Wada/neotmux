@@ -696,6 +696,10 @@ fn an_ascii_spinner_frame_with_its_timer_is_a_running_turn() {
 /// word "yes" somewhere on a screen. This is this repository's own ruleset in a pager — the
 /// phrase and the word are both on it, several times, and a pane showing source code is a pane
 /// showing source code.
+///
+/// "an answer it could pick" is a shape, not a proof: `%f[%W]` is what stops `no` from matching
+/// the "note…" and "nothing…" that open half the sentences in these files, and a line really
+/// shaped like an answer would still pass. It narrows the rule; it does not make it sound.
 #[test]
 fn source_code_that_talks_about_prompts_is_not_a_prompt() {
     let screen = "      local answerable = holds(lines, \"yes\") or holds(lines, \"❯\")\n\
@@ -706,4 +710,18 @@ fn source_code_that_talks_about_prompts_is_not_a_prompt() {
                   \x20       \"waiting for permission\",\n\
                   \x20     })\n";
     assert_detects(screen, "", "nil", "nil");
+}
+
+/// The prose that opens with the letters of an answer. A dialog is drawn and the question is
+/// asked in so many words, so everything else the backstop wants is there — and the only line
+/// that could be an answer begins "Note that", which is a sentence.
+#[test]
+fn a_line_that_merely_starts_with_the_letters_of_an_answer_is_not_an_answer() {
+    let screen = format!(
+        "{BAR}\n\
+         \x20Do you want to know what this rule does?\n\
+         \x20Note that it reads the region below the last rule.\n\
+         \x20Nothing above it draws one.\n"
+    );
+    assert_detects(&screen, "", "nil", "nil");
 }

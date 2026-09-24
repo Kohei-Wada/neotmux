@@ -173,9 +173,23 @@ Code was ever going to be on the other end. None of those hold now:
   counts only while the command that was running when it was last seen is still running; see
   §3.2b.
 
-With those three, a pane the ruleset has no business answering for falls through to §4's
-fallback exactly as if it had declined — which is what the deny-list needs to be true, and is
-now made true by the rules rather than assumed. It keeps the one edge it was written for, because
+Those three narrow it; they do not make it safe. Measured over the 245 files in this
+repository, the screens a ruleset would answer for and should not went from 53 to 30, and
+`legacy_no_prompt_blocker` — 21 of the 53 — went to zero. What is left is mostly
+`live_blocked_form` at 980, which reads `after_rule()`, and `after_rule()` answers the *whole*
+screen when nothing drew a `─`: a pane showing `neotmux/agents/claude.lua` around line 150
+still reads `blocked`, because that is where `live_blocked_form`'s own literals — "esc to
+cancel", "enter to confirm" — are written down.
+It is left alone on purpose. The screen that rule was written for — the captured trust dialog —
+draws no rule of its own, so the `─` requirement that fixed the backstop would cost a real
+`blocked` to fix a false one.
+
+So the honest claim is the narrower one: a pane the ruleset has no business answering for falls
+through to §4's fallback unless its screen quotes Claude Code's own wording closely enough to
+be one — which, in practice, means a pane showing this repository. A deny-list of shells buys
+detection for every wrapped agent at that price, and the price is paid in false `blocked`s on
+source files rather than in the silence an allow-list bought. It keeps the one edge it was
+written for, because
 quitting Claude Code puts the shell's own name back in `comm` — the edge measured on 2026-09-24
 against v2.1.281, which installs as a native ELF, so `comm` reads `claude` and the allow-list
 looked sufficient.
@@ -204,7 +218,17 @@ answering for a pane that is plainly doing something else.
 
 It cannot catch a program that sets the very same title its predecessor did, and it reads
 `pane.info` on the same 250 ms cadence §3.2a does — both are judged once per revision, and a
-program that has just started prints something.
+program that has just started prints something. A title first seen while `pane.info` could not
+be read has no owner on record and is trusted until something writes a new one; naming the
+program that answers at the next look would be a guess that could never be taken back, and the
+miss happens exactly when a process is going away.
+
+Two things a reader weighing this up should know. Claude Code v2.1.281, measured, *clears* its
+title on the way out, so the Critical that motivated §3.2a does not reproduce on that version at
+all — this defence is for the programs that do not clear theirs, which is most of them, and for
+the version that stops clearing. And `pane.info().command` is `/proc`: on anything but Linux it
+is always nil, so `claims` claims every pane and the title seam trusts every title. Both are
+inert there, and the fallback in §4 is what answers.
 
 ### 3.3 The hold
 

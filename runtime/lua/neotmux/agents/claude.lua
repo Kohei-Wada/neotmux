@@ -4,6 +4,12 @@
 -- and the priorities are the manifest's on purpose: they are what lets a reader hold this file
 -- against the TOML it came from and see whether the two still say the same thing.
 --
+-- Where they no longer do, and deliberately: `legacy_no_prompt_blocker` requires the screen to
+-- have drawn a `─`, which the manifest does not ask for, and reads an option line rather than
+-- the word "yes" anywhere. herdr's rules run against a pane it knows is an agent's; these run
+-- against every pane that is not a shell, and the manifest's backstop, taken literally, reads
+-- a page of prose about permission prompts as a permission prompt.
+--
 -- Two of the manifest's rules are not ported. `background_agents_working` and
 -- `background_mcp_task_working` read the shapes Claude Code draws for work it is running out of
 -- sight, and nobody here has a screen of either to check a rule against — a rule written from a
@@ -116,11 +122,16 @@ end
 -- last of them optional. The `│` that goes with it is defensive — no screen anybody has
 -- captured puts an option inside a box — and costs nothing to keep. `numbered` is for the rule
 -- that wants the option list rather than any line that happens to begin with a yes.
+--
+-- `%f[%W]` is the whole of the word: without it `no` matched "note that…" and "nothing here",
+-- which is most of a page of prose about this very file. With it, this is still only the
+-- *shape* of an answer — "No such file or directory" is a sentence and passes — so it is
+-- corroboration for a rule, never evidence on its own.
 local function is_option(line, numbered)
   local body = line:gsub("^%s*\u{2502}", ""):gsub("^%s*\u{276f}", "")
   local digit = numbered and "%d" or "%d?"
-  return body:match("^%s*" .. digit .. "%.?%s*yes") ~= nil
-    or body:match("^%s*" .. digit .. "%.?%s*no") ~= nil
+  return body:match("^%s*" .. digit .. "%.?%s*yes%f[%W]") ~= nil
+    or body:match("^%s*" .. digit .. "%.?%s*no%f[%W]") ~= nil
 end
 
 -- A line that is only a chevron: the empty input box, and the one screen the legacy blocker
@@ -330,7 +341,8 @@ local claude = {
   -- this repository hold the phrase "do you want to" and the word "yes", and opening any of
   -- them would have chimed. So: the region is what is below the last rule, like its two
   -- neighbours, and the evidence is an answer you could *pick* — `❯ 1. Yes`, `  2. No` — rather
-  -- than the word "yes" anywhere at all. Source code does not draw option lists.
+  -- than the word "yes" anywhere at all. That is a narrowing and not a proof: a line can be
+  -- shaped like an answer without being one, and "No such file or directory" is.
   --
   -- The screen is still read whole for the one thing that makes this rule stand down, an empty
   -- prompt box, because a guard that only ever suppresses can afford to look everywhere.

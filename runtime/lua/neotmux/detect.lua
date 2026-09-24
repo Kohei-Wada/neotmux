@@ -323,7 +323,8 @@ end
 -- It cannot see a program that sets the very same title its predecessor did, and it is judged
 -- against a `pane.info` up to the host's 250 ms old — the same window `claims` is judged in, and
 -- for the same reason: both are read once per revision, and a program that has just started
--- prints something.
+-- prints something. `pane.info` is `/proc`, so on anything but Linux the command is always nil
+-- and this seam, like `claims` above it, is inert.
 local function title_is_the_running_program(pane, title)
   local command = command_of(pane)
   local was = titled[pane]
@@ -331,11 +332,20 @@ local function title_is_the_running_program(pane, title)
     titled[pane] = { title = title, command = command }
     return true
   end
-  if was.command == nil then
-    was.command = command
+  -- A command nobody could read is not an owner, and is not written down as one. `pane.info`
+  -- answers nil for a process that went away between the host asking and the answer coming
+  -- back — which is the moment an agent exits, the moment this seam exists for — so the program
+  -- that answers at the *next* look is as likely the pane's new tenant as the title's author,
+  -- and naming it owner would be a guess this could never take back.
+  --
+  -- The honest cost: with no owner on record the title keeps the benefit of the doubt for as
+  -- long as it stands. A title first seen through a nil command is trusted until a program
+  -- writes a new one — which Claude Code does every turn, and a pager never does. That is the
+  -- one case this defence does not cover, and it is a guess either way.
+  if command == nil or was.command == nil then
     return true
   end
-  return command == nil or command == was.command
+  return command == was.command
 end
 
 -- `pairs` does not walk a table the same way twice, and two rulesets that both answer would
