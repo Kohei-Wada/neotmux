@@ -126,6 +126,12 @@ pub fn running(sub: &Built, command: &str) {
     );
 }
 
+/// And what the host reads when it cannot read anything: `/proc` is empty for a process that
+/// went away between the ask and the answer, and absent altogether off Linux.
+pub fn running_unreadable(sub: &Built) {
+    sub.publish_pane_info(one(), std::collections::BTreeMap::new());
+}
+
 pub fn feed(sub: &Built, text: &[u8]) {
     sub.terminals().open(pane(), SIZE, 100);
     sub.terminals().feed(pane(), text);

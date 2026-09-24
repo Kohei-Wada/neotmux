@@ -7,7 +7,7 @@
 
 mod support;
 
-use support::{built, feed, keys, logged, pane, running};
+use support::{built, feed, keys, logged, pane, running, running_unreadable};
 
 /// A Claude screen gets the detector's answer, not the fallback's clock. The first look
 /// establishes both: the detector's own cache, which persists a `working` verdict across looks
@@ -215,5 +215,67 @@ fn a_pane_that_ran_an_agent_and_now_runs_a_pager_is_not_answered_by_the_title_it
     assert!(
         logged(&sub).iter().any(|l| l == "of=blocked"),
         "a pager asking a question read as an idle agent, off a title nobody reset"
+    );
+}
+
+/// The cost of §3.2b's nil rule, pinned so that changing it is a decision and not an accident.
+///
+/// A title whose first sighting could not be matched to a program has no owner on record, and
+/// `neotmux.detect` never gives it one. Four looks: the title arrives while `/proc` says
+/// nothing, then a pager has the pane, then something else does, then that something else asks
+/// a question. The title is believed through all four — including the last, where a real
+/// `blocked` is on the screen and goes unheard.
+///
+/// This is the looser of the two behaviours, measurably: writing the next readable command down
+/// as the owner instead gives `idle / idle / working / blocked` for these same four looks —
+/// ownership comes off at the third command and the question is heard. It is chosen anyway, and
+/// the reason is the platform rather than which guess is nicer. `pane.info().command` is
+/// `/proc`: off Linux it is *always* nil, so a rule that distrusted a title it could not match
+/// to a program would blank every title on every non-Linux host and take both title rules with
+/// it. Trust is wrong on one path; distrust is wrong on one platform.
+#[test]
+fn a_title_whose_owner_was_never_readable_is_believed_until_something_writes_another() {
+    let (_dir, sub) = built(
+        "local state = require('neotmux.state')\n\
+         local n = 0\n\
+         neotmux.on_key(function(key)\n\
+           if key == 'J' then\n\
+             n = n + 1\n\
+             neotmux.log.info('look' .. n .. '=' .. tostring(state.of(1)))\n\
+             return true\n\
+           end\n\
+           return false\n\
+         end)\n",
+    );
+
+    // The title arrives while nothing can be read about the pane — the `/proc` miss that
+    // happens when a process is going away, which is when an agent's title is left behind.
+    feed(&sub, "\x1b]2;\u{2733} hostname の確認\x07".as_bytes());
+    running_unreadable(&sub);
+    keys(&sub, &["J"]);
+
+    // A pager, then something else. Each look needs a byte to move the revision, or the
+    // detector answers out of the look it already took.
+    running(&sub, "less");
+    sub.terminals().feed(pane(), b"\r\n:");
+    keys(&sub, &["J"]);
+
+    running(&sub, "python3");
+    sub.terminals().feed(pane(), b"\r\n>>> ");
+    keys(&sub, &["J"]);
+
+    sub.terminals().feed(pane(), b"\r\nContinue? [y/N] ");
+    keys(&sub, &["J"]);
+
+    assert_eq!(
+        logged(&sub),
+        vec![
+            "look1=idle".to_string(),
+            "look2=idle".to_string(),
+            "look3=idle".to_string(),
+            "look4=idle".to_string(),
+        ],
+        "the title with no owner on record is believed through every program that follows, and \
+         the question at the fourth look is the price of that"
     );
 }

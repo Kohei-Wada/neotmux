@@ -173,13 +173,22 @@ Code was ever going to be on the other end. None of those hold now:
   counts only while the command that was running when it was last seen is still running; see
   §3.2b.
 
-Those three narrow it; they do not make it safe. Measured over the 245 files in this
-repository, the screens a ruleset would answer for and should not went from 53 to 30, and
-`legacy_no_prompt_blocker` — 21 of the 53 — went to zero. What is left is mostly
-`live_blocked_form` at 980, which reads `after_rule()`, and `after_rule()` answers the *whole*
-screen when nothing drew a `─`: a pane showing `neotmux/agents/claude.lua` around line 150
-still reads `blocked`, because that is where `live_blocked_form`'s own literals — "esc to
-cancel", "enter to confirm" — are written down.
+Those three narrow it; they do not make it safe. Measured by sweeping every 40-line window at
+a 10-line step over the 245 text files in this repository and judging each as a screen, the
+windows a ruleset would answer for and should not went from 53 to 30, and
+`legacy_no_prompt_blocker` — 21 of the 53 — went to zero. The same sweep over 6,144 files
+outside it found none: all 30 are this repository's own source, which is the only prose on disk
+that quotes these rules' literals.
+
+What is left is mostly `live_blocked_form` at 980, which reads `after_rule()`, and
+`after_rule()` answers the *whole* screen when nothing drew a `─`: a pane showing
+`neotmux/agents/claude.lua` can still read `blocked` off `live_blocked_form`'s own literals —
+"esc to cancel", "enter to confirm" — where the file writes them down. It is a property of the
+*viewport* rather than of a line: the windows that fire are the ones starting at lines 145–179
+and 225–260, two bands and not one, which is why `vim +180` on that file reads `blocked` and
+`vim +150` does not — `vim` centres the line it jumps to, so `+150` shows a window starting
+above the first band.
+
 It is left alone on purpose. The screen that rule was written for — the captured trust dialog —
 draws no rule of its own, so the `─` requirement that fixed the backstop would cost a real
 `blocked` to fix a false one.
@@ -218,10 +227,17 @@ answering for a pane that is plainly doing something else.
 
 It cannot catch a program that sets the very same title its predecessor did, and it reads
 `pane.info` on the same 250 ms cadence §3.2a does — both are judged once per revision, and a
-program that has just started prints something. A title first seen while `pane.info` could not
-be read has no owner on record and is trusted until something writes a new one; naming the
-program that answers at the next look would be a guess that could never be taken back, and the
-miss happens exactly when a process is going away.
+program that has just started prints something.
+
+A title first seen while `pane.info` could not be read has no owner on record, and never gets
+one: it is trusted until something writes a new title. That is the looser of the two available
+answers and it is measured, not assumed — writing down the next readable command instead lets
+ownership come off one program later, so a `Continue? [y/N]` two programs after the title would
+be heard, and with trust it is not. The reason for choosing trust anyway is the platform:
+`pane.info().command` is `/proc`, so off Linux it is always nil, and distrusting a title whose
+owner cannot be named would blank every title on every non-Linux host and take both title rules
+with it. Trust is wrong on one path; distrust is wrong on one platform. `state.rs` has the four
+looks that tell the two apart.
 
 Two things a reader weighing this up should know. Claude Code v2.1.281, measured, *clears* its
 title on the way out, so the Critical that motivated §3.2a does not reproduce on that version at

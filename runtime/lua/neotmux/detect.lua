@@ -332,16 +332,18 @@ local function title_is_the_running_program(pane, title)
     titled[pane] = { title = title, command = command }
     return true
   end
-  -- A command nobody could read is not an owner, and is not written down as one. `pane.info`
-  -- answers nil for a process that went away between the host asking and the answer coming
-  -- back — which is the moment an agent exits, the moment this seam exists for — so the program
-  -- that answers at the *next* look is as likely the pane's new tenant as the title's author,
-  -- and naming it owner would be a guess this could never take back.
+  -- A command nobody could read is not an owner, and is not written down as one.
   --
-  -- The honest cost: with no owner on record the title keeps the benefit of the doubt for as
-  -- long as it stands. A title first seen through a nil command is trusted until a program
-  -- writes a new one — which Claude Code does every turn, and a pager never does. That is the
-  -- one case this defence does not cover, and it is a guess either way.
+  -- The reason is the platform, not the guess. `pane.info` is `/proc`: off Linux it answers nil
+  -- for every pane, always. A rule that distrusted a title it could not match to a program
+  -- would therefore blank every title on every non-Linux host and take both title rules with
+  -- it — the detector would lose its two best-evidenced rules everywhere but here, to close a
+  -- hole that is only reachable on the platform where the command *can* be read.
+  --
+  -- This is the looser of the two, measurably. Writing the next readable command down instead
+  -- would let ownership come off again one program later, and a `Continue? [y/N]` after that
+  -- would be heard; trusting keeps the title through all of them. `state.rs` has the four looks
+  -- that tell the two apart, and pins this one with the question it misses in plain sight.
   if command == nil or was.command == nil then
     return true
   end
