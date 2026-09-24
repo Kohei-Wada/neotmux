@@ -669,3 +669,51 @@ fn f_in_copy_mode_lands_on_the_buffer_line_behind_a_scrolled_view() {
         "the jump used the screen row as the buffer line instead of adding state.top: {said:?}"
     );
 }
+
+/// `f`'s finder answers `{ col, text }` for every run on the line, and `text` is dead on this
+/// path — only `line` and `col` ever move the cursor — but a wrong one left in is worse than
+/// none, so it is checked directly here rather than left for the first caller who reads it to
+/// find out the hard way. Six runs, deliberately: two multi-column words, a lone `.`, a lone
+/// wide character with nothing ASCII about it, a one-column word right after it with no gap,
+/// and a run at the very end of the line — with a two-space gap ahead of every one of the
+/// middle four, so a `finish` that crept past its own run's last column into the gap shows up
+/// immediately in the text rather than only in a length nobody checked.
+///
+/// The spy sits in front of `hints.open` rather than reading `plugin.copy` internals directly:
+/// user layers load before the shipped one, so wrapping `neotmux.hints.open` here is in effect
+/// before `plugin.copy` ever requires the same, cached module table, and every `find` `f`
+/// builds — production code, unmodified — passes through it on the way to the real thing.
+#[test]
+fn the_finder_stops_each_word_at_its_own_last_column() {
+    let (_dir, sub) = built(
+        "local hints = require('neotmux.hints')\n\
+         local real_open = hints.open\n\
+         hints.open = function(opts)\n\
+           if opts.find then\n\
+             for _, hit in ipairs(opts.find()) do\n\
+               neotmux.log.info('hit col=' .. hit.col .. ' text=[' .. hit.text .. ']')\n\
+             end\n\
+           end\n\
+           return real_open(opts)\n\
+         end\n",
+    );
+    sub.terminals().open(pane(), SIZE, 100);
+    sub.terminals()
+        .feed(pane(), "  foo.bar  あa baz".as_bytes());
+    enter(&sub);
+
+    keys(&sub, &["f"]);
+    let said = logged(&sub);
+    assert_eq!(
+        said,
+        vec![
+            "hit col=2 text=[foo]",
+            "hit col=5 text=[.]",
+            "hit col=6 text=[bar]",
+            "hit col=11 text=[あ]",
+            "hit col=13 text=[a]",
+            "hit col=15 text=[baz]",
+        ],
+        "a run's text reached past its own last column into the gap after it"
+    );
+}

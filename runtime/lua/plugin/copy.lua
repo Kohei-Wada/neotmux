@@ -135,6 +135,33 @@ local function slice(line, from_col, to_col)
   return table.concat(out)
 end
 
+-- The column the run starting at `col` ends at — its own last column, not the next run's
+-- first one. `words.word_end` cannot be reused for this: it is built for `e`, and vim's `e`
+-- from a word already at its own end lands on the *next* word's end, which is correct for a
+-- motion and wrong for a boundary. This walks the same word/punct/blank classes `neotmux.words`
+-- classifies with, from `col`, stopping the instant the class changes — blank included — so a
+-- run's `finish` never reaches past its own last character into the blanks after it.
+local function run_end(line, col)
+  local class = nil
+  local finish = col
+  local at = 0
+  for _, code in utf8.codes(line) do
+    local ch = utf8.char(code)
+    if at >= col then
+      local this = (ch ~= " " and ch ~= "\t") and (ch:match(words.word) and "word" or "punct")
+        or "blank"
+      if class == nil then
+        class = this
+      elseif this ~= class then
+        break
+      end
+      finish = at
+    end
+    at = at + math.max(1, neotmux.width(ch))
+  end
+  return finish
+end
+
 -- Every word on one line, `neotmux.words`' own idea of one: a run `w` would step over, not
 -- the url/path/hash/ip set `neotmux.hints` reads by default. In copy mode the thing you want
 -- is a position to land the cursor on, not a token to act on, so this is the finder for it.
@@ -148,9 +175,9 @@ local function line_words(line)
   local out = {}
   local col = words.first_word(line)
   while col do
-    local next_col = words.forward(line, col)
-    local finish = next_col and (next_col - 1) or words.last(line)
+    local finish = run_end(line, col)
     out[#out + 1] = { col = col, text = slice(line, col, finish) }
+    local next_col = words.forward(line, col)
     if next_col == nil or next_col <= col then
       break
     end

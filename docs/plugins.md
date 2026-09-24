@@ -1152,7 +1152,7 @@ costs one plugin one frame instead of costing you the program.
 
 ## The shipped defaults
 
-neotmux ships eleven plugins in the runtime layer an install puts on the search path:
+neotmux ships thirteen plugins in the runtime layer an install puts on the search path:
 
 | plugin | what it does |
 |---|---|
@@ -1170,7 +1170,7 @@ neotmux ships eleven plugins in the runtime layer an install puts on the search 
 | `sidebar` | a tree of every session, and the windows and panes of the one you are in, down a reserved left band, folded by `C-b b` — **off by default** |
 | `footer` | whichever mode is raised through `neotmux.mode`, on one reserved bottom row — **off by default** |
 
-None of them is a host feature — all ten are ordinary files making ordinary API calls, and
+None of them is a host feature — all thirteen are ordinary files making ordinary API calls, and
 the prefix is the only reason a fresh install can make a second pane at all. `C-b v` splits
 vertically (the panes end up side by side, because `pane.split('vertical')` divides the
 width), `C-b -` splits horizontally (one above the other), `C-b o` focuses the next pane,
