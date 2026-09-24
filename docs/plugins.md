@@ -1335,7 +1335,7 @@ h j k l     the cursor, one cell
 C-u C-d     half a screen
 g G         the oldest line the snapshot holds, the newest
 Space       start a selection here, or drop the one there is
-y           yank it
+y           yank it, and leave — the yank is what the mode was entered for
 f           label every word on screen, jump the cursor to the one you pick
 Esc q       leave
 ```

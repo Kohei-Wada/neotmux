@@ -339,6 +339,26 @@ fn yanking_puts_the_selected_text_in_the_register() {
     );
 }
 
+/// The yank is what the mode was entered for, so taking the text leaves it: the keyboard goes
+/// back to the pane without an Esc of its own, the way tmux's own copy mode ends.
+#[test]
+fn yanking_leaves_the_mode() {
+    let (_dir, sub) = built("");
+    scrolled(&sub);
+    enter(&sub);
+    keys(&sub, &["v", "l", "y"]);
+
+    assert_eq!(
+        sub.dispatch_key(support::one(), "j"),
+        KeyOutcome::Fallthrough,
+        "the mode still owns the keyboard after a yank"
+    );
+    assert!(
+        tints(&frame(&sub)).is_empty(),
+        "the mode is still drawing after a yank"
+    );
+}
+
 /// A yank reaching over the boundary is one region, not two: `four` is the last line of the
 /// history and `five` the first of the screen.
 #[test]

@@ -17,7 +17,7 @@
 --   C-u C-d     half a screen
 --   g G         the oldest line the snapshot holds, the newest
 --   v           start a selection here, or drop the one there is
---   y           yank it
+--   y           yank it, and leave
 --   f           label every word on screen, jump the cursor to the one you pick
 --   Esc q       leave
 --
@@ -295,6 +295,10 @@ M.commands = {
     -- terminal that ignores it is byte-identical to one that accepted it. Saying "copied to
     -- the clipboard" on the strength of that is the false-success bug other multiplexers ship.
     local offered = clipboard(M.register)
+    -- Taken, so there is nothing left to do here: the yank is what the mode was entered for,
+    -- and tmux leaves on it too. The notify below says what was taken, which is the only
+    -- reason to still be looking at the pane.
+    leave()
     neotmux.notify(
       "info",
       "yanked "
