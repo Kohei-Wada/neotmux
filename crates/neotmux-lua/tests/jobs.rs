@@ -2,7 +2,6 @@
 //! here drives a fake `Runner`, so nothing spawns and nothing waits — what a real process adds
 //! is tested once, in `crates/neotmux/tests/job_process.rs`.
 
-use std::cell::RefCell;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -10,13 +9,13 @@ use std::time::{Duration, Instant};
 
 use neotmux_lua::LuaSubsystem;
 use neotmux_lua::ops::Op;
-use neotmux_lua::runner::{JobChunk, JobSpec, Runner, Running};
+use neotmux_lua::runner::{JobChunk, Runner};
 use neotmux_lua::runtime::Layers;
 use neotmux_proto::{Epoch, Geometry, PaneId, Rect, SessionId, Size};
 
 mod support;
 
-use support::Built;
+use support::{Built, FakeRunner};
 
 const SIZE: Size = Size { rows: 10, cols: 40 };
 
@@ -26,63 +25,6 @@ fn pane() -> PaneId {
 
 fn shipped_layer() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime")
-}
-
-/// What one fake job will say, in order, one `poll` at a time: `script[0]` is the first
-/// poll's answer, `script[1]` the second's. An empty vector is "nothing yet".
-#[derive(Default)]
-struct Script(Vec<Vec<JobChunk>>);
-
-struct FakeRunning {
-    script: std::vec::IntoIter<Vec<JobChunk>>,
-    killed: Rc<RefCell<bool>>,
-}
-
-impl Running for FakeRunning {
-    fn poll(&mut self) -> Vec<JobChunk> {
-        self.script.next().unwrap_or_default()
-    }
-
-    fn kill(&mut self) {
-        *self.killed.borrow_mut() = true;
-    }
-}
-
-/// Answers every `start` with the next script, and records what it was asked to run.
-struct FakeRunner {
-    scripts: RefCell<std::collections::VecDeque<Script>>,
-    started: RefCell<Vec<JobSpec>>,
-    killed: Rc<RefCell<bool>>,
-    refuse: RefCell<Option<String>>,
-}
-
-impl FakeRunner {
-    fn new() -> Rc<Self> {
-        Rc::new(Self {
-            scripts: RefCell::new(std::collections::VecDeque::new()),
-            started: RefCell::new(Vec::new()),
-            killed: Rc::new(RefCell::new(false)),
-            refuse: RefCell::new(None),
-        })
-    }
-
-    fn will_say(&self, polls: Vec<Vec<JobChunk>>) {
-        self.scripts.borrow_mut().push_back(Script(polls));
-    }
-}
-
-impl Runner for FakeRunner {
-    fn start(&self, spec: &JobSpec) -> std::io::Result<Box<dyn Running>> {
-        if let Some(why) = self.refuse.borrow().clone() {
-            return Err(std::io::Error::other(why));
-        }
-        self.started.borrow_mut().push(spec.clone());
-        let script = self.scripts.borrow_mut().pop_front().unwrap_or_default();
-        Ok(Box::new(FakeRunning {
-            script: script.0.into_iter(),
-            killed: Rc::clone(&self.killed),
-        }))
-    }
 }
 
 fn built(extra: &str, runner: Rc<FakeRunner>) -> (tempfile::TempDir, Built) {

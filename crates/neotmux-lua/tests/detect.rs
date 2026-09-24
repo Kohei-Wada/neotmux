@@ -9,7 +9,9 @@ use neotmux_proto::Size;
 
 mod support;
 
-use support::{Built, built, feed, keys, logged, pane};
+use support::{
+    BAR, Built, built, feed, idle_screen, keys, logged, pane, permission_screen, working_screen,
+};
 
 /// Priority decides, not order in the table: a lower-priority rule that matches first in the
 /// table must not win.
@@ -323,64 +325,8 @@ fn assert_detects(screen: &str, title: &str, state: &str, id: &str) {
     assert!(said.contains(&want), "want {want}: {said:?}");
 }
 
-/// The rule Claude Code draws around its prompt, at the width the captures were taken at.
-const BAR: &str = "────────────────────────────────────────────────────────────────────────────";
-
 /// The lighter separators Claude Code draws around a diff. Not rules: a different character.
 const DASHED: &str = "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌";
-
-/// Captured: idle, nothing running. The prompt is a `❯` between two rules, with the status
-/// lines under the lower one.
-fn idle_screen() -> String {
-    format!(
-        "✻ Cogitated for 6s · done 9:01 PM\n\
-         \n\
-         {BAR}\n\
-         ❯\n\
-         {BAR}\n\
-         \x20 ⚠ Transcript saving is off …\n\
-         \x20 [Opus 5.5 (1M context)] cmp ●─────────── 7% | ctx …\n\
-         \x20 -- INSERT -- ⏵⏵ auto mode on (shift+tab to cycle)\n"
-    )
-}
-
-/// Captured: a turn running. The same prompt is still on the screen under the spinner line.
-fn working_screen() -> String {
-    format!(
-        "\x20 Listing 1 directory… (ctrl+o to expand)\n\
-         \x20 ⎿  $ ls -la /etc/hostname\n\
-         \n\
-         * Actioning… (3s · ↓ 16 tokens)\n\
-         \n\
-         {BAR}\n\
-         ❯\n\
-         {BAR}\n"
-    )
-}
-
-/// Captured: a Bash permission prompt. One rule, and the dialog runs to the bottom of the
-/// screen — no second rule, so no prompt box, so nothing reads this as an idle prompt.
-fn permission_screen() -> String {
-    format!(
-        "\x20 Reading 1 file… (ctrl+o to expand)\n\
-         \x20 ⎿  $ cat /etc/hostname\n\
-         \n\
-         {BAR}\n\
-         \x20Bash command\n\
-         \x20Tip: auto mode handles these prompts for you — choose \"switch to auto mode\" below\n\
-         \n\
-         \x20  cat /etc/hostname\n\
-         \x20  Print hostname\n\
-         \n\
-         \x20Do you want to proceed?\n\
-         \x20❯ 1. Yes\n\
-         \x20  2. Yes, allow reading from /etc from this project\n\
-         \x20  3. Yes, and switch to auto mode · auto mode handles these prompts for you\n\
-         \x20  4. No\n\
-         \n\
-         \x20Esc to cancel · Tab to amend\n"
-    )
-}
 
 /// Captured: the trust dialog Claude Code opens on its first run in a directory.
 fn trust_screen() -> &'static str {
