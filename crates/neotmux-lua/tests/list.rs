@@ -360,7 +360,7 @@ end)
     assert_eq!(sub.dispatch_key(support::one(), "j"), KeyOutcome::Consumed);
     let said = texts(&frame(&sub));
     assert!(
-        said.iter().any(|t| t == "/ j"),
+        said.iter().any(|t| t == "> j"),
         "`j` did not reach the query: {said:?}"
     );
     assert!(said.iter().any(|t| t == "jam"), "{said:?}");
@@ -531,7 +531,7 @@ end)
     keys(&sub, &["z"]);
     let said = texts(&frame(&sub));
     assert!(
-        said.iter().any(|t| t == "/ z"),
+        said.iter().any(|t| t == "> z"),
         "the query did not show `z`: {said:?}"
     );
     assert!(said.iter().any(|t| t.contains("apple")), "{said:?}");
@@ -563,7 +563,7 @@ end)
     assert_eq!(sub.dispatch_key(support::one(), "o"), KeyOutcome::Consumed);
     let said = texts(&frame(&sub));
     assert!(
-        !said.iter().any(|t| t == "/ "),
+        !said.iter().any(|t| t == "> "),
         "a query line showed up with no `input`: {said:?}"
     );
     keys(&sub, &["j", "Enter"]);
@@ -827,5 +827,104 @@ end)
         sub.dispatch_key(support::one(), "z"),
         KeyOutcome::Fallthrough,
         "a closed list still ate a key"
+    );
+}
+
+/// Where a drawn text landed, by row. Two tests below are about order on the screen rather
+/// than about what was said, and order is the one thing `texts` throws away.
+fn rows_at(cmds: &[DrawCmd]) -> Vec<(u16, String)> {
+    cmds.iter()
+        .filter_map(|cmd| match cmd {
+            DrawCmd::Text { y, text, .. } => Some((*y, text.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+fn row_of(rows: &[(u16, String)], needle: &str) -> u16 {
+    rows.iter()
+        .find(|(_, text)| text.contains(needle))
+        .unwrap_or_else(|| panic!("{needle:?} was not drawn: {rows:#?}"))
+        .0
+}
+
+/// `place = 'top'` hangs the window from the top of the pane area and puts the query line
+/// first — a palette, where what you type is what you look at, rather than a picker, where you
+/// are choosing between things in the middle of the screen.
+#[test]
+fn a_top_placed_list_types_on_its_first_row() {
+    let (_dir, sub) = built(
+        "neotmux.on_key(function(key)
+           if key == 'o' then
+             require('neotmux.list').open({
+               place = 'top', input = true, rows = 4,
+               items = function() return { 'alpha', 'beta' } end,
+               row = function(item) return { { text = item } } end,
+               done = function() end,
+             })
+             return true
+           end
+           return false
+         end)",
+    );
+    sub.dispatch_key(support::one(), "o");
+    sub.dispatch_key(support::one(), "a");
+    let rows = rows_at(&frame(&sub));
+    assert!(
+        row_of(&rows, "> a") < row_of(&rows, "alpha"),
+        "the query line is not above the items: {rows:#?}"
+    );
+}
+
+/// The same list centred keeps its query line last, which is where a picker's name field has
+/// always been.
+#[test]
+fn a_centred_list_keeps_its_query_line_at_the_bottom() {
+    let (_dir, sub) = built(
+        "neotmux.on_key(function(key)
+           if key == 'o' then
+             require('neotmux.list').open({
+               input = true, rows = 4,
+               items = function() return { 'alpha', 'beta' } end,
+               row = function(item) return { { text = item } } end,
+               done = function() end,
+             })
+             return true
+           end
+           return false
+         end)",
+    );
+    sub.dispatch_key(support::one(), "o");
+    sub.dispatch_key(support::one(), "a");
+    let rows = rows_at(&frame(&sub));
+    assert!(
+        row_of(&rows, "> a") > row_of(&rows, "alpha"),
+        "the query line is not below the items: {rows:#?}"
+    );
+}
+
+/// An empty frame says nothing about why it is empty, and the line that says so needs a row of
+/// its own rather than the frame's.
+#[test]
+fn a_list_with_nothing_left_says_so_inside_its_frame() {
+    let (_dir, sub) = built(
+        "neotmux.on_key(function(key)
+           if key == 'o' then
+             require('neotmux.list').open({
+               input = true, empty = 'nothing here',
+               items = function() return {} end,
+               row = function(item) return { { text = item } } end,
+               done = function() end,
+             })
+             return true
+           end
+           return false
+         end)",
+    );
+    sub.dispatch_key(support::one(), "o");
+    let rows = rows_at(&frame(&sub));
+    assert!(
+        row_of(&rows, "nothing here") < row_of(&rows, "\u{2570}"),
+        "the empty line landed on the frame: {rows:#?}"
     );
 }

@@ -1535,6 +1535,16 @@ dismisses the input line first and only then runs `cancel`, since that *is* what
 `Esc` means; a raise in it cannot undo that dismissal or leak the key, for the same reason
 nothing below can — see the next paragraph.
 
+`place` is where the window hangs. `'center'` — the default — is the middle of the pane area,
+which is what a picker wants: you are choosing between things, and the middle is where your
+eyes already are. `'top'` drops it from the top edge instead and moves the query line to the
+first row, which is what a command palette wants, and what `plugin.palette` asks for: you are
+typing, and what you type should be where you are looking. `neotmux.list.drop` is how far down
+a `'top'` list hangs; `neotmux.list.prompt` is what a query line is introduced by.
+
+`empty` is one line to draw when there is nothing left to show. Without it a query that matched
+nothing leaves a frame with nothing in it, which says nothing about why.
+
 Give `input = true` and the list becomes one you type into rather than move through by
 letter: the input line comes up, every printable key joins a query, and the cursor moves on
 `C-j`/`C-k` instead of the plain `j`/`k` an `input`-less list uses, because a query still needs

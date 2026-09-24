@@ -23,7 +23,10 @@ M.colors = {
   source = "#585b70", -- surface2: quieter still
 }
 
-M.width = 60
+-- Wide and shallow, hanging from the top: what you are doing here is reading a line you typed
+-- and the handful of things it left, not surveying a list. `width` is the most columns it
+-- takes; it fits itself to a narrower terminal on its own.
+M.width = 72
 M.rows = 12
 
 -- A query matches `name` when its characters appear in `name`, in order, gaps allowed —
@@ -110,11 +113,12 @@ function M.open()
   local handle
 
   handle = list.open({
-    title = "commands",
     mode = "palette",
     width = M.width,
     rows = M.rows,
+    place = "top",
     input = true,
+    empty = "no command matches",
     items = function()
       local query = handle and handle:query() or ""
       return ranked(neotmux.command.list(), query)

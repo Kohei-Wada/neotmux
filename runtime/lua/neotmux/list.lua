@@ -21,7 +21,13 @@
 -- list opens, the way `neotmux.guard` arms itself — a layer that requires this file and never
 -- opens a list holds no subscription for it.
 --
--- `input = true` turns the line at the bottom on: every printable key joins a query,
+-- `place` is where the window hangs: `'center'` over the pane area, which is the default and
+-- what a picker wants, or `'top'`, which drops it from the top edge and moves the input line to
+-- the first row — a command palette, where what you type is what you look at. `empty` is a line
+-- to draw when nothing is left to show, so a query that matched nothing says so rather than
+-- leaving a frame with nothing in it.
+--
+-- `input = true` turns the line on: every printable key joins a query,
 -- `C-j`/`C-k` move the cursor instead of the plain `j`/`k`, and `handle:query()` reads what
 -- has been typed. `filter` is a separate, optional predicate — `function(item, query) return
 -- ... end` — that narrows `items()` by that query. A list can take `input` with no `filter`
@@ -261,15 +267,43 @@ local function typing(key)
   end
 end
 
+-- What a query line is introduced by. One glyph and a space, so the caret sits where the next
+-- character will land.
+M.prompt = "> "
+
+-- How far down a `place = 'top'` list hangs from the top of the pane area. Far enough to read
+-- as a thing that dropped down rather than a thing that was always there.
+M.drop = 2
+
 -- How big the window wants to be and where: the rows, the frame's own two, and a footer or
--- input line, centred over the panes.
+-- input line.
+--
+-- `place` is where it hangs. `'center'` is the middle of the pane area, which is what a picker
+-- wants — you are choosing between things, and the middle is where your eyes are. `'top'`
+-- drops it from the top edge instead, and puts the query line first rather than last, which is
+-- what a command palette wants: you are typing, and what you type should be where you look.
 local function wanted()
-  local rows = math.min(#state.items, state.opts.rows) + 3
+  -- A list with nothing in it still needs the row its `empty` line is drawn on, or the line
+  -- lands on the frame.
+  local shown = math.max(#state.items, state.opts.empty and 1 or 0)
+  local rows = math.min(shown, state.opts.rows) + 3
   local w = math.min(state.opts.width, area and area.w or state.opts.width)
   local h = math.min(rows, area and area.h or rows)
   local x = (area and area.x or 0) + math.max(0, math.floor(((area and area.w or w) - w) / 2))
-  local y = (area and area.y or 0) + math.max(0, math.floor(((area and area.h or h) - h) / 2))
+  local y
+  if state.opts.place == "top" then
+    y = (area and area.y or 0) + math.min(M.drop, math.max(0, (area and area.h or h) - h))
+  else
+    y = (area and area.y or 0) + math.max(0, math.floor(((area and area.h or h) - h) / 2))
+  end
   return { x = x, y = y, w = w, h = h }
+end
+
+-- Which row the input line takes, and which rows the items get. A `'top'` list reads downwards
+-- from what you typed; every other list keeps the line at the bottom, where a picker's name
+-- field has always been.
+local function input_first()
+  return state.opts.place == "top"
 end
 
 local registered = false
@@ -378,11 +412,12 @@ local function arm()
     local inner = box.draw(ctx, win, rect, { title = state.opts.title, bg = M.colors.frame })
 
     local room = inner.h - 1
+    local top = input_first() and inner.y + 1 or inner.y
     state.first = window_over(#state.items, room, state.at)
     for slot = 0, math.min(#state.items, room) - 1 do
       local at = state.first + slot
       local item = state.items[at]
-      local row = inner.y + slot
+      local row = top + slot
       local chosen = at == state.at
       local background = chosen and M.colors.cursor or M.colors.frame
       if chosen then
@@ -396,7 +431,7 @@ local function arm()
       draw_runs(ctx, win, inner.x, row, inner.w, runs or {}, background)
     end
 
-    local last = inner.y + inner.h - 1
+    local last = input_first() and inner.y or inner.y + inner.h - 1
     if state.input then
       local label = (state.input.label and state.input.label .. "  ") or ""
       ctx:text(win, inner.x, last, label .. state.input.value, {
@@ -414,13 +449,13 @@ local function arm()
         { bg = M.colors.caret }
       )
     elseif state.opts.input then
-      ctx:text(win, inner.x, last, "/ " .. (state.query or ""), {
+      ctx:text(win, inner.x, last, M.prompt .. (state.query or ""), {
         fg = M.colors.text,
         bg = M.colors.frame,
       })
       ctx:rect(
         win,
-        inner.x + neotmux.width("/ " .. (state.query or "")),
+        inner.x + neotmux.width(M.prompt .. (state.query or "")),
         last,
         1,
         1,
@@ -435,6 +470,12 @@ local function arm()
       if text then
         ctx:text(win, inner.x, last, text, { fg = M.colors.hint, bg = M.colors.frame })
       end
+    end
+
+    -- An empty frame says nothing about why it is empty. A query that matched none of them is
+    -- the only way a list with items behind it can be empty, so that is what it says.
+    if #state.items == 0 and state.opts.empty then
+      ctx:text(win, inner.x, top, state.opts.empty, { fg = M.colors.hint, bg = M.colors.frame })
     end
   end)
 end
@@ -507,6 +548,8 @@ function M.open(opts)
       title = opts.title,
       width = opts.width or 40,
       rows = opts.rows or 10,
+      place = opts.place or "center",
+      empty = opts.empty,
       items = opts.items,
       row = opts.row,
       footer = opts.footer,
