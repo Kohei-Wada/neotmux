@@ -20,7 +20,10 @@ which of the ways it was. `start` answers the handle, or `nil` and one line sayi
 there is no error to catch and no coroutine to drive.
 
 A timer is clamped to the frame, fires at most once per frame and does not catch up — five
-callbacks to make up for a slow frame is a worse answer than one. Both run before the tick
+callbacks to make up for a slow frame is a worse answer than one. `every` and `after`
+answer the same two values `start` does, and have the one reason to refuse: an arm from
+inside the `on_exit` a session teardown hands you, whose timer would belong to a session
+with no frame left to fire it. Both run before the tick
 in the frame they arrived in, so a tick draws what they changed rather than finding out
 next frame; both are measured against the same tick budget everything else is, where a
 runaway callback costs its own job or its own timer and nothing else its author wrote; and
