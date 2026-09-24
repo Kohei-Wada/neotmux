@@ -667,10 +667,18 @@ to answer. And an agent that never calls into neotmux at all — one driving its
 other way — was never at this door to begin with; enforcing panes-only belongs to the agent's
 configuration or a sandbox, not to a hook that only ever sees what comes through a pane.
 
-A handler that raises, or that runs past its tick budget, refuses the write exactly as if it
-had returned `false` — the same rule `on_tick` and every other callback answer to. A guardrail
-that fails open is useless exactly when something is wrong, so a broken handler is a closed
-door rather than an open one.
+What this protects is writes that come through a pane, and nothing else. It is not a defence
+against an agent with write access to the configuration that installs it: a runtime layer is a
+file, and an agent that can write files can write one that registers nothing, or edit your
+`init.lua` to remove the `require` that loads the guard — and the guard is gone while the pane
+still looks the same and nothing announces that it happened. If an agent's filesystem access is
+the thing you do not trust, this hook is not what closes that gap.
+
+A handler that raises, or that runs past its budget, refuses the write — the opposite of the
+rule the rest of the command surface answers to, where a failing Lua layer lets the built-in
+answer instead. This hook inverts that, and only this hook: a guardrail that fails open is
+useless exactly when something is wrong, so a broken handler is a closed door rather than an
+open one.
 
 With nothing registered, the path a write takes is unchanged: the host asks `has_write_hooks`
 before it does anything else, and a session with no handler pays nothing for the question.

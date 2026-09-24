@@ -22,7 +22,7 @@ host command.
 This spec adds the one thing that is missing and nothing else:
 
 ```lua
-neotmux.on_write(function(write)     -- { pane =, text =, from = 'tool' | 'terminal' }
+neotmux.on_write(function(write)     -- { pane =, text =, from = 'tool' | 'plugin' }
   if write.text:find('rm%s+%-rf') then
     return false, 'rm -rf is blocked'
   end
@@ -128,15 +128,21 @@ The cost is stated plainly rather than hidden: **once a handler is registered, a
 layer stops agent writes.** That is the trade the registration is, and it is why registration —
 not the host's own opinion — is what switches the behaviour on.
 
-**The budget** is the tick's, per source: a handler runs under its own source's slice, and an
-overrun cuts it off and refuses the write. A slow handler costs its write, not the server.
+**The budget** is one interval for the whole dispatch, the way `dispatch_key`'s is, not a slice
+per source: the path has to stay fast, and the failure is already a refusal, so there is nothing
+to gain by metering each handler on its own clock. An overrun still refuses the write and names
+the handler that was running when it did, so a slow handler costs its write, not the server, and
+a person can still tell which layer is slow.
 
 ## 6. Which connection asked
 
 The socket already distinguishes the two: a connection that sent `Attach` is a client with a
 terminal; one that sent `Command`, `List` or `Kill` is not. `from` carries that distinction to
-the handler as `'terminal'` or `'tool'`, so a policy can be written as "an agent may not, a
-person may" without the host deciding what an agent is.
+the handler as `'tool'` for the second kind — `'terminal'` is reserved for it, not emitted,
+because a person's keys are not writes (§1) — and as `'plugin'` for a plugin's own `pane.send`,
+which is not a connection at all. A policy can still be written as "an agent may not, a person
+may" without the host deciding what an agent is; it just never sees a `'terminal'` write to
+decide about.
 
 **The rule this establishes:** a command that changes what neotmux itself does — reloading the
 config, evaluating Lua, adding or removing a subscription, changing `opt` — is answerable to a
