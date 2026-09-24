@@ -12,14 +12,18 @@
 --
 -- `panes` is which panes to look at — `'visible'`, the default, or an explicit list of ids.
 -- `targets` narrows the built-in finders by name; `find = function(pane, lines) return { {
--- line =, col =, text = }, ... } end` replaces them outright with the caller's own. `done` and
+-- line =, col =, text = }, ... } end` replaces them outright with the caller's own — it is
+-- called once per pane, with `lines` nil where that pane's content could not be read, since a
+-- finder need not work from `lines` at all. `done` and
 -- `cancel` are the caller's, called with `{ pane =, line =, col =, text = }` and with nothing,
 -- respectively — `cancel` is optional, and Esc and `q` both reach it. `line` is the row within
 -- the pane, zero-based, as `pane.cursor` counts; `col` is the column the target starts at,
 -- counted with `neotmux.width` and never `#`, since a run can hold a wide character.
 --
--- One hint session at a time, the same as `neotmux.list`: opening another closes the first.
--- `open` returns a handle with `close()`, idempotent.
+-- One hint session at a time, the same as `neotmux.list`: opening another cancels the first,
+-- so the caller that opened it hears its own `cancel` rather than being left waiting on a
+-- session that is gone. `open` returns a handle with `close()`, idempotent, and nil when there
+-- was nothing on the screen to label — a session with no targets is never opened.
 --
 -- Every pane a target was found on is frozen for the life of the session and thawed on the
 -- way out, whichever way it leaves — except a pane that was already frozen when hints opened
@@ -29,7 +33,8 @@
 -- `init.lua` can replace it before this ever runs. One character while there are few enough
 -- targets to letter them singly, two when there are not; a target never gets a label another
 -- target's label is a prefix of, which two-character labels get for free here since this
--- module never mixes the two lengths in one session. Nearest targets get the shortest labels:
+-- module never mixes the two lengths in one session. `Esc` and `q` are read before labels are,
+-- so `M.keys` must not hold `q`: a target labelled with it could never be picked. Nearest targets get the shortest labels:
 -- the focused pane first, then the row closest to the top of the screen. Past `#M.keys ^ 2`
 -- targets there are no labels left to give out; the farthest ones are left unlabelled rather
 -- than handed a label that collides with another's.
@@ -95,14 +100,14 @@ function M.finders.path(line)
   return out
 end
 
--- A run of 7 to 40 hex characters — a git object, near enough. `%f[%x]` and `%f[%X]` bound it
--- to a maximal run so a longer one is not cut in the middle by a shorter match starting inside
--- it, and a run longer than a hash is still a hash's worth of it.
+-- A run of 7 to 64 hex characters — a git object or a sha256, near enough. `%f[%x]` and
+-- `%f[%X]` bound it to a maximal run, and the run is taken whole or not at all: a label that
+-- answered with the first 40 characters of a 64-character hash would be a copy of something
+-- that is not on the screen, which is worse than not labelling it.
 function M.finders.hash(line)
   local out = {}
   for _, hit in ipairs(scan(line, "%f[%x]%x+%f[%X]")) do
-    if #hit.text >= 7 then
-      hit.text = hit.text:sub(1, 40)
+    if #hit.text >= 7 and #hit.text <= 64 then
       out[#out + 1] = hit
     end
   end
@@ -212,31 +217,46 @@ local function gather(opts)
   local found = {}
   for _, pane in ipairs(pane_ids) do
     local lines = neotmux.pane.content(pane)
-    if lines then
-      if opts.find then
-        local ok, hits = pcall(opts.find, pane, lines)
-        if not ok then
-          return nil, "find", hits
+    if opts.find then
+      -- Called whether or not this pane's content could be read: a caller's finder is not
+      -- obliged to work from `lines` at all — `plugin.copy`'s reads its own snapshot — and
+      -- skipping it here would open a session with no targets on a pane that has plenty.
+      local ok, hits = pcall(opts.find, pane, lines)
+      if not ok then
+        return nil, "find", hits
+      end
+      -- Grouped by row before the containment filter, which compares columns and so only
+      -- means anything within one line.
+      local by_line = {}
+      local rows = {}
+      for _, hit in ipairs(hits or {}) do
+        if by_line[hit.line] == nil then
+          by_line[hit.line] = {}
+          rows[#rows + 1] = hit.line
         end
-        for _, hit in ipairs(hits or {}) do
-          found[#found + 1] = { pane = pane, line = hit.line, col = hit.col, text = hit.text }
+        local row = by_line[hit.line]
+        row[#row + 1] = hit
+      end
+      table.sort(rows)
+      for _, row in ipairs(rows) do
+        for _, hit in ipairs(drop_contained(by_line[row])) do
+          found[#found + 1] = { pane = pane, line = row, col = hit.col, text = hit.text }
         end
-      else
-        for row, line in ipairs(lines) do
-          local hits = {}
-          for _, finder in ipairs(finder_fns) do
-            local ok, found_hits = pcall(finder, line)
-            if not ok then
-              return nil, "find", found_hits
-            end
-            for _, hit in ipairs(found_hits or {}) do
-              hits[#hits + 1] = hit
-            end
+      end
+    elseif lines then
+      for row, line in ipairs(lines) do
+        local hits = {}
+        for _, finder in ipairs(finder_fns) do
+          local ok, found_hits = pcall(finder, line)
+          if not ok then
+            return nil, "find", found_hits
           end
-          for _, hit in ipairs(drop_contained(hits)) do
-            found[#found + 1] =
-              { pane = pane, line = row - 1, col = hit.col, text = hit.text }
+          for _, hit in ipairs(found_hits or {}) do
+            hits[#hits + 1] = hit
           end
+        end
+        for _, hit in ipairs(drop_contained(hits)) do
+          found[#found + 1] = { pane = pane, line = row - 1, col = hit.col, text = hit.text }
         end
       end
     end
@@ -384,7 +404,11 @@ local function arm()
     for _, hit in ipairs(state.targets) do
       local rect = ctx:pane_rect(hit.pane)
       if rect then
-        ctx:text(nil, rect.x + hit.col, rect.y + hit.line, hit.label, {
+        -- Held inside the pane: a two-character label on a target that starts in the last
+        -- column would otherwise be drawn over the border, or over the pane next door.
+        local room = rect.w - neotmux.width(hit.label)
+        local col = math.max(0, math.min(hit.col, room))
+        ctx:text(nil, rect.x + col, rect.y + hit.line, hit.label, {
           fg = M.colors.fg,
           bg = M.colors.bg,
         })
@@ -409,12 +433,22 @@ end
 -- Opens a hint session, closing one already up. See the module header for the shape of
 -- `opts`.
 function M.open(opts)
-  close()
+  -- Cancelled, not merely closed: the caller of the session being pre-empted has no other way
+  -- to learn that its pick is over, and one that yields the keyboard while a pick is up — as
+  -- `plugin.copy` does — would yield it forever.
+  if state then
+    finish_cancel()
+  end
   opts = opts or {}
 
   local found, label, err = gather(opts)
   if found == nil then
     fail(label, err)
+    return nil
+  end
+
+  if #found == 0 then
+    neotmux.notify("info", "nothing to hint")
     return nil
   end
 

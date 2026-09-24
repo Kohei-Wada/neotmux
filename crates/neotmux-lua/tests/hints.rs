@@ -518,6 +518,143 @@ fn a_pane_removed_from_the_layout_mid_session_does_not_stop_hints_closing_cleanl
     );
 }
 
+/// Opening a session over one already up cancels it rather than dropping it: the caller of
+/// the first one has no other way to learn that its pick is over, and one that yields the
+/// keyboard while a pick is up would yield it for good.
+#[test]
+fn opening_a_second_session_cancels_the_first_rather_than_dropping_it() {
+    let (_dir, sub) = built(&default_trigger());
+    feed(&sub, b"http://example.com");
+    open(&sub);
+    assert!(!labels(&frame(&sub)).is_empty());
+
+    open(&sub);
+    let said = logged(&sub);
+    assert!(
+        said.iter().any(|line| line == "cancelled"),
+        "the pre-empted session never reached its caller's cancel: {said:?}"
+    );
+
+    // The second session is the one up now, and it answers for itself.
+    let marks = labels(&frame(&sub));
+    assert_eq!(marks.len(), 1, "{marks:?}");
+    keys(&sub, &[&marks[0].2]);
+    assert!(
+        logged(&sub)
+            .iter()
+            .any(|line| line.starts_with("done pane=1")),
+    );
+}
+
+/// A screen with nothing on it to label opens nothing: a session with no targets would take
+/// every key and show nothing for them, which reads as a terminal that has stopped answering.
+#[test]
+fn a_screen_with_nothing_to_label_never_takes_the_keyboard() {
+    let (_dir, sub) = built(&default_trigger());
+    feed(&sub, b"nothing here but words");
+    open(&sub);
+
+    assert!(labels(&frame(&sub)).is_empty());
+    assert_eq!(
+        sub.dispatch_key(support::one(), "j"),
+        KeyOutcome::Fallthrough,
+        "an empty session took the keyboard"
+    );
+}
+
+/// A hash is taken whole or not at all. A sha256 is 64 hex characters and a label that
+/// answered with the first 40 of them would be a copy of something that is not on the screen —
+/// worse, silently, than not labelling it at all.
+#[test]
+fn a_hash_longer_than_a_git_object_is_answered_whole() {
+    let sha256 = "e".repeat(64);
+    let (_dir, sub) = built(&default_trigger());
+    // Its own pane, wide enough to hold all 64 characters on one row: wrapped across two rows
+    // they are two runs on the screen and two targets, which is a different question.
+    sub.terminals().open(
+        pane(),
+        Size {
+            rows: SIZE.rows,
+            cols: 80,
+        },
+        100,
+    );
+    sub.terminals().feed(pane(), sha256.as_bytes());
+    open(&sub);
+    let marks = labels(&frame(&sub));
+    assert_eq!(marks.len(), 1, "{marks:?}");
+
+    keys(&sub, &[&marks[0].2]);
+    let said = logged(&sub);
+    assert!(
+        said.iter()
+            .any(|line| *line == format!("done pane=1 line=0 col=0 text=[{sha256}]")),
+        "{said:?}"
+    );
+}
+
+/// A caller's own `find` gets the same containment filter the built-in finders get: two hits
+/// where one holds the other are one thing on the screen whoever found them.
+#[test]
+fn a_caller_supplied_find_gets_its_overlapping_hits_filtered_too() {
+    let (_dir, sub) = built(&trigger(
+        "{\n\
+           find = function()\n\
+             return {\n\
+               { line = 0, col = 0, text = 'alpha' },\n\
+               { line = 0, col = 1, text = 'lph' },\n\
+             }\n\
+           end,\n\
+           done = function(target)\n\
+             neotmux.log.info('done text=[' .. target.text .. ']')\n\
+           end,\n\
+         }",
+    ));
+    feed(&sub, b"alpha");
+    open(&sub);
+    let marks = labels(&frame(&sub));
+    assert_eq!(
+        marks.len(),
+        1,
+        "the contained hit got its own label: {marks:?}"
+    );
+    keys(&sub, &[&marks[0].2]);
+    assert!(
+        logged(&sub).iter().any(|line| line == "done text=[alpha]"),
+        "the label landed on the piece rather than the whole"
+    );
+}
+
+/// A label is held inside its pane: a two-character one on a target that starts in the last
+/// column would otherwise be drawn over the border, or over the pane next door.
+#[test]
+fn a_label_is_clipped_to_the_pane_it_belongs_to() {
+    let mut hits = String::new();
+    for line in 0..11 {
+        hits.push_str(&format!(
+            "{{ line = {line}, col = {}, text = 'x' }},\n",
+            if line == 10 { SIZE.cols - 1 } else { 0 }
+        ));
+    }
+    let (_dir, sub) = built(&trigger(&format!(
+        "{{ find = function() return {{ {hits} }} end }}"
+    )));
+    feed(&sub, b"anything");
+    open(&sub);
+    let marks = labels(&frame(&sub));
+    assert_eq!(marks.len(), 11, "{marks:?}");
+    let last = marks
+        .iter()
+        .find(|mark| mark.1 == 10)
+        .unwrap_or_else(|| panic!("{marks:?}"));
+    assert_eq!(last.2.chars().count(), 2, "{marks:?}");
+    assert_eq!(
+        last.0,
+        SIZE.cols - 2,
+        "a two-character label spilled out of the pane: {marks:?}"
+    );
+}
+
 // `plugin.hints`: what a person does with a target once one is picked. Its own harness, since
 // these three commands are the shipped prefix and the shipped registry, not the bare module
 // above — `built` there turns both off to keep a frame free of anything but the module's own

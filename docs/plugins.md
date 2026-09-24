@@ -1159,7 +1159,7 @@ neotmux ships thirteen plugins in the runtime layer an install puts on the searc
 | `status` | the default status bar, on one reserved top row |
 | `prefix` | a `C-b` prefix over `v`, `-`, `o`, `h/j/k/l`, `r`, `c`, `n`, `p`, `,` and `[` |
 | `copy` | copy mode: read back over a pane's scrollback, select a region, yank it |
-| `hints` | `C-b f` labels every url, path, hash and ip on screen and copies the one you pick; `hint-send` and `hint-open` are the same pick, typed rather than copied |
+| `hints` | `C-b f` labels every url, path, hash (7–64 hex characters, taken whole) and ip on screen and copies the one you pick; `hint-send` and `hint-open` are the same pick, typed rather than copied |
 | `notify` | draws each notification in a frame of its own, stacked up from the bottom-right |
 | `sessions` | the session picker on `C-b s`: every session and what it is running, `Enter` to go, `c` to make one, `r` to rename one, `d` to end one |
 | `palette` | the command palette on `C-b :`: every registered command, fuzzy-filtered as you type, `Enter` to run the one under the cursor |
@@ -1612,7 +1612,9 @@ hints.open({
 `panes` is which panes to look at — `'visible'`, the default, or an explicit list of ids.
 `targets` narrows the built-in finders by name (`url`, `path`, `hash`, `ip`, in that order);
 `find = function(pane, lines) return { { line =, col =, text = }, ... } end` replaces them
-outright with the caller's own. That is what `plugin.copy`'s own `f` does: its finder is
+outright with the caller's own; it is called once per pane, and `lines` is nil where that
+pane's content could not be read, since a finder need not work from `lines` at all. That is
+what `plugin.copy`'s own `f` does: its finder is
 `neotmux.words` rather than the url/path/hash/ip set, because in copy mode the thing you want
 is a position to land the cursor on, not a token to act on — the same module, asked a
 different question. `done` and `cancel` are the caller's own code, called with
@@ -1631,10 +1633,20 @@ screen.
 Every pane a target was found on is frozen for the life of the session and thawed on the way
 out — except a pane that was already frozen when the session opened (`plugin.copy`'s own `[`,
 say, got there first): that one is left exactly as it was found, neither frozen again nor
-thawed underneath whatever froze it first. That is what lets `f` inside copy mode open a hint
-session over the very pane copy mode is already holding still, without either one undoing the
-other's freeze. One session at a time, the same rule `neotmux.list` follows: opening another
-closes the first, and `open` returns a handle with a `close()`, idempotent.
+thawed underneath whatever froze it first. The host's freeze is a flag and not a count, so the
+rule runs both ways: `plugin.copy` asks `pane.frozen` before it freezes too, and a copy mode
+entered over a hint session leaves without thawing the pane the labels are drawn on. That is
+what lets `f` inside copy mode open a hint session over the very pane copy mode is already
+holding still, without either one undoing the other's freeze.
+
+One session at a time, the same rule `neotmux.list` follows — but opening another *cancels*
+the first rather than closing it quietly, so the caller that opened it hears its own `cancel`
+and can put the keyboard back the way it found it. A caller that yields the keyboard while a
+pick is up, as `plugin.copy` does, would otherwise yield it forever the first time a prefix key
+opened a second session over the top. `open` returns a handle with a `close()`, idempotent, and
+nil when there was nothing on the screen to label: a session with no targets is never opened,
+since it would take every key and show nothing for them. `Esc` and `q` are read before labels
+are, so a replacement `neotmux.hints.keys` must not hold `q`.
 
 `plugin.hints` is the shipped use of it, one picker shared by three commands:
 
