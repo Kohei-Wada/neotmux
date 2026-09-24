@@ -18,6 +18,7 @@
 --   g G         the oldest line the snapshot holds, the newest
 --   v           start a selection here, or drop the one there is
 --   y           yank it
+--   f           label every word on screen, jump the cursor to the one you pick
 --   Esc q       leave
 --
 -- Nothing here is a host feature. The mode is an `on_key` over a local, exactly as the
@@ -31,6 +32,7 @@ local snapshot = require("neotmux.snapshot")
 local selection = require("neotmux.selection")
 local words = require("neotmux.words")
 local modes = require("neotmux.mode")
+local hints = require("neotmux.hints")
 
 local M = {}
 
@@ -66,8 +68,20 @@ local state = nil
 -- Kept apart from `state` rather than folded into it because every exit — cancel, the pane
 -- closing, focus moving away — has to lower it, and `leave` below is the one place that does.
 local mode_handle = nil
+-- The handle `hints.open` returns while a `f` pick is in progress, and nil the rest of the
+-- time. While it is up, this mode's own `on_key` below has to step out of the way and let
+-- `neotmux.hints` see the label being typed — it does not, on its own, since every other key
+-- this mode owns is swallowed unconditionally.
+local hint_handle = nil
 
 local function leave()
+  if hint_handle then
+    -- Closed here too, not only by its own Esc: `pane_closed` and `focus_changed` reach
+    -- `leave` straight from an event, never through this mode's own `on_key`, so a pick left
+    -- pending would otherwise still be open, drawing over the pane the cursor has left.
+    hint_handle:close()
+    hint_handle = nil
+  end
   if state then
     -- The pane goes back to showing what it is doing, and to moving while it does it.
     neotmux.pane.unfreeze(state.pane)
@@ -100,6 +114,49 @@ end
 
 local function page(rect)
   return math.max(1, math.floor(rect.h * M.page))
+end
+
+-- The text between two columns, inclusive, out of a line — columns and not bytes, the same
+-- reason `neotmux.hints` counts that way: a run found by column has to be sliced by column
+-- too, or a wide character in front of it shifts every answer after it.
+local function slice(line, from_col, to_col)
+  local out = {}
+  local col = 0
+  for _, code in utf8.codes(line) do
+    local ch = utf8.char(code)
+    if col >= from_col and col <= to_col then
+      out[#out + 1] = ch
+    end
+    col = col + math.max(1, neotmux.width(ch))
+    if col > to_col then
+      break
+    end
+  end
+  return table.concat(out)
+end
+
+-- Every word on one line, `neotmux.words`' own idea of one: a run `w` would step over, not
+-- the url/path/hash/ip set `neotmux.hints` reads by default. In copy mode the thing you want
+-- is a position to land the cursor on, not a token to act on, so this is the finder for it.
+local function line_words(line)
+  -- `first_word` answers 0 both for "the first word is at column 0" and for "there is no
+  -- word on this line at all" — it is built for `^`, which always needs a column to land the
+  -- cursor on. Checked here, not there: a line with nothing on it gets no target.
+  if not line:match("%S") then
+    return {}
+  end
+  local out = {}
+  local col = words.first_word(line)
+  while col do
+    local next_col = words.forward(line, col)
+    local finish = next_col and (next_col - 1) or words.last(line)
+    out[#out + 1] = { col = col, text = slice(line, col, finish) }
+    if next_col == nil or next_col <= col then
+      break
+    end
+    col = next_col
+  end
+  return out
 end
 
 -- The terminal's own clipboard, if this host can reach one at all.
@@ -218,6 +275,38 @@ M.commands = {
         .. (offered and ", and offered them to the terminal's clipboard" or "")
     )
   end,
+  -- Every word on the screen the mode is showing, labelled; the label answers with a
+  -- screen-relative row and column, same as `neotmux.hints`' own default finders do, so it is
+  -- `mode.top` that turns it back into a row the buffer recognises — the view is scrolled,
+  -- the buffer is not.
+  ["hint-jump"] = function(mode, rect)
+    hint_handle = hints.open({
+      panes = { mode.pane },
+      find = function()
+        local out = {}
+        for row = 0, rect.h - 1 do
+          local line = snapshot.line(mode.buffer, mode.top + row)
+          if line then
+            for _, hit in ipairs(line_words(line)) do
+              out[#out + 1] = { line = row, col = hit.col, text = hit.text }
+            end
+          end
+        end
+        return out
+      end,
+      done = function(target)
+        hint_handle = nil
+        mode.cursor.line = mode.top + target.line
+        mode.cursor.col = target.col
+        if state == mode then
+          settle(neotmux.pane.rect(mode.pane) or rect)
+        end
+      end,
+      cancel = function()
+        hint_handle = nil
+      end,
+    })
+  end,
   ["cancel"] = function()
     leave()
   end,
@@ -243,6 +332,7 @@ M.keys = {
   ["G"] = "history-bottom",
   ["v"] = "begin-selection",
   ["y"] = "copy-selection",
+  ["f"] = "hint-jump",
   ["Esc"] = "cancel",
   ["q"] = "cancel",
 }
@@ -278,6 +368,13 @@ end
 
 neotmux.on_key(function(key)
   if state == nil then
+    return false
+  end
+  if hint_handle then
+    -- A pick is in progress: every key belongs to `neotmux.hints` until it lands or is
+    -- cancelled, not to this mode's own bindings, which would otherwise swallow the label
+    -- being typed before `neotmux.hints`'s own `on_key` — registered after this one — ever
+    -- saw it.
     return false
   end
   local rect = neotmux.pane.rect(state.pane)

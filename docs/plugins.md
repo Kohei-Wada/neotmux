@@ -1152,13 +1152,14 @@ costs one plugin one frame instead of costing you the program.
 
 ## The shipped defaults
 
-neotmux ships ten plugins in the runtime layer an install puts on the search path:
+neotmux ships eleven plugins in the runtime layer an install puts on the search path:
 
 | plugin | what it does |
 |---|---|
 | `status` | the default status bar, on one reserved top row |
 | `prefix` | a `C-b` prefix over `v`, `-`, `o`, `h/j/k/l`, `r`, `c`, `n`, `p`, `,` and `[` |
 | `copy` | copy mode: read back over a pane's scrollback, select a region, yank it |
+| `hints` | `C-b f` labels every url, path, hash and ip on screen and copies the one you pick; `hint-send` and `hint-open` are the same pick, typed rather than copied |
 | `notify` | draws each notification in a frame of its own, stacked up from the bottom-right |
 | `sessions` | the session picker on `C-b s`: every session and what it is running, `Enter` to go, `c` to make one, `r` to rename one, `d` to end one |
 | `palette` | the command palette on `C-b :`: every registered command, fuzzy-filtered as you type, `Enter` to run the one under the cursor |
@@ -1188,7 +1189,8 @@ Every mode moves with `j`/`k` (and `h`/`l` where sideways means anything): one s
 the picker, copy mode, pane focus and resize, so a hand that has learned one has learned all of
 them. The arrows are deliberately not bound.
 With the sidebar on, `C-b b` folds it — the sidebar adds that one itself, since it is the
-optional plugin and the prefix is the standard one.
+optional plugin and the prefix is the standard one. `C-b f` is `plugin.hints`'s own addition
+the same way — see [The hints convention](#the-hints-convention) below.
 
 The sidebar is a tree: every session with what it is running, and under the one you are in, its
 windows and their panes. Its width is taken from what there is to show, between
@@ -1334,6 +1336,7 @@ C-u C-d     half a screen
 g G         the oldest line the snapshot holds, the newest
 Space       start a selection here, or drop the one there is
 y           yank it
+f           label every word on screen, jump the cursor to the one you pick
 Esc q       leave
 ```
 
@@ -1591,6 +1594,66 @@ list and says which callback it was through `neotmux.notify`, rather than leavin
 frozen on its last drawn frame (a raise on the tick) or letting the key that triggered it fall
 through to the pane behind the float (a raise on a key) — the same hazard the Critical review
 found in `items`, closed off everywhere else this module calls code it did not write.
+
+### The hints convention
+
+Two keys pick anything on the screen, the way Vimium and tmux-fingers do. A terminal's output
+is full of things you want to act on — a url, a path, a hash, an ip address — and the only way
+to reach one has been to read it and type it back in; `neotmux.hints` finds every one of them,
+labels each with a key or two, and answers with the one you typed.
+
+```lua
+local hints = require('neotmux.hints')
+hints.open({
+  done = function(target) neotmux.pane.send(target.pane, target.text) end,
+})
+```
+
+`panes` is which panes to look at — `'visible'`, the default, or an explicit list of ids.
+`targets` narrows the built-in finders by name (`url`, `path`, `hash`, `ip`, in that order);
+`find = function(pane, lines) return { { line =, col =, text = }, ... } end` replaces them
+outright with the caller's own. That is what `plugin.copy`'s own `f` does: its finder is
+`neotmux.words` rather than the url/path/hash/ip set, because in copy mode the thing you want
+is a position to land the cursor on, not a token to act on — the same module, asked a
+different question. `done` and `cancel` are the caller's own code, called with
+`{ pane =, line =, col =, text = }` and with nothing; `cancel` is optional, and `Esc` and `q`
+both reach it. `line` is the row within the pane, zero-based, the same as `pane.cursor` counts
+it; `col` is the column the target starts at, counted with `neotmux.width` and never `#`,
+since a run can hold a wide character.
+
+A label is drawn over its target's first cells — one character while there are few enough
+targets to letter singly out of `neotmux.hints.keys` (`asdfghjkl;`, read fresh on every
+`open`), two once there are not, and a label is never a prefix of another's, which two-character
+labels get for free since a session never mixes the two lengths. Nearest targets get the
+shortest labels: the focused pane's own first, then whichever sits closest to the top of the
+screen.
+
+Every pane a target was found on is frozen for the life of the session and thawed on the way
+out — except a pane that was already frozen when the session opened (`plugin.copy`'s own `[`,
+say, got there first): that one is left exactly as it was found, neither frozen again nor
+thawed underneath whatever froze it first. That is what lets `f` inside copy mode open a hint
+session over the very pane copy mode is already holding still, without either one undoing the
+other's freeze. One session at a time, the same rule `neotmux.list` follows: opening another
+closes the first, and `open` returns a handle with a `close()`, idempotent.
+
+`plugin.hints` is the shipped use of it, one picker shared by three commands:
+
+```
+C-b f       label the screen, copy what you point at
+hint-send   label the screen, type what you point at into the focused pane
+hint-open   label the screen, write an opener command for what you point at
+```
+
+Only `hint-copy` gets a key, because copy is the one people want most; the other two are
+`neotmux.command`s the palette lists like any other. `hint-send` and `hint-open` both write
+into the pane that is *focused*, not the pane the target came from — with hints spanning every
+visible pane, those can be two different panes, and the point of `hint-send` is "type this
+where I am typing." `hint-open` cannot launch anything: there is no host call this branch can
+ask to start a process with, so it goes as far as the ABI reaches instead of faking the rest —
+it writes `require('plugin.hints').opener` (`xdg-open`, reassign it on a host without one) and
+the target's text, quoted for a POSIX shell, into the focused pane with `neotmux.pane.send`,
+without pressing Enter. It types the command that would open the target; it does not run it,
+and whether to press Enter is left to whoever is reading the line.
 
 ### The state convention
 

@@ -139,6 +139,23 @@ fn tints(cmds: &[DrawCmd]) -> Vec<(Rect, Option<Color>)> {
         .collect()
 }
 
+/// The labels `f`'s hint session draws: `ctx:text(nil, ...)` is what `pane: None` records, and
+/// nothing else in this harness ever draws directly on the surface.
+fn labels(cmds: &[DrawCmd]) -> Vec<(u16, u16, String)> {
+    cmds.iter()
+        .filter_map(|cmd| match cmd {
+            DrawCmd::Text {
+                pane: None,
+                x,
+                y,
+                text,
+                ..
+            } => Some((*x, *y, text.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
 /// The frame a mode that is not on draws is no frame at all: the tick returns before it has
 /// asked the pane anything.
 #[test]
@@ -592,5 +609,63 @@ fn a_word_motion_counts_columns_and_not_bytes() {
     assert!(
         logged(&sub).iter().any(|line| line == "register=[ok]"),
         "a word motion over wide characters landed in the wrong column"
+    );
+}
+
+/// `f` opens a hint session over every word the mode is showing, and typing the label under
+/// one moves the cursor there — the EasyMotion half of the same module `C-b f` uses, asked a
+/// different question: a position to land on rather than a token to act on.
+#[test]
+fn f_in_copy_mode_jumps_the_cursor_to_a_hinted_word() {
+    let (_dir, sub) = built("");
+    sub.terminals().open(pane(), SIZE, 100);
+    sub.terminals().feed(pane(), b"alpha beta gamma");
+    enter(&sub);
+
+    keys(&sub, &["f"]);
+    let marks = labels(&frame(&sub));
+    assert_eq!(marks.len(), 3, "{marks:?}");
+    // "alpha " is six columns, ascii, so "beta" starts at column 6.
+    let beta = marks
+        .iter()
+        .find(|mark| mark.0 == 6)
+        .unwrap_or_else(|| panic!("no label landed on beta: {marks:?}"));
+
+    keys(&sub, &[&beta.2]);
+    let cmds = frame(&sub);
+    assert_eq!(
+        tints(&cmds)[0].0,
+        Rect::new(6, 0, 1, 1),
+        "the cursor did not land on the hinted word"
+    );
+}
+
+/// The line a hint answers with is a row on the screen; the cursor it moves counts against the
+/// buffer. Scroll the view first, so the two disagree, and a jump that forgot `state.top` lands
+/// on the row above or below the word it was asked for instead of the word itself.
+#[test]
+fn f_in_copy_mode_lands_on_the_buffer_line_behind_a_scrolled_view() {
+    let (_dir, sub) = built_named(REPORT, std::rc::Rc::new(WorkingClipboard));
+    scrolled(&sub);
+    enter(&sub);
+    // Scroll the view up two lines: it now shows three, four, five, six, seven, eight, with
+    // "six" the fourth row — row index 3 — rather than the sixth line of the buffer.
+    keys(&sub, &["k", "k"]);
+
+    keys(&sub, &["f"]);
+    let marks = labels(&frame(&sub));
+    let six = marks
+        .iter()
+        .find(|mark| mark.1 == 3)
+        .unwrap_or_else(|| panic!("no label on six's row: {marks:?}"));
+
+    keys(&sub, &[&six.2]);
+    keys(&sub, &["v", "$", "y"]);
+    sub.dispatch_tick(support::one());
+    keys(&sub, &["C-b", "R"]);
+    let said = logged(&sub);
+    assert!(
+        said.iter().any(|line| line == "register=[six]"),
+        "the jump used the screen row as the buffer line instead of adding state.top: {said:?}"
     );
 }
