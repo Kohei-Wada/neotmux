@@ -595,10 +595,13 @@ impl LuaSubsystem {
         }
         let budget_ms = self.opts.borrow().tick_budget_ms;
         self.budget.enter(Duration::from_millis(budget_ms));
-        let verdict = self.offer_write(pane, text, from);
+        let verdict = self.offer_write(pane, text, from, budget_ms);
         let outcome = self.budget.leave();
         self.budget.disarm(&self.lua);
-        if outcome != Outcome::WithinBudget {
+        // `offer_write` already names the handler it caught overrunning; this is the
+        // backstop for an overrun neither of its checks was running to attribute — nothing
+        // was between handlers when the deadline passed.
+        if outcome != Outcome::WithinBudget && matches!(verdict, WriteVerdict::Pass) {
             return WriteVerdict::Refused(format!(
                 "a write handler exceeded the {budget_ms} ms budget"
             ));
@@ -606,7 +609,7 @@ impl LuaSubsystem {
         verdict
     }
 
-    fn offer_write(&self, pane: PaneId, text: &str, from: &str) -> WriteVerdict {
+    fn offer_write(&self, pane: PaneId, text: &str, from: &str, budget_ms: u64) -> WriteVerdict {
         for id in self.registry.snapshot(KindTag::Write) {
             let Some(callback) = self.registry.callback(id) else {
                 return WriteVerdict::Refused("the handler could not be read".to_string());
@@ -631,14 +634,24 @@ impl LuaSubsystem {
                 return WriteVerdict::Refused(format!("{tag}: the write could not be described"));
             }
             match func.call::<(Value, Value)>(write) {
-                Ok((Value::Boolean(false), why)) => {
-                    let why = match why {
-                        Value::String(why) => why.to_string_lossy().to_string(),
-                        _ => format!("refused by {tag}"),
-                    };
-                    return WriteVerdict::Refused(why);
+                Ok(result) => {
+                    // Checked after every handler, whatever it answered: a long call inside
+                    // it can run past the deadline without the sampling hook ever catching
+                    // it mid-flight, and this is the last point that still knows which
+                    // handler that was.
+                    if self.budget.ran_long() {
+                        return WriteVerdict::Refused(format!(
+                            "{tag}: exceeded the {budget_ms} ms budget"
+                        ));
+                    }
+                    if let (Value::Boolean(false), why) = result {
+                        let why = match why {
+                            Value::String(why) => why.to_string_lossy().to_string(),
+                            _ => format!("refused by {tag}"),
+                        };
+                        return WriteVerdict::Refused(why);
+                    }
                 }
-                Ok(_) => continue,
                 Err(err) => {
                     self.report(owner, &err);
                     return WriteVerdict::Refused(format!("{tag}: {err}"));

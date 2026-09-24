@@ -124,6 +124,18 @@ impl Budget {
         self.overran.get()
     }
 
+    /// Peeks whether the open region has already run past its deadline, without closing it.
+    /// `leave` answers this once, for the whole region; this lets a caller that runs several
+    /// handlers under one region check after each one returns, so a `RanLong` overrun — one
+    /// long call the sampling hook never caught mid-flight — is attributed to whichever
+    /// handler was running when it was noticed, not lost by the time the region ends.
+    pub fn ran_long(&self) -> bool {
+        match self.active.get() {
+            Some(active) => active.start.elapsed() > active.budget,
+            None => false,
+        }
+    }
+
     /// Arms the hook for one frame of tick dispatch, and `disarm` takes it away again. It is
     /// scoped rather than left on for the VM's lifetime because `LUA_MASKCOUNT` makes Lua 5.4
     /// set `trap` and route *every* instruction through `luaG_traceexec` whatever n is: an

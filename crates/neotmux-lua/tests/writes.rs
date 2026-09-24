@@ -173,10 +173,45 @@ fn a_handler_that_overruns_its_budget_refuses_the_write() {
          neotmux.on_write(function() while true do end end)",
     )]);
     side_by_side(&sub);
-    assert!(matches!(
-        sub.dispatch_write(support::one(), PaneId::from(1), "x", "tool"),
-        WriteVerdict::Refused(_)
-    ));
+    let WriteVerdict::Refused(why) =
+        sub.dispatch_write(support::one(), PaneId::from(1), "x", "tool")
+    else {
+        panic!("an overrunning handler passed the write");
+    };
+    assert!(why.contains("init"), "the refusal did not name init: {why}");
+}
+
+/// The budget is one interval for the whole dispatch, not a slice per handler — but the
+/// refusal still names whichever handler was running when it expired, not the dispatch as a
+/// whole and not some other, innocent handler.
+#[test]
+fn an_overrun_is_attributed_to_the_handler_that_was_running() {
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.a') require('plugin.b')"),
+        (
+            "lua/plugin/a.lua",
+            "neotmux.opt.tick_budget_ms = 5
+             neotmux.on_write(function() end) return {}",
+        ),
+        (
+            "lua/plugin/b.lua",
+            "neotmux.on_write(function() while true do end end) return {}",
+        ),
+    ]);
+    side_by_side(&sub);
+    let WriteVerdict::Refused(why) =
+        sub.dispatch_write(support::one(), PaneId::from(1), "x", "tool")
+    else {
+        panic!("an overrunning handler passed the write");
+    };
+    assert!(
+        why.contains("plugin/b"),
+        "the refusal did not name the overrunning handler: {why}"
+    );
+    assert!(
+        !why.contains("plugin/a"),
+        "the refusal named the handler that ran fine: {why}"
+    );
 }
 
 /// A handler earlier in the snapshot can remove a later one's registration before the
