@@ -47,11 +47,16 @@ struct Job {
 }
 
 impl Job {
+    /// What the job is making the host keep. In buffered mode that is everything it has said,
+    /// since `on_exit` is owed all of it at once; in streaming mode it is only what is still
+    /// unhandable — the bytes since the last line break. Complete lines are handed over and
+    /// dropped before the frame is out, and counting them would kill the endless stream that
+    /// streaming mode exists for.
     fn bytes_held(&self) -> usize {
         if self.buffered {
             self.stdout.len() + self.stderr.len()
         } else {
-            self.held_stdout.len() + self.held_stderr.len()
+            fragment(&self.held_stdout) + fragment(&self.held_stderr)
         }
     }
 
@@ -97,6 +102,15 @@ impl Job {
                 lines: vec![line],
             });
         }
+    }
+}
+
+/// How much of a held buffer is not yet a line: everything after the last break, or all of it
+/// if there has been no break at all.
+fn fragment(held: &[u8]) -> usize {
+    match held.iter().rposition(|byte| *byte == b'\n') {
+        Some(at) => held.len() - at - 1,
+        None => held.len(),
     }
 }
 
@@ -265,17 +279,18 @@ impl Jobs {
             if !job.buffered {
                 job.stream(&mut out);
             }
-            if job.ending.is_some() {
-                finished.push(*id);
+            // The ending travels with the id rather than staying on the job, so that there is
+            // no way to reach the removal below without one to report.
+            if let Some(ending) = job.ending.take() {
+                finished.push((*id, ending));
             }
         }
-        for id in finished {
-            let Some(mut job) = self.live.borrow_mut().remove(&id) else {
-                continue;
-            };
-            let Some((code, err)) = job.ending.take() else {
-                continue;
-            };
+        for (id, (code, err)) in finished {
+            let mut job = self
+                .live
+                .borrow_mut()
+                .remove(&id)
+                .expect("a job that ended this frame is still in the map that named it");
             // Before the ending, not after it: `on_exit` is the last thing a plugin hears.
             if !job.buffered {
                 job.flush(&mut out);

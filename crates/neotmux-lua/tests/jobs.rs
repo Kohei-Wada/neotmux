@@ -286,6 +286,7 @@ fn a_session_that_did_not_adopt_a_job_never_sees_it() {
         "session one heard the end of a job it never adopted"
     );
 }
+
 /// A streaming job is handed complete lines and nothing else: a chunk that stops mid-line is
 /// held until the rest of it arrives, and what is still held at the end is flushed as one
 /// last line. A plugin never joins a fragment to its remainder because it is never given one.
@@ -445,4 +446,185 @@ fn a_source_may_not_have_more_jobs_than_the_limit() {
             .any(|l| l.starts_with("start 3 = false why=too many jobs")),
         "{said:?}"
     );
+}
+
+/// What a streaming job logs, one delivery per line, so that a test can see both how many
+/// deliveries there were and where the breaks fell.
+fn streaming(body: &str) -> String {
+    on_key(&format!(
+        "    neotmux.job.start({{ 'tail' }}, {{\n\
+               buffered = false,\n\
+               on_stdout = function(lines)\n\
+                 neotmux.log.info('out=[' .. table.concat(lines, '|') .. ']')\n\
+               end,\n\
+               on_stderr = function(lines)\n\
+                 neotmux.log.info('err=[' .. table.concat(lines, '|') .. ']')\n\
+               end,\n\
+             {body}\
+             }})",
+    ))
+}
+
+/// The end of a streaming job, said the way every other test here says it.
+const STREAM_EXIT: &str = "    on_exit = function(code, out, errout, err)\n\
+                             neotmux.log.info('exit code=' .. tostring(code)\n\
+                               .. ' err=' .. tostring(err))\n\
+                           end,\n";
+
+/// The limit bounds what a job makes the host hold, not what it has already said. A streaming
+/// job's complete lines are handed over and dropped inside the frame they arrive in, so output
+/// many times the limit must not end it: streaming mode exists for output that never stops,
+/// and a limit that counted delivered lines would defeat its own purpose.
+#[test]
+fn a_streaming_job_is_not_killed_for_lines_it_has_already_been_handed() {
+    let runner = FakeRunner::new();
+    runner.will_say(vec![
+        (0..8)
+            .map(|n| JobChunk::Stdout(format!("line-{n}\n").into_bytes()))
+            .collect(),
+        vec![JobChunk::Stdout(b"done\n".to_vec()), JobChunk::Exited(0)],
+    ]);
+    let (_dir, sub) = built(
+        &format!(
+            "neotmux.opt.job_output_bytes = 16\n{}",
+            streaming(STREAM_EXIT)
+        ),
+        Rc::clone(&runner),
+    );
+
+    keys(&sub, &["J"]);
+    frame(&sub);
+    assert_eq!(
+        logged(&sub),
+        vec!["out=[line-0|line-1|line-2|line-3|line-4|line-5|line-6|line-7]"],
+        "the job was cut off for output it had already been handed"
+    );
+
+    frame(&sub);
+    assert_eq!(logged(&sub), vec!["out=[done]", "exit code=0 err=nil"]);
+    assert!(!*runner.killed.borrow(), "the job was killed");
+}
+
+/// What the limit does bound in streaming mode is the fragment nobody can be handed: a program
+/// that says more than the limit without ever ending a line is a program the host would have to
+/// hold all of.
+#[test]
+fn a_streaming_job_that_holds_a_fragment_past_the_limit_is_killed() {
+    let runner = FakeRunner::new();
+    runner.will_say(vec![vec![JobChunk::Stdout(vec![b'x'; 64])]]);
+    let (_dir, sub) = built(
+        &format!(
+            "neotmux.opt.job_output_bytes = 16\n{}",
+            streaming(STREAM_EXIT)
+        ),
+        Rc::clone(&runner),
+    );
+
+    keys(&sub, &["J"]);
+    frame(&sub);
+    let said = logged(&sub);
+    assert!(
+        said.iter()
+            .any(|line| line == "exit code=nil err=output limit"),
+        "{said:?}"
+    );
+    assert!(*runner.killed.borrow(), "the job was not killed");
+}
+
+/// A program that ends its lines the DOS way means the same lines as one that does not, and a
+/// chunk boundary between the `\r` and the `\n` is still not a line boundary.
+#[test]
+fn a_carriage_return_before_the_break_belongs_to_the_break_across_chunks() {
+    let runner = FakeRunner::new();
+    runner.will_say(vec![
+        vec![JobChunk::Stdout(b"alpha\r".to_vec())],
+        vec![JobChunk::Stdout(b"\nbravo\r\n".to_vec())],
+        vec![JobChunk::Exited(0)],
+    ]);
+    let (_dir, sub) = built(&streaming(STREAM_EXIT), Rc::clone(&runner));
+
+    keys(&sub, &["J"]);
+    frame(&sub);
+    assert!(
+        logged(&sub).is_empty(),
+        "a line whose break had not arrived was handed over anyway"
+    );
+
+    frame(&sub);
+    assert_eq!(logged(&sub), vec!["out=[alpha|bravo]"]);
+
+    frame(&sub);
+    assert_eq!(logged(&sub), vec!["exit code=0 err=nil"]);
+}
+
+/// The flush is what is left over, so output that ends on a break leaves nothing: an empty line
+/// at the end would be one the program never said. An empty line it did say is a line.
+#[test]
+fn output_that_ends_on_a_break_invents_no_last_line() {
+    let runner = FakeRunner::new();
+    runner.will_say(vec![
+        vec![JobChunk::Stdout(b"one\n\nthree\n".to_vec())],
+        vec![JobChunk::Exited(0)],
+    ]);
+    let (_dir, sub) = built(&streaming(STREAM_EXIT), Rc::clone(&runner));
+
+    keys(&sub, &["J"]);
+    frame(&sub);
+    assert_eq!(logged(&sub), vec!["out=[one||three]"]);
+
+    frame(&sub);
+    assert_eq!(
+        logged(&sub),
+        vec!["exit code=0 err=nil"],
+        "the flush made up a line out of nothing left over"
+    );
+}
+
+/// Standard error streams the same way standard output does, down to the last fragment: a
+/// plugin that reads a program's diagnostics as they come reads them as lines too.
+#[test]
+fn stderr_streams_in_lines_and_flushes_what_is_left() {
+    let runner = FakeRunner::new();
+    runner.will_say(vec![
+        vec![JobChunk::Stderr(b"warn one\nwarn tw".to_vec())],
+        vec![JobChunk::Stderr(b"o".to_vec()), JobChunk::Exited(1)],
+    ]);
+    let (_dir, sub) = built(&streaming(STREAM_EXIT), Rc::clone(&runner));
+
+    keys(&sub, &["J"]);
+    frame(&sub);
+    assert_eq!(logged(&sub), vec!["err=[warn one]"]);
+
+    frame(&sub);
+    assert_eq!(logged(&sub), vec!["err=[warn two]", "exit code=1 err=nil"]);
+}
+
+/// A job that never got as far as exiting still ends, once: the runner's failure is the
+/// ending, and `on_exit` is where a plugin hears about it.
+#[test]
+fn a_job_that_failed_calls_on_exit_once() {
+    let runner = FakeRunner::new();
+    runner.will_say(vec![vec![JobChunk::Failed("the pipe broke".to_string())]]);
+    let (_dir, sub) = built(
+        &on_key(
+            "    neotmux.job.start({ 'echo' }, {\n\
+                   on_exit = function(code, out, errout, err)\n\
+                     neotmux.log.info('exit code=' .. tostring(code)\n\
+                       .. ' err=' .. tostring(err))\n\
+                   end,\n\
+                 })",
+        ),
+        Rc::clone(&runner),
+    );
+
+    keys(&sub, &["J"]);
+    frame(&sub);
+    assert_eq!(
+        logged(&sub),
+        vec!["exit code=nil err=the pipe broke"],
+        "a failed job did not end exactly once"
+    );
+
+    frame(&sub);
+    assert!(logged(&sub).is_empty(), "a failed job ended twice");
 }
