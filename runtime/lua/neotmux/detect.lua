@@ -22,7 +22,7 @@
 --
 -- A ruleset may carry one field of its own beside its rules:
 --
---   claims = function(info) return info.command == 'claude' end
+--   claims = function(info) return not shells[info.command] end
 --
 -- asked with `neotmux.pane.info(pane)` before any rule runs. A ruleset that answers false is
 -- skipped whole and the pane falls through to whatever `neotmux.state` does with a pane nobody
@@ -47,6 +47,11 @@
 -- `view.lines`, and the whole view is kept until the screen moves — so a rule that does
 -- `table.remove(view.lines)` to ignore the last line corrupts every region for every rule
 -- below it, and keeps corrupting them until the pane is fed again. Copy before you cut.
+--
+-- `view.title` is the one region that is not read off the screen, and the one that can be a
+-- lie: a terminal keeps the last title it was given, and the program that gave it is long
+-- gone. `of` blanks it for a pane whose command has changed since — see `titled` below — so a
+-- rule may read it as what is running now rather than as what ran once.
 --
 -- The shape is herdr's (herdrdev/herdr, Apache-2.0): a rule with a priority, a state and the
 -- screen regions it reads is `src/detect/manifests/*.toml`, and the hold below — a fall to
@@ -278,11 +283,59 @@ end
 local seen = {}
 local held = {}
 
--- Both of them: this is the call for "start over on this pane", and a forget that dropped the
+-- And the title each pane was last seen wearing, against the program that was running when it
+-- was. A terminal keeps the last title it was given forever, so a title is the only thing on a
+-- pane that can outlive the program that wrote it — which is why a title rule, alone among
+-- rules, can answer out of a screen nobody is looking at any more.
+local titled = {}
+
+-- All three: this is the call for "start over on this pane", and a forget that dropped the
 -- look but kept the hold would answer the next question out of a screen it had not read.
 function M.forget(pane)
   seen[pane] = nil
   held[pane] = nil
+  titled[pane] = nil
+end
+
+-- What the pane is running, or nil for a pane nothing can be read about. `pane.info` answers
+-- nil rather than raising today; the pcall is for the day it does not.
+local function command_of(pane)
+  local ok, info = pcall(neotmux.pane.info, pane)
+  if not ok or info == nil then
+    return nil
+  end
+  return info.command
+end
+
+-- Whether the title on this pane is still the title of the program that is running on it.
+--
+-- A program sets the title and then exits; the next program inherits it and mostly never sets
+-- one of its own. So a pane that ran Claude Code and now runs `less` wears `✳ …`, and
+-- `osc_title_idle` would answer `idle` for it until the end of the session — the pane reads
+-- done when it is a pager, and a question underneath it goes unheard. That is the same fault
+-- `claims` was built to fix, back for every program that is not a shell.
+--
+-- The test is the title against the program it was first seen under: the same title under a
+-- different command is a title nobody has refreshed, and is treated as no title at all until
+-- the program writes one. The stored command is deliberately not updated while the title is
+-- stale, so it stays stale rather than being adopted by whatever is running one look later.
+--
+-- It cannot see a program that sets the very same title its predecessor did, and it is judged
+-- against a `pane.info` up to the host's 250 ms old — the same window `claims` is judged in, and
+-- for the same reason: both are read once per revision, and a program that has just started
+-- prints something.
+local function title_is_the_running_program(pane, title)
+  local command = command_of(pane)
+  local was = titled[pane]
+  if was == nil or was.title ~= title then
+    titled[pane] = { title = title, command = command }
+    return true
+  end
+  if was.command == nil then
+    was.command = command
+    return true
+  end
+  return command == nil or command == was.command
 end
 
 -- `pairs` does not walk a table the same way twice, and two rulesets that both answer would
@@ -339,14 +392,16 @@ end
 function M.of(pane)
   local revision = neotmux.pane.revision(pane)
   if revision == nil then
-    seen[pane] = nil
-    held[pane] = nil
+    M.forget(pane)
     return nil
   end
   local it = seen[pane]
   if it == nil or it.revision ~= revision then
     it = { revision = revision, view = M.view(pane) }
     if it.view ~= nil then
+      if not title_is_the_running_program(pane, it.view.title) then
+        it.view.title = ""
+      end
       for _, name in ipairs(names()) do
         local rules = M.agents[name]
         if M.claimed(name, rules, pane) then

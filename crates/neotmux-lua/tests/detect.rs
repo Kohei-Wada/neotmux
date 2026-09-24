@@ -604,11 +604,19 @@ fn a_generic_permission_prompt_is_blocked() {
     assert_detects(&screen, "", "blocked", "generic_permission_prompt");
 }
 
-/// The backstop: words that read as a question left standing. Written from the manifest.
+/// The backstop: words that read as a question left standing. Written from the manifest, with
+/// the rule Claude Code draws above anything it asks about — the backstop wants one now, because
+/// the words alone are on every page of prose that talks about prompts.
 #[test]
 fn a_screen_waiting_for_permission_is_blocked() {
-    let screen = "Waiting for permission to continue\n";
-    assert_detects(screen, "", "blocked", "legacy_no_prompt_blocker");
+    let screen = format!("{BAR}\nWaiting for permission to continue\n");
+    assert_detects(&screen, "", "blocked", "legacy_no_prompt_blocker");
+}
+
+/// And the same words with nothing drawn around them are a page of prose.
+#[test]
+fn the_words_without_a_dialog_around_them_are_not_a_question() {
+    assert_detects("Waiting for permission to continue\n", "", "nil", "nil");
 }
 
 /// Captured: a Write approval, and the reason the backstop is not a leftover. It asks
@@ -657,4 +665,45 @@ fn an_idle_title_is_idle() {
         "idle",
         "osc_title_idle",
     );
+}
+
+/// A bullet is not a spinner. `*` and `·` really are two of Claude Code's frames — the captured
+/// `* Actioning… (3s · ↓ 16 tokens)` above is one — but they are also how every markdown list
+/// and every `git log --graph` edge begins, and this ruleset is now asked about every pane that
+/// is not a shell. `live_turn_working` answers at 970, above both permission rules, so a bullet
+/// that read as working would hide a real question underneath it. What tells the two apart is
+/// the clock Claude draws with the verb, which prose does not have.
+#[test]
+fn a_bullet_with_an_ellipsis_is_not_a_running_turn() {
+    let screen = "* Installing dependencies…\n\
+                  · Resolving versions…\n\
+                  * Linking…\n";
+    assert_detects(screen, "", "nil", "nil");
+}
+
+/// And the frame that is one, kept: the same glyph with the timer Claude Code puts after it.
+#[test]
+fn an_ascii_spinner_frame_with_its_timer_is_a_running_turn() {
+    assert_detects(
+        "* Actioning… (3s · ↓ 16 tokens)\n",
+        "",
+        "working",
+        "live_turn_working",
+    );
+}
+
+/// The backstop reads the region below the last rule and wants an answer it could pick, not the
+/// word "yes" somewhere on a screen. This is this repository's own ruleset in a pager — the
+/// phrase and the word are both on it, several times, and a pane showing source code is a pane
+/// showing source code.
+#[test]
+fn source_code_that_talks_about_prompts_is_not_a_prompt() {
+    let screen = "      local answerable = holds(lines, \"yes\") or holds(lines, \"❯\")\n\
+                  \x20     if answerable and (holds(lines, \"do you want to\")) then\n\
+                  \x20       return true\n\
+                  \x20     end\n\
+                  \x20     return holds_any(lines, {\n\
+                  \x20       \"waiting for permission\",\n\
+                  \x20     })\n";
+    assert_detects(screen, "", "nil", "nil");
 }

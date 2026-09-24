@@ -13,8 +13,11 @@ Claude Code, six of them checked against screens captured off a real one. A fall
 to idle is held for a moment unless the screen says idle in so many words, because the gap
 between two frames of a spinner is a screen that means "busy" and a notification fired on that
 blink is why this kind of detector gets turned off. `state.of` asks the detector first and
-keeps the pattern list for the panes no ruleset claims — a shell, or a program nobody has
-written rules for yet.
+keeps the pattern list for a pane no ruleset claims and for one whose rules all had nothing to
+say — a shell at a prompt, a pager, a build. A ruleset says which panes are its through
+`claims(info)`; the shipped one names the shells and speaks for everything else, because the
+command a pane reports for an agent is whatever you launched it through, and `claude` under
+`systemd-inhibit` or `npx` is still Claude Code.
 
 What the detector is for is `plugin.chime`, on by default: a sound when a pane you are not
 looking at starts waiting for you, and another when it stops working. One sound per entry into

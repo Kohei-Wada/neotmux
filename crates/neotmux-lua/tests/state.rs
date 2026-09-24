@@ -175,3 +175,45 @@ fn a_pane_running_the_agent_under_a_wrapper_is_still_claimed() {
         "a wrapped Claude Code was declined, and with it the whole detector"
     );
 }
+
+/// The other end of the same thread: claiming by default means a pane that ran Claude Code and
+/// then ran something that is not a shell — `less`, `python`, a script — is claimed too, and it
+/// is still wearing the `✳ ` title Claude left in the terminal. Nothing resets a title, so
+/// `osc_title_idle` would answer `idle` for that pane until the session ended: a pager reading
+/// done, and the question underneath it never heard.
+///
+/// So a title counts only while the program that set it is the program that is running.
+/// `neotmux.detect` blanks it when the pane's command has changed since the title was last
+/// seen, which puts this pane back where it belongs — the pattern fallback, and `[y/N]`.
+#[test]
+fn a_pane_that_ran_an_agent_and_now_runs_a_pager_is_not_answered_by_the_title_it_kept() {
+    let (_dir, sub) = built(
+        "local state = require('neotmux.state')\n\
+         neotmux.on_key(function(key)\n\
+           if key == 'J' then\n\
+             neotmux.log.info('of=' .. tostring(state.of(1)))\n\
+             return true\n\
+           end\n\
+           return false\n\
+         end)\n",
+    );
+    feed(&sub, "\x1b]2;\u{2733} hostname の確認\x07".as_bytes());
+
+    running(&sub, "claude");
+    keys(&sub, &["J"]);
+    assert!(
+        logged(&sub).iter().any(|l| l == "of=idle"),
+        "the title rule stopped answering for a pane that is running Claude Code"
+    );
+
+    // Claude is gone and a pager has the pane. The title is untouched — a terminal keeps it —
+    // so this writes into the same terminal rather than opening a fresh one.
+    running(&sub, "less");
+    sub.terminals()
+        .feed(pane(), b"\r\nOverwrite existing file? [y/N] ");
+    keys(&sub, &["J"]);
+    assert!(
+        logged(&sub).iter().any(|l| l == "of=blocked"),
+        "a pager asking a question read as an idle agent, off a title nobody reset"
+    );
+}

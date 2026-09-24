@@ -17,16 +17,30 @@
 
 -- Codepoints, not a pattern class: `✳` is three bytes, and `[✳✶✻]` is a class of those bytes
 -- taken singly, which matches a byte of nearly every other symbol on the screen.
+--
+-- Split in two because the ruleset is now asked about every pane that is not a shell, and half
+-- of these characters belong to everyone. `✳ ✶ ✻ ✽ ✢` are typographic asterisks nobody types by
+-- accident; `*` and `·` are a markdown bullet, a `git log --graph` edge and a separator in
+-- half the prose on disk. A frame is a frame either way — `* Actioning… (3s · ↓ 16 tokens)` is
+-- captured off a real Claude Code and lives in `tests/support/mod.rs` — so the ambiguous two
+-- are kept and made to show the timer Claude draws with them instead.
 local SPINNER = {
-  [0x2a] = true, -- *
-  [0xb7] = true, -- ·
   [0x2722] = true, -- ✢
   [0x2733] = true, -- ✳
   [0x2736] = true, -- ✶
   [0x273b] = true, -- ✻
   [0x273d] = true, -- ✽
 }
+local AMBIGUOUS = {
+  [0x2a] = true, -- *
+  [0xb7] = true, -- ·
+}
+
+-- The elapsed-time counter Claude Code puts after the verb: `(3s · ↓ 16 tokens)`. A bullet in a
+-- document has a sentence there, not a clock.
+local TIMER = "%(%d+s"
 local PAUSE, PLAY = 0x23f8, 0x23f5 -- ⏸ ⏵
+local RULE = 0x2500 -- ─
 local CHEVRON = 0x276f -- ❯
 local STAR = 0x2733 -- ✳
 local ELLIPSIS = "\u{2026}" -- …
@@ -185,6 +199,11 @@ local claude = {
   -- line with its trailing ellipsis. The ellipsis is the whole of it — Claude Code leaves the
   -- *finished* turn on the screen under the same glyph (`✻ Cogitated for 6s · done 9:01 PM`),
   -- so a rule that fired on the glyph alone would read every idle screen as working.
+  --
+  -- This one answers `working` at 970, above both permission rules, so a screen it reads wrong
+  -- is a pane waiting for you that nothing says anything about. That is what the timer on the
+  -- ambiguous frames is for: `* Installing dependencies…` in a pager is a bullet, and a bullet
+  -- must not be able to hide a question.
   {
     id = "live_turn_working",
     state = "working",
@@ -199,7 +218,13 @@ local claude = {
         if (ink == PAUSE or ink == PLAY) and line:find("esc to interrupt", 1, true) then
           return true
         end
-        return SPINNER[ink] ~= nil and line:find(ELLIPSIS, 1, true) ~= nil
+        if line:find(ELLIPSIS, 1, true) == nil then
+          return false
+        end
+        if SPINNER[ink] then
+          return true
+        end
+        return AMBIGUOUS[ink] ~= nil and line:find(TIMER) ~= nil
       end)
     end,
   },
@@ -298,16 +323,41 @@ local claude = {
   -- the rule above does not know. No `visible`, because what it has found is words rather than a
   -- prompt it can point at — a screen this is the best anyone can say about is not evidence
   -- enough to release the hold above it.
+  --
+  -- It used to read `view.lines`, the whole screen, and ask only whether the word "yes" was
+  -- somewhere on it. That was survivable while a pane had to be running `claude` by name; it is
+  -- not survivable now that every pane that is not a shell is claimed, because seven files in
+  -- this repository hold the phrase "do you want to" and the word "yes", and opening any of
+  -- them would have chimed. So: the region is what is below the last rule, like its two
+  -- neighbours, and the evidence is an answer you could *pick* — `❯ 1. Yes`, `  2. No` — rather
+  -- than the word "yes" anywhere at all. Source code does not draw option lists.
+  --
+  -- The screen is still read whole for the one thing that makes this rule stand down, an empty
+  -- prompt box, because a guard that only ever suppresses can afford to look everywhere.
+  --
+  -- And the screen has to have drawn a rule at all. `view.after_rule()` answers the whole screen
+  -- when there is none, which is the right answer for the regions — but for the loosest rule in
+  -- the set it means "every line of a pager" all over again. Claude Code draws a `─` above
+  -- everything it asks about, including the Write approval this rule exists for; prose in a
+  -- pager does not. The stricter rules above can skip this, and one of them has to: the captured
+  -- trust dialog draws no rule and `live_blocked_form` is what catches it.
   {
     id = "legacy_no_prompt_blocker",
     state = "blocked",
     priority = 300,
     match = function(view)
-      local lines = lower(view.lines)
-      if any_line(lines, is_bare_prompt) then
+      if any_line(lower(view.lines), is_bare_prompt) then
         return false
       end
-      local answerable = holds(lines, "yes") or holds(lines, "\u{276f}")
+      if not any_line(view.lines, function(line)
+        return first_ink(line) == RULE
+      end) then
+        return false
+      end
+      local lines = lower(view.after_rule())
+      local answerable = any_line(lines, function(line)
+        return is_option(line, false)
+      end)
       if answerable and (holds(lines, "do you want to") or holds(lines, "would you like to")) then
         return true
       end

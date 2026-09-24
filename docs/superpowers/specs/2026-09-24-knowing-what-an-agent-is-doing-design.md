@@ -155,9 +155,27 @@ changed in decades. The set of ways to launch an agent is neither: a pane's fore
 group leader is whatever the user's own shell function put in front of it, `systemd-inhibit`,
 `env`, `nohup`, `sudo`, `npx`, and there is no enumerating that. An allow-list of `claude` and
 `node` is therefore not a narrower detector but a dead one for everybody who wraps the command
-— the ruleset never runs at all. A deny-list of shells errs the other way: at worst the ruleset
-is asked about a pane running `vim`, where no rule of its matches and the pane falls through to
-§4's fallback exactly as if it had declined. It keeps the one edge it was written for, because
+— the ruleset never runs at all. A deny-list of shells errs the other way: the ruleset is asked
+about `vim`, `less`, `make`, everything. That is not free, and it is not a detail of the seam —
+it is a bill the *rules* pay. A rule written for a world where a pane had to be claimed by name
+could read the whole screen for a word, or trust a glyph, or trust a title, because only Claude
+Code was ever going to be on the other end. None of those hold now:
+
+- a spinner frame that is also a markdown bullet (`*`, `·`) reads every bullet list as a running
+  turn, and at priority 970 that *hides* the `blocked` below it — silence exactly where the
+  feature is supposed to speak. The frames Claude shares with prose have to show the timer it
+  draws with them (`(3s · ↓ 16 tokens)`);
+- the backstop that reads the whole screen for "do you want to" and "yes" fires on seven files
+  in this repository. It reads what is below the last rule the screen drew, wants an answer that
+  could be *picked* rather than the word, and wants the screen to have drawn a rule at all;
+- a title outlives the program that set it — a terminal keeps the last one forever — so
+  a pane that ran Claude and now runs `less` wears `✳ ` and reads `idle` for good. A title
+  counts only while the command that was running when it was last seen is still running; see
+  §3.2b.
+
+With those three, a pane the ruleset has no business answering for falls through to §4's
+fallback exactly as if it had declined — which is what the deny-list needs to be true, and is
+now made true by the rules rather than assumed. It keeps the one edge it was written for, because
 quitting Claude Code puts the shell's own name back in `comm` — the edge measured on 2026-09-24
 against v2.1.281, which installs as a native ELF, so `comm` reads `claude` and the allow-list
 looked sufficient.
@@ -168,6 +186,25 @@ the next byte moves the revision. `pane.info` is itself published on the host's 
 (§2 of `paneinfo.rs`), so even a fresh revision can be judged against a command that old. Both
 windows are a fraction of a second, and the transition this exists for — an agent quitting —
 redraws a prompt on its way out.
+
+### 3.2b A title is evidence only while its program is running
+
+`view.title` is the one thing a rule reads that is not on the screen, and the one that can be a
+lie: a terminal keeps the last title it was given, and `neotmux-term` is no exception, so a pane
+that ran Claude Code wears `✳ …` through every program that follows. While a ruleset had to
+claim a pane by name this cost nothing — the pane stopped being claimed the moment the agent
+quit. With claiming on by default it is §3.2a's Critical again, once per program.
+
+So `detect.of` remembers, per pane, the title it last saw and the command that was running when
+it saw it. A title unchanged under a command that has changed is a title nobody has refreshed:
+the view's title is blanked until a program writes a new one, and the stored command is
+deliberately *not* updated, so the title stays disowned rather than being adopted by whatever
+started next. Rules are unchanged and need no knowledge of this; a title rule simply stops
+answering for a pane that is plainly doing something else.
+
+It cannot catch a program that sets the very same title its predecessor did, and it reads
+`pane.info` on the same 250 ms cadence §3.2a does — both are judged once per revision, and a
+program that has just started prints something.
 
 ### 3.3 The hold
 
@@ -190,13 +227,13 @@ Ported from `claude.toml`, keeping its priorities so the order is comparable:
 | 1000 | `transcript_viewer` | — | "showing detailed transcript" and a hint line: not a state |
 | 980 | `live_blocked_form` | blocked | after the last rule: "esc to cancel" with "enter to confirm"/"enter to select" |
 | 975 | `btw_overlay_working` | working | the last five lines hold `/btw` or "esc to close" |
-| 970 | `live_turn_working` | working | `⏸`/`⏵` with "esc to interrupt", or a spinner glyph with `…` |
+| 970 | `live_turn_working` | working | `⏸`/`⏵` with "esc to interrupt", or a spinner glyph with `…` — and, for the frames prose also uses (`*`, `·`), the timer beside it |
 | 950 | `live_prompt_box` | idle | the prompt box holds `❯` and no menu hints |
 | 900 | `model_picker_menu` | — | "select model" + "enter to set as default": not a state |
 | 850 | `bash_permission_prompt` | blocked | "do you want to proceed?" plus a Bash tell and a yes/no option line |
 | 840 | `generic_permission_prompt` | blocked | the same, after the last rule, without the Bash tell |
-| 300 | `legacy_no_prompt_blocker` | blocked | the older shapes: "do you want to", "waiting for permission", … |
-| 250 | `osc_title_idle` | idle | the title starts with `✳` |
+| 300 | `legacy_no_prompt_blocker` | blocked | the older shapes: "do you want to", "waiting for permission", … — below the last rule, beside an option line, on a screen that drew a rule |
+| 250 | `osc_title_idle` | idle | the title starts with `✳` — and is still the running program's (§3.2b) |
 
 Rules that read the title are worth more than rules that read the screen, which is why they
 bracket the table. A pane whose title Claude never set falls through to the screen rules, which

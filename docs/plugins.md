@@ -1881,10 +1881,25 @@ state.working_for = 2000    -- ms after a pane last said something that the fall
 The guess itself lives in `neotmux.detect`, which reads a pane's screen by rules rather than by
 pattern, and knows a program's own idea of running from the blink of a spinner between two of its
 lines. `state.of` asks it first and returns its answer when it has one. The pattern list above,
-and `working_for`, are what a pane no ruleset in `neotmux.detect.agents` claims falls back to — a
-shell, or a program nobody has written a ruleset for yet. Writing one is a file in
+and `working_for`, are what a pane no ruleset in `neotmux.detect.agents` claims falls back to, and
+what answers when every ruleset that did claim it had nothing to say about what is on its screen
+— a shell at a prompt, a pager, `make` halfway through a build. Writing a ruleset is a file in
 `neotmux/agents/*.lua` and a line in `neotmux.detect.agents`; the shipped one, `claude`, is that
 file's own model.
+
+Which panes a ruleset speaks for is the ruleset's own answer, through an optional `claims(info)`
+asked with `neotmux.pane.info`. The shipped one names the shells and speaks for everything else:
+
+```lua
+require('neotmux.agents.claude').shells.osh = true   -- one more shell to stay out of
+require('neotmux.agents.claude').shells.fish = nil   -- and one fewer
+```
+
+That way round because a shell is one of a dozen programs with names that have not changed in
+decades, while the command a pane reports for an agent is whatever you launch it through —
+`systemd-inhibit`, `env`, `nohup`, `npx`, a function in your `~/.bashrc`. A pane running a shell
+is declined so that the title an agent left behind stops answering for the prompt you go on
+using; everything else is claimed and judged on what is drawn.
 
 The expensive half — reading the pane's text — happens only for a pane whose revision has moved
 since it was last asked about, so a session nobody is typing into costs one stamp per pane per
