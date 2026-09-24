@@ -17,7 +17,9 @@
 --   })
 --
 -- One list is open at a time: opening another closes the first, the same as `neotmux.prompt`.
--- A stack of lists has no consumer here.
+-- A stack of lists has no consumer here. `on_key` and `on_tick` are armed the first time a
+-- list opens, the way `neotmux.guard` arms itself — a layer that requires this file and never
+-- opens a list holds no subscription for it.
 local modes = require("neotmux.mode")
 local box = require("neotmux.box")
 
@@ -31,10 +33,13 @@ M.colors = {
   hint = "#585b70", -- surface2
 }
 
--- The state of the one list that may be open, and nil the rest of the time.
+-- The state of the one list that may be open, and nil the rest of the time. `state.generation`
+-- names which `open()` this state belongs to, so a handle from an earlier open can tell that
+-- the list it names is gone even once a later one is up in its place — see `bound`.
 local state = nil
 local win = nil
 local mode_handle = nil
+local generation = 0
 
 -- Where the panes are, in surface coordinates, as of the last tick: the list is centred over
 -- them rather than over the terminal, so it does not sit on the status bar or a sidebar. It is
@@ -127,7 +132,7 @@ M.commands = {
   ["choose"] = function()
     local item = state.items[state.at]
     if item and state.opts.done then
-      state.opts.done(item, M.handle)
+      state.opts.done(item, state.handle)
     end
   end,
   ["cancel"] = function()
@@ -141,7 +146,7 @@ M.commands = {
 
 -- `ask`'s own keys: every printable character, and three that are not. Filtering does not
 -- come through here — it stays live under the ordinary keys below, since a filtered list is
--- still a list a person moves the cursor in.
+-- still a list a person moves the cursor in (with `C-j`/`C-k`; see the key handler).
 local function typing(key)
   local input = state.input
   if key == "Esc" then
@@ -158,7 +163,12 @@ local function typing(key)
   elseif key == "BS" or key == "Backspace" then
     input.value = input.value:sub(1, -2)
   elseif utf8.len(key) == 1 then
-    input.value = input.value .. key
+    -- `accept`, when given, is asked before the character joins the buffer: the picker's
+    -- refusal of a leading `-` is "no" here and nowhere else, since this is the one place a
+    -- character is ever added to it.
+    if not input.accept or input.accept(key, input.value) then
+      input.value = input.value .. key
+    end
   end
 end
 
@@ -173,10 +183,211 @@ local function wanted()
   return { x = x, y = y, w = w, h = h }
 end
 
+local registered = false
+
+local function arm()
+  if registered then
+    return
+  end
+  registered = true
+
+  neotmux.on_key(function(key)
+    if state == nil then
+      return false
+    end
+    if state.input then
+      typing(key)
+      return true
+    end
+    refresh()
+    if key == "Enter" then
+      M.commands.choose()
+      return true
+    end
+    if key == "Esc" then
+      M.commands.cancel()
+      return true
+    end
+    local extra = state.opts.keys[key]
+    if extra then
+      extra(state.items[state.at], state.handle)
+      return true
+    end
+    if state.opts.filter then
+      -- A filtered list is typed into rather than moved through by letter: `j` and `k` are
+      -- characters a query may hold, so movement while filtering is `C-j`/`C-k` instead —
+      -- nothing above claims those, and nothing here changes what a filter-less list does
+      -- with a plain `j`/`k`.
+      if key == "C-j" then
+        M.commands.down()
+        return true
+      end
+      if key == "C-k" then
+        M.commands.up()
+        return true
+      end
+      if key == "BS" or key == "Backspace" then
+        state.query = state.query:sub(1, -2)
+      elseif utf8.len(key) == 1 then
+        state.query = state.query .. key
+      end
+      return true
+    end
+    local vim = M.keys[key]
+    local command = vim and M.commands[vim]
+    if command then
+      command()
+    end
+    -- A key nothing above claims is swallowed while a list is up: a list that let it through
+    -- would type into the pane behind it.
+    return true
+  end)
+
+  neotmux.on_tick(function(ctx)
+    local left, top, right, bottom
+    for _, pane in ipairs(neotmux.pane.list()) do
+      local r = ctx:pane_rect(pane)
+      if r then
+        left = math.min(left or r.x, r.x)
+        top = math.min(top or r.y, r.y)
+        right = math.max(right or (r.x + r.w), r.x + r.w)
+        bottom = math.max(bottom or (r.y + r.h), r.y + r.h)
+      end
+    end
+    if left then
+      area = { x = left, y = top, w = right - left, h = bottom - top }
+    end
+
+    if state == nil or win == nil then
+      return
+    end
+    refresh()
+    local rect = ctx:float_rect(win)
+    if rect == nil then
+      return
+    end
+    local want = wanted()
+    if rect.w ~= want.w or rect.h ~= want.h then
+      win:resize_to(want.w, want.h)
+    end
+    if rect.x ~= want.x or rect.y ~= want.y then
+      win:move_to(want.x, want.y)
+    end
+    local inner = box.draw(ctx, win, rect, { title = state.opts.title, bg = M.colors.frame })
+
+    local room = inner.h - 1
+    state.first = window_over(#state.items, room, state.at)
+    for slot = 0, math.min(#state.items, room) - 1 do
+      local at = state.first + slot
+      local item = state.items[at]
+      local row = inner.y + slot
+      local chosen = at == state.at
+      local background = chosen and M.colors.cursor or M.colors.frame
+      if chosen then
+        ctx:rect(win, inner.x, row, inner.w, 1, { bg = M.colors.cursor })
+      end
+      local runs = state.opts.row(item, chosen) or {}
+      draw_runs(ctx, win, inner.x, row, inner.w, runs, background)
+    end
+
+    local last = inner.y + inner.h - 1
+    if state.input then
+      local label = (state.input.label and state.input.label .. "  ") or ""
+      ctx:text(win, inner.x, last, label .. state.input.value, {
+        fg = M.colors.text,
+        bg = M.colors.frame,
+      })
+      -- The caret, drawn rather than placed: the terminal's own cursor belongs to the focused
+      -- pane, and a float cannot take it.
+      ctx:rect(
+        win,
+        inner.x + neotmux.width(label) + neotmux.width(state.input.value),
+        last,
+        1,
+        1,
+        { bg = M.colors.caret }
+      )
+    elseif state.opts.filter then
+      ctx:text(win, inner.x, last, "/ " .. (state.query or ""), {
+        fg = M.colors.text,
+        bg = M.colors.frame,
+      })
+      ctx:rect(
+        win,
+        inner.x + neotmux.width("/ " .. (state.query or "")),
+        last,
+        1,
+        1,
+        { bg = M.colors.caret }
+      )
+    elseif state.opts.footer then
+      local text = state.opts.footer()
+      if text then
+        ctx:text(win, inner.x, last, text, { fg = M.colors.hint, bg = M.colors.frame })
+      end
+    end
+  end)
+end
+
+-- `j`/`k` and nothing else: every mode neotmux ships moves with the vim four, so a hand that
+-- has learned one has learned all of them. `q` is with them here rather than beside `Esc` in
+-- the key handler, because a filtered list gives `q` back to the query text — the search is
+-- what the letter belongs to once there is one to type into.
+M.keys = {
+  ["j"] = "down",
+  ["k"] = "up",
+  ["q"] = "cancel",
+}
+
+-- Builds the handle for the list just opened, bound to `my_generation` so that a callback
+-- still holding it after a second list has opened over it finds nothing rather than reaching
+-- into whatever is there now. `close`, like every handle in this ABI, is idempotent — on a
+-- handle whose list is already gone, one way or another, it does nothing.
+local function handle_for(my_generation)
+  local function bound()
+    return state ~= nil and state.generation == my_generation
+  end
+
+  local handle = {}
+  function handle:close()
+    if bound() then
+      close()
+    end
+  end
+  function handle:selected()
+    if not bound() then
+      return nil
+    end
+    return state.items[state.at]
+  end
+  function handle:ask(ask_opts)
+    if not bound() then
+      return
+    end
+    state.input = {
+      label = ask_opts.label,
+      value = ask_opts.value or "",
+      done = ask_opts.done,
+      cancel = ask_opts.cancel,
+      accept = ask_opts.accept,
+    }
+  end
+  function handle:query()
+    if not bound() then
+      return nil
+    end
+    return state.query
+  end
+  return handle
+end
+
 -- Opens a list, closing one already up. See the module header for the shape of `opts`.
 function M.open(opts)
   close()
+  generation = generation + 1
+  local my_generation = generation
   state = {
+    generation = my_generation,
     at = 1,
     items = {},
     first = 1,
@@ -196,180 +407,18 @@ function M.open(opts)
     },
   }
   refresh()
-  local handle = neotmux.float(wanted())
-  if not handle then
+  local float = neotmux.float(wanted())
+  if not float then
     state = nil
     return nil
   end
-  win = handle
+  win = float
   mode_handle = modes.raise(opts.mode or "list")
 
-  M.handle = {}
-  function M.handle:close()
-    close()
-  end
-  function M.handle:selected()
-    if state == nil then
-      return nil
-    end
-    return state.items[state.at]
-  end
-  function M.handle:ask(ask_opts)
-    if state == nil then
-      return
-    end
-    state.input = {
-      label = ask_opts.label,
-      value = ask_opts.value or "",
-      done = ask_opts.done,
-      cancel = ask_opts.cancel,
-    }
-  end
-  function M.handle:query()
-    if state == nil then
-      return nil
-    end
-    return state.query
-  end
-
-  return M.handle
+  local handle = handle_for(my_generation)
+  state.handle = handle
+  arm()
+  return handle
 end
-
--- `j`/`k` and nothing else: every mode neotmux ships moves with the vim four, so a hand that
--- has learned one has learned all of them. `q` is with them here rather than beside `Esc` in
--- the handler below, because a filtered list gives `q` back to the query text — the search
--- is what the letter belongs to once there is one to type into.
-M.keys = {
-  ["j"] = "down",
-  ["k"] = "up",
-  ["q"] = "cancel",
-}
-
-neotmux.on_key(function(key)
-  if state == nil then
-    return false
-  end
-  if state.input then
-    typing(key)
-    return true
-  end
-  refresh()
-  if key == "Enter" then
-    M.commands.choose()
-    return true
-  end
-  if key == "Esc" then
-    M.commands.cancel()
-    return true
-  end
-  local extra = state.opts.keys[key]
-  if extra then
-    extra(state.items[state.at], M.handle)
-    return true
-  end
-  if state.opts.filter then
-    -- A filtered list is typed into rather than moved through: `j` and `k` are letters a
-    -- query may hold, not commands, so only Enter and Esc stay reserved above.
-    if key == "BS" or key == "Backspace" then
-      state.query = state.query:sub(1, -2)
-    elseif utf8.len(key) == 1 then
-      state.query = state.query .. key
-    end
-    return true
-  end
-  local vim = M.keys[key]
-  local command = vim and M.commands[vim]
-  if command then
-    command()
-  end
-  -- A key nothing above claims is swallowed while a list is up: a list that let it through
-  -- would type into the pane behind it.
-  return true
-end)
-
-neotmux.on_tick(function(ctx)
-  local left, top, right, bottom
-  for _, pane in ipairs(neotmux.pane.list()) do
-    local r = ctx:pane_rect(pane)
-    if r then
-      left = math.min(left or r.x, r.x)
-      top = math.min(top or r.y, r.y)
-      right = math.max(right or (r.x + r.w), r.x + r.w)
-      bottom = math.max(bottom or (r.y + r.h), r.y + r.h)
-    end
-  end
-  if left then
-    area = { x = left, y = top, w = right - left, h = bottom - top }
-  end
-
-  if state == nil or win == nil then
-    return
-  end
-  refresh()
-  local rect = ctx:float_rect(win)
-  if rect == nil then
-    return
-  end
-  local want = wanted()
-  if rect.w ~= want.w or rect.h ~= want.h then
-    win:resize_to(want.w, want.h)
-  end
-  if rect.x ~= want.x or rect.y ~= want.y then
-    win:move_to(want.x, want.y)
-  end
-  local inner = box.draw(ctx, win, rect, { title = state.opts.title, bg = M.colors.frame })
-
-  local room = inner.h - 1
-  state.first = window_over(#state.items, room, state.at)
-  for slot = 0, math.min(#state.items, room) - 1 do
-    local at = state.first + slot
-    local item = state.items[at]
-    local row = inner.y + slot
-    local chosen = at == state.at
-    local background = chosen and M.colors.cursor or M.colors.frame
-    if chosen then
-      ctx:rect(win, inner.x, row, inner.w, 1, { bg = M.colors.cursor })
-    end
-    local runs = state.opts.row(item, chosen) or {}
-    draw_runs(ctx, win, inner.x, row, inner.w, runs, background)
-  end
-
-  local last = inner.y + inner.h - 1
-  if state.input then
-    local label = (state.input.label and state.input.label .. "  ") or ""
-    ctx:text(win, inner.x, last, label .. state.input.value, {
-      fg = M.colors.text,
-      bg = M.colors.frame,
-    })
-    -- The caret, drawn rather than placed: the terminal's own cursor belongs to the focused
-    -- pane, and a float cannot take it.
-    ctx:rect(
-      win,
-      inner.x + neotmux.width(label) + neotmux.width(state.input.value),
-      last,
-      1,
-      1,
-      { bg = M.colors.caret }
-    )
-  elseif state.opts.filter then
-    ctx:text(win, inner.x, last, "/ " .. (state.query or ""), {
-      fg = M.colors.text,
-      bg = M.colors.frame,
-    })
-    ctx:rect(
-      win,
-      inner.x + neotmux.width("/ " .. (state.query or "")),
-      last,
-      1,
-      1,
-      { bg = M.colors.caret }
-    )
-  elseif state.opts.footer then
-    local text = state.opts.footer()
-    if text then
-      ctx:text(win, inner.x, last, text, { fg = M.colors.hint, bg = M.colors.frame })
-    end
-  end
-end)
 
 return M

@@ -250,15 +250,180 @@ end)
     assert!(said.iter().any(|line| line == "claimed=banana"), "{said:?}");
 }
 
-/// Unclaimed keys are swallowed: a list that let them through would type into the pane.
+/// Unclaimed keys are swallowed: a list that let them through would type into the pane. A
+/// stub that swallows every key forever would pass a weaker version of this test, so it also
+/// checks that the list is still up and drawing afterwards, and that the very same key stops
+/// being consumed once the list is actually gone.
 #[test]
 fn a_key_nobody_claimed_is_swallowed_while_a_list_is_up() {
     let (_dir, sub) = built(THREE);
     open_three(&sub);
     assert_eq!(sub.dispatch_key(support::one(), "z"), KeyOutcome::Consumed);
+    let said = texts(&frame(&sub));
+    assert!(
+        said.iter().any(|t| t.contains("apple")),
+        "the list stopped drawing after an unclaimed key: {said:?}"
+    );
+
     assert_eq!(
         sub.dispatch_key(support::one(), "C-x"),
         KeyOutcome::Consumed
+    );
+    assert!(
+        !frame(&sub).is_empty(),
+        "the list closed on an unclaimed key"
+    );
+
+    sub.dispatch_key(support::one(), "Esc");
+    assert_eq!(
+        sub.dispatch_key(support::one(), "z"),
+        KeyOutcome::Fallthrough,
+        "the same key was still consumed once the list was gone"
+    );
+}
+
+/// A handle from a list that has since been replaced is inert: `:selected()` answers nothing
+/// and `:close()` does nothing, rather than reading or tearing down whatever list is open now.
+/// The palette opens a second list from inside a callback of the first, so this is the
+/// ordinary case and not a corner of it.
+#[test]
+fn a_handle_from_a_replaced_list_is_inert() {
+    let (_dir, sub) = built(
+        "
+local list = require('neotmux.list')
+neotmux.on_key(function(key)
+  if key == 'o' then
+    list.open({
+      items = function() return { 'a' } end,
+      row = function(item) return { { text = item } } end,
+      done = function() end,
+      keys = {
+        ['n'] = function(item, handle)
+          -- Opens a second list on top of this one, then reaches for the first list's own
+          -- handle — the one this very callback was handed — after it no longer names
+          -- anything that is open.
+          list.open({
+            title = 'second',
+            items = function() return { 'b' } end,
+            row = function(item) return { { text = item } } end,
+            done = function() end,
+          })
+          neotmux.log.info('selected=' .. tostring(handle:selected()))
+          handle:close()
+        end,
+      },
+    })
+    return true
+  end
+  return false
+end)
+",
+    );
+    assert_eq!(sub.dispatch_key(support::one(), "o"), KeyOutcome::Consumed);
+    assert_eq!(sub.dispatch_key(support::one(), "n"), KeyOutcome::Consumed);
+    let said = logged(&sub);
+    assert!(
+        said.iter().any(|l| l == "selected=nil"),
+        "a stale handle still read the list that replaced it: {said:?}"
+    );
+    let drawn = texts(&frame(&sub));
+    assert!(
+        drawn.iter().any(|t| t.contains("second")),
+        "closing through the stale handle tore down the list that replaced it: {drawn:?}"
+    );
+    assert!(drawn.iter().any(|t| t == "b"), "{drawn:?}");
+}
+
+/// A filtered list is typed into rather than moved through by letter, so cursor movement while
+/// filtering is `C-j`/`C-k`: a plain `j` is a character the query may hold.
+#[test]
+fn a_filtered_list_moves_with_c_j_and_c_k_and_types_j_as_a_letter() {
+    let (_dir, sub) = built(
+        "
+local list = require('neotmux.list')
+neotmux.on_key(function(key)
+  if key == 'o' then
+    list.open({
+      items = function() return { 'jam', 'jar', 'cherry' } end,
+      row = function(item) return { { text = item } } end,
+      done = function(item) neotmux.log.info('chosen=' .. item) end,
+      filter = function(item, query) return item:find(query, 1, true) ~= nil end,
+    })
+    return true
+  end
+  return false
+end)
+",
+    );
+    assert_eq!(sub.dispatch_key(support::one(), "o"), KeyOutcome::Consumed);
+    assert_eq!(sub.dispatch_key(support::one(), "j"), KeyOutcome::Consumed);
+    let said = texts(&frame(&sub));
+    assert!(
+        said.iter().any(|t| t == "/ j"),
+        "`j` did not reach the query: {said:?}"
+    );
+    assert!(said.iter().any(|t| t == "jam"), "{said:?}");
+    assert!(said.iter().any(|t| t == "jar"), "{said:?}");
+    assert!(
+        !said.iter().any(|t| t == "cherry"),
+        "cherry survived a query it does not match: {said:?}"
+    );
+
+    assert_eq!(
+        sub.dispatch_key(support::one(), "C-j"),
+        KeyOutcome::Consumed
+    );
+    assert_eq!(
+        sub.dispatch_key(support::one(), "Enter"),
+        KeyOutcome::Consumed
+    );
+    let said = logged(&sub);
+    assert!(
+        said.iter().any(|l| l == "chosen=jar"),
+        "C-j did not move the cursor onto the second item: {said:?}"
+    );
+}
+
+/// `ask`'s `accept` is asked before a character joins the buffer: a leading `-` is refused and
+/// never appears, while the same character later in the string is accepted.
+#[test]
+fn asks_accept_hook_can_refuse_a_leading_character() {
+    let (_dir, sub) = built(
+        "
+local list = require('neotmux.list')
+neotmux.on_key(function(key)
+  if key == 'o' then
+    list.open({
+      items = function() return { 'apple' } end,
+      row = function(item) return { { text = item } } end,
+      done = function() end,
+      keys = {
+        ['a'] = function(item, handle)
+          handle:ask({
+            label = 'name',
+            accept = function(k, text)
+              if k == '-' and text == '' then
+                return false
+              end
+              return true
+            end,
+            done = function(text) neotmux.log.info('typed=' .. text) end,
+          })
+        end,
+      },
+    })
+    return true
+  end
+  return false
+end)
+",
+    );
+    assert_eq!(sub.dispatch_key(support::one(), "o"), KeyOutcome::Consumed);
+    keys(&sub, &["a", "-", "a", "-", "Enter"]);
+    let said = logged(&sub);
+    assert!(
+        said.iter().any(|l| l == "typed=a-"),
+        "a leading '-' was let through, or one later in the string was refused: {said:?}"
     );
 }
 
