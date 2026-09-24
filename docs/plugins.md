@@ -958,12 +958,25 @@ neotmux.job.start({ 'tail', '-F', '/var/log/syslog' }, {
 ```
 
 **`on_exit(code, stdout, stderr, err)` runs exactly once**, whatever ended the job. `code` is
-the exit status, or `nil` when the job did not get to exit on its own; `err` is `nil` for an
-ordinary exit and otherwise one word for what ended it — `killed` for your own `job:kill()`,
-`session ended`, `output limit`, `budget`. Exactly one of the four ways a job can end reaches
-you, and it reaches you once. The one exception is a job whose *source* went away — a chunk
-that failed to load, or a reload — where the job is killed and nothing is called: the function
-that would hear it is the thing that is gone.
+the exit status — 128 plus the signal for a program a signal ended — or `nil` when the job did
+not get to exit on its own; `err` is `nil` for an ordinary exit, one of four words for a job
+the host ended (`killed` for your own `job:kill()`, `session ended`, `output limit`, `budget`),
+and otherwise a one-line reason the host could not do better than quote, such as a pipe that
+broke while it was being read. Whichever it is, it reaches you once.
+
+Two things are not told, and both are the same reason — there is nobody left to tell. A job
+whose *source* went away, because its chunk failed to load or was reloaded, is killed in
+silence: the function that would hear it is the thing that is gone. And a server told to stop by a
+signal puts its sessions down without ending them one at a time, so nothing is called there
+either — the jobs are killed on the way out, but nothing hears about it.
+
+**The exit is reported only once both pipes have closed**, never when the program itself dies:
+the last of the output has to be in before the ending, and the pipe closing is the only thing
+that says it is. So a job whose program leaves a grandchild holding stdout open — a backgrounded
+daemon, something that escaped into a session of its own — is not reported as ended when its own
+program exits, and it holds its `job_concurrency` slot until the pipe finally closes. A `kill`
+reaches the job's whole process group, so the ordinary pipeline (`{ 'sh', '-c', 'a | b' }`) goes
+down together; what it does not reach is a process that put itself in another group.
 
 Two options bound what jobs may cost you, neither of them per job:
 
@@ -1218,6 +1231,13 @@ every single frame.
 Your key handlers and your event handlers are measured against the same 8 ms. An overrun there
 is cut off and logged and that is all — it does not count towards the five, because what the
 count buys back is a *tick* subscription and a key handler is not one.
+
+Your job and timer callbacks are measured against it too, and they are the one other place the
+count means something — but what it buys back there is smaller. Five overruns in a row from one
+job's callbacks kill *that job*, and five from one timer's stop *that timer*; the source's ticks
+and its other jobs carry on, because a runaway callback is a fact about the thing that keeps
+calling it and not about everything its author wrote. A killed job still gets its one `on_exit`,
+with `budget` as the reason.
 
 Your `init.lua` is measured too, against `config_budget_ms` rather than the tick budget: a
 load legitimately does far more work than a frame, and 8 ms would make plugins unloadable. Pass

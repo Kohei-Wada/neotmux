@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+### A plugin can run a program, and ask to be called again later
+
+`neotmux.job.start` runs a program in the server and calls you back with what it said;
+`neotmux.timer.every` and `neotmux.timer.after` call you back when the time comes. Both
+are what the plugin layer was missing to do the thing it exists for — watching something
+long-running while nobody is looking at the pane it would have needed — without a pane, a
+coroutine to keep alive, or a shell to hide it in.
+
+A job takes its command as a list, so nothing is split on spaces or globbed behind your
+back, and a table of options beside it: `cwd`, an `env` that is added to the server's
+rather than replacing it, and the callbacks. Buffered — the default — hands `on_exit` the
+whole of what the program said; streaming hands `on_stdout` and `on_stderr` complete lines
+as they arrive, holding back the half-line a chunk boundary cut and flushing the last
+fragment before the ending. `on_exit` runs exactly once, whatever ended the job, and says
+which of the ways it was. `start` answers the handle, or `nil` and one line saying why:
+there is no error to catch and no coroutine to drive.
+
+A timer is clamped to the frame, fires at most once per frame and does not catch up — five
+callbacks to make up for a slow frame is a worse answer than one. Both run before the tick
+in the frame they arrived in, so a tick draws what they changed rather than finding out
+next frame; both are measured against the same tick budget everything else is, where a
+runaway callback costs its own job or its own timer and nothing else its author wrote; and
+both belong to their source and their session, so a plugin that goes takes its jobs with
+it, a session that ends kills its jobs and tells them so, and a job's process group goes
+down with the job rather than outliving the server. `neotmux.opt.job_concurrency` and
+`neotmux.opt.job_output_bytes` bound what all this may cost.
+
 ### Two clients in one session
 
 `neotmux work`, in two terminals at once. A key typed on one is the key the other
