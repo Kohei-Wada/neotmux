@@ -2,10 +2,17 @@
 //! pane fed through `support::panes()`, keys driven with `dispatch_key` — with an `H` bound in
 //! the test's own `init.lua` to `hints.open(...)`, since nothing in the shipped layer opens a
 //! hint session on its own.
+//!
+//! `plugin.hints` is the other half, below: what `C-b f`, `hint-send` and `hint-open` do with a
+//! target once `neotmux.hints` has picked one, driven through the shipped prefix rather than
+//! a test-bound key, since that binding is the plugin's own.
 
+use std::cell::RefCell;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
+use neotmux_lua::clipboard::Clipboard;
 use neotmux_lua::ops::Op;
 use neotmux_lua::runtime::Layers;
 use neotmux_lua::{KeyOutcome, LuaSubsystem};
@@ -509,4 +516,145 @@ fn a_pane_removed_from_the_layout_mid_session_does_not_stop_hints_closing_cleanl
         !said.iter().any(|line| line.starts_with("neotmux.hints:")),
         "closing over a removed pane raised: {said:?}"
     );
+}
+
+// `plugin.hints`: what a person does with a target once one is picked. Its own harness, since
+// these three commands are the shipped prefix and the shipped registry, not the bare module
+// above — `built` there turns both off to keep a frame free of anything but the module's own
+// draw commands, which is exactly what these tests need on.
+
+struct Recording(RefCell<Vec<String>>);
+
+impl Clipboard for Recording {
+    fn set(&self, text: &str) -> std::io::Result<()> {
+        self.0.borrow_mut().push(text.to_string());
+        Ok(())
+    }
+}
+
+/// The shipped runtime with the prefix and `plugin.hints` on and every other plugin off, so a
+/// frame's draw commands and a session's ops belong to one of the two and nothing else.
+fn built_plugin(extra: &str, clipboard: Rc<dyn Clipboard>) -> (tempfile::TempDir, Built) {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(
+        dir.path().join("init.lua"),
+        format!(
+            "local defaults = require('neotmux.defaults')\n\
+             for _, name in ipairs({{ 'status', 'copy', 'sessions', 'palette', 'notify',\n\
+               'borders', 'sync' }}) do\n\
+               defaults[name] = false\n\
+             end\n\
+             {extra}"
+        ),
+    )
+    .unwrap();
+    let terminals = support::panes();
+    let sub = LuaSubsystem::build_with(
+        Layers::from_paths(vec![dir.path().to_path_buf(), shipped_layer()]),
+        terminals.clone(),
+        clipboard,
+    )
+    .unwrap();
+    assert!(sub.run_init().is_empty());
+    sub.begin_frame(
+        support::one(),
+        Epoch::new(SIZE, vec![pane()], Some(pane())),
+        Geometry {
+            area: Rect::new(0, 0, SIZE.cols, SIZE.rows),
+            windows: vec![neotmux_proto::geometry::Window {
+                id: neotmux_proto::WindowId::from(1),
+                panes: vec![pane()],
+                name: None,
+            }],
+            window: Some(neotmux_proto::WindowId::from(1)),
+            panes: vec![(pane(), Rect::new(0, 0, SIZE.cols, SIZE.rows))],
+            focus: Some(pane()),
+        },
+    );
+    (dir, Built::new(sub, terminals))
+}
+
+/// A key bound in the test's own `init.lua` to `neotmux.command.run(name)`, the same way a
+/// test drives a command that ships with no key of its own.
+fn run_on(key: &str, name: &str) -> String {
+    format!(
+        "neotmux.on_key(function(k)\n\
+           if k == '{key}' then\n\
+             neotmux.command.run('{name}')\n\
+             return true\n\
+           end\n\
+           return false\n\
+         end)\n"
+    )
+}
+
+#[test]
+fn c_b_f_labels_the_screen_and_copies_what_is_picked() {
+    let recording = Rc::new(Recording(RefCell::new(Vec::new())));
+    let (_dir, sub) = built_plugin("", recording.clone());
+    feed(&sub, b"see http://example.com now");
+
+    keys(&sub, &["C-b", "f"]);
+    let marks = labels(&frame(&sub));
+    assert_eq!(marks.len(), 1, "{marks:?}");
+
+    let label = marks[0].2.clone();
+    keys(&sub, &[&label]);
+
+    assert_eq!(
+        *recording.0.borrow(),
+        vec!["http://example.com".to_string()],
+        "C-b f did not hand the picked target's text to the clipboard"
+    );
+}
+
+#[test]
+fn hint_send_types_the_target_into_the_focused_pane() {
+    let (_dir, sub) = built_plugin(
+        &run_on("X", "hint-send"),
+        Rc::new(neotmux_lua::clipboard::Absent),
+    );
+    feed(&sub, b"see http://example.com now");
+
+    keys(&sub, &["X"]);
+    let marks = labels(&frame(&sub));
+    assert_eq!(marks.len(), 1, "{marks:?}");
+
+    let label = marks[0].2.clone();
+    keys(&sub, &[&label]);
+
+    let sends: Vec<_> = sub
+        .drain_ops(Some(support::one()))
+        .into_iter()
+        .filter_map(|(_, op)| match op {
+            Op::PaneSend { pane, text } => Some((pane, text)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        sends,
+        vec![(pane(), "http://example.com".to_string())],
+        "hint-send did not type the target's text into the focused pane"
+    );
+}
+
+#[test]
+fn the_commands_are_registered_for_the_palette() {
+    let (_dir, sub) = built_plugin(
+        "neotmux.on_tick(function()\n\
+           for _, cmd in ipairs(neotmux.command.list()) do\n\
+             neotmux.log.info(cmd.name .. ': ' .. tostring(cmd.desc))\n\
+           end\n\
+         end)\n",
+        Rc::new(neotmux_lua::clipboard::Absent),
+    );
+    sub.dispatch_tick(support::one());
+    let said = logged(&sub);
+    for name in ["hint-copy", "hint-send", "hint-open"] {
+        assert!(
+            said.iter()
+                .any(|line| { line.starts_with(&format!("{name}: ")) && !line.ends_with(": nil") }),
+            "{name} is not registered with a description for the palette: {said:?}"
+        );
+    }
 }

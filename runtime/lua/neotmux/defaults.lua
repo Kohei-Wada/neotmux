@@ -28,6 +28,10 @@ return {
   -- costs a key handler that answers no and a command in the palette; nothing is relayed
   -- anywhere until `:sync-panes` says so, and it says so again to stop.
   sync = true,
+  -- With them, for the same bargain again: nothing is on screen until the key is pressed, and
+  -- typing back a url or a hash you can already see is the thing you would otherwise be doing
+  -- by hand.
+  hints = true,
   -- Off, unlike the four above: which command is worth stopping to ask about is an opinion
   -- about what you run, and one with no rules in it would stop nothing anyway.
   guard = false,
