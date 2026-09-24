@@ -24,11 +24,17 @@
 --
 --   claims = function(info) return info.command == 'claude' end
 --
--- asked once per look, before any rule runs, with `neotmux.pane.info(pane)`. A ruleset that
--- answers false is skipped whole and the pane falls through to whatever `neotmux.state` does
--- with a pane nobody claims. Without it a ruleset speaks for every pane on the screen alone,
--- which is how a pane that once ran an agent goes on being answered for out of what the agent
--- left behind — a title nothing resets when the program exits.
+-- asked with `neotmux.pane.info(pane)` before any rule runs. A ruleset that answers false is
+-- skipped whole and the pane falls through to whatever `neotmux.state` does with a pane nobody
+-- claims. Without it a ruleset speaks for every pane on the screen alone, which is how a pane
+-- that once ran an agent goes on being answered for out of what the agent left behind — a
+-- title nothing resets when the program exits.
+--
+-- Asked once per *revision*, not once per call: it sits inside `of`'s cache, so a pane whose
+-- program changed and printed nothing keeps the last look's verdict until the next byte. And
+-- `pane.info` is itself the host's, refreshed on a 250 ms cadence, so even a fresh revision can
+-- be judged against a command up to that old. Both windows are a fraction of a second wide in
+-- the one case this exists for — quitting an agent redraws a prompt, and typing echoes.
 --
 -- `priority` decides, not where the rule sits in the table. `state` is the answer, and a rule
 -- with none says "this screen is not a state" and stops the search. `visible` is the state the
@@ -240,18 +246,24 @@ end
 -- drawn wants. One that names a program declines every pane not running it — and a pane whose
 -- agent has quit is then answered by the fallback rather than by the agent's leavings.
 --
--- A `claims` that raises declines: the ruleset is the thing that is broken, and skipping it
+-- A `claims` that raises declines, and says which ruleset it was — once, for the same reason a
+-- rule that raises is reported once. The ruleset is the thing that is broken, and skipping it
 -- leaves the pane where it would have been had nobody written it.
-function M.claimed(rules, pane)
+function M.claimed(name, rules, pane)
   local ask = rules.claims
   if ask == nil then
     return true
   end
-  local ok, yes = pcall(ask, neotmux.pane.info(pane))
+  -- The `info` read is inside the `pcall` too: it is `neotmux.pane.info`, which answers nil
+  -- rather than raising today, and a change that made it raise must not take a look down.
+  local ok, yes = pcall(function()
+    return ask(neotmux.pane.info(pane))
+  end)
   if not ok then
     if not complained[rules] then
       complained[rules] = true
-      neotmux.notify("error", "neotmux.detect: claims: " .. tostring(yes))
+      local which = "neotmux.detect: ruleset '" .. tostring(name) .. "' claims"
+      neotmux.notify("error", which .. ": " .. tostring(yes))
     end
     return false
   end
@@ -335,7 +347,7 @@ function M.of(pane)
     if it.view ~= nil then
       for _, name in ipairs(names()) do
         local rules = M.agents[name]
-        if M.claimed(rules, pane) then
+        if M.claimed(name, rules, pane) then
           local state, id, visible = M.judge(rules, it.view)
           if id ~= nil then
             it.state, it.visible, it.matched = state, visible, true

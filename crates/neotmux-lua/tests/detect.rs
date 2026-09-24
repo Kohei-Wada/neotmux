@@ -404,7 +404,7 @@ fn a_raising_claims_declines_the_pane_and_is_reported_once() {
     );
     assert_eq!(
         said.iter()
-            .filter(|l| l.starts_with("neotmux.detect: claims:"))
+            .filter(|l| l.starts_with("neotmux.detect: ruleset 'test' claims:"))
             .count(),
         1,
         "{said:?}"

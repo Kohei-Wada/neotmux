@@ -69,11 +69,7 @@ fn a_pane_no_ruleset_claims_falls_back_to_the_patterns() {
     feed(&sub, b"rm -i file\r\nremove file? [y/N] ");
     keys(&sub, &["J"]);
     assert!(
-        {
-            let g = logged(&sub);
-            eprintln!("{g:?}");
-            g.iter().any(|l| l == "of=blocked")
-        },
+        logged(&sub).iter().any(|l| l == "of=blocked"),
         "the fallback stopped working"
     );
 }

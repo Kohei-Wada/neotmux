@@ -143,11 +143,18 @@ A ruleset may carry, beside its rules:
 claims = function(info) return info.command == 'claude' end
 ```
 
-asked once per look with `neotmux.pane.info(pane)`, before any rule runs. A ruleset that answers
-false is skipped whole. Without it a ruleset speaks for every pane on what is drawn alone, and
-Claude Code's `✳` title — which `neotmux-term` keeps after the program exits, because nothing
-resets it — makes the shell you go on using in that pane read as an idle agent forever. A
-ruleset with no `claims` speaks for every pane, as before.
+asked with `neotmux.pane.info(pane)` before any rule runs. A ruleset that answers false is
+skipped whole. Without it a ruleset speaks for every pane on what is drawn alone, and Claude
+Code's `✳` title — which `neotmux-term` keeps after the program exits, because nothing resets
+it — makes the shell you go on using in that pane read as an idle agent forever. A ruleset with
+no `claims` speaks for every pane, as before.
+
+It is asked once per pane *revision*, not once per call: the ask sits inside `detect.of`'s
+cache, so a pane whose program changed and printed nothing keeps the last look's verdict until
+the next byte moves the revision. `pane.info` is itself published on the host's 250 ms cadence
+(§2 of `paneinfo.rs`), so even a fresh revision can be judged against a command that old. Both
+windows are a fraction of a second, and the transition this exists for — an agent quitting —
+redraws a prompt on its way out.
 
 ### 3.3 The hold
 
