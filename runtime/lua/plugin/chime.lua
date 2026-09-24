@@ -12,6 +12,7 @@
 --
 --   require('plugin.chime').only_when_away = false   -- chime for the pane you are in, too
 --   require('plugin.chime').sounds.idle = nil        -- only the waiting, not the finishing
+--   require('plugin.chime').players = { { 'aplay' } } -- and this is also "try again"
 --
 -- Every pane the session owns is watched, hidden windows included — the same reach
 -- `plugin.watch` has, and for the same reason: another window is exactly where you are when you
@@ -52,10 +53,27 @@ M.only_when_away = true
 -- frame the prompt is still up.
 local seen = {}
 
--- The player being used, as an index into `M.players`, and whether the walk has run out. A
--- machine with no player at all is a fact about the machine: said once, then dropped.
+-- The player being used, as an index into `M.players`.
 local using = 1
-local hopeless = false
+
+-- The sound files nothing could play, so the same file is not walked and complained about on
+-- every frame. Keyed by the *path* and not set for the plugin as a whole: an exit code cannot
+-- tell "this program cannot decode an mp3" from "that file is not there" or "this machine has
+-- no audio device", so a `sounds.idle` that is wrong must not take `blocked` down with it.
+local gave_up = {}
+
+-- What `M.players` and `M.sounds` were when it gave up. Reassigning either is a user answering
+-- the notification, and the one thing they should not have to do to be heard is restart the
+-- server — so a new table is a new go, from the top of the list.
+local configured = {}
+
+local function reconsider()
+  if configured.players ~= M.players or configured.sounds ~= M.sounds then
+    configured.players, configured.sounds = M.players, M.sounds
+    gave_up = {}
+    using = 1
+  end
+end
 
 neotmux.on_event("pane_closed", function(event)
   seen[event.pane] = nil
@@ -83,23 +101,41 @@ end
 -- so only a *number* that is not zero, and only a refusal that names the spawn, count as
 -- evidence. Everything else leaves the walk where it is, to be tried again next time.
 local function player_failed(why)
-  -- `neotmux.job.start`'s own wording for a spawn that failed. The two refusals it makes
-  -- before ever reaching the program — "the session is ending", "too many jobs: N already
-  -- running" — are facts about this layer, and matching the spawn positively is what keeps a
-  -- refusal added later from being read as a verdict on a program nobody tried to run.
-  return type(why) == "string" and why:find("^could not start ") ~= nil
+  -- `neotmux.job.start`'s own wording for a spawn that failed. Matching the spawn positively is
+  -- what keeps a refusal added later from being read as a verdict on a program nobody tried to
+  -- run. (This reads a message the host writes; `crates/neotmux-lua/src/jobs.rs` owns it.)
+  return why:find("^could not start ") ~= nil
 end
 
-local function play(path, from)
+-- The refusals that come before the program: this source already holds `job_concurrency` jobs,
+-- or the session is going away. Both are facts about the layer under load, so the chime is
+-- dropped and the next one tries the same player again.
+local function busy(why)
+  return why:find("^too many jobs") ~= nil or why == "the session is ending"
+end
+
+-- An entry that cannot be run at all is the user's mistake rather than a player's failing, and
+-- is worth exactly one line — keyed by the entry, so a list edited into shape is heard again.
+local complained = setmetatable({}, { __mode = "k" })
+
+local function play(path, from, trouble)
+  -- Set when a walk ran out for this file. A second walk for the same file in the same frame
+  -- stops here, which is what keeps one silent machine to one notification.
+  if gave_up[path] then
+    return
+  end
   local spec = M.players[from]
   if spec == nil then
-    -- Two walks can run out in the same frame, and one machine with no player is one thing to
-    -- be told about.
-    if hopeless then
-      return
-    end
-    hopeless = true
-    neotmux.notify("error", "plugin.chime: no player could play " .. path .. "; set .players")
+    gave_up[path] = true
+    -- What failed is the pair — this file, through these players — and the notification says
+    -- so, because the fault is as likely to be a path that is not there or a machine with no
+    -- audio as it is to be the list. Either way it is recoverable: assigning `M.players` or
+    -- `M.sounds` is what says "try again".
+    neotmux.notify(
+      "error",
+      "plugin.chime: no player could play " .. path .. " (" .. (trouble or "no players listed") ..
+        ") — it may be the file or the audio rather than the list; set .sounds or .players to try again"
+    )
     return
   end
   local cmd = { table.unpack(spec) }
@@ -109,12 +145,25 @@ local function play(path, from)
       if code == 0 then
         using = from
       elseif type(code) == "number" then
-        play(path, from + 1)
+        play(path, from + 1, tostring(spec[1]) .. " exited " .. code)
       end
     end,
   })
-  if job == nil and player_failed(why) then
-    play(path, from + 1)
+  if job ~= nil then
+    return
+  end
+  why = type(why) == "string" and why or "refused"
+  if player_failed(why) then
+    play(path, from + 1, why)
+  elseif not busy(why) then
+    -- Neither the program nor back-pressure: nothing the host would refuse this way is about a
+    -- player, so the entry itself is unusable. Said once, and the walk carries on rather than
+    -- letting one bad entry stand in front of the rest of the list.
+    if not complained[spec] then
+      complained[spec] = true
+      neotmux.notify("error", "plugin.chime: player " .. from .. " cannot be run (" .. why .. "); check .players")
+    end
+    play(path, from + 1, why)
   end
 end
 
@@ -129,7 +178,7 @@ local function watch(pane, focused)
   if now == "idle" and detect.of(pane) == nil then
     now = nil
   end
-  if now ~= seen[pane] and not hopeless then
+  if now ~= seen[pane] then
     local sound = M.sounds[now]
     if sound ~= nil and pane ~= focused then
       play(file(sound), using)
@@ -139,6 +188,7 @@ local function watch(pane, focused)
 end
 
 neotmux.on_tick(function()
+  reconsider()
   local focused = M.only_when_away and neotmux.pane.current() or nil
   for _, window in ipairs(neotmux.window.list()) do
     for _, pane in ipairs(neotmux.window.panes(window) or {}) do

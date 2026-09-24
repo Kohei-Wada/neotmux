@@ -22,7 +22,11 @@ a state, so a prompt that is still up next frame is the same wait. It finds a pl
 `paplay`, `pw-play`, `ffplay`, `mpg123` and `mpv` in turn and judging each by how it *ends*
 rather than by whether it started — one that is not installed fails at the spawn, one that
 cannot decode an mp3 starts happily and exits non-zero — and remembers the first that exits
-zero. A machine with none of them is told once. The two sounds are carried from herdr, as are
+zero. When nothing can play a file, what it says names the file and the last failure rather
+than blaming the list — the fault is as easily a missing path or a machine with no audio — and
+it says it once per file, so one bad sound does not silence the other. Assigning `players` or
+`sounds` is read as "try again", because somebody who has just fixed their config should not
+have to restart the server to be heard. The two sounds are carried from herdr, as are
 the rules and the hold; `NOTICE` at the root says which files and from where.
 
 ### The wire lost the question nobody was asking any more

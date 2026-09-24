@@ -1945,14 +1945,24 @@ judged by how it ends, not by whether it started.** One that is not installed fa
 spawn, and one that is installed but cannot decode an mp3 starts perfectly happily and exits
 non-zero a moment later — so "it started" says nothing, and only a zero exit means the sound
 was played. The walk moves on from either, and the first player that exits zero is remembered
-and used from then on. A machine where none of them works is told once, through
-`neotmux.notify('error', ...)`, and the plugin stops trying.
+and used from then on.
+
+When the walk runs out, the notification names **the file** and the last failure, not just the
+list — an exit code cannot tell "this program cannot decode an mp3" from "that path is not
+there" or "this machine has no audio device", and blaming `players` for any of the three would
+send you to the wrong place. Giving up is per sound file, so a `sounds.idle` nothing can play
+does not silence `blocked` as well, and it is **not for the life of the server**: assigning
+`chime.players` or `chime.sounds` is read as "try again", from the top of the list. Somebody
+who reads the notification and fixes their config is exactly the person who should get their
+sound back without restarting anything.
 
 What is *not* a verdict on a player is an ending that was never the program's own. A job killed
 by a session ending or by the output limit answers `on_exit` with a nil code, and a `start`
 refused because the source already holds `job_concurrency` jobs never reached the program at
 all. Reading either as "this one does not work" would write off a player that works for the
-life of the server, so the walk stays where it is and tries the same one again next time.
+life of the server, so the walk stays where it is and tries the same one again next time. A
+refusal that is neither — an entry that cannot be run as a command at all — is your mistake
+rather than the player's, and is said once and stepped over.
 
 The two sounds in `runtime/sounds/` are herdr's (herdrdev/herdr), carried unchanged, as are
 the detection rules and the hold behind `neotmux.state`. Those files are Apache-2.0 only —

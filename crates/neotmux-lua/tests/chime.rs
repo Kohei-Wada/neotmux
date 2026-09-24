@@ -36,12 +36,19 @@ const THREE: u32 = 3;
 
 /// Every shipped plugin off but `chime`, which is on by default and stays on: what is under
 /// test is the shipped default, not a plugin the test turned on for itself.
+///
+/// The tick budget is off. It is eight milliseconds of *wall clock*, and a tick here reads
+/// three 40x100 screens through the whole Claude ruleset — under a parallel `cargo test` on a
+/// loaded machine that overruns, the tick is cut off part-way, and the pane it had not reached
+/// yet does not chime until the next frame. These tests are about what the chime decides, not
+/// about what the budget interrupts, and the budget has tests of its own.
 const TWO_PANES: &str = "local defaults = require('neotmux.defaults')\n\
      for _, name in ipairs({ 'status', 'prefix', 'copy', 'sessions', 'palette',\n\
        'notify', 'borders', 'guard', 'sync', 'watch', 'sidebar', 'footer',\n\
        'hints' }) do\n\
        defaults[name] = false\n\
-     end\n";
+     end\n\
+     neotmux.opt.tick_budget_ms = 0\n";
 
 fn shipped_layer() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime")
@@ -368,7 +375,7 @@ fn a_shell_that_finishes_a_command_is_silent() {
     let runner = FakeRunner::new();
     let (_dir, sub) = built(
         &format!(
-            "{TWO_PANES}require('neotmux.state').working_for = 100\n\
+            "{TWO_PANES}require('neotmux.state').working_for = 400\n\
              local state = require('neotmux.state')\n\
              local last\n\
              neotmux.on_tick(function()\n\
@@ -385,7 +392,7 @@ fn a_shell_that_finishes_a_command_is_silent() {
     show(&sub, TWO, "$ ls -la /etc\ntotal 0\n");
     frame(&sub);
     // Past the fallback's window, with nothing new said, the same screen reads idle.
-    std::thread::sleep(std::time::Duration::from_millis(150));
+    std::thread::sleep(std::time::Duration::from_millis(600));
     frame(&sub);
 
     let said = logged(&sub);
@@ -396,5 +403,100 @@ fn a_shell_that_finishes_a_command_is_silent() {
     assert!(
         runner.started.borrow().is_empty(),
         "an ordinary shell chimed at the end of a command"
+    );
+}
+
+/// Giving up is about the file that could not be played, not about the plugin. An exit code
+/// cannot tell "this player cannot decode an mp3" from "that path is not there", so a `sounds`
+/// entry nothing can play must not take the other sound down with it.
+#[test]
+fn a_second_sound_still_chimes_after_the_first_gave_up() {
+    let runner = FakeRunner::new();
+    // Five players, five non-zero exits: the walk runs out for request.mp3.
+    for _ in 0..5 {
+        runner.will_say(vec![vec![JobChunk::Exited(1)]]);
+    }
+    runner.will_say(vec![vec![JobChunk::Exited(0)]]);
+    let (_dir, sub) = built(TWO_PANES, Rc::clone(&runner));
+
+    blocked(&sub, TWO);
+    for _ in 0..7 {
+        frame(&sub);
+    }
+    let said = notified(&sub);
+    assert_eq!(
+        said.iter()
+            .filter(|line| line.contains("no player"))
+            .count(),
+        1,
+        "{said:?}"
+    );
+    assert!(
+        said.iter().any(|line| line.contains("request.mp3")),
+        "the notification did not name the file that could not be played: {said:?}"
+    );
+
+    idle(&sub, TWO);
+    frame(&sub);
+    let tried = runner.started.borrow();
+    assert_eq!(
+        tried.len(),
+        6,
+        "the other sound was silenced by the first one's failure"
+    );
+    assert!(
+        tried[5].cmd.last().unwrap().ends_with("done.mp3"),
+        "{:?}",
+        tried[5].cmd
+    );
+}
+
+/// And giving up is not for the life of the server. The notification names what to change, and
+/// somebody who changes it should be heard without restarting the session.
+#[test]
+fn a_player_list_set_after_it_gave_up_is_tried_again() {
+    let runner = FakeRunner::new();
+    for name in ["paplay", "pw-play", "ffplay", "mpg123", "mpv"] {
+        runner.refuse_program(name);
+    }
+    let (_dir, sub) = built(
+        &format!(
+            "{TWO_PANES}neotmux.on_key(function(key)\n\
+               if key == 'R' then\n\
+                 require('plugin.chime').players = {{ {{ 'aplay' }} }}\n\
+                 return true\n\
+               end\n\
+               return false\n\
+             end)\n"
+        ),
+        Rc::clone(&runner),
+    );
+
+    blocked(&sub, TWO);
+    frame(&sub);
+    assert!(runner.started.borrow().is_empty(), "nothing is installed");
+    assert_eq!(
+        notified(&sub)
+            .iter()
+            .filter(|line| line.contains("no player"))
+            .count(),
+        1
+    );
+
+    sub.dispatch_key(support::one(), "R");
+    working(&sub, TWO);
+    frame(&sub);
+    blocked(&sub, TWO);
+    frame(&sub);
+    let tried: Vec<String> = runner
+        .started
+        .borrow()
+        .iter()
+        .map(|spec| spec.cmd[0].clone())
+        .collect();
+    assert_eq!(
+        tried,
+        vec!["aplay"],
+        "a list set after the plugin gave up was never tried: {tried:?}"
     );
 }
