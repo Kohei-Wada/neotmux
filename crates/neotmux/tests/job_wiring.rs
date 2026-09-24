@@ -41,8 +41,9 @@ neotmux.on_tick(function()
 end)
 ";
 
-/// The binary, through a PTY — `ratatui::init()` needs a real tty — with a shell that stays up
-/// so the session lives until the plugin quits it.
+/// The binary, through a PTY — `ratatui::init()` needs a real tty — with a shell that reads
+/// its stdin and therefore stays up, so the session lives until the plugin quits it. `/bin/sh`
+/// rather than anything else in `/bin`: it is the one path every system has.
 fn run_neotmux(runtime_dir: &Path, log: &Path) {
     let pair = native_pty_system()
         .openpty(PtySize {
@@ -60,7 +61,7 @@ fn run_neotmux(runtime_dir: &Path, log: &Path) {
     cmd.arg("--log");
     cmd.arg(log);
     cmd.env("NEOTMUX_RUNTIME", runtime_dir);
-    cmd.env("SHELL", "/bin/cat");
+    cmd.env("SHELL", "/bin/sh");
     cmd.env("TERM", "xterm-256color");
     cmd.env("HOME", home.path());
     cmd.env("XDG_CONFIG_HOME", home.path());

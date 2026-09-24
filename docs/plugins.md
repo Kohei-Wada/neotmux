@@ -966,9 +966,13 @@ broke while it was being read. Whichever it is, it reaches you once.
 
 Two things are not told, and both are the same reason — there is nobody left to tell. A job
 whose *source* went away, because its chunk failed to load or was reloaded, is killed in
-silence: the function that would hear it is the thing that is gone. And a server told to stop by a
-signal puts its sessions down without ending them one at a time, so nothing is called there
-either — the jobs are killed on the way out, but nothing hears about it.
+silence: the function that would hear it is the thing that is gone. And a server told to stop — `SIGTERM`,
+`SIGINT`, `SIGHUP` — puts its sessions down without ending them one at a time, so nothing is
+called there either: the jobs are killed on the way out, but nothing hears about it.
+
+`SIGKILL` to the server is the one case where a job is neither told nor killed. Nothing runs
+on the way out, because nothing gets to run at all, so every job the server had keeps going —
+its process group along with it — with no reader left, no `on_exit`, and nothing to reap it.
 
 **The exit is reported only once both pipes have closed**, never when the program itself dies:
 the last of the output has to be in before the ending, and the pipe closing is the only thing

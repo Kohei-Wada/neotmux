@@ -25,8 +25,10 @@ in the frame they arrived in, so a tick draws what they changed rather than find
 next frame; both are measured against the same tick budget everything else is, where a
 runaway callback costs its own job or its own timer and nothing else its author wrote; and
 both belong to their source and their session, so a plugin that goes takes its jobs with
-it, a session that ends kills its jobs and tells them so, and a job's process group goes
-down with the job rather than outliving the server. `neotmux.opt.job_concurrency` and
+it, a session that ends kills its jobs and tells them so, and a job is killed by its whole
+process group rather than only by the program's own pid — a server that is asked to stop
+takes them with it, and only a `SIGKILL`ed one, which runs nothing on its way out, leaves
+them behind. `neotmux.opt.job_concurrency` and
 `neotmux.opt.job_output_bytes` bound what all this may cost.
 
 ### Two clients in one session
