@@ -14,8 +14,9 @@
 -- written `ESC O A` where another is written `ESC [ A` — so the spelling is the host's and the
 -- deciding which panes get it is this file's.
 --
--- Off by default: a multiplexer that types into four shells at once because a plugin shipped
--- on is not one anybody asked for.
+-- Shipped on, which loads the plugin rather than the synchronising: until `:sync-panes` is
+-- run, this file is a key handler that answers no. What is on by default is the command being
+-- there to run.
 local modes = require("neotmux.mode")
 
 local M = {}

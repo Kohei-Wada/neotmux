@@ -190,7 +190,7 @@ fn csi(bytes: &[u8]) -> Step {
             let Some(code) = key_from_codepoint(codepoint) else {
                 return Step::Skip(used);
             };
-            return Step::Key(Key::new(code, mods), used);
+            return Step::Key(as_escape(Key::new(code, mods)), used);
         }
         b'~' => match param(0) {
             1 | 7 => KeyCode::Home,
@@ -212,6 +212,24 @@ fn csi(bytes: &[u8]) -> Step {
         _ => return Step::Skip(used),
     };
     Step::Key(Key::new(code, mods), used)
+}
+
+/// `C-[` is Escape, and has been since before there were arrow keys: a terminal sends `0x1b`
+/// for both, which is why `Esc` and `C-[` are the same key to every program that has ever read
+/// a tty. A terminal in the kitty keyboard protocol can afford to tell them apart and does —
+/// `[` with the control modifier, or Escape carrying one — and the rest of neotmux would then
+/// see a key nothing binds while the person is pressing the one thing that means "stop".
+///
+/// So they are folded back together here, at the edge, rather than every plugin being asked to
+/// know about it. What the pane receives is unchanged: `Esc` is `0x1b`, which is what `C-[`
+/// would have sent anyway.
+fn as_escape(key: Key) -> Key {
+    let escape = matches!(key.code, KeyCode::Char('[')) && key.mods.ctrl
+        || matches!(key.code, KeyCode::Esc) && key.mods.ctrl;
+    if escape {
+        return Key::plain(KeyCode::Esc);
+    }
+    key
 }
 
 /// `CSI u` (kitty / xterm keyboard protocol) names a key by its Unicode codepoint: ordinary
@@ -385,7 +403,8 @@ mod tests {
             one(b"\x1b[97;2u"),
             Key::new(KeyCode::Char('a'), Modifiers::ALT)
         );
-        assert_eq!(one(b"\x1b[27;4u"), Key::new(KeyCode::Esc, Modifiers::CTRL));
+        // Escape carrying control is Escape — see `as_escape`, and the test below it.
+        assert_eq!(one(b"\x1b[27;4u"), Key::plain(KeyCode::Esc));
     }
 
     /// A named key by its protocol codepoint: Up = U+2191 = 8593.
@@ -562,5 +581,18 @@ mod tests {
         let keys = decode(paste.as_bytes());
         assert_eq!(keys.len(), 4096);
         assert!(keys.iter().all(|k| *k == Key::plain(KeyCode::Char('x'))));
+    }
+    /// `C-[` is Escape wherever it comes from. A terminal that sends `0x1b` says so by saying
+    /// `0x1b`; one in the kitty protocol says `[` with control, or Escape with control, and
+    /// both mean the key the person pressed to stop whatever is happening.
+    #[test]
+    fn control_bracket_is_escape_however_the_terminal_spells_it() {
+        assert_eq!(one(&[0x1b]), Key::plain(KeyCode::Esc));
+        // CSI 91 ; 5 u — `[` with the control modifier
+        assert_eq!(one(b"\x1b[91;5u"), Key::plain(KeyCode::Esc));
+        // CSI 27 ; 5 u — Escape itself, carrying one
+        assert_eq!(one(b"\x1b[27;5u"), Key::plain(KeyCode::Esc));
+        // and an ordinary `[` is still an ordinary `[`
+        assert_eq!(one(b"\x1b[91u"), Key::plain(KeyCode::Char('[')));
     }
 }

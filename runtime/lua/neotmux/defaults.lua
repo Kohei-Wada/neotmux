@@ -24,9 +24,10 @@ return {
   -- With them: a notification nobody draws is a notification that only reaches the log, and
   -- the host stopped drawing them when what one looks like became a plugin's decision.
   notify = true,
-  -- Off: a multiplexer that types into four shells at once because a plugin shipped on is not
-  -- one anybody asked for. `:sync-panes` from the palette turns it on when you want it.
-  sync = false,
+  -- On, and note what that means: the plugin is loaded, not the synchronising. Loading it
+  -- costs a key handler that answers no and a command in the palette; nothing is relayed
+  -- anywhere until `:sync-panes` says so, and it says so again to stop.
+  sync = true,
   -- Off, unlike the four above: which command is worth stopping to ask about is an opinion
   -- about what you run, and one with no rules in it would stop nothing anyway.
   guard = false,

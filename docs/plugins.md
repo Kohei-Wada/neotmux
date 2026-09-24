@@ -1163,7 +1163,7 @@ neotmux ships ten plugins in the runtime layer an install puts on the search pat
 | `sessions` | the session picker on `C-b s`: every session and what it is running, `Enter` to go, `c` to make one, `r` to rename one, `d` to end one |
 | `palette` | the command palette on `C-b :`: every registered command, fuzzy-filtered as you type, `Enter` to run the one under the cursor |
 | `borders` | a rule along every boundary between two panes |
-| `sync` | relays every key to every pane of the window — tmux's `synchronize-panes`, on `:sync-panes` or `C-b S` — **off by default** |
+| `sync` | relays every key to every pane of the window — tmux's `synchronize-panes`, turned on and off with `:sync-panes` or `C-b S`; the plugin loads by default, the relaying starts off |
 | `guard` | holds back the Enter that would run a line `neotmux.guard`'s rules name, until you press it again — **off by default** |
 | `watch` | notifies you when a pane looks like it is waiting for you, on `neotmux.state`'s guess — **off by default** |
 | `sidebar` | a tree of every session, and the windows and panes of the one you are in, down a reserved left band, folded by `C-b b` — **off by default** |
