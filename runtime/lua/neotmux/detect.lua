@@ -39,8 +39,9 @@ local M = {}
 -- is why this kind of detector gets turned off.
 M.settle = 700
 
--- Rulesets by name, filled in by `neotmux/agents/*.lua`. Empty here on purpose.
-M.agents = {}
+-- Rulesets by name. One entry per program neotmux knows the screen of; teaching it another is
+-- a file in `neotmux/agents/` and a line here.
+M.agents = { claude = require("neotmux.agents.claude") }
 
 local SPACE = { [0x20] = true, [0x09] = true }
 local DASH = { [0x2d] = true, [0x2500] = true } -- - ─

@@ -333,3 +333,116 @@ fn a_raising_rule_is_reported_once_and_not_once_a_look() {
         "the raising rule stopped the search instead of being skipped: {said:?}"
     );
 }
+
+/// One screen, one title, one answer. The title is set the way a program sets it — OSC 2 in the
+/// same bytes as the screen, because opening a pane starts it over — and the answer is `judge`'s
+/// own rather than `of`'s, so that no hold stands between a fixture and the rule it is about.
+fn assert_detects(screen: &str, title: &str, state: &str, id: &str) {
+    let (_dir, sub) = built(
+        "local detect = require('neotmux.detect')\n\
+         neotmux.on_key(function(key)\n\
+           if key == 'J' then\n\
+             local state, id = detect.judge(detect.agents.claude, detect.view(1))\n\
+             neotmux.log.info('state=' .. tostring(state) .. ' id=' .. tostring(id))\n\
+             return true\n\
+           end\n\
+           return false\n\
+         end)\n",
+    );
+    let mut bytes = Vec::new();
+    if !title.is_empty() {
+        bytes.extend_from_slice(format!("\x1b]2;{title}\x07").as_bytes());
+    }
+    bytes.extend_from_slice(screen.replace('\n', "\r\n").as_bytes());
+    feed(&sub, &bytes);
+    keys(&sub, &["J"]);
+    let want = format!("state={state} id={id}");
+    let said = logged(&sub);
+    assert!(said.contains(&want), "want {want}: {said:?}");
+}
+
+/// The title outranks the screen: a screen that reads idle under a working title is working.
+#[test]
+fn the_title_outranks_the_screen() {
+    let screen = "╭────────╮\n│ ❯      │\n╰────────╯\n";
+    assert_detects(screen, "⠋ Claude", "working", "osc_title_working");
+}
+
+/// Scrolled back into the transcript: whatever the pane is doing, this screen is not it.
+#[test]
+fn a_transcript_scrolled_back_is_not_a_state() {
+    let screen = "> what did you change\nShowing detailed transcript (ctrl+o)\n";
+    assert_detects(screen, "", "nil", "transcript_viewer");
+}
+
+/// A form with something to confirm is blocked; "esc to cancel" on its own would not be.
+#[test]
+fn a_form_waiting_to_be_confirmed_is_blocked() {
+    let screen = "Which branch?\nEnter to confirm · Esc to cancel\n";
+    assert_detects(screen, "", "blocked", "live_blocked_form");
+}
+
+/// The `/btw` overlay is typed at a turn that is still running.
+#[test]
+fn a_btw_overlay_is_working() {
+    let screen = "/btw the port is 8080\n";
+    assert_detects(screen, "", "working", "btw_overlay_working");
+}
+
+/// A working turn: the spinner line Claude draws while it is going, with its interrupt hint.
+#[test]
+fn a_turn_in_progress_is_working() {
+    let screen = "✻ Herding… (12s · esc to interrupt)\n";
+    assert_detects(screen, "", "working", "live_turn_working");
+}
+
+/// An input box with nothing running behind it, and none of the hints a menu comes with.
+#[test]
+fn an_empty_prompt_box_is_idle() {
+    let screen = "╭────────╮\n│ ❯      │\n╰────────╯\n";
+    assert_detects(screen, "", "idle", "live_prompt_box");
+}
+
+/// Picking a model is a menu over the top, not a state.
+#[test]
+fn the_model_picker_is_not_a_state() {
+    let screen = "Select Model\n1. Default\nEnter to set as default, Esc to cancel\n";
+    assert_detects(screen, "", "nil", "model_picker_menu");
+}
+
+/// A Bash approval names the command and offers numbered options.
+#[test]
+fn a_bash_permission_prompt_is_blocked() {
+    let screen = "Bash command\n\
+                  ls -la\n\
+                  Do you want to proceed?\n\
+                  ❯ 1. Yes\n\
+                    2. Yes, and don't ask again for: ls\n\
+                    3. No\n";
+    assert_detects(screen, "", "blocked", "bash_permission_prompt");
+}
+
+/// Any other approval: the question and a numbered answer, with nothing naming a command.
+#[test]
+fn a_generic_permission_prompt_is_blocked() {
+    let screen = "Edit src/main.rs\n\
+                  Do you want to proceed?\n\
+                  1. Yes\n\
+                  2. No\n\
+                  Esc to cancel\n";
+    assert_detects(screen, "", "blocked", "generic_permission_prompt");
+}
+
+/// The backstop: words that read as a question left standing, and no prompt to point at.
+#[test]
+fn a_screen_waiting_for_permission_is_blocked() {
+    let screen = "Waiting for permission to continue\n";
+    assert_detects(screen, "", "blocked", "legacy_no_prompt_blocker");
+}
+
+/// What Claude Code leaves in the title when a turn is over.
+#[test]
+fn an_idle_title_is_idle() {
+    assert_detects("all done\n", "✳ Claude", "idle", "osc_title_idle");
+}
+
