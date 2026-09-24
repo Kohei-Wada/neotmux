@@ -552,7 +552,7 @@ fn door(
 /// What a plugin asked of the set of sessions, applied once every session has had its frame.
 fn apply_server_ops(
     asked: Vec<(SessionId, String, ServerOp)>,
-    plugins: &Plugins,
+    plugins: &mut Plugins,
     sessions: &mut Sessions,
     clients: &mut Vec<Attached>,
     terminals: &Rc<PaneTerminals>,
@@ -805,7 +805,7 @@ fn answer(
 /// child — and the Lua layer forgets what it was holding for it.
 fn end_session(
     id: SessionId,
-    plugins: &Plugins,
+    plugins: &mut Plugins,
     sessions: &mut Sessions,
     clients: &mut Vec<Attached>,
 ) {
@@ -824,6 +824,9 @@ fn end_session(
     // panes are showing has to be answered by the session it is being told about rather than
     // by the hole where it was.
     plugins.lua().forget_session(id);
+    // What those `on_exit` callbacks raised is filed under a session that has just had its
+    // last frame, so no frame will ever come and take it: drained here, or never.
+    plugins.drain_teardown_ops(id);
     sessions.live.remove(&id);
 }
 

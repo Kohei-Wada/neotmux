@@ -990,6 +990,10 @@ impl LuaSubsystem {
         if !endings.is_empty() {
             let _bound = self.ambient.bind(session);
             let _sweeping = self.jobs.sweeping();
+            // And the timers', for the same reason a `start` is refused here: a timer armed
+            // from one of these callbacks would be bound to a session with no frame left to
+            // fire it, so nothing would ever call it and nothing would ever drop it.
+            let _arming = self.timers.sweeping();
             self.arm_budget();
             for delivery in endings {
                 let owner = delivery.owner();

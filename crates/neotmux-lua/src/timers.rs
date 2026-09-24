@@ -55,12 +55,27 @@ pub struct Due {
 pub struct Timers {
     next: Cell<u64>,
     armed: RefCell<BTreeMap<TimerId, Timer>>,
+    /// True while a session is being swept, which is the one stretch of a frame where an
+    /// `arm` must be refused: see [`Timers::sweeping`].
+    sweeping: Cell<bool>,
 }
 
 impl Timers {
-    /// Arms one, due `ms` from `now`. An interval under a frame is raised to one: the host
-    /// has nothing finer than a frame to fire on, so promising less would be a promise it
-    /// could not keep.
+    /// Says that a session is being swept, for as long as the guard lives. A timer armed
+    /// from inside one of that sweep's `on_exit` callbacks would take the dying session as
+    /// its own — the ambient session is still bound — and then never be fired, never be
+    /// swept and never be adopted, holding its callback for the life of the server, so
+    /// `arm` refuses while this is on. The same guard [`crate::jobs::Jobs::sweeping`] is,
+    /// and for the same reason.
+    pub fn sweeping(&self) -> Sweeping<'_> {
+        self.sweeping.set(true);
+        Sweeping(self)
+    }
+
+    /// Arms one, due `ms` from `now`, or says why not — one line, no punctuation at the end,
+    /// the shape `job.start` already answers with. An interval under a frame is raised to
+    /// one: the host has nothing finer than a frame to fire on, so promising less would be a
+    /// promise it could not keep.
     pub fn arm(
         &self,
         ms: u64,
@@ -69,7 +84,10 @@ impl Timers {
         session: Option<SessionId>,
         callback: Rc<RegistryKey>,
         now: Instant,
-    ) -> TimerId {
+    ) -> Result<TimerId, String> {
+        if self.sweeping.get() {
+            return Err("the session is ending".to_string());
+        }
         let interval = Duration::from_millis(ms).max(FRAME);
         let id = TimerId(self.next.get() + 1);
         self.next.set(id.0);
@@ -86,7 +104,7 @@ impl Timers {
                 overruns: 0,
             },
         );
-        id
+        Ok(id)
     }
 
     /// Disarms one, answering whether the call it was armed for will now not happen. A
@@ -194,6 +212,16 @@ impl Timers {
     }
 }
 
+/// Held for the length of a session sweep. A guard rather than a flag the caller clears,
+/// because a callback that raises must not leave `arm` refusing for the rest of the run.
+pub struct Sweeping<'a>(&'a Timers);
+
+impl Drop for Sweeping<'_> {
+    fn drop(&mut self) {
+        self.0.sweeping.set(false);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -216,7 +244,9 @@ mod tests {
         let lua = mlua::Lua::new();
         let timers = Timers::default();
         let start = Instant::now();
-        let id = timers.arm(16, false, ANONYMOUS, Some(session()), callback(&lua), start);
+        let id = timers
+            .arm(16, false, ANONYMOUS, Some(session()), callback(&lua), start)
+            .unwrap();
 
         assert!(
             timers
@@ -227,5 +257,28 @@ mod tests {
         let due = timers.due(session(), start + Duration::from_millis(16));
         assert_eq!(due.len(), 1);
         assert_eq!(due[0].id, id);
+    }
+
+    /// An arm during a sweep is refused, and the refusal lasts exactly as long as the guard:
+    /// a timer armed into a session that is going away would be fired by no frame and swept
+    /// by no sweep, and it would hold its callback forever.
+    #[test]
+    fn arming_while_a_session_is_being_swept_is_refused() {
+        let lua = mlua::Lua::new();
+        let timers = Timers::default();
+        let start = Instant::now();
+
+        {
+            let _sweeping = timers.sweeping();
+            let refused = timers.arm(16, false, ANONYMOUS, Some(session()), callback(&lua), start);
+            assert_eq!(refused, Err("the session is ending".to_string()));
+        }
+
+        assert!(
+            timers
+                .arm(16, false, ANONYMOUS, Some(session()), callback(&lua), start)
+                .is_ok(),
+            "the guard went on refusing after the sweep was over"
+        );
     }
 }

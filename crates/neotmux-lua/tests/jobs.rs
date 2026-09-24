@@ -6,6 +6,7 @@ use std::cell::RefCell;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use neotmux_lua::LuaSubsystem;
 use neotmux_lua::ops::Op;
@@ -784,6 +785,75 @@ fn a_job_started_while_a_session_is_being_swept_is_refused() {
         runner.started.borrow().len(),
         1,
         "the second start reached the runner anyway"
+    );
+}
+
+/// A plugin that arms a timer from inside the `on_exit` a session ending gave it is refused,
+/// the way a `job.start` there is. The timer would belong to the session going away: no frame
+/// of it is left to fire the timer, and the sweep that would have dropped it is already past,
+/// so it would sit in the map holding its callback for the life of the server.
+#[test]
+fn a_timer_armed_while_a_session_is_being_swept_is_refused() {
+    let runner = FakeRunner::new();
+    let (_dir, sub) = built(
+        &on_key(
+            "    neotmux.job.start({ 'sleep' }, {\n\
+                   on_exit = function()\n\
+                     local timer, why = neotmux.timer.after(0, function()\n\
+                       neotmux.log.info('fired')\n\
+                     end)\n\
+                     neotmux.log.info('again=' .. tostring(timer)\n\
+                       .. ' why=' .. tostring(why))\n\
+                   end,\n\
+                 })",
+        ),
+        Rc::clone(&runner),
+    );
+
+    keys(&sub, &["J"]);
+    frame(&sub);
+    sub.forget_session(support::one());
+
+    assert_eq!(
+        logged(&sub),
+        vec!["again=nil why=the session is ending"],
+        "a timer was armed into a session that is going away"
+    );
+
+    sub.dispatch_timers(support::one(), Instant::now() + Duration::from_secs(60));
+    assert!(
+        logged(&sub).is_empty(),
+        "a timer outlived the session it was armed in"
+    );
+}
+
+/// The endings are delivered before the session's timers are dropped, and an `on_exit` that
+/// stops one of them is told the truth: `true`, because the call it cancelled really does not
+/// happen. Drop the timers first and the same stop answers `false` — there is nothing left
+/// for it to have cancelled — which is the reorder this pins.
+#[test]
+fn a_teardown_on_exit_can_still_stop_the_sessions_timers() {
+    let runner = FakeRunner::new();
+    let (_dir, sub) = built(
+        &on_key(
+            "    local timer = neotmux.timer.every(50, function() end)\n\
+                 neotmux.job.start({ 'sleep' }, {\n\
+                   on_exit = function()\n\
+                     neotmux.log.info('stopped=' .. tostring(timer:stop()))\n\
+                   end,\n\
+                 })",
+        ),
+        Rc::clone(&runner),
+    );
+
+    keys(&sub, &["J"]);
+    frame(&sub);
+    sub.forget_session(support::one());
+
+    assert_eq!(
+        logged(&sub),
+        vec!["stopped=true"],
+        "the timers were dropped before the endings were delivered"
     );
 }
 

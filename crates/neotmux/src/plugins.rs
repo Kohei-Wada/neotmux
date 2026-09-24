@@ -240,6 +240,34 @@ impl Plugins {
         (out, server)
     }
 
+    /// The ops a session's teardown raised, once that session is gone. A job's `on_exit` runs
+    /// inside `forget_session`, with the dying session still bound, so what it raises is filed
+    /// under a session that will never have another frame: nobody else would ever come for
+    /// these, and the buffer would hold them for the life of the server.
+    ///
+    /// Only the three that need nothing but this side survive the trip. Everything else wants
+    /// a live session to act on and has nowhere left to land — `quit` and `detach`, every
+    /// `pane.*` and `window.*`, and the `session.*` four — so it is dropped here rather than
+    /// deferred to a frame that is not coming.
+    pub fn drain_teardown_ops(&mut self, session: SessionId) {
+        for (id, op) in self.lua.drain_ops(Some(session)) {
+            let tag = self
+                .lua
+                .sources()
+                .name(id)
+                .unwrap_or_else(|| id.to_string());
+            match op {
+                Op::Log { level, text } => logging::log(level, &tag, &text),
+                Op::Notify { level, text } => {
+                    self.notifications.push(level, &tag, &text);
+                    logging::log(level, &tag, &text);
+                }
+                Op::NoticesClear => self.notifications.clear(),
+                _ => {}
+            }
+        }
+    }
+
     /// The ops a layer raised while it was still loading, before there was a session for any
     /// of them to act on. Returns whether one of them asked to quit, which is the one that
     /// can be honoured: nothing is running yet, so there is nothing to split or focus.
@@ -327,6 +355,7 @@ mod tests {
     use std::rc::Rc;
 
     use neotmux_lua::LuaSubsystem;
+    use neotmux_lua::runner::{JobChunk, JobSpec, Runner, Running};
     use neotmux_lua::runtime::Layers;
     use neotmux_proto::geometry::Window;
     use neotmux_proto::{Epoch, Geometry, PaneId, Rect, SessionId, Size, WindowId};
@@ -345,6 +374,94 @@ mod tests {
         .expect("lua");
         assert!(lua.run_init().is_empty());
         (dir, Plugins::new(lua))
+    }
+
+    /// A job that says nothing and needs no reaping. Enough for one to be live when the
+    /// session ends, which is the only thing that calls `on_exit` from inside
+    /// `forget_session`.
+    struct Idle;
+
+    impl Running for Idle {
+        fn poll(&mut self) -> Vec<JobChunk> {
+            Vec::new()
+        }
+
+        fn kill(&mut self) {}
+    }
+
+    struct Fake;
+
+    impl Runner for Fake {
+        fn start(&self, _spec: &JobSpec) -> std::io::Result<Box<dyn Running>> {
+            Ok(Box::new(Idle))
+        }
+    }
+
+    fn built_with_jobs(script: &str) -> (tempfile::TempDir, Plugins) {
+        let dir = tempfile::tempdir().expect("layer dir");
+        std::fs::write(dir.path().join("init.lua"), script).expect("write layer file");
+        let lua = LuaSubsystem::build_with_runner(
+            Layers::from_paths(vec![dir.path().to_path_buf()]),
+            Rc::new(PaneTerminals::new()),
+            Rc::new(neotmux_lua::clipboard::Absent),
+            Rc::new(Fake),
+        )
+        .expect("lua");
+        assert!(lua.run_init().is_empty());
+        (dir, Plugins::new(lua))
+    }
+
+    fn begin(plugins: &Plugins, session: SessionId) {
+        let pane = PaneId::from(1);
+        let size = Size { rows: 24, cols: 80 };
+        plugins.lua.begin_frame(
+            session,
+            Epoch::new(size, vec![pane], Some(pane)),
+            Geometry {
+                area: Rect::new(0, 0, size.cols, size.rows),
+                panes: vec![(pane, Rect::new(0, 0, size.cols, size.rows))],
+                focus: Some(pane),
+                ..Default::default()
+            },
+        );
+    }
+
+    /// A job's `on_exit` runs inside `forget_session`, with the dying session bound, so what
+    /// it raises is filed under a session no frame will ever ask for again. Without the
+    /// teardown drain the first thing an author writes to debug a teardown reaches neither
+    /// the log nor the transcript, and the buffer keeps it for the life of the server.
+    #[test]
+    fn what_a_teardown_on_exit_says_still_arrives() {
+        let (_dir, mut plugins) = built_with_jobs(
+            "local started = false
+             neotmux.on_tick(function()
+               if started then return end
+               started = true
+               neotmux.job.start({ 'sleep' }, {
+                 on_exit = function()
+                   neotmux.log.warn('teardown said so')
+                   neotmux.notify('warn', 'and so')
+                 end,
+               })
+             end)",
+        );
+        let session = SessionId::from(1);
+        begin(&plugins, session);
+        plugins.lua.dispatch_tick(session);
+        plugins.drain_ops(Some(session), &BTreeMap::new());
+
+        plugins.lua.forget_session(session);
+        plugins.drain_teardown_ops(session);
+
+        assert_eq!(
+            plugins.notifications().since(0),
+            vec!["init: and so".to_string()],
+            "a teardown's notify never reached the transcript"
+        );
+        assert!(
+            plugins.lua.drain_ops(Some(session)).is_empty(),
+            "a teardown's ops were left in the buffer for nobody"
+        );
     }
 
     /// `Op::PaneSend` used to be converted in a second pass, after every other op in the

@@ -30,8 +30,13 @@ pub(crate) fn install(
             // None while an `init.lua` is running, which is where a plugin most naturally
             // arms its poll: the timer is adopted by the first session to run a frame.
             let session = ambient.current();
-            let id = timers.arm(ms, repeating, owner, session, key, Instant::now());
-            handle(lua, Rc::clone(&timers), id)
+            match timers.arm(ms, repeating, owner, session, key, Instant::now()) {
+                Ok(id) => Ok((
+                    Value::Table(handle(lua, Rc::clone(&timers), id)?),
+                    Value::Nil,
+                )),
+                Err(why) => Ok((Value::Nil, Value::String(lua.create_string(&why)?))),
+            }
         })?;
         table.set(name, arm)?;
     }
