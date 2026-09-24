@@ -15,6 +15,9 @@
 -- `neotmux.state` takes it to avoid reading a pane's content twice on the common path — a pane
 -- no ruleset claims, which is the ordinary shell.
 --
+-- `detect.agent(pane)` names the ruleset that answered at that look — `'claude'` — or nil, which
+-- is how a list of agents tells an agent from a pane the fallback is guessing about.
+--
 -- A rule is a table:
 --
 --   { id = 'spinner', state = 'working', priority = 9, visible = 'working',
@@ -419,7 +422,7 @@ function M.of(pane)
         if M.claimed(name, rules, pane) then
           local state, id, visible = M.judge(rules, it.view)
           if id ~= nil then
-            it.state, it.visible, it.matched = state, visible, true
+            it.state, it.visible, it.matched, it.agent = state, visible, true, name
             break
           end
         end
@@ -428,6 +431,14 @@ function M.of(pane)
     seen[pane] = it
   end
   return hold(pane, it.state, it.visible, it.matched), it.view
+end
+
+-- Which ruleset answered for the pane at the last look: its name in `M.agents`, or nil where
+-- none did. Read off the cache `of` fills, so it costs nothing after `of` — and knows nothing of
+-- a pane `of` has not been asked about.
+function M.agent(pane)
+  local it = seen[pane]
+  return it and it.agent or nil
 end
 
 return M

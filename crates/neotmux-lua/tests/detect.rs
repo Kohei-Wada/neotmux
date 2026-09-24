@@ -725,3 +725,37 @@ fn a_line_that_merely_starts_with_the_letters_of_an_answer_is_not_an_answer() {
     );
     assert_detects(&screen, "", "nil", "nil");
 }
+
+/// `agent` names the ruleset that answered at the last look, and nothing once none does.
+#[test]
+fn agent_names_the_ruleset_that_answered_the_last_look() {
+    let (_dir, sub) = built(
+        "local detect = require('neotmux.detect')\n\
+         detect.agents = { fake = {\n\
+           { id = 'busy', state = 'working', priority = 1,\n\
+             match = function(v) return v.lines[#v.lines] == 'BUSY' end },\n\
+         } }\n\
+         neotmux.on_key(function(key)\n\
+           if key == 'J' then\n\
+             local before = tostring(detect.agent(1))\n\
+             detect.of(1)\n\
+             neotmux.log.info('before=' .. before .. ' agent=' .. tostring(detect.agent(1)))\n\
+             return true\n\
+           end\n\
+           return false\n\
+         end)\n",
+    );
+    feed(&sub, b"BUSY");
+    keys(&sub, &["J"]);
+    sub.terminals().feed(pane(), b"\x1b[2J\x1b[Hsomething else");
+    keys(&sub, &["J"]);
+    let said: Vec<String> = logged(&sub)
+        .into_iter()
+        .filter(|l| l.starts_with("before="))
+        .collect();
+    assert_eq!(
+        said,
+        vec!["before=nil agent=fake", "before=fake agent=nil"],
+        "{said:?}"
+    );
+}
