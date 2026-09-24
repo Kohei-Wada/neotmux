@@ -10,6 +10,11 @@
 --   local detect = require('neotmux.detect')
 --   detect.of(pane)  --> 'working' | 'blocked' | 'idle', or nil when nothing answered
 --
+-- `of` answers a second value too: the view it judged the pane from, or the one it last judged
+-- it from if this look was a cache hit, or nil if the pane has none (gone, or never read).
+-- `neotmux.state` takes it to avoid reading a pane's content twice on the common path — a pane
+-- no ruleset claims, which is the ordinary shell.
+--
 -- A rule is a table:
 --
 --   { id = 'spinner', state = 'working', priority = 9, visible = 'working',
@@ -272,7 +277,8 @@ end
 
 -- The same cost control as `neotmux.state`: the screen is read only for a pane that has been
 -- fed since it was last looked at. The hold runs on every call regardless, because a pane
--- that has stopped changing is exactly the one whose settle has to expire.
+-- that has stopped changing is exactly the one whose settle has to expire. The view built here
+-- is kept on `it` rather than thrown away, so a cache hit still has one to hand back.
 function M.of(pane)
   local revision = neotmux.pane.revision(pane)
   if revision == nil then
@@ -282,11 +288,10 @@ function M.of(pane)
   end
   local it = seen[pane]
   if it == nil or it.revision ~= revision then
-    it = { revision = revision }
-    local view = M.view(pane)
-    if view ~= nil then
+    it = { revision = revision, view = M.view(pane) }
+    if it.view ~= nil then
       for _, name in ipairs(names()) do
-        local state, id, visible = M.judge(M.agents[name], view)
+        local state, id, visible = M.judge(M.agents[name], it.view)
         if id ~= nil then
           it.state, it.visible = state, visible
           break
@@ -295,7 +300,7 @@ function M.of(pane)
     end
     seen[pane] = it
   end
-  return hold(pane, it.state, it.visible)
+  return hold(pane, it.state, it.visible), it.view
 end
 
 return M

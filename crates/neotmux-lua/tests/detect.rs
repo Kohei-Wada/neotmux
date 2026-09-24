@@ -1,92 +1,15 @@
 //! `neotmux.detect`: what a pane looks like it is doing, as a function of what is on it.
 //! The rules under test here are the tests' own — the shipped Claude ruleset has its own file.
 //!
-//! The harness is `hints.rs`'s: a real pane fed real bytes through `support::panes()`, with the
-//! shipped plugins off so that every log line in a dispatch belongs to the test's own `on_key`.
+//! The harness (`built`, `feed`, `keys`, `logged`, `pane`, `SIZE`) is `support`'s, shared with
+//! `state.rs`: a real pane fed real bytes through `support::panes()`, with the shipped plugins
+//! off so that every log line in a dispatch belongs to the test's own `on_key`.
 
-use std::fs;
-use std::path::{Path, PathBuf};
-
-use neotmux_lua::ops::Op;
-use neotmux_lua::runtime::Layers;
-use neotmux_lua::{KeyOutcome, LuaSubsystem};
-use neotmux_proto::{Epoch, Geometry, PaneId, Rect, Size};
+use neotmux_proto::Size;
 
 mod support;
 
-use support::Built;
-
-const SIZE: Size = Size { rows: 16, cols: 40 };
-
-fn shipped_layer() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime")
-}
-
-fn pane() -> PaneId {
-    PaneId::from(1)
-}
-
-/// The shipped runtime with every plugin off. `neotmux.detect` is a convention module — nothing
-/// registers it — so the only thing running here is what the test's `init.lua` asks for.
-fn built(extra: &str) -> (tempfile::TempDir, Built) {
-    let dir = tempfile::tempdir().unwrap();
-    fs::write(
-        dir.path().join("init.lua"),
-        format!(
-            "local defaults = require('neotmux.defaults')\n\
-             for _, name in ipairs({{ 'status', 'prefix', 'copy', 'sessions', 'palette',\n\
-               'notify', 'borders', 'guard', 'sync', 'watch', 'sidebar', 'footer',\n\
-               'hints' }}) do\n\
-               defaults[name] = false\n\
-             end\n\
-             {extra}"
-        ),
-    )
-    .unwrap();
-    let terminals = support::panes();
-    let sub = LuaSubsystem::build(
-        Layers::from_paths(vec![dir.path().to_path_buf(), shipped_layer()]),
-        terminals.clone(),
-    )
-    .unwrap();
-    assert!(sub.run_init().is_empty());
-    sub.begin_frame(
-        support::one(),
-        Epoch::new(SIZE, vec![pane()], Some(pane())),
-        Geometry {
-            area: Rect::new(0, 0, SIZE.cols, SIZE.rows),
-            panes: vec![(pane(), Rect::new(0, 0, SIZE.cols, SIZE.rows))],
-            focus: Some(pane()),
-            ..Default::default()
-        },
-    );
-    (dir, Built::new(sub, terminals))
-}
-
-fn feed(sub: &Built, text: &[u8]) {
-    sub.terminals().open(pane(), SIZE, 100);
-    sub.terminals().feed(pane(), text);
-}
-
-fn keys(sub: &LuaSubsystem, specs: &[&str]) {
-    for spec in specs {
-        assert_eq!(
-            sub.dispatch_key(support::one(), spec),
-            KeyOutcome::Consumed,
-            "the test's own on_key did not take '{spec}'"
-        );
-    }
-}
-
-fn logged(sub: &LuaSubsystem) -> Vec<String> {
-    sub.drain_ops(Some(support::one()))
-        .into_iter()
-        .filter_map(|(_, op)| match op {
-            Op::Log { text, .. } | Op::Notify { text, .. } => Some(text),
-            _ => None,
-        })
-        .collect()
-}
+use support::{Built, built, feed, keys, logged, pane};
 
 /// Priority decides, not order in the table: a lower-priority rule that matches first in the
 /// table must not win.

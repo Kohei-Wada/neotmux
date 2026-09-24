@@ -18,6 +18,12 @@
 -- `M.of` asks it first. What follows in this file — the pattern list, `M.working_for` — is what
 -- answers for a pane no ruleset in `neotmux.detect.agents` claims: a shell, or an agent nobody
 -- has taught neotmux the screen of yet.
+--
+-- Two caches, `neotmux.detect`'s and this file's own, sit behind the one call: each keyed by a
+-- pane's revision, each rebuilt only when it moves. They cannot disagree today only because both
+-- always recompute the moment the revision they last saw is stale — nothing enforces that a pane
+-- crossing from unclaimed to claimed, or back, is handed off between them correctly, and no test
+-- watches that crossing.
 local M = {}
 
 -- Lua patterns, matched against the last `M.lines` non-blank lines of a pane. Replace the
@@ -70,12 +76,10 @@ local function matches(line)
   return false
 end
 
--- Whether the pane's last few lines read as a question, or nil when it went away.
-local function asking(pane)
-  local lines = neotmux.pane.content(pane)
-  if lines == nil then
-    return nil
-  end
+-- Whether the pane's last few non-blank lines read as a question. `lines` may already have its
+-- blanks stripped (a view handed over by `neotmux.detect`) or not (raw `pane.content`) — either
+-- way the last `M.lines` non-empty entries are the ones that matter.
+local function asking(lines)
   local looked = 0
   for i = #lines, 1, -1 do
     if lines[i] ~= "" then
@@ -97,8 +101,9 @@ function M.forget(pane)
 end
 
 -- A pane a ruleset in `neotmux.detect.agents` claims is answered there; everything below is
--- what a pane none of them recognise falls back to.
-local function fallback(pane)
+-- what a pane none of them recognise falls back to. `lines`, when given, is the view
+-- `neotmux.detect` already read this pane's screen into — reused rather than read again.
+local function fallback(pane, lines)
   -- The whole cost control: the lines are built only for a pane that has been fed since it was
   -- last looked at, which on a session nobody is typing into is none of them. The stamp is one
   -- call and no copying; the content is the expensive one.
@@ -109,12 +114,14 @@ local function fallback(pane)
   end
   local it = seen[pane]
   if it == nil or it.revision ~= revision then
-    local blocked = asking(pane)
-    if blocked == nil then
-      seen[pane] = nil
-      return nil
+    if lines == nil then
+      lines = neotmux.pane.content(pane)
+      if lines == nil then
+        seen[pane] = nil
+        return nil
+      end
     end
-    it = { revision = revision, at = neotmux.now(), blocked = blocked }
+    it = { revision = revision, at = neotmux.now(), blocked = asking(lines) }
     seen[pane] = it
   end
   if it.blocked then
@@ -127,11 +134,11 @@ local function fallback(pane)
 end
 
 function M.of(pane)
-  local detected = require("neotmux.detect").of(pane)
+  local detected, view = require("neotmux.detect").of(pane)
   if detected ~= nil then
     return detected
   end
-  return fallback(pane)
+  return fallback(pane, view and view.lines or nil)
 end
 
 function M.icon(name)
