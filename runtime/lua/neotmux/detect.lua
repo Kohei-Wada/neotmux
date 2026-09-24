@@ -10,6 +10,23 @@
 --   local detect = require('neotmux.detect')
 --   detect.of(pane)  --> 'working' | 'blocked' | 'idle', or nil when nothing answered
 --
+-- A rule is a table:
+--
+--   { id = 'spinner', state = 'working', priority = 9, visible = 'working',
+--     match = function(view) return ... end }
+--
+-- `priority` decides, not where the rule sits in the table. `state` is the answer, and a rule
+-- with none says "this screen is not a state" and stops the search. `visible` is the state the
+-- screen is *showing*, spelled out: it is read, not merely tested, and only `'idle'` or
+-- `'blocked'` change anything — they release the hold below at once, because a prompt on the
+-- screen is evidence rather than the absence of it. `visible = 'working'` on a rule that
+-- answers `idle` is a rule with a typo in it, and gets held like any other unevidenced fall.
+--
+-- A view is read-only to a rule. Every region is cut from one list, that list is handed out as
+-- `view.lines`, and the whole view is kept until the screen moves — so a rule that does
+-- `table.remove(view.lines)` to ignore the last line corrupts every region for every rule
+-- below it, and keeps corrupting them until the pane is fed again. Copy before you cut.
+--
 -- The shape is herdr's (herdrdev/herdr, Apache-2.0): a rule with a priority, a state and the
 -- screen regions it reads is `src/detect/manifests/*.toml`, and the hold below — a fall to
 -- idle disbelieved until it settles, unless the screen says idle in so many words — is
@@ -123,6 +140,11 @@ function M.view(pane)
     return after
   end
 
+  -- The last box on the screen, without its edges. An unclosed box — one whose bottom has
+  -- scrolled off, which is what a box being typed into looks like — is still a box, so the
+  -- region runs to the end of the screen rather than coming back empty. The cost of that is a
+  -- stale `╭` high up dragging everything below it in, so a rule that cares should check what
+  -- it got rather than that it got something.
   local box
   function view.prompt_box()
     if box == nil then
@@ -172,6 +194,11 @@ local function by_priority(rules)
   return sorted
 end
 
+-- The rules that have raised, so that each one is reported once and not once a frame. Keyed by
+-- the rule table rather than by `rule.id`: ids collide across rulesets, and the rule most likely
+-- to raise is the malformed one that has no id at all. Weak, so a ruleset that goes away does.
+local complained = setmetatable({}, { __mode = "k" })
+
 -- The first rule that matches, by priority. It answers `state, id, visible` — and a rule with
 -- no state answers `nil, id`, which says "this screen is not a state": a transcript scrolled
 -- back, a menu over the top. That stops the search rather than falling through to a lower
@@ -184,8 +211,14 @@ function M.judge(rules, view)
     local rule = entry.rule
     local ok, hit = pcall(rule.match, view)
     if not ok then
-      -- One bad rule must not take the detector down with it, and must say which one it was.
-      neotmux.notify("error", "neotmux.detect: rule '" .. tostring(rule.id) .. "': " .. tostring(hit))
+      -- One bad rule must not take the detector down with it, and must say which one it was —
+      -- once. This runs for every pane on every frame, and a rule that raises on one screen
+      -- raises on the next thousand.
+      if not complained[rule] then
+        complained[rule] = true
+        local which = "neotmux.detect: rule '" .. tostring(rule.id) .. "'"
+        neotmux.notify("error", which .. ": " .. tostring(hit))
+      end
     elseif hit then
       return rule.state, rule.id, rule.visible
     end
@@ -199,8 +232,11 @@ end
 local seen = {}
 local held = {}
 
+-- Both of them: this is the call for "start over on this pane", and a forget that dropped the
+-- look but kept the hold would answer the next question out of a screen it had not read.
 function M.forget(pane)
   seen[pane] = nil
+  held[pane] = nil
 end
 
 -- `pairs` does not walk a table the same way twice, and two rulesets that both answer would
@@ -220,15 +256,23 @@ local function hold(pane, state, visible)
     return was and was.state or nil
   end
   local now = neotmux.now()
-  -- Only the fall out of working is disbelieved, and only when nothing on the screen says
-  -- idle: a rule that carries `visible` matched something that is there — a prompt, a summary
-  -- — rather than the absence of something that was.
-  if was ~= nil and was.state == "working" and state == "idle" and not visible then
+  -- Only the fall out of working is disbelieved, and only when the screen does not say in so
+  -- many words what it is doing instead. `visible` is a state name, not a flag: a rule that
+  -- claims to show `working` while answering `idle` is a rule with a typo in it, and holding
+  -- it is the better of the two wrong answers.
+  local shows = visible == "idle" or visible == "blocked"
+  if was ~= nil and was.state == "working" and state == "idle" and not shows then
     if now - was.since < M.settle then
       return was.state
     end
   end
-  held[pane] = { state = state, since = now }
+  -- Mutated rather than replaced: `of` runs this on every look at every pane, and a fresh
+  -- table per look is a few hundred a second on a session nobody is even typing into.
+  if was == nil then
+    held[pane] = { state = state, since = now }
+  else
+    was.state, was.since = state, now
+  end
   return state
 end
 
