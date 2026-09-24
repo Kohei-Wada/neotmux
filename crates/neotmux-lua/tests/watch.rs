@@ -20,8 +20,10 @@ fn shipped_layer() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime")
 }
 
-/// The shipped runtime with the watcher on and the other three off, so the only ops a tick
-/// can produce are the watcher's.
+/// The shipped runtime with the watcher on and the others off, so the only ops a tick can
+/// produce are the watcher's. `chime` is one of the others on purpose: it reads the same
+/// states this file drives a pane through, and under `NoRunner` every player it tries fails
+/// to start, so leaving it on would put its "no player" notification in among the watcher's.
 fn built() -> (tempfile::TempDir, Built) {
     let dir = tempfile::tempdir().unwrap();
     fs::write(
@@ -30,6 +32,7 @@ fn built() -> (tempfile::TempDir, Built) {
          defaults.status = false\n\
          defaults.prefix = false\n\
          defaults.borders = false\n\
+         defaults.chime = false\n\
          defaults.watch = true\n",
     )
     .unwrap();

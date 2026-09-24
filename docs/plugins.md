@@ -1898,9 +1898,10 @@ you open a sidebar to find out.
 ### The chime
 
 `plugin.chime` is what the state convention above is *for*, and the one shipped plugin that
-makes a noise. On by default: it reads every pane of the window on each tick, and when one
-changes into a state it has a sound for, it plays it. Off with
-`require('neotmux.defaults').chime = false`.
+makes a noise. On by default: it reads every pane the session owns on each tick — hidden
+windows included, like `plugin.watch`, because another window is exactly where you are when you
+have stopped watching the one an agent is in — and when one changes into a state it has a sound
+for, it plays it. Off with `require('neotmux.defaults').chime = false`.
 
 ```lua
 local chime = require('plugin.chime')
@@ -1947,9 +1948,16 @@ was played. The walk moves on from either, and the first player that exits zero 
 and used from then on. A machine where none of them works is told once, through
 `neotmux.notify('error', ...)`, and the plugin stops trying.
 
-The two sounds in `runtime/sounds/` are herdr's (herdrdev/herdr, Apache-2.0), carried
-unchanged, as are the detection rules and the hold behind `neotmux.state`. `NOTICE` at the root
-of the repository says which files and from where.
+What is *not* a verdict on a player is an ending that was never the program's own. A job killed
+by a session ending or by the output limit answers `on_exit` with a nil code, and a `start`
+refused because the source already holds `job_concurrency` jobs never reached the program at
+all. Reading either as "this one does not work" would write off a player that works for the
+life of the server, so the walk stays where it is and tries the same one again next time.
+
+The two sounds in `runtime/sounds/` are herdr's (herdrdev/herdr), carried unchanged, as are
+the detection rules and the hold behind `neotmux.state`. Those files are Apache-2.0 only —
+the repository's MIT option does not reach them — and `NOTICE` at the root says which files,
+from where, and at what version.
 
 ### The box convention
 

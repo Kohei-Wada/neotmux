@@ -170,7 +170,7 @@ pub struct FakeRunner {
     pub scripts: RefCell<VecDeque<Script>>,
     pub started: RefCell<Vec<JobSpec>>,
     pub killed: Rc<RefCell<bool>>,
-    pub refuse: RefCell<Option<String>>,
+    refuse: RefCell<Option<String>>,
     refused: RefCell<HashSet<String>>,
 }
 

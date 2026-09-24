@@ -13,7 +13,11 @@
 --   require('plugin.chime').only_when_away = false   -- chime for the pane you are in, too
 --   require('plugin.chime').sounds.idle = nil        -- only the waiting, not the finishing
 --
--- Nothing here is a host feature: `neotmux.pane.list`, `neotmux.job.start` and
+-- Every pane the session owns is watched, hidden windows included — the same reach
+-- `plugin.watch` has, and for the same reason: another window is exactly where you are when you
+-- have stopped looking at the one an agent is in.
+--
+-- Nothing here is a host feature: `neotmux.window.list`, `neotmux.job.start` and
 -- `neotmux.notify`, over the shared guess.
 local detect = require("neotmux.detect")
 local state = require("neotmux.state")
@@ -55,6 +59,9 @@ local hopeless = false
 
 neotmux.on_event("pane_closed", function(event)
   seen[event.pane] = nil
+  -- The hold is worth keeping for a live pane and worth nothing for a dead one: an id is
+  -- reused, and what the pane before it was doing is not evidence about its successor.
+  state.forget(event.pane)
 end)
 
 local function file(name)
@@ -67,49 +74,76 @@ end
 -- A player is judged by how it *ends*, not by whether it started: one that is not installed
 -- fails at `start`, and one that is installed but cannot decode an mp3 starts happily and
 -- exits non-zero a moment later. Both mean the same thing — try the next one.
+--
+-- What must not move the walk on is an ending that says nothing about the player. A job killed
+-- by a session ending, or by the output limit, answers `on_exit` with a nil code; a `start`
+-- refused because this source already has `job_concurrency` jobs running, or because the
+-- session is going away, answers with no handle either. Reading any of those as "this program
+-- does not work" writes off a player that works perfectly well, for the life of the server —
+-- so only a *number* that is not zero, and only a refusal that names the spawn, count as
+-- evidence. Everything else leaves the walk where it is, to be tried again next time.
+local function player_failed(why)
+  -- `neotmux.job.start`'s own wording for a spawn that failed. The two refusals it makes
+  -- before ever reaching the program — "the session is ending", "too many jobs: N already
+  -- running" — are facts about this layer, and matching the spawn positively is what keeps a
+  -- refusal added later from being read as a verdict on a program nobody tried to run.
+  return type(why) == "string" and why:find("^could not start ") ~= nil
+end
+
 local function play(path, from)
   local spec = M.players[from]
   if spec == nil then
+    -- Two walks can run out in the same frame, and one machine with no player is one thing to
+    -- be told about.
+    if hopeless then
+      return
+    end
     hopeless = true
     neotmux.notify("error", "plugin.chime: no player could play " .. path .. "; set .players")
     return
   end
   local cmd = { table.unpack(spec) }
   cmd[#cmd + 1] = path
-  local job = neotmux.job.start(cmd, {
+  local job, why = neotmux.job.start(cmd, {
     on_exit = function(code)
       if code == 0 then
         using = from
-      else
+      elseif type(code) == "number" then
         play(path, from + 1)
       end
     end,
   })
-  if job == nil then
+  if job == nil and player_failed(why) then
     play(path, from + 1)
   end
 end
 
+local function watch(pane, focused)
+  local now = state.of(pane)
+  -- A shell reaches `idle` at the end of every command it runs — that is what
+  -- `neotmux.state`'s fallback is for — and a sound on that edge would chime for an `ls` in a
+  -- pane nobody is looking at. An `idle` worth hearing is one the *detector* answered: a turn
+  -- that finished, on a screen a ruleset in `neotmux.detect.agents` read. A question left
+  -- standing is different, and still sounds for anything, because a shell asking one is
+  -- waiting for you exactly as an agent is.
+  if now == "idle" and detect.of(pane) == nil then
+    now = nil
+  end
+  if now ~= seen[pane] and not hopeless then
+    local sound = M.sounds[now]
+    if sound ~= nil and pane ~= focused then
+      play(file(sound), using)
+    end
+  end
+  seen[pane] = now
+end
+
 neotmux.on_tick(function()
   local focused = M.only_when_away and neotmux.pane.current() or nil
-  for _, pane in ipairs(neotmux.pane.list()) do
-    local now = state.of(pane)
-    -- A shell reaches `idle` at the end of every command it runs — that is what
-    -- `neotmux.state`'s fallback is for — and a sound on that edge would chime for an `ls` in
-    -- a pane nobody is looking at. Only a pane a ruleset in `neotmux.detect.agents` claims has
-    -- an `idle` worth hearing: a turn finishing. A question left standing is different, and
-    -- still sounds for anything, because a shell asking one is waiting for you exactly as an
-    -- agent is. `state.of` has already filled the detector's cache, so this costs a lookup.
-    if now == "idle" and detect.of(pane) == nil then
-      now = nil
+  for _, window in ipairs(neotmux.window.list()) do
+    for _, pane in ipairs(neotmux.window.panes(window) or {}) do
+      watch(pane, focused)
     end
-    if now ~= seen[pane] and not hopeless then
-      local sound = M.sounds[now]
-      if sound ~= nil and pane ~= focused then
-        play(file(sound), using)
-      end
-    end
-    seen[pane] = now
   end
 end)
 
