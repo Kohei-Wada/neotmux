@@ -231,10 +231,12 @@ bounds, and the overrun rule already stops one that abuses it.
 stops its timers — the same sweep that already drops a source's registrations, reservations and
 floats, with one more line for this.
 
-**They also belong to the session that was current when they started.** A callback runs with
-that session as its ambient one, because a callback that calls `neotmux.notify` or
-`pane.send` has to have somewhere to send it. When that session is gone, the job is killed and
-the timer stopped.
+**They also belong to a session.** A callback runs with that session as its ambient one, because
+a callback that calls `neotmux.notify` or `pane.send` has to have somewhere to send it. The
+session is the one that was current when the job or timer started — or, when there was none, the
+first session whose frame runs afterwards. That second case is not an edge: a plugin's `init.lua`
+runs before any session exists, and arming a poll at load is the most ordinary thing a plugin
+with a timer does. When that session is gone, the job is killed and the timer stopped.
 
 **Server shutdown** kills every job without waiting for it, the way a pane's child is hung up.
 
