@@ -298,6 +298,41 @@ fn the_frame_that_takes_a_cleared_notice_off_the_screen_is_produced() {
     );
 }
 
+/// A plugin winding a pane back into its history is a change to the picture even when it
+/// draws nothing different: copy mode's cursor on the bottom row stays on the bottom row as
+/// `j` scrolls the view under it, so the overlay is the same and only the view has moved.
+#[test]
+fn a_view_that_moves_with_the_overlay_unchanged_produces_a_frame() {
+    let (_dir, _wakeup, mut session, mut plugins) = halves(&[(
+        "init.lua",
+        "local back = 0\n\
+         neotmux.keymap.set('V', function() back = 50 return true end)\n\
+         neotmux.on_tick(function(ctx)\n\
+         \x20 local pane = neotmux.pane.current()\n\
+         \x20 if pane then ctx:view(pane, back) end\n\
+         end)\n",
+    )]);
+    for typed in typed("seq 1 100\n") {
+        key(&mut session, &plugins, typed);
+    }
+    assert!(step_until(&mut session, &mut plugins, |frame| {
+        screen(frame).lines().any(|row| row.trim() == "100")
+    }));
+    settle(&mut session, &mut plugins);
+
+    for typed in typed("V") {
+        key(&mut session, &plugins, typed);
+    }
+    let mut moved = false;
+    for _ in 0..5 {
+        if let Some(shown) = frame(&mut session, &mut plugins).frame {
+            moved = screen(&shown).lines().any(|row| row.trim() == "50");
+            break;
+        }
+    }
+    assert!(moved, "the view moved and no frame showed it");
+}
+
 /// Whether `noticed` is in the overlay, or is not, within a few frames of asking. An op is
 /// drained after the tick that raised it, so a change the keyboard made takes a frame or two
 /// to reach the picture — and this is the only thing either assertion is waiting for.

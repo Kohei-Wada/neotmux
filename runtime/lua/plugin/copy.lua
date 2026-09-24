@@ -248,7 +248,7 @@ M.keys = {
 }
 
 -- The mode opens where the pane already is: the view is the visible screen and the cursor is
--- its top left corner, so entering changes nothing about what is on screen.
+-- where the pane's own cursor is, which is where whatever you were typing is.
 function M.enter()
   local pane = neotmux.pane.current()
   if pane == nil then
@@ -265,11 +265,12 @@ function M.enter()
   -- over; this is the same instant's cells, and the two have to be the same instant or the
   -- selection is over one thing and the screen shows another.
   neotmux.pane.freeze(pane)
+  local at = neotmux.pane.cursor(pane) or { x = 0, y = 0 }
   state = {
     pane = pane,
     buffer = buffer,
     top = buffer.history,
-    cursor = { line = buffer.history, col = 0 },
+    cursor = { line = buffer.history + at.y, col = at.x },
     anchor = nil,
   }
   mode_handle = modes.raise("copy")

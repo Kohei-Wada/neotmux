@@ -54,6 +54,9 @@ pub struct Session {
     pane_info: PaneInfoCache,
     dirty: bool,
     last_overlay: Vec<DrawCmd>,
+    /// The views the last frame was drawn at. A view that moves under an unchanged overlay
+    /// is still a different picture.
+    last_views: BTreeMap<PaneId, usize>,
     /// What has happened to the session since the client was last told, in order. A batch
     /// with one geometry attached would be a lie: a `pane_opened` handler must see the pane
     /// it is being told about, so the geometry moves between the events exactly as it does
@@ -131,6 +134,7 @@ impl Session {
             pane_info: PaneInfoCache::new(),
             dirty: true,
             last_overlay: Vec::new(),
+            last_views: BTreeMap::new(),
             steps: Vec::new(),
             wants_pane_output: setup.wants_pane_output,
             ended: false,
@@ -334,6 +338,7 @@ impl Session {
         // Nothing this client has been shown is on its screen, so the first frame is not
         // allowed to be "nothing changed".
         self.last_overlay.clear();
+        self.last_views.clear();
         self.dirty = true;
         Ok(())
     }
@@ -792,10 +797,11 @@ impl Session {
         // every path but an ops-Quit (which the original also skipped it on), so the
         // last frame a leaving session shows is this tock's one, and not the one before.
         if application.end != Some(End::Quit) {
-            if tock.overlay != self.last_overlay {
+            if tock.overlay != self.last_overlay || *views != self.last_views {
                 self.dirty = true;
             }
             self.last_overlay.clone_from(&tock.overlay);
+            self.last_views.clone_from(views);
         }
         match application.end {
             // The original forced this last frame (`if self.dirty || eof`); folding the

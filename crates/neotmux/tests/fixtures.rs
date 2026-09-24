@@ -2459,7 +2459,9 @@ fn copy_mode_leaves_the_pane_alone_and_gives_the_keys_back() {
     let before = settled_pane_area(&mut nt, PATIENCE);
 
     nt.send("\x02["); // C-b [
-    nt.send("jjllkh"); // every one of them a motion, and none of them a character
+    // Every one of them a motion, and none of them a character. They end on the text, since a
+    // cursor on an empty row is a cell `contents()` sees.
+    nt.send("kkllhj");
     let inside = settled_pane_area(&mut nt, PATIENCE);
     assert_eq!(before, inside, "entering copy mode disturbed the pane");
 
@@ -2504,24 +2506,25 @@ fn the_copy_cursor_is_visible_and_moves() {
 
     nt.send("\x02["); // C-b [
     nt.settle(Duration::from_millis(400));
+    // The line the tty echoed and the line `cat` wrote back, and the pane's cursor under them.
     assert_eq!(
-        nt.cell_bg(PANE_TOP, 0),
+        nt.cell_bg(PANE_TOP + 2, 0),
         Some(COPY_CURSOR),
-        "the cursor is not on the pane's top left cell:\n{}",
+        "the cursor is not where the pane's cursor was:\n{}",
         nt.screen_after(Duration::ZERO)
     );
 
     nt.send("lll");
-    nt.send("j");
+    nt.send("k");
     nt.settle(Duration::from_millis(400));
     assert_eq!(
         nt.cell_bg(PANE_TOP + 1, 3),
         Some(COPY_CURSOR),
-        "the cursor did not move three right and one down:\n{}",
+        "the cursor did not move three right and one up:\n{}",
         nt.screen_after(Duration::ZERO)
     );
     assert_ne!(
-        nt.cell_bg(PANE_TOP, 0),
+        nt.cell_bg(PANE_TOP + 2, 0),
         Some(COPY_CURSOR),
         "the cursor is in two places at once"
     );
@@ -2555,6 +2558,25 @@ fn copy_mode_shows_a_line_the_shell_has_already_scrolled_away() {
     );
 }
 
+/// A cursor walked past the top of the screen takes the view with it, one line at a time.
+/// The cursor stays on the top row while it does, so the overlay never changes and only the
+/// view does — which is the frame that used to be skipped.
+#[test]
+fn copy_mode_scrolls_as_the_cursor_walks_off_the_top() {
+    let (mut nt, _init) = start_shipped("", "bash");
+    nt.send("printf 'LINE-%03d\\n' $(seq 1 90)\r");
+    nt.wait_for_screen("LINE-090", PATIENCE);
+    let before = nt.screen_after(Duration::from_millis(400));
+    assert!(!before.contains("LINE-055"), "{before}");
+
+    nt.send("\x02["); // C-b [
+    // Onto the top row first, on its own frame, so the keys after it move nothing but the view.
+    nt.send(&"k".repeat(30));
+    nt.settle(Duration::from_millis(400));
+    nt.send(&"k".repeat(10));
+    nt.wait_for_screen("LINE-055", PATIENCE);
+}
+
 /// A selection is visible over the pane's real content, and the content is still readable
 /// through it: the cells carry the selection's background and the shell's own characters at
 /// the same time.
@@ -2566,6 +2588,7 @@ fn a_selection_is_visible_over_text_that_is_still_readable() {
     assert_eq!(nt.cell(PANE_TOP, 1), "B", "the pane is not where expected");
 
     nt.send("\x02["); // C-b [
+    nt.send("kk"); // up from the pane's cursor to the echoed line
     nt.send("v"); // start the selection under the cursor
     nt.send("lll");
     nt.settle(Duration::from_millis(400));

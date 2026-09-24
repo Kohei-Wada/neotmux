@@ -161,6 +161,27 @@ fn entering_costs_one_cell_and_leaves_the_pane_alone() {
     assert!(texts(&cmds).is_empty(), "the pane was redrawn: {cmds:?}");
 }
 
+/// The mode opens on the cell the pane's own cursor is on, which is where whatever you were
+/// just typing is, rather than on a corner of the screen you then have to walk back from.
+#[test]
+fn entering_puts_the_cursor_where_the_pane_s_cursor_is() {
+    let (_dir, sub) = built("");
+    scrolled(&sub);
+    sub.publish_pane_tty(
+        support::one(),
+        std::collections::BTreeMap::from([(
+            pane(),
+            neotmux_proto::PaneTty {
+                cursor: (5, 3),
+                ..Default::default()
+            },
+        )]),
+    );
+    enter(&sub);
+    assert_eq!(tints(&frame(&sub))[0].0, Rect::new(3, 5, 1, 1));
+    assert_eq!(view(&sub), 0);
+}
+
 /// The cursor is where the keys put it, and it is a cell you can see.
 #[test]
 fn the_cursor_moves_and_is_drawn_where_it_landed() {
