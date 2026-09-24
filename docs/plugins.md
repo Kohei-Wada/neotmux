@@ -1071,6 +1071,7 @@ timer polls, the job makes the noise, and neither had to wait for the other.
 ```lua
 neotmux.log.info(text)    -- also .warn, .error
 neotmux.notify(level, text)  -- 'info' | 'warn' | 'error'; raised on the surface and logged
+neotmux.now()                -- milliseconds, monotonic, zeroed at an arbitrary point
 neotmux.notifications.list() -- what is on it now: { level =, tag =, text = }, newest first
 neotmux.notifications.clear()-- take them all down; the transcript keeps them
 neotmux.quit()
@@ -1149,6 +1150,11 @@ terminal" — or say nothing, and tell the person about the paste buffer you kee
 which you can actually check.
 
 There is no paste buffer in the host. Yanked text goes wherever your plugin puts it.
+
+`neotmux.now()` is the only clock in the VM fine enough for anything that happens between two
+frames: `os.time` is still there, and still counts whole seconds. Only differences between two
+`neotmux.now()` reads mean anything — what it is zeroed at is not part of the contract, and it
+never goes backwards.
 
 `neotmux.home` is a fact, not an option: it sits beside `pane.info`'s facts rather than under
 `opt`, because nothing sets it. The VM has no `os.getenv` — reading the process environment is

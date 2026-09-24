@@ -452,6 +452,15 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
     }
 
     {
+        // Zeroed when the subsystem is built rather than at the epoch: a `Duration` since an
+        // arbitrary start is what a monotonic clock can honestly answer, and milliseconds are
+        // what every timing a plugin does is written in.
+        let start = std::time::Instant::now();
+        let now = lua.create_function(move |_, ()| Ok(start.elapsed().as_millis() as u64))?;
+        neotmux.set("now", now)?;
+    }
+
+    {
         // Top level, not a `neotmux.plugin` namespace: the host has no plugin concept (§4.1).
         // The display name is the only handle a human has — it is what the notification
         // reported — and two layers providing the same relative path share one on purpose

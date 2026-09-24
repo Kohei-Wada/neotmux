@@ -544,7 +544,7 @@ fn pairs_over_the_sealed_top_level_table_sees_the_real_fields() {
     };
     assert_eq!(
         text,
-        "clipboard command detach float job keymap log notifications notify on_event on_key on_tick on_write opt pane quit reserve resubscribe session session_name timer width window",
+        "clipboard command detach float job keymap log notifications notify now on_event on_key on_tick on_write opt pane quit reserve resubscribe session session_name timer width window",
         "the top-level ABI surface changed"
     );
 }
@@ -1278,4 +1278,41 @@ fn a_float_owners_binding_still_waits_behind_every_on_key() {
         !text.contains("f binding ran"),
         "F's binding ran although K's on_key consumed the key: {text}"
     );
+}
+
+/// The only clock a plugin had counted whole seconds, which is too coarse for anything that
+/// happens between two frames. Monotonic and relative: what it is zeroed at is nobody's
+/// business, and only differences mean anything.
+#[test]
+fn the_clock_answers_milliseconds_that_never_go_backwards() {
+    let dir = layer(&[(
+        "init.lua",
+        "local first = neotmux.now()\n\
+         local last = first\n\
+         for _ = 1, 1000 do\n\
+           local now = neotmux.now()\n\
+           if now < last then\n\
+             error('the clock went backwards')\n\
+           end\n\
+           last = now\n\
+         end\n\
+         neotmux.log.info('span=' .. tostring(last - first >= 0))\n\
+         neotmux.log.info('number=' .. type(first))\n",
+    )]);
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        support::panes(),
+    )
+    .unwrap();
+    assert!(sub.run_init().is_empty());
+    let said: Vec<String> = sub
+        .drain_ops(None)
+        .into_iter()
+        .filter_map(|(_, op)| match op {
+            Op::Log { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect();
+    assert!(said.iter().any(|line| line == "span=true"), "{said:?}");
+    assert!(said.iter().any(|line| line == "number=number"), "{said:?}");
 }
