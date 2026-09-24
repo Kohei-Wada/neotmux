@@ -1881,7 +1881,7 @@ fn capture_lines_trims_the_blank_tail_and_answers_the_actual_output() {
 }
 
 /// `new`'s cold-start path: every other test starts from a running server, but an agent's
-/// first `neotmux new` runs with nothing listening at all — `run_command`'s `start::begin()`
+/// first `neotmux new` runs with nothing listening at all — `client::command`'s `start::begin()`
 /// branch, untested until now.
 #[test]
 fn new_starts_a_server_from_cold_when_nothing_is_listening() {

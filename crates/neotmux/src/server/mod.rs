@@ -17,8 +17,9 @@
 //! are the panes and the children behind them, [`plugins`] and `notify` the Lua layer and
 //! what it raises, [`runner`] a job in a real process, `clip` a yank with nowhere of its
 //! own to go, [`input`] the bytes a key is typed as, [`command`] what the host answers
-//! without the Lua layer, `paneinfo` what `/proc` last said about a pane's child, and
-//! [`start`] how this half gets started at all.
+//! without the Lua layer, and `paneinfo` what `/proc` last said about a pane's child.
+//!
+//! [`run`] is the door: `--server` enters here, and the loop below is what it enters.
 
 pub(crate) mod clip;
 pub mod command;
@@ -29,7 +30,6 @@ pub mod plugins;
 pub mod runner;
 pub mod session;
 pub(crate) mod shells;
-pub mod start;
 
 use std::collections::BTreeMap;
 use std::os::fd::AsFd as _;
@@ -54,6 +54,7 @@ use crate::server::clip::Clip;
 use crate::server::plugins::{Plugins, ServerOp};
 use crate::server::session::{Pass, Session, Setup};
 use crate::signals::ShutdownSignal;
+use crate::sock::{self, Lock, Paths};
 
 /// The frame's cadence, and so the closest together two frames can be. The same number
 /// the one-process loop used, for the same reason: it is a property of the loop rather
@@ -151,6 +152,39 @@ impl Sessions {
     }
 }
 
+/// The server, as `--server` runs it: the lock that says this process is the one, the
+/// socket it binds, `serve` for as long as there is a session, and the taking of both
+/// away again.
+///
+/// It stands down quietly rather than complaining when somebody else got there first: two
+/// clients starting at the same instant will both have tried, and the loser has nothing to
+/// report — its client is about to connect to the winner.
+pub fn run() -> anyhow::Result<()> {
+    let paths = Paths::resolve(&|key| std::env::var_os(key))?;
+    let Some(_lock) = Lock::take(&paths)? else {
+        return Ok(());
+    };
+    let Some(listener) = sock::bind(&paths)? else {
+        return Ok(());
+    };
+    let shutdown = ShutdownSignal::install()?;
+    let served = serve(&listener, &shutdown);
+    // Taken away on the way out, so the next client does not connect to a server that is
+    // gone — and only if it is still this server's, so one that outlived a replacement does
+    // not take the replacement's name with it.
+    sock::unbind(&paths, &listener);
+    // The server's standard error goes to `/dev/null` — it has no screen to complain to —
+    // so the log is the only place a failure can be read afterwards.
+    if let Err(err) = &served {
+        logging::log(
+            Level::Error,
+            "neotmux-server",
+            &format!("the session ended in an error: {err:#}"),
+        );
+    }
+    served
+}
+
 /// What the server holds for the whole of its life, as against what one frame has: the
 /// socket its clients arrive on, the pipe its panes nudge it with, the handle the panes are
 /// given to do the nudging, and the signal that ends all of it. One value because every one
@@ -164,7 +198,7 @@ struct Serving<'a> {
     terminals: &'a Rc<PaneTerminals>,
 }
 
-pub(crate) fn serve(listener: &UnixListener, shutdown: &ShutdownSignal) -> anyhow::Result<()> {
+fn serve(listener: &UnixListener, shutdown: &ShutdownSignal) -> anyhow::Result<()> {
     // Polled rather than blocked on, so the frame loop can answer a client instead of
     // leaving it in the backlog wondering.
     listener

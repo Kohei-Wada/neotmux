@@ -250,7 +250,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     if cli.server {
-        return neotmux::server::start::serve();
+        return neotmux::server::run();
     }
     match cli.action {
         Action::Ls => neotmux::client::ls(),

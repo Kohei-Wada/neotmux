@@ -4,16 +4,17 @@
 //! [`attach()`], [`ls`], [`kill`] and [`command`]. The last three say a sentence over the
 //! socket and print the answer; [`attach()`] is the one that takes a terminal, and what is
 //! in this file is the loop it then runs — it reads the terminal through `tty`, turns what
-//! it read into keys with `decode`, sends them over a [`crate::link`] that `start`
-//! found or started a server for, and paints the frame that comes back with `draw` and
-//! `overlay`. It holds no session state — what it shows is what it was last sent.
+//! it read into keys with `decode`, sends them over a `link` that `start` found or started
+//! a server for, and paints the frame that comes back with `draw` and `overlay`. It holds
+//! no session state — what it shows is what it was last sent.
 
-pub mod ask;
-pub mod attach;
-pub mod decode;
+pub(crate) mod decode;
 pub(crate) mod draw;
 pub(crate) mod overlay;
-pub mod start;
+pub(crate) mod start;
+
+mod ask;
+mod attach;
 
 pub use ask::{command, kill, ls};
 pub use attach::attach;
