@@ -344,6 +344,45 @@ pub(crate) fn install(
         let sources = sources.clone();
         let ops = ops.clone();
         let geometry = geometry.clone();
+        // A keystroke into a pane, named the way `on_key` names one — `a`, `C-c`, `Enter`.
+        //
+        // The bytes are the host's to decide, because they are a fact about the pane: a pane
+        // that asked for application cursor keys is written `ESC O A` where another is written
+        // `ESC [ A`, and a plugin relaying somebody's arrow key cannot know which without
+        // asking. `pane.send` is the other half of this — text, exactly as given — and the two
+        // reach the pty by the same path, so a write hook sees a relayed key like any other.
+        let key = lua.create_function(move |lua, (pane, spec): (u32, String)| {
+            let pane = PaneId::from(pane);
+            let held = {
+                let geometry = geometry.borrow();
+                geometry
+                    .windows
+                    .iter()
+                    .any(|window| window.panes.contains(&pane))
+            };
+            if !held {
+                return Ok((
+                    false,
+                    Value::String(lua.create_string(format!("no pane {pane}"))?),
+                ));
+            }
+            // A spec nothing could mean is a programming error, the way an unparseable keymap
+            // spec is, so it raises rather than being answered.
+            if neotmux_proto::Key::from_spec(&spec).is_none() {
+                return Err(mlua::Error::RuntimeError(format!(
+                    "cannot parse key spec '{spec}'"
+                )));
+            }
+            ops.push(source::caller(lua, &sources), Op::PaneKey { pane, spec });
+            Ok((true, Value::Nil))
+        })?;
+        pane.set("key", key)?;
+    }
+
+    {
+        let sources = sources.clone();
+        let ops = ops.clone();
+        let geometry = geometry.clone();
         // Text into a pane's shell, as though it had been typed there. Bytes as written: no
         // key names, and nothing wrapped in a bracketed paste — a caller that wants either
         // writes the escapes itself, and the host does not guess at what a program expects.

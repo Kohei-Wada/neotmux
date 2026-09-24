@@ -372,6 +372,7 @@ neotmux.pane.split('horizontal' | 'vertical')
 neotmux.pane.focus(id)
 neotmux.pane.resize('left' | 'right' | 'up' | 'down', cells)
 neotmux.pane.send(id, text)   -- true, or false and why
+neotmux.pane.key(id, spec)    -- one keystroke, spelled the way that pane asked for
 ```
 
 **An id is an identity, not a number to show anybody.** A `PaneId` is handed out once and
@@ -411,6 +412,14 @@ A cursor is where the *program* put it, which is where typing appears only when 
 the one reading the line — `mode` is what says whether it is. `visible` is whether the program
 is showing it; a hidden cursor is still somewhere. Both answer `nil` for a pane this frame said
 nothing about, which is a pane that has closed.
+
+`key` is `send`'s other half: a keystroke rather than text, named the way `on_key` names one —
+`a`, `C-c`, `Enter`. The bytes are the host's to work out, because they are a fact about the
+pane: one that asked for application cursor keys is written `ESC O A` where another is written
+`ESC [ A`, and a plugin relaying somebody's arrow key cannot know which. A spec nothing could
+mean raises, the way an unparseable keymap spec does; a pane the session does not hold answers
+`false` as `send` does. It reaches the pty by the same path as `send`, so a write hook sees a
+relayed key like any other write.
 
 `send` writes text into a pane's shell, as though it had been typed there — the in-process half
 of `neotmux send`. The bytes go as written: no key names, and nothing wrapped in a bracketed
@@ -1154,6 +1163,7 @@ neotmux ships ten plugins in the runtime layer an install puts on the search pat
 | `sessions` | the session picker on `C-b s`: every session and what it is running, `Enter` to go, `c` to make one, `r` to rename one, `d` to end one |
 | `palette` | the command palette on `C-b :`: every registered command, fuzzy-filtered as you type, `Enter` to run the one under the cursor |
 | `borders` | a rule along every boundary between two panes |
+| `sync` | relays every key to every pane of the window — tmux's `synchronize-panes`, on `:sync-panes` or `C-b S` — **off by default** |
 | `guard` | holds back the Enter that would run a line `neotmux.guard`'s rules name, until you press it again — **off by default** |
 | `watch` | notifies you when a pane looks like it is waiting for you, on `neotmux.state`'s guess — **off by default** |
 | `sidebar` | a tree of every session, and the windows and panes of the one you are in, down a reserved left band, folded by `C-b b` — **off by default** |

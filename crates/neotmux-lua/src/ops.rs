@@ -32,6 +32,13 @@ pub enum Op {
         pane: PaneId,
         text: String,
     },
+    /// A keystroke, named the way `on_key` names one. The bytes it becomes are the host's to
+    /// work out: they depend on what the pane has asked for, which is a fact about the pane
+    /// rather than about the plugin relaying the key.
+    PaneKey {
+        pane: PaneId,
+        spec: String,
+    },
     WindowCreate {
         window: WindowId,
     },

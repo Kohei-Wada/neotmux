@@ -14,10 +14,10 @@ use std::collections::BTreeMap;
 use neotmux_lua::ops::Op;
 use neotmux_lua::{KeyOutcome, LuaSubsystem, WriteVerdict};
 use neotmux_proto::msg::{SessionOp, Step, Tick, Tock};
-use neotmux_proto::{Key, Level, PaneId, SessionId};
+use neotmux_proto::{Key, Level, PaneId, PaneTty, SessionId};
 use std::time::Instant;
 
-use crate::input::key_spec;
+use crate::input::{encode_key, key_spec};
 use crate::logging;
 use crate::notify::Notifications;
 
@@ -114,6 +114,9 @@ impl Plugins {
         if let Some(info) = tick.pane_info {
             self.lua.publish_pane_info(session, info);
         }
+        // Kept as well as published: converting a relayed key needs to know whether the pane
+        // it is going to asked for application cursor keys, and that is the same fact.
+        let tty = tick.pane_tty.clone();
         self.lua.publish_pane_tty(session, tick.pane_tty);
         self.lua.begin_frame(session, tick.epoch, tick.geometry);
         // Before the tick, so a plugin drawing the surface draws what is on it now.
@@ -121,7 +124,7 @@ impl Plugins {
         self.lua.publish_notices(self.notifications.visible());
         self.lua.dispatch_tick(session);
 
-        let (ops, server) = self.drain_ops(Some(session));
+        let (ops, server) = self.drain_ops(Some(session), &tty);
         let tock = Tock {
             ops,
             overlay: self.lua.frame_output(),
@@ -143,6 +146,7 @@ impl Plugins {
     fn drain_ops(
         &mut self,
         session: Option<SessionId>,
+        tty: &BTreeMap<PaneId, PaneTty>,
     ) -> (Vec<(String, SessionOp)>, Vec<(String, ServerOp)>) {
         let mut out = Vec::new();
         let mut server = Vec::new();
@@ -186,6 +190,27 @@ impl Plugins {
                     }
                     SessionOp::PaneSend { pane, text }
                 }
+                Op::PaneKey { pane, spec } => {
+                    // The same path a `pane.send` takes, once the keystroke is the bytes the
+                    // pane would have been sent had somebody pressed it there: a write hook
+                    // sees a relayed key like any other write, and the pane's own DECCKM is
+                    // what decides how a cursor key is spelled.
+                    let Some(key) = Key::from_spec(&spec) else {
+                        logging::log(Level::Error, &tag, &format!("pane.key: no key is '{spec}'"));
+                        continue;
+                    };
+                    let application = tty.get(&pane).is_some_and(|tty| tty.application_cursor);
+                    let Some(bytes) = encode_key(key, application) else {
+                        continue;
+                    };
+                    let text = String::from_utf8_lossy(&bytes).into_owned();
+                    if let Some(session) = session
+                        && self.check_write(session, pane, &text, "plugin").is_err()
+                    {
+                        continue;
+                    }
+                    SessionOp::PaneSend { pane, text }
+                }
                 Op::WindowCreate { window } => SessionOp::WindowCreate { window },
                 Op::WindowFocus { window } => SessionOp::WindowFocus { window },
                 Op::WindowRename { window, name } => SessionOp::WindowRename { window, name },
@@ -216,8 +241,9 @@ impl Plugins {
     /// can be honoured: nothing is running yet, so there is nothing to split or focus.
     pub fn drain_load_ops(&mut self) -> bool {
         let mut quit = false;
-        // The load ran before any session existed, so what it raised belongs to none of them.
-        let (ops, server) = self.drain_ops(None);
+        // The load ran before any session existed, so what it raised belongs to none of them —
+        // and no pane has said anything about how it wants its keys, because no pane exists.
+        let (ops, server) = self.drain_ops(None, &BTreeMap::new());
         for (tag, op) in server {
             let (call, why) = match op {
                 ServerOp::Create { name } => (
@@ -349,7 +375,7 @@ mod tests {
             },
         );
         plugins.lua.dispatch_tick(session);
-        let (ops, _server) = plugins.drain_ops(Some(session));
+        let (ops, _server) = plugins.drain_ops(Some(session), &BTreeMap::new());
 
         let kinds: Vec<&str> = ops
             .iter()
