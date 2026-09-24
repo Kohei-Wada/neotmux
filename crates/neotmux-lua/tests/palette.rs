@@ -178,3 +178,83 @@ fn the_prefix_verbs_are_registered_as_commands() {
     assert!(names.iter().any(|n| n == "split-vertical"), "{names:?}");
     assert!(names.iter().any(|n| n == "detach"), "{names:?}");
 }
+
+/// The names the ordering and gap tests below register, kept apart from `COMMANDS` so each
+/// test's rows are exactly the ones it names — nothing to filter out but each other.
+const GAP: &str = "
+neotmux.command.add('bravo', function() end)
+neotmux.command.add('vibrant', function() end)
+require('plugin.prefix')
+require('plugin.palette')
+";
+
+/// `bv` is nowhere contiguous in `bravo` — the query only matches because the matcher is
+/// fuzzy, not a substring search — and `vibrant` holds the same two letters in the wrong
+/// order, so it is not matched at all. Both are what tells the two apart: a substring filter
+/// would fail `bravo` too, and an order-blind one would pass `vibrant`.
+#[test]
+fn a_query_with_a_gap_matches_in_order_and_refuses_the_wrong_order() {
+    let (_dir, sub) = built(GAP);
+    open(&sub);
+    keys(&sub, &["b", "v"]);
+
+    let said = texts(&frame(&sub));
+    assert!(said.iter().any(|t| t == "bravo"), "{said:?}");
+    assert!(!said.iter().any(|t| t == "vibrant"), "{said:?}");
+}
+
+const RANKED: &str = "
+neotmux.command.add('abxyz', function() end)
+neotmux.command.add('aqqqqb', function() end)
+neotmux.command.add('Zzzab', function() end)
+require('plugin.prefix')
+require('plugin.palette')
+";
+
+/// Three names, ranked by the query `ab` three different ways: `abxyz` matches at the front
+/// with nothing between the two letters (first 1, spread 1); `aqqqqb` matches at the same
+/// front but with four letters between them (first 1, spread 5); `Zzzab` matches four
+/// characters in (first 4). First position outranks spread, so the expected order is `abxyz`,
+/// `aqqqqb`, `Zzzab` — read off in draw order, not with `any()`.
+///
+/// `Zzzab`'s leading capital is not decorative: `neotmux.command.list()` answers in name
+/// order out of a `BTreeMap`, byte-wise, and a capital sorts before every lowercase letter — so
+/// this set's *registered* order is `Zzzab`, `abxyz`, `aqqqqb`, nothing like the ranked order
+/// above. A scorer that forgot to rank, and merely kept what `items()` was handed, would answer
+/// that registered order here and fail this assertion instead of coincidentally passing it.
+#[test]
+fn typing_ranks_by_first_match_then_by_how_tightly_the_rest_followed() {
+    let (_dir, sub) = built(RANKED);
+    open(&sub);
+    keys(&sub, &["a", "b"]);
+
+    let names = ["abxyz", "aqqqqb", "Zzzab"];
+    let order: Vec<String> = texts(&frame(&sub))
+        .into_iter()
+        .filter(|t| names.contains(&t.as_str()))
+        .collect();
+    assert_eq!(order, vec!["abxyz", "aqqqqb", "Zzzab"]);
+}
+
+const TIED: &str = "
+neotmux.command.add('bee', function() end)
+neotmux.command.add('cee', function() end)
+require('plugin.prefix')
+require('plugin.palette')
+";
+
+/// `bee` and `cee` score identically against `e` — the match lands on the same character, one
+/// deep, in both — so the tie is broken by name, not by whichever was registered first.
+#[test]
+fn a_tied_score_falls_back_to_name_order() {
+    let (_dir, sub) = built(TIED);
+    open(&sub);
+    keys(&sub, &["e"]);
+
+    let names = ["bee", "cee"];
+    let order: Vec<String> = texts(&frame(&sub))
+        .into_iter()
+        .filter(|t| names.contains(&t.as_str()))
+        .collect();
+    assert_eq!(order, vec!["bee", "cee"]);
+}

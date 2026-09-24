@@ -172,6 +172,34 @@ fn a_command_can_be_called_from_lua_by_name() {
 }
 
 #[test]
+fn run_answers_the_lines_a_handler_returned_as_its_third_value() {
+    let (_dir, sub) = built(&[(
+        "init.lua",
+        "neotmux.command.add('lines', function() return { 'a', 'b' } end)
+         neotmux.command.add('empty', function() end)
+         neotmux.command.add('boom', function() error('kaboom') end)
+
+         local ok1, err1, lines1 = neotmux.command.run('lines')
+         assert(ok1 == true, tostring(err1))
+         assert(err1 == nil, 'a success carried an error message')
+         assert(#lines1 == 2 and lines1[1] == 'a' and lines1[2] == 'b', 'wrong lines')
+
+         local ok2, err2, lines2 = neotmux.command.run('empty')
+         assert(ok2 == true, tostring(err2))
+         assert(type(lines2) == 'table' and #lines2 == 0, 'a handler with nothing to say did not answer an empty table')
+
+         local ok3, err3, lines3 = neotmux.command.run('boom')
+         assert(ok3 == false, 'a raising handler answered ok')
+         assert(err3 ~= nil, 'a failure carried no message')
+         assert(lines3 == nil, 'a failure carried lines')
+
+         neotmux.log.info('checked')",
+    )]);
+    let lines = logged(&sub);
+    assert!(lines.iter().any(|l| l == "checked"), "{lines:?}");
+}
+
+#[test]
 fn list_answers_in_name_order() {
     let (_dir, sub) = built(&[(
         "init.lua",
