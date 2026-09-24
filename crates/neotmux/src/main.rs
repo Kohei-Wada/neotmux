@@ -332,7 +332,7 @@ fn ask(
     start_if_needed: bool,
 ) -> anyhow::Result<Option<neotmux_proto::OwnedToClient>> {
     let link = if start_if_needed {
-        Some(neotmux::server::start::begin()?.finish()?)
+        Some(neotmux::client::start::begin()?.finish()?)
     } else {
         let paths = neotmux::sock::Paths::resolve(&|key| env::var_os(key))?;
         match neotmux::sock::connect(&paths.socket)? {
@@ -419,7 +419,7 @@ fn client(session: Option<String>) -> anyhow::Result<()> {
     let name = session
         .clone()
         .unwrap_or_else(|| neotmux::sock::DEFAULT_SESSION.to_string());
-    let link = neotmux::server::start::begin()?.finish()?;
+    let link = neotmux::client::start::begin()?.finish()?;
 
     // The attach, and the session's answer, before the screen: a session that a plugin ended
     // while it was loading must not flash the alternate screen on its way past.
