@@ -396,11 +396,14 @@ fn a_turn_in_progress_is_working() {
     assert_detects(screen, "", "working", "live_turn_working");
 }
 
-/// An input box with nothing running behind it, and none of the hints a menu comes with.
+/// An input box with nothing running behind it, and none of the hints a dialog comes with.
+/// Both prompt characters: which one Claude Code draws has changed between versions.
 #[test]
 fn an_empty_prompt_box_is_idle() {
-    let screen = "╭────────╮\n│ ❯      │\n╰────────╯\n";
-    assert_detects(screen, "", "idle", "live_prompt_box");
+    for prompt in ["\u{276f}", ">"] {
+        let screen = format!("╭────────╮\n│ {prompt}      │\n╰────────╯\n");
+        assert_detects(&screen, "", "idle", "live_prompt_box");
+    }
 }
 
 /// Picking a model is a menu over the top, not a state.
@@ -446,3 +449,21 @@ fn an_idle_title_is_idle() {
     assert_detects("all done\n", "✳ Claude", "idle", "osc_title_idle");
 }
 
+/// The shape a permission prompt is really drawn in: a rounded box, with the hint line below it
+/// rather than inside it. Our `prompt_box()` is the last rounded box — herdr's was narrower —
+/// so without an exclusion of its own `live_prompt_box` outranks this at 950 and calls a dialog
+/// waiting on you idle. Lines are cut to the test pane's forty columns.
+#[test]
+fn a_permission_prompt_inside_a_box_is_blocked_and_not_an_idle_prompt() {
+    let screen = "╭────────────────────────────────────╮\n\
+                  │ Bash command                       │\n\
+                  │ ls -la                             │\n\
+                  │                                    │\n\
+                  │ Do you want to proceed?            │\n\
+                  │ ❯ 1. Yes                           │\n\
+                  │   2. Yes, don't ask again          │\n\
+                  │   3. No, tell Claude what to do    │\n\
+                  ╰────────────────────────────────────╯\n\
+                  \x20 Esc to cancel\n";
+    assert_detects(screen, "", "blocked", "bash_permission_prompt");
+}

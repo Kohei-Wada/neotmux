@@ -9,6 +9,10 @@
 -- sight, and nobody here has a screen of either to check a rule against — a rule written from a
 -- pattern alone is one that only ever matches the fixture written from the same pattern.
 --
+-- The fixtures in `crates/neotmux-lua/tests/detect.rs` are written from that manifest and from
+-- what is known of the current Claude Code UI, not from captured screens: they say what these
+-- rules mean, and only the ones a real session has been held against say what Claude draws.
+--
 --   detect.agents = { claude = require('neotmux.agents.claude') }
 
 -- Codepoints, not a pattern class: `✳` is three bytes, and `[✳✶✻]` is a class of those bytes
@@ -23,7 +27,10 @@ local SPINNER = {
   [0x273d] = true, -- ✽
 }
 local PAUSE, PLAY = 0x23f8, 0x23f5 -- ⏸ ⏵
-local CHEVRON = 0x276f -- ❯
+local BOTTOM = 0x2570 -- ╰
+-- What the input box draws to the left of what you are typing. Two of them: which one it is
+-- has changed between versions of Claude Code, and a rule betting on one goes blind on the other.
+local PROMPT = { [0x3e] = true, [0x276f] = true } -- > ❯
 local STAR = 0x2733 -- ✳
 local ELLIPSIS = "\u{2026}" -- …
 
@@ -94,11 +101,12 @@ local function title_opens(title, wanted)
   return after ~= nil and title:sub(after, after) == " "
 end
 
--- `❯ 1. Yes`, with the chevron cut off first: `❯` is three bytes, and `❯?` makes only the last
--- of them optional. `numbered` is for the rule that wants the option list rather than any line
--- that happens to begin with a yes.
+-- `❯ 1. Yes`, with the box edge and the chevron cut off first: an option list is drawn inside
+-- the dialog's box, and `❯` is three bytes, so `❯?` would make only the last of them optional.
+-- `numbered` is for the rule that wants the option list rather than any line that happens to
+-- begin with a yes.
 local function is_option(line, numbered)
-  local body = line:gsub("^%s*\u{276f}", "")
+  local body = line:gsub("^%s*\u{2502}", ""):gsub("^%s*\u{276f}", "")
   local digit = numbered and "%d" or "%d?"
   return body:match("^%s*" .. digit .. "%.?%s*yes") ~= nil
     or body:match("^%s*" .. digit .. "%.?%s*no") ~= nil
@@ -108,6 +116,24 @@ end
 -- below must not fire on. The `│` edges are the box rather than what the line says.
 local function is_bare_prompt(line)
   return line:match("^%s*\u{2502}?%s*\u{276f}%s*\u{2502}?%s*$") ~= nil
+end
+
+-- What is drawn *under* the last rounded box. `view.prompt_box()` is the box's body, and the
+-- hint line that tells a dialog from an input box is below it — nothing for a box whose bottom
+-- has not been drawn yet, because the body already runs to the end of the screen there.
+local function under_box(lines)
+  local from
+  for i = #lines, 1, -1 do
+    if first_ink(lines[i]) == BOTTOM then
+      from = i + 1
+      break
+    end
+  end
+  local out = {}
+  for i = from or (#lines + 1), #lines do
+    out[#out + 1] = lines[i]
+  end
+  return out
 end
 
 return {
@@ -190,8 +216,13 @@ return {
     end,
   },
 
-  -- The input box with nothing running behind it. A menu is drawn in the same box, so the box
-  -- is idle only when it holds none of the hints a menu comes with.
+  -- The input box with nothing running behind it. A dialog is drawn in the same box and its
+  -- selected option starts with the same character, so the exclusions below are what tell the
+  -- two apart — and they read the lines *under* the box as well as its body, because that is
+  -- where Claude puts the hint. herdr could exclude less: its prompt box was cut at a plain
+  -- `───` rule, so a rounded dialog box was never the prompt box there and this rule could not
+  -- reach one. Ours is the last rounded box, which is the wider region, and the manifest's
+  -- priorities are only safe under it because of this list.
   {
     id = "live_prompt_box",
     state = "idle",
@@ -200,16 +231,19 @@ return {
     match = function(view)
       local box = lower(view.prompt_box())
       if not any_line(box, function(line)
-        return first_ink(line) == CHEVRON
+        return PROMPT[first_ink(line)] ~= nil
       end) then
         return false
       end
-      return not holds_any(box, {
+      local asking = {
         "enter to select",
         "esc to cancel",
         "arrow keys",
         "\u{2191}/\u{2193} to navigate",
-      })
+        -- A box putting a question to you is not an idle prompt, whatever its hint line says.
+        "do you want to proceed?",
+      }
+      return not holds_any(box, asking) and not holds_any(lower(under_box(view.lines)), asking)
     end,
   },
 
