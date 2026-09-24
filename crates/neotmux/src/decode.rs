@@ -224,9 +224,7 @@ fn csi(bytes: &[u8]) -> Step {
 /// know about it. What the pane receives is unchanged: `Esc` is `0x1b`, which is what `C-[`
 /// would have sent anyway.
 fn as_escape(key: Key) -> Key {
-    let escape = matches!(key.code, KeyCode::Char('[')) && key.mods.ctrl
-        || matches!(key.code, KeyCode::Esc) && key.mods.ctrl;
-    if escape {
+    if key.mods.ctrl && matches!(key.code, KeyCode::Char('[') | KeyCode::Esc) {
         return Key::plain(KeyCode::Esc);
     }
     key
