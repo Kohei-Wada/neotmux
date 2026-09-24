@@ -924,6 +924,10 @@ arguments, handed over as they are. There is no shell in between, so nothing is 
 spaces, globbed or expanded — ask for a shell by name (`{ 'sh', '-c', '...' }`) when you want
 one, and know what you are asking for.
 
+**A job's stdin is `/dev/null`**, so a job is not a filter: there is nothing to write to it,
+and a program that reads its input reads an immediate end of file. Feed it from a file or a
+here-string inside the shell you asked for (`{ 'sh', '-c', 'sort < /tmp/in' }`) instead.
+
 `start` answers a handle, or `nil` and one line saying why: `a job needs a command` for an
 empty list, `could not start <cmd>: ...` when the program is not there, `too many jobs: N
 already running`, and `the session is ending` for a start from inside the `on_exit` a session
@@ -1002,6 +1006,10 @@ local handle = neotmux.timer.every(1000, function() ... end)  -- again, and agai
 local once   = neotmux.timer.after(250, function() ... end)   -- once
 handle:stop()   -- true if it stopped a call that had not happened yet
 ```
+
+Both answer a handle, or `nil` and `the session is ending` — the one refusal there is, and the
+same one `job.start` has, for the same reason: a timer armed from inside a teardown `on_exit`
+would belong to a session with no frame left to fire it.
 
 A timer is **clamped to the frame**: a frame is 16 ms, nothing finer than one exists here, and
 asking for less is asking for every frame, which is what you get. It fires **at most once per

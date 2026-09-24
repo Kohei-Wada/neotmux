@@ -84,9 +84,15 @@ get wrong.
 | number | nil | the program exited; `code` is its status, zero or not |
 | nil | string | the job never ran or was stopped: spawn failed, `kill()`, output limit, budget |
 
-`err` is one line of English, suitable for a notify. Every path that ends a job calls `on_exit`
-exactly once, including `kill()` — a caller that has registered a callback hears the end of the
-thing it started, whatever ended it.
+`err` is one line of English, suitable for a notify. Every ending a plugin can still be told
+about calls `on_exit` exactly once, `kill()` included — a caller that has registered a callback
+hears the end of the thing it started, whatever ended it. Three endings tell nobody, and all
+three for the same reason: there is nobody left to tell. A job whose *source* went away, because
+its chunk failed to load or was reloaded, is killed in silence — the function that would hear it
+is the thing that is gone. A server told to stop (`SIGTERM`, `SIGINT`, `SIGHUP`) puts its
+sessions down together rather than one at a time, so the process groups go on the way out and
+nothing is called. And a `SIGKILL`ed server does not even kill them: nothing runs at all, so
+every job it had keeps running, its process group along with it.
 
 `start` answers `(nil, message)` rather than raising when it refuses: an unreadable `cwd`, a
 program that is not there, too many jobs already (§6). Two values, the shape `keymap.set`
@@ -103,6 +109,10 @@ t:stop()   -- true if it was running, false if it had already stopped or fired
 
 `ms` is a whole number of milliseconds, clamped up to the frame interval (§5). `after`'s
 callback runs once and the timer is then stopped; `every`'s runs until stopped.
+
+Both answer `(handle, nil)`, or `(nil, 'the session is ending')` for an arm from inside the
+`on_exit` a session teardown gave — the same refusal `start` has, and for the same reason: that
+timer would belong to a session with no frame left to fire it, and nothing would ever drop it.
 
 ### 2.3 Options
 
@@ -249,7 +259,10 @@ job whose callbacks the plugin no longer wants is one the plugin should kill.
 |---|---|
 | spawn failed (no such program, bad `cwd`) | `start` answers `(nil, message)`; nothing is notified |
 | the program exited non-zero | `on_exit(code, …)`; the plugin decides whether that is news |
-| output limit, budget, session gone, plugin unloaded | `on_exit(nil, …, err)`; the host also notifies for the limit and budget cases, because those are neotmux's decisions rather than the program's |
+| output limit, budget, session gone | `on_exit(nil, …, err)`; the host also notifies for the limit and budget cases, because those are neotmux's decisions rather than the program's |
+| plugin unloaded or reloaded | nobody: the callback that would hear it belongs to the chunk that is gone, so the job is killed in silence |
+| server told to stop (`SIGTERM`, `SIGINT`, `SIGHUP`) | nobody: the sessions go down together rather than one at a time, so the jobs are killed with no ending delivered |
+| server `SIGKILL`ed | nobody, and nothing is killed either: no code runs on the way out, so the jobs and their process groups outlive the server |
 | a callback raised | reported the way every other raising callback is, attributed to its source; the job keeps running |
 
 A raising callback does not kill the job. A callback that raises on one chunk of output may well
@@ -268,8 +281,8 @@ over a temp layer, keys and ticks driven directly — with a fake in place of th
 
 What is tested: buffered output arrives whole; streaming hands over complete lines only and
 flushes the held fragment at the end; `on_exit` is called exactly once on every path, including
-`kill`, the output limit, the concurrency refusal path (which does not start a job at all), an
-unloaded plugin and a dead session; a timer fires at most once per frame; `after` fires once; a
+`kill`, the output limit, the concurrency refusal path (which does not start a job at all) and a
+dead session, while an unloaded plugin's jobs are killed in silence; a timer fires at most once per frame; `after` fires once; a
 timer stopped inside its own callback does not fire again; overrun stops the timer and kills the
 job and leaves the source's tick subscriptions alone; a raising callback leaves the job running.
 
