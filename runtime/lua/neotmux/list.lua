@@ -30,6 +30,9 @@
 -- to draw when nothing is left to show, so a query that matched nothing says so rather than
 -- leaving a frame with nothing in it.
 --
+-- An input line — a query or an `ask` — takes the editing keys a line of text takes anywhere:
+-- `BS` and `C-h` take the last character back, and `C-u` clears the line.
+--
 -- `input = true` turns the line on: every printable key joins a query,
 -- `C-j`/`C-k` move the cursor instead of the plain `j`/`k`, and `handle:query()` reads what
 -- has been typed. `filter` is a separate, optional predicate — `function(item, query) return
@@ -251,7 +254,9 @@ local function typing(key)
         fail("ask done", err)
       end
     end
-  elseif key == "BS" or key == "Backspace" then
+  elseif key == "C-u" then
+    input.value = ""
+  elseif key == "BS" or key == "Backspace" or key == "C-h" then
     input.value = input.value:sub(1, -2)
   elseif utf8.len(key) == 1 then
     -- `accept`, when given, is asked before the character joins the buffer: the picker's
@@ -371,7 +376,10 @@ local function arm()
         M.commands.up()
         return true
       end
-      if key == "BS" or key == "Backspace" then
+      if key == "C-u" then
+        state.query = ""
+        state.at = 1
+      elseif key == "BS" or key == "Backspace" or key == "C-h" then
         state.query = state.query:sub(1, -2)
       elseif utf8.len(key) == 1 then
         state.query = state.query .. key

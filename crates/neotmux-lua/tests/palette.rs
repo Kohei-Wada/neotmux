@@ -2,6 +2,7 @@
 //! with Enter — a composition on `neotmux.list` (see `tests/list.rs`) and `neotmux.command`
 //! (see `tests/commands.rs`).
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -84,11 +85,36 @@ fn frame(sub: &LuaSubsystem) -> Vec<DrawCmd> {
     sub.frame_output()
 }
 
+/// One string per drawn row, in row order. A name is drawn in several runs now — the letters
+/// the query matched are lit, so they are runs of their own — and a row is what a person
+/// reads, so a row is what these assert on.
 fn texts(cmds: &[DrawCmd]) -> Vec<String> {
-    cmds.iter()
-        .filter_map(|cmd| match cmd {
-            DrawCmd::Text { text, .. } => Some(text.clone()),
-            _ => None,
+    let mut rows: BTreeMap<u16, Vec<(u16, String)>> = BTreeMap::new();
+    for cmd in cmds {
+        if let DrawCmd::Text { x, y, text, .. } = cmd {
+            rows.entry(*y).or_default().push((*x, text.clone()));
+        }
+    }
+    rows.into_values()
+        .map(|mut runs| {
+            runs.sort_by_key(|(x, _)| *x);
+            let row: String = runs.into_iter().map(|(_, text)| text).collect();
+            // The frame is drawn into the same rows as the content it holds; a reader does not
+            // count it as part of the line and neither do these tests.
+            row.trim_matches(|c| c == '│').to_string()
+        })
+        .collect()
+}
+
+/// The name each item row starts with. A row is the name, then its description, then the
+/// source pushed right — so the name is what it begins with, and that is what the tests about
+/// which items are shown and in what order are about.
+fn names(rows: &[String], of: &[&str]) -> Vec<String> {
+    rows.iter()
+        .filter_map(|row| {
+            of.iter()
+                .find(|name| row.starts_with(*name))
+                .map(|name| (*name).to_string())
         })
         .collect()
 }
@@ -120,10 +146,10 @@ fn the_palette_lists_every_registered_command() {
     open(&sub);
 
     let said = texts(&frame(&sub));
-    assert!(said.iter().any(|t| t == "alpha"), "{said:?}");
+    assert!(said.iter().any(|t| t.starts_with("alpha")), "{said:?}");
     assert!(said.iter().any(|t| t.contains("the first one")), "{said:?}");
-    assert!(said.iter().any(|t| t == "bravo"), "{said:?}");
-    assert!(said.iter().any(|t| t == "cascade"), "{said:?}");
+    assert!(said.iter().any(|t| t.starts_with("bravo")), "{said:?}");
+    assert!(said.iter().any(|t| t.starts_with("cascade")), "{said:?}");
 }
 
 /// Typing narrows the list to names whose characters the query matches in order — `br` is in
@@ -135,9 +161,9 @@ fn typing_narrows_the_list_to_what_matches_in_order() {
     keys(&sub, &["b", "r"]);
 
     let said = texts(&frame(&sub));
-    assert!(said.iter().any(|t| t == "bravo"), "{said:?}");
-    assert!(!said.iter().any(|t| t == "alpha"), "{said:?}");
-    assert!(!said.iter().any(|t| t == "cascade"), "{said:?}");
+    assert!(said.iter().any(|t| t.starts_with("bravo")), "{said:?}");
+    assert!(!said.iter().any(|t| t.starts_with("alpha")), "{said:?}");
+    assert!(!said.iter().any(|t| t.starts_with("cascade")), "{said:?}");
 }
 
 /// `Enter` runs the command under the cursor and closes the palette.
@@ -199,8 +225,8 @@ fn a_query_with_a_gap_matches_in_order_and_refuses_the_wrong_order() {
     keys(&sub, &["b", "v"]);
 
     let said = texts(&frame(&sub));
-    assert!(said.iter().any(|t| t == "bravo"), "{said:?}");
-    assert!(!said.iter().any(|t| t == "vibrant"), "{said:?}");
+    assert!(said.iter().any(|t| t.starts_with("bravo")), "{said:?}");
+    assert!(!said.iter().any(|t| t.starts_with("vibrant")), "{said:?}");
 }
 
 const RANKED: &str = "
@@ -228,11 +254,7 @@ fn typing_ranks_by_first_match_then_by_how_tightly_the_rest_followed() {
     open(&sub);
     keys(&sub, &["a", "b"]);
 
-    let names = ["abxyz", "aqqqqb", "Zzzab"];
-    let order: Vec<String> = texts(&frame(&sub))
-        .into_iter()
-        .filter(|t| names.contains(&t.as_str()))
-        .collect();
+    let order = names(&texts(&frame(&sub)), &["abxyz", "aqqqqb", "Zzzab"]);
     assert_eq!(order, vec!["abxyz", "aqqqqb", "Zzzab"]);
 }
 
@@ -251,10 +273,6 @@ fn a_tied_score_falls_back_to_name_order() {
     open(&sub);
     keys(&sub, &["e"]);
 
-    let names = ["bee", "cee"];
-    let order: Vec<String> = texts(&frame(&sub))
-        .into_iter()
-        .filter(|t| names.contains(&t.as_str()))
-        .collect();
+    let order = names(&texts(&frame(&sub)), &["bee", "cee"]);
     assert_eq!(order, vec!["bee", "cee"]);
 }

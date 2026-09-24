@@ -928,3 +928,71 @@ fn a_list_with_nothing_left_says_so_inside_its_frame() {
         "the empty line landed on the frame: {rows:#?}"
     );
 }
+
+/// A query line takes the editing keys a line of text takes anywhere: `C-h` is the backspace
+/// a terminal has always sent, and `C-u` clears what is there.
+#[test]
+fn a_query_line_deletes_by_character_and_clears_by_line() {
+    let (_dir, sub) = built(
+        "neotmux.on_key(function(key)
+           if key == 'o' then
+             require('neotmux.list').open({
+               input = true, rows = 4,
+               items = function() return { 'alpha' } end,
+               row = function(item) return { { text = item } } end,
+               done = function() end,
+             })
+             return true
+           end
+           return false
+         end)",
+    );
+    sub.dispatch_key(support::one(), "o");
+    for key in ["a", "b", "c"] {
+        sub.dispatch_key(support::one(), key);
+    }
+    sub.dispatch_key(support::one(), "C-h");
+    assert!(
+        texts(&frame(&sub)).iter().any(|t| t == "> ab"),
+        "C-h did not take the last character back"
+    );
+    sub.dispatch_key(support::one(), "C-u");
+    assert!(
+        texts(&frame(&sub)).iter().any(|t| t == "> "),
+        "C-u did not clear the query"
+    );
+}
+
+/// And an `ask` field takes the same two, since it is the same line.
+#[test]
+fn an_ask_field_deletes_by_character_and_clears_by_line() {
+    let (_dir, sub) = built(
+        "local list = require('neotmux.list')
+         neotmux.on_key(function(key)
+           if key == 'o' then
+             local handle = list.open({
+               rows = 4,
+               items = function() return { 'alpha' } end,
+               row = function(item) return { { text = item } } end,
+               done = function() end,
+             })
+             handle:ask({ label = 'name', value = 'abc', done = function() end })
+             return true
+           end
+           return false
+         end)",
+    );
+    sub.dispatch_key(support::one(), "o");
+    sub.dispatch_key(support::one(), "C-h");
+    assert!(
+        texts(&frame(&sub)).iter().any(|t| t == "name  ab"),
+        "C-h did not take the last character back: {:?}",
+        texts(&frame(&sub))
+    );
+    sub.dispatch_key(support::one(), "C-u");
+    assert!(
+        texts(&frame(&sub)).iter().any(|t| t == "name  "),
+        "C-u did not clear the field: {:?}",
+        texts(&frame(&sub))
+    );
+}

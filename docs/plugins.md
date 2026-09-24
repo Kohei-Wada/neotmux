@@ -1553,7 +1553,9 @@ Give `input = true` and the list becomes one you type into rather than move thro
 letter: the input line comes up, every printable key joins a query, and the cursor moves on
 `C-j`/`C-k` instead of the plain `j`/`k` an `input`-less list uses, because a query still needs
 `j` and `k` to be characters it can hold — which is also why `q` is a cancel only when `input`
-is off. `handle:query()` reads what has been typed. Give `filter` a predicate —
+is off. `handle:query()` reads what has been typed. An input line — a query or an `ask` — takes the
+editing keys a line of text takes anywhere: `BS` and `C-h` take the last character back, and
+`C-u` clears the line. Give `filter` a predicate —
 `function(item, query) return ... end` — alongside it and `items` is narrowed by whatever the
 query matches; `filter` on its own, with no `input`, does nothing, since there is then no query
 for it to be handed. `plugin.palette`, below, takes `input` with no `filter`: its own `items`
