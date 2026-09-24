@@ -1375,24 +1375,41 @@ With the sidebar on, `C-b b` folds it — the sidebar adds that one itself, sinc
 optional plugin and the prefix is the standard one. `C-b f` is `plugin.hints`'s own addition
 the same way — see [The hints convention](#the-hints-convention) below.
 
-The sidebar is a tree: every session with what it is running, and under the one you are in, its
-windows and their panes. Its width is taken from what there is to show, between
-`require('plugin.sidebar').widths.min` (27) and `.max` (36). What is on which row is a table
-rather than a shape baked into the file — each level draws one entry as a list of rows, and each
-row is a list of tokens:
+The sidebar is a stack of sections, and the shipped one is a tree: every session with what it is
+running, and under the one you are in, its windows and their panes. Its width is taken from what
+there is to show, between `require('plugin.sidebar').widths.min` (27) and `.max` (36). What is on
+which row of the tree is a table rather than a shape baked into the file — each level draws one
+entry as a list of rows, and each row is a list of tokens:
 
 ```lua
-local sidebar = require('plugin.sidebar')
-sidebar.sessions.rows = { { 'state_icon', 'name' }, { 'command', 'panes' } }
-sidebar.panes.rows = { { 'marker', 'tree', 'number', 'command' } }
-sidebar.tree.on = false          -- indent without the lines
-sidebar.tokens.sessions.age = function(it) ... end   -- a token of your own
+local sessions = require('plugin.sidebar.sessions')
+sessions.sessions.rows = { { 'state_icon', 'name' }, { 'command', 'panes' } }
+sessions.panes.rows = { { 'marker', 'tree', 'number', 'command' } }
+sessions.tree.on = false          -- indent without the lines
+sessions.tokens.sessions.age = function(it) ... end   -- a token of your own
 ```
 
 so moving what is where, or dropping what you do not care about, is an assignment rather than a
 fork of the file. The first column is left to the markers on purpose: it is the whole of the
 band when the sidebar is folded, and a fold showing a run of `│` says nothing about where you
 are.
+
+A section is a table, and `require('plugin.sidebar').sections` is the list of them, top to
+bottom:
+
+```lua
+table.insert(require('plugin.sidebar').sections, {
+  title = 'mine',     -- a header above it; nil for none
+  share = 0.3,        -- the most of the band it takes when there is not room for everybody
+  build = function(sidebar) return { rows = { { { text = 'hello' } } }, anchor = 1 } end,
+  fit = function(model, height, sidebar) ... end,   -- optional: cut the rows to a height
+})
+```
+
+A row is a list of runs, the shape `status.segments.draw` takes, and `sidebar.row(tokens, names,
+it)` builds one out of a token table the way the tree does. Without a `fit` a section is cut by
+`sidebar.scroll`, which keeps `anchor` on screen. A section whose `build` or `fit` raises is left
+out of that frame and named once through `neotmux.notify`.
 
 `h/j/k/l` are geometry, not list order: the pane you get is the one whose edge faces most of
 yours on that side, which is what you would point at however deeply the splits are nested.
@@ -1623,23 +1640,19 @@ measure a string in columns.
 
 ### Changing what the sidebar looks like
 
-`plugin.sidebar` takes twenty-four columns off the left and lists the session down them: a row
-per window, then a row per pane of that window with what it is running. A ▸ marks the
-window being shown and a • the focused pane. Numbers are positions, the same way the
+`plugin.sidebar` takes the left of the screen and stacks its sections down it. In the tree, a ▸
+marks the window being shown and a • the focused pane. Numbers are positions, the same way the
 status bar writes them, so a pane reads `2.1`.
 
 ```lua
-local sidebar = require('plugin.sidebar')
-sidebar.colors.focused_pane = '#f9e2af'
-sidebar.markers = { current_window = '>', window = ' ', focused_pane = '*', pane = ' ' }
+require('plugin.sidebar').colors.focused_pane = '#f9e2af'
+require('plugin.sidebar.sessions').markers =
+  { current_window = '>', window = ' ', focused_pane = '*', pane = ' ' }
 ```
 
-`colors` and `markers` are read every tick. A marker is one cell: one that measured two
-columns would push every name on its row across by one.
-
-The **width** is not in that table. It is a `local` at the top of the file, because the
-reservation is made once while the file is being required and the host is never told a band
-changed width. Edit it there, or leave the sidebar off.
+`colors` and `markers` are read every tick. The colours are the sidebar's and every section reads
+them. A marker is one cell: one that measured two columns would push every name on its row
+across by one.
 
 ### Showing a pane's own history
 

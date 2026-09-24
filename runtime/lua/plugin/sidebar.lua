@@ -1,6 +1,6 @@
--- A sidebar down the left: every session with what it is doing, then the windows and panes of
--- the one you are in. `C-b b` folds it to the markers column and back, when the prefix is
--- loaded.
+-- A sidebar down the left: a stack of sections, each a table saying what rows it has and how to
+-- cut them to a height. The shipped one is the session tree, `plugin.sidebar.sessions`.
+-- `C-b b` folds the band to its first column and back, when the prefix is loaded.
 --
 -- Off by default, unlike the status bar: a status line spends a row nobody was using for
 -- anything else, while a sidebar is an opinion about screen real estate. Turn it on from your
@@ -8,29 +8,28 @@
 --
 --   require('neotmux.defaults').sidebar = true
 --
+-- What is in it is `sections`, top to bottom, a list you assign to like any other field here:
+--
+--   table.insert(require('plugin.sidebar').sections, {
+--     title = 'mine',   -- a header above it; nil for none
+--     share = 0.3,      -- the most of the band it takes when there is not room for everybody
+--     build = function(sidebar) return { rows = { runs, ... }, anchor = 1 } end,
+--     fit = function(model, height, sidebar) return { runs, ... } end,   -- optional
+--   })
+--
+-- A row is a list of runs, the shape `status.segments.draw` takes. `build` is handed this module
+-- rather than requiring it, because the shipped sections are required from here while this file
+-- is still loading. Without a `fit`, a section is cut by `sidebar.scroll`.
+--
 -- Nothing here is a host feature. `neotmux.reserve('left', n)` takes the band,
--- `handle:resize_to(n)` widens and folds it, `ctx:reserved()` answers where it landed, and the
--- rest is `session.list`, `session.with`, `window.list`, `window.panes`, `pane.info` and
--- `neotmux.state` read from a tick.
---
--- The layout is a table, not a shape baked into this file. Each level draws one entry as a list
--- of rows, and each row is a list of tokens:
---
---   local sidebar = require('plugin.sidebar')
---   sidebar.sessions.rows = { { 'state_icon', 'name' }, { 'command', 'panes' } }
---   sidebar.panes.rows = { { 'state_icon', 'number', 'command' } }
---
--- so moving what is on which line, or dropping a token you do not care about, is an assignment
--- rather than a fork of this file.
+-- `handle:resize_to(n)` widens and folds it, and `ctx:reserved()` answers where it landed.
 local segments = require("status.segments")
-local state = require("neotmux.state")
 
 local M = {}
 
 -- What the band is worth, in columns. The width is taken from what there is to show, between
 -- these two, so a session called `feature/long-branch-name` is not cut to nothing — and `min`
--- is what it settles at when there is nothing long to show, which is most of the time. Wide
--- enough that a name and what it is running are both readable without the eye working for it.
+-- is what it settles at when there is nothing long to show, which is most of the time.
 M.widths = {
   min = 27,
   max = 36,
@@ -40,8 +39,8 @@ M.widths = {
   closed = 1,
 }
 
--- Catppuccin Mocha, the palette the status bar was drawn from. Every field is read on the tick,
--- so assigning to one from your own `init.lua` takes effect.
+-- Catppuccin Mocha, the palette the status bar was drawn from. Every section reads these, and
+-- every field is read on the tick, so assigning to one from your own `init.lua` takes effect.
 M.colors = {
   bar = "#181825", -- mantle: the band everything else sits on
   session = "#9399b2", -- overlay2: a session you are not in
@@ -52,122 +51,11 @@ M.colors = {
   focused_pane = "#a6e3a1", -- green
   -- The second row of an entry, and anything else that is detail rather than name.
   detail = "#585b70", -- surface2
+  rule = "#45475a", -- surface1: a section's header
   -- One per state, so the icon carries its meaning in the colour as well as the shape.
   working = "#a6e3a1", -- green
   blocked = "#f9e2af", -- yellow: the one that wants you
   idle = "#585b70", -- surface2
-}
-
-M.markers = {
-  current_window = "\u{25b8}", -- ▸
-  window = " ",
-  focused_pane = "\u{2022}", -- •
-  pane = " ",
-}
-
--- A session holds windows and a window holds panes, so the sidebar draws what it is: a tree.
--- The guides go after the first column and never in it — that column is the whole of the band
--- when it is folded, and a fold showing a run of `│` says nothing about where you are.
---
---   require('plugin.sidebar').tree.on = false   -- indent without the lines
-M.tree = {
-  on = true,
-  -- Two columns each, so a level always costs the same and the labels line up whichever
-  -- branch they are on.
-  glyphs = {
-    branch = "\u{251c}\u{2500}", -- ├─
-    last = "\u{2514}\u{2500}", -- └─
-    through = "\u{2502} ", -- │
-    blank = "  ",
-  },
-}
-
--- The guide in front of a row, given where it sits: one segment per level above it saying
--- whether that level had anything after it, and one for the row itself.
-local function guide(levels)
-  if not M.tree.on then
-    return string.rep("  ", #levels)
-  end
-  local out = {}
-  for at, last in ipairs(levels) do
-    if at == #levels then
-      out[#out + 1] = last and M.tree.glyphs.last or M.tree.glyphs.branch
-    else
-      out[#out + 1] = last and M.tree.glyphs.blank or M.tree.glyphs.through
-    end
-  end
-  return table.concat(out)
-end
-
--- Each level's layout: the rows of one entry, and the blank rows between entries. A row that
--- comes out empty is dropped rather than drawn, so a second row of detail costs nothing on a
--- session with no detail to give.
-M.sessions = {
-  rows = { { "state_icon", "name" }, { "command", "panes" } },
-  row_gap = 0,
-}
-M.windows = {
-  rows = { { "marker", "tree", "number", "name" } },
-  row_gap = 0,
-}
-M.panes = {
-  rows = { { "marker", "tree", "number", "command" } },
-  row_gap = 0,
-}
-
--- What a token is worth, given what the row is about. Add one and it is available to every
--- layout at that level:
---
---   require('plugin.sidebar').tokens.sessions.age = function(it) ... end
-M.tokens = {
-  sessions = {
-    state_icon = function(it)
-      return state.icon(it.state), M.colors[it.state]
-    end,
-    name = function(it)
-      return it.name, it.here and M.colors.current_session or M.colors.session
-    end,
-    command = function(it)
-      return it.command, M.colors.detail
-    end,
-    panes = function(it)
-      return it.panes .. "p", M.colors.detail
-    end,
-  },
-  windows = {
-    tree = function(it)
-      return it.guide, M.colors.detail
-    end,
-    marker = function(it)
-      return it.current and M.markers.current_window or M.markers.window,
-        it.current and M.colors.current_window or M.colors.window
-    end,
-    number = function(it)
-      return tostring(it.number), it.current and M.colors.current_window or M.colors.window
-    end,
-    -- Nothing for a window nobody has named: its number is what it is called until then.
-    name = function(it)
-      return it.name, it.current and M.colors.current_window or M.colors.window
-    end,
-  },
-  panes = {
-    tree = function(it)
-      return it.guide, M.colors.detail
-    end,
-    marker = function(it)
-      return it.focused and M.markers.focused_pane or M.markers.pane,
-        it.focused and M.colors.focused_pane or M.colors.pane
-    end,
-    state_icon = function(it)
-      return state.icon(it.state), M.colors[it.state]
-    end,
-    number = function(it)
-      return it.number, it.focused and M.colors.focused_pane or M.colors.pane
-    end,
-    command = function(it)
-      return it.command, M.colors.detail
-    end,
-  },
 }
 
 M.band = neotmux.reserve("left", M.widths.min)
@@ -177,37 +65,13 @@ M.band = neotmux.reserve("left", M.widths.min)
 -- clipped off, and there is no second way of drawing this to keep in step with the first.
 M.open = true
 
--- What a pane is running, or nil where the host has not got it — a child that exited between
--- the sample and the tick, or a pane that closed while the rows were being built.
-local UNKNOWN = "\u{2014}" -- em dash
-
-local function command_of(pane)
-  local info = neotmux.pane.info(pane)
-  return info and info.command
-end
-
--- What a session is doing, read through `session.with`: how many panes it has, what the one
--- somebody is looking at is running, and whether any of them is waiting for you. A session that
--- is not the one this tick is for is still a session this plugin can see, which is the whole
--- reason the sidebar can say any of this.
-local function about(name)
-  local panes, command, worst = 0, nil, "idle"
-  neotmux.session.with(name, function()
-    local list = neotmux.pane.list()
-    panes = #list
-    local focus = neotmux.pane.current()
-    command = focus and command_of(focus)
-    worst = state.worst(list)
-  end)
-  return { panes = panes, command = command or UNKNOWN, state = worst }
-end
-
--- One row: every token that has something to say, in order, separated by a space. A token that
--- answers nil or an empty string is left out, so a row whose tokens are all empty is no row.
-local function build(level, it)
+-- One row: every token in `names` that has something to say, in order, separated by a space.
+-- A token that answers nil or an empty string is left out, so a row whose tokens are all empty
+-- is no row.
+function M.row(tokens, names, it)
   local runs = {}
-  for _, name in ipairs(level.rows_in_hand) do
-    local token = M.tokens[level.kind][name]
+  for _, name in ipairs(names) do
+    local token = tokens[name]
     if token then
       local text, colour = token(it)
       if text and text ~= "" then
@@ -221,95 +85,97 @@ local function build(level, it)
   return runs
 end
 
--- Every row of one entry, indented past the first column for all but the first: the first
--- column is the whole of the sidebar when it is folded, so what is in it has to be the marker
--- and the rest has to start after it.
-local function entry(level, kind, it, out)
-  for at, tokens in ipairs(level.rows) do
-    level.rows_in_hand = tokens
-    level.kind = kind
-    local runs = build(level, it)
-    if #runs > 0 then
-      if at > 1 then
-        table.insert(runs, 1, { text = "  ", bg = M.colors.bar })
-      end
-      out[#out + 1] = runs
-    end
+-- The default fit: every row if they fit, and otherwise a window of them centred on `anchor`
+-- and clamped to the ends, so the row that matters is always one of the ones that stayed.
+function M.scroll(model, height)
+  local rows = model.rows
+  if height <= 0 then
+    return {}
   end
-  for _ = 1, level.row_gap or 0 do
-    out[#out + 1] = { { text = "", bg = M.colors.bar } }
+  if #rows <= height then
+    return rows
   end
-end
-
--- Which row is worth keeping on screen when there are more rows than band: the pane you are in,
--- or failing that the window, or failing that the session. A sidebar that has scrolled the
--- thing you are looking at off the bottom is a sidebar about somebody else's session.
-local anchor = 1
-
--- The windows and panes of the session that is open, hung under it: a window belongs to a
--- session and a pane to a window, so the list of them is drawn where that says they are.
-local function subtree(out)
-  local current_window = neotmux.window.current()
-  local focused = neotmux.pane.current()
-  local windows = neotmux.window.list()
-  for window_at, window in ipairs(windows) do
-    local current = window == current_window
-    local last_window = window_at == #windows
-    if current then
-      anchor = #out + 1
-    end
-    entry(M.windows, "windows", {
-      number = window_at,
-      name = neotmux.window.name(window),
-      current = current,
-      guide = guide({ last_window }),
-    }, out)
-    -- Nil for a window that closed between the list and now, which is not an error worth a
-    -- sidebar with a hole in it.
-    local panes = neotmux.window.panes(window) or {}
-    for pane_at, pane in ipairs(panes) do
-      local is_focused = pane == focused
-      if is_focused then
-        anchor = #out + 1
-      end
-      entry(M.panes, "panes", {
-        number = window_at .. "." .. pane_at,
-        focused = is_focused,
-        command = command_of(pane) or UNKNOWN,
-        state = state.of(pane) or "idle",
-        guide = guide({ last_window, pane_at == #panes }),
-      }, out)
-    end
-  end
-end
-
-local function rows()
+  local anchor = model.anchor or 1
+  local first = math.min(math.max(anchor - math.floor(height / 2), 1), #rows - height + 1)
   local out = {}
-  anchor = 1
-  local here = neotmux.session.current()
-  for _, name in ipairs(neotmux.session.list()) do
-    local it = about(name)
-    it.name = name
-    it.here = name == here
-    if it.here then
-      anchor = #out + 1
-    end
-    entry(M.sessions, "sessions", it, out)
-    -- Under the one you are in, because that is where its windows are. The others are named
-    -- and no more: what is inside a session you are not in is what the picker is for.
-    if it.here then
-      subtree(out)
-    end
+  for at = first, first + height - 1 do
+    out[#out + 1] = rows[at]
   end
   return out
 end
 
--- How wide the band wants to be: the widest row there is, between the two bounds. Taken from
--- what is on it rather than fixed, so a sidebar of short names is a narrow sidebar.
-local function width_for(all)
+local function default_fit(model, height)
+  return M.scroll(model, height)
+end
+
+-- One broken section must not take the sidebar down with it, and must say which one it was —
+-- once, because it will raise again on every frame after this one.
+local complained = setmetatable({}, { __mode = "k" })
+
+local function guarded(section, at, what, fn, ...)
+  local ok, result = pcall(fn, ...)
+  if ok then
+    return result
+  end
+  if not complained[section] then
+    complained[section] = true
+    local which = "plugin.sidebar: section '" .. tostring(section.title or at) .. "' " .. what
+    neotmux.notify("error", which .. ": " .. tostring(result))
+  end
+  return nil
+end
+
+-- How many rows each live section gets. All of what it wants when everybody fits; otherwise a
+-- capped section is held to its share first, the uncapped ones take what they want of the rest
+-- in order, and whatever is still left goes back to the capped ones in order.
+local function share_out(live, height)
+  local wants, total = {}, 0
+  for i, it in ipairs(live) do
+    wants[i] = #it.model.rows + (it.titled and 1 or 0)
+    total = total + wants[i]
+  end
+  if total <= height then
+    return wants
+  end
+  local got, left = {}, height
+  for i, it in ipairs(live) do
+    if it.section.share then
+      got[i] = math.min(wants[i], math.floor(height * it.section.share), left)
+      left = left - got[i]
+    end
+  end
+  for i, it in ipairs(live) do
+    if not it.section.share then
+      got[i] = math.min(wants[i], left)
+      left = left - got[i]
+    end
+  end
+  for i, it in ipairs(live) do
+    if it.section.share then
+      local more = math.min(wants[i] - got[i], left)
+      got[i] = got[i] + more
+      left = left - more
+    end
+  end
+  return got
+end
+
+local function header(title, width)
+  local text = "\u{2500} " .. title .. " "
+  local rest = width - segments.columns(text)
+  if rest > 0 then
+    text = text .. string.rep("\u{2500}", rest)
+  end
+  return { { text = text, fg = M.colors.rule, bg = M.colors.bar } }
+end
+
+-- How wide the band wants to be: the widest row any section has, between the two bounds.
+local function width_for(live)
   local widest = 0
-  for _, runs in ipairs(all) do
-    widest = math.max(widest, segments.width(runs))
+  for _, it in ipairs(live) do
+    for _, runs in ipairs(it.model.rows) do
+      widest = math.max(widest, segments.width(runs))
+    end
   end
   return math.max(M.widths.min, math.min(M.widths.max, widest + 1))
 end
@@ -355,12 +221,26 @@ neotmux.on_tick(function(ctx)
   if not band then
     return
   end
-  local all = rows()
+
+  -- A section with nothing to show takes no room and draws no header. The first section that
+  -- does show something draws no header either: the top of the band says where it starts.
+  local live = {}
+  for at, section in ipairs(M.sections) do
+    local model = guarded(section, at, "build", section.build, M)
+    if type(model) == "table" and type(model.rows) == "table" and #model.rows > 0 then
+      live[#live + 1] = {
+        section = section,
+        at = at,
+        model = model,
+        titled = #live > 0 and section.title ~= nil,
+      }
+    end
+  end
 
   -- The width the content wants, asked for once it is known. `resize_to` lands on the next
   -- frame, which is why this is a comparison and not a call every tick.
   if M.band then
-    local want = M.open and width_for(all) or M.widths.closed
+    local want = M.open and width_for(live) or M.widths.closed
     if want ~= band.w then
       M.band:resize_to(want)
     end
@@ -368,16 +248,31 @@ neotmux.on_tick(function(ctx)
 
   ctx:rect(nil, band.x, band.y, band.w, band.h, { bg = M.colors.bar })
 
-  -- More rows than band is the ordinary case, and which rows go is the question: the ones that
-  -- do not fit are dropped from the top or the bottom so that `anchor` — the pane you are in —
-  -- is always one of the ones that stayed.
-  local first = 1
-  if #all > band.h then
-    first = math.min(math.max(anchor - math.floor(band.h / 2), 1), #all - band.h + 1)
-  end
-  for at = first, math.min(first + band.h - 1, #all) do
-    segments.draw(ctx, band.x, band.y + at - first, band.w, all[at])
+  local heights = share_out(live, band.h)
+  local y = band.y
+  for i, it in ipairs(live) do
+    local body = heights[i] - (it.titled and 1 or 0)
+    if body >= 1 then
+      local fit = it.section.fit or default_fit
+      local rows = guarded(it.section, it.at, "fit", fit, it.model, body, M)
+      if type(rows) == "table" then
+        local top = y
+        if it.titled then
+          segments.draw(ctx, band.x, top, band.w, header(it.section.title, band.w))
+          top = top + 1
+        end
+        for k = 1, math.min(#rows, body) do
+          segments.draw(ctx, band.x, top + k - 1, band.w, rows[k])
+        end
+      end
+    end
+    y = y + heights[i]
   end
 end)
+
+-- Last, so a section's own file can already find everything above in the module it is handed.
+M.sections = {
+  require("plugin.sidebar.sessions"),
+}
 
 return M
