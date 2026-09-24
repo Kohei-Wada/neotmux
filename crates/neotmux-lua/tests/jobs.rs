@@ -753,6 +753,40 @@ fn forgetting_a_session_ends_its_jobs_and_says_why() {
     assert!(logged(&sub).is_empty(), "the job ended twice");
 }
 
+/// A plugin that starts a job from inside the `on_exit` a session ending gave it is refused.
+/// The session it would be adopted by is the one going away, so nothing would ever sweep it
+/// and the child would outlive the whole thing.
+#[test]
+fn a_job_started_while_a_session_is_being_swept_is_refused() {
+    let runner = FakeRunner::new();
+    let (_dir, sub) = built(
+        &on_key(
+            "    neotmux.job.start({ 'sleep' }, {\n\
+                   on_exit = function()\n\
+                     local job, why = neotmux.job.start({ 'echo' })\n\
+                     neotmux.log.info('again=' .. tostring(job) .. ' why=' .. tostring(why))\n\
+                   end,\n\
+                 })",
+        ),
+        Rc::clone(&runner),
+    );
+
+    keys(&sub, &["J"]);
+    frame(&sub);
+    sub.forget_session(support::one());
+
+    assert_eq!(
+        logged(&sub),
+        vec!["again=nil why=the session is ending"],
+        "a job was started into a session that is going away"
+    );
+    assert_eq!(
+        runner.started.borrow().len(),
+        1,
+        "the second start reached the runner anyway"
+    );
+}
+
 /// A streaming job's held fragment is handed over before the session's ending, the way the
 /// ordinary ending path hands it over: a session going away is not the one case where the
 /// plugin loses the last thing the job said.

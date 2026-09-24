@@ -180,6 +180,9 @@ pub struct Jobs {
     runner: Rc<dyn Runner>,
     next: Cell<u64>,
     live: RefCell<BTreeMap<JobId, Job>>,
+    /// True while a session's endings are being delivered, which is the one stretch of a
+    /// frame where a `start` must be refused: see [`Jobs::sweeping`].
+    sweeping: Cell<bool>,
 }
 
 impl Jobs {
@@ -188,7 +191,17 @@ impl Jobs {
             runner,
             next: Cell::new(1),
             live: RefCell::new(BTreeMap::new()),
+            sweeping: Cell::new(false),
         }
+    }
+
+    /// Says that a session's jobs are being ended, for as long as the guard lives. A job
+    /// started from inside one of those `on_exit` callbacks would take the dying session as
+    /// its own — the ambient session is still bound — and then be swept by nobody, leaving
+    /// the child running with nothing left to reap it, so `start` refuses while this is on.
+    pub fn sweeping(&self) -> Sweeping<'_> {
+        self.sweeping.set(true);
+        Sweeping(self)
     }
 
     /// Starts one, or says why not. The message is for a plugin to read: one line, no
@@ -202,6 +215,9 @@ impl Jobs {
         callbacks: Callbacks,
         concurrency: usize,
     ) -> Result<JobId, String> {
+        if self.sweeping.get() {
+            return Err("the session is ending".to_string());
+        }
         let running_for_owner = self
             .live
             .borrow()
@@ -417,5 +433,15 @@ impl Jobs {
             });
         }
         out
+    }
+}
+
+/// Held for the length of a session sweep. A guard rather than a flag the caller clears,
+/// because a callback that raises must not leave `start` refusing for the rest of the run.
+pub struct Sweeping<'a>(&'a Jobs);
+
+impl Drop for Sweeping<'_> {
+    fn drop(&mut self) {
+        self.0.sweeping.set(false);
     }
 }

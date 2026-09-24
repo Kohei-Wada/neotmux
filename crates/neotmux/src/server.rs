@@ -171,7 +171,10 @@ pub fn serve(listener: &UnixListener, shutdown: &ShutdownSignal) -> anyhow::Resu
         .ok()
         .and_then(|path| path.parent().map(std::path::Path::to_path_buf));
     let layers = Layers::resolve(&|key| std::env::var_os(key), exe_dir.as_deref());
-    let lua = LuaSubsystem::build_with(layers, terminals.clone(), clip.clone())?;
+    // The waker the panes' reader threads already hold: a job's pipes are drained by threads
+    // of its own and nudge the same wakeup, so nothing here is added to the poll set.
+    let runner = Rc::new(neotmux::runner::Processes::new(waker.clone()));
+    let lua = LuaSubsystem::build_with_runner(layers, terminals.clone(), clip.clone(), runner)?;
     let mut plugins = Plugins::new(lua);
     for failure in plugins.lua().run_init() {
         logging::log(Level::Warn, &failure.source, &failure.message);
@@ -817,8 +820,11 @@ fn end_session(
         client.gone = true;
     }
     clients.retain(|client| !client.gone);
-    sessions.live.remove(&id);
+    // The Lua layer first: a job's `on_exit` runs in here, and a plugin that asks what its
+    // panes are showing has to be answered by the session it is being told about rather than
+    // by the hole where it was.
     plugins.lua().forget_session(id);
+    sessions.live.remove(&id);
 }
 
 /// The client a session adopts, out of the attach it sent — and, where there is no session,

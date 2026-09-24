@@ -899,6 +899,135 @@ during it, so a `create` followed by a `list` in the same tick does not name the
 `switch` moves **every client attached to the session that asked**, which with one terminal
 attached is the terminal that asked.
 
+### Jobs and timers
+
+A plugin runs in the server, so the two things a terminal multiplexer's plugin most wants —
+running a program without a pane to run it in, and being called again in a second — are a
+function call rather than a coroutine you have to keep alive.
+
+```lua
+local job, why = neotmux.job.start({ 'git', 'status', '--porcelain' }, {
+  cwd = '/home/you/src',        -- where to run it; the server's own directory by default
+  env = { GIT_PAGER = 'cat' },  -- *added* to what the server has, never a replacement
+  buffered = true,              -- the default; see below
+  on_stdout = function(lines) end, -- streaming only: a list of whole lines
+  on_stderr = function(lines) end, -- the same, for stderr
+  on_exit = function(code, stdout, stderr, err) end,
+})
+
+job.id        -- the number this job is, for your own bookkeeping
+job:kill()    -- ends it now; true if there was a live job to end
+```
+
+The command is a **list**, not a line: the first entry is the program and the rest are its
+arguments, handed over as they are. There is no shell in between, so nothing is split on
+spaces, globbed or expanded — ask for a shell by name (`{ 'sh', '-c', '...' }`) when you want
+one, and know what you are asking for.
+
+`start` answers a handle, or `nil` and one line saying why: `a job needs a command` for an
+empty list, `could not start <cmd>: ...` when the program is not there, `too many jobs: N
+already running`, and `the session is ending` for a start from inside the `on_exit` a session
+teardown gave you — that job would belong to a session that is already going away, and nothing
+would be left to reap it.
+
+```lua
+local job, why = neotmux.job.start({ 'rg', '--json', pattern })
+if not job then
+  neotmux.notify('warn', why)
+  return
+end
+```
+
+**`buffered` decides what you are handed.** Buffered — the default — keeps everything the
+program said and gives it to `on_exit` whole, as two strings; `on_stdout` and `on_stderr` are
+not called at all. Streaming calls them as the output arrives, and hands `on_exit` `nil` for
+both, because it has already given you all of it.
+
+A streaming callback is given **complete lines only**, as a list. A chunk boundary is not a
+line boundary, so the half of a line that arrived first is held back until its `\n` does — and
+the last fragment, which will never get one, is flushed as one final line *before* `on_exit`.
+`on_exit` is the last thing you hear about a job, always.
+
+```lua
+neotmux.job.start({ 'tail', '-F', '/var/log/syslog' }, {
+  buffered = false,
+  on_stdout = function(lines)
+    for _, line in ipairs(lines) do neotmux.log.info(line) end
+  end,
+})
+```
+
+**`on_exit(code, stdout, stderr, err)` runs exactly once**, whatever ended the job. `code` is
+the exit status, or `nil` when the job did not get to exit on its own; `err` is `nil` for an
+ordinary exit and otherwise one word for what ended it — `killed` for your own `job:kill()`,
+`session ended`, `output limit`, `budget`. Exactly one of the four ways a job can end reaches
+you, and it reaches you once. The one exception is a job whose *source* went away — a chunk
+that failed to load, or a reload — where the job is killed and nothing is called: the function
+that would hear it is the thing that is gone.
+
+Two options bound what jobs may cost you, neither of them per job:
+
+```lua
+neotmux.opt.job_concurrency = 8         -- jobs at once, per source; >= 1
+neotmux.opt.job_output_bytes = 1048576  -- what one job may make the host hold; >= 1
+```
+
+`job_concurrency` is counted per source, so one plugin's fork bomb cannot starve another's; the
+ninth `start` answers `nil`. `job_output_bytes` is what a job is allowed to make the *host*
+keep, which is not the same as how much it may print: a buffered job is holding everything it
+has said, so it is the whole output, while a streaming job is only holding the fragment since
+its last line break — a stream of lines runs forever inside a byte limit, and only a program
+writing one endless unbroken line trips it. A job over the limit is killed and gets its one
+`on_exit`, with `output limit` as the reason.
+
+```lua
+local handle = neotmux.timer.every(1000, function() ... end)  -- again, and again
+local once   = neotmux.timer.after(250, function() ... end)   -- once
+handle:stop()   -- true if it stopped a call that had not happened yet
+```
+
+A timer is **clamped to the frame**: a frame is 16 ms, nothing finer than one exists here, and
+asking for less is asking for every frame, which is what you get. It fires **at most once per
+frame** and **does not catch up** — a timer that came due four times while the VM was busy is
+called once, because four callbacks in a row to make up for a slow frame is a worse answer
+than one. Neither call sleeps, and neither is a thread: the deadline is compared against the
+instant the frame happened at, and that is all.
+
+**Both belong to their source and to their session.** Whichever goes first takes them: a
+plugin that fails to load or is reloaded has its jobs killed and its timers dropped in
+silence, and a session that ends kills its jobs with `on_exit` called and `session ended` as
+the reason, and drops its timers without a word — a timer is a promise to call again, not a
+thing owed an ending. One started while an `init.lua` is running belongs to no session yet and
+is adopted by the first session to run a frame.
+
+**Callbacks run before the tick, in the frame they arrived in.** So a tick draws what this
+frame's jobs and timers have already changed rather than finding out about it next frame, and
+your callback can simply write to a table your `on_tick` reads. They are measured against the
+same tick budget everything else is, and a callback that keeps overrunning it has its own job
+killed or its own timer stopped — the job and the timer, not the source's other work.
+
+One worked example, since it is the thing everybody wants first: a sound when a pane stops
+working, on the [state convention](#the-state-convention)'s guess.
+
+```lua
+local state = require('neotmux.state')
+local was = {}
+
+neotmux.timer.every(500, function()
+  for _, pane in ipairs(neotmux.pane.list()) do
+    local now = state.of(pane)
+    if now and was[pane] and was[pane] == 'working' and now ~= 'working' then
+      local job, why = neotmux.job.start({ 'paplay', '/usr/share/sounds/freedesktop/stereo/complete.oga' })
+      if not job then neotmux.log.warn(why) end
+    end
+    was[pane] = now
+  end
+end)
+```
+
+Nothing is drawn and nothing is read out of a callback that a tick could not have read: the
+timer polls, the job makes the noise, and neither had to wait for the other.
+
 ### Everything else
 
 ```lua
@@ -913,6 +1042,8 @@ neotmux.opt.tick_budget_ms = 8     -- per source per frame; 0 turns the budget o
 neotmux.opt.tick_overrun_limit = 5 -- consecutive overruns before the tick is dropped; >= 1
 neotmux.opt.config_budget_ms = 5000 -- what one layer's init.lua gets, for the layers after it
 neotmux.opt.pane_gutter = 0        -- cells left between panes, for whoever draws there; <= 4
+neotmux.opt.job_concurrency = 8    -- jobs at once, per source; >= 1
+neotmux.opt.job_output_bytes = 1048576 -- what one job may make the host hold; >= 1
 neotmux.resubscribe(name)          -- give a dropped source its tick back; returns handles
 neotmux.width(text)                -- how many columns `text` takes on a pane's grid
 neotmux.clipboard.set(text)        -- written? — true, or false and why not

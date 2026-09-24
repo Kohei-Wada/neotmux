@@ -122,6 +122,10 @@ impl Plugins {
         // Before the tick, so a plugin drawing the surface draws what is on it now.
         self.notifications.expire(Instant::now());
         self.lua.publish_notices(self.notifications.visible());
+        // Before the tick, so a tick sees what this frame's jobs and timers have already
+        // changed rather than finding out next frame.
+        self.lua.dispatch_jobs(session);
+        self.lua.dispatch_timers(session, Instant::now());
         self.lua.dispatch_tick(session);
 
         let (ops, server) = self.drain_ops(Some(session), &tty);

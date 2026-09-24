@@ -989,6 +989,7 @@ impl LuaSubsystem {
         let endings = self.jobs.end_session(session);
         if !endings.is_empty() {
             let _bound = self.ambient.bind(session);
+            let _sweeping = self.jobs.sweeping();
             self.arm_budget();
             for delivery in endings {
                 let owner = delivery.owner();
