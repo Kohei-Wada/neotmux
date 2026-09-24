@@ -1528,9 +1528,12 @@ in columns, never bytes, the same shape `ctx:text` takes one of. `done` fires on
 not itself a close: the handle is the caller's to close, so a rename or a kill can run one and
 leave the list open, which is why `plugin.sessions`'s own `done` calls `handle:close()` and its
 `r` and `d` do not. `cancel` fires on `Esc` always, and `keys` adds more of them, keyed by spec
-and called with the item under the cursor and the handle, the same as `done`. **`Esc` is
-handled before any of the caller's own code runs** — a list can always be dismissed, even one
-whose `items` has started raising.
+and called with the item under the cursor and the handle, the same as `done`. **For the list
+itself, `Esc` is checked before any caller code runs at all** — it closes the list even when
+`items`, `row` or anything else it owns is what is broken. While `ask` is up, `Esc` instead
+dismisses the input line first and only then runs `cancel`, since that *is* what `ask`'s own
+`Esc` means; a raise in it cannot undo that dismissal or leak the key, for the same reason
+nothing below can — see the next paragraph.
 
 Give `input = true` and the list becomes one you type into rather than move through by
 letter: the input line comes up, every printable key joins a query, and the cursor moves on
@@ -1553,11 +1556,15 @@ question that is not the filter — a name to create or rename, say — with `ac
 given the chance to refuse a character before it joins the buffer. One list is open at a time:
 opening a second closes the first, the same rule `neotmux.prompt` follows.
 
-`items`, `row` and `filter` are the caller's own code, and run on `neotmux/list`'s own tick
+`items`, `row`, `filter`, `footer`, `done`, `cancel`, a `keys` entry, and `ask`'s own
+`accept`/`done`/`cancel` are all the caller's own code, and run on `neotmux/list`'s own tick
 budget rather than the caller's, so a slow one parks every list open in the process — every
 caller of `neotmux.list`, not just the one that was slow — recoverable with
-`neotmux.resubscribe('neotmux/list')`. A raising `items` closes the list it belongs to, on the
-next key or tick, rather than leaving it stuck open with nothing able to reach it.
+`neotmux.resubscribe('neotmux/list')`. Every one of those calls is guarded: a raise closes the
+list and says which callback it was through `neotmux.notify`, rather than leaving the float
+frozen on its last drawn frame (a raise on the tick) or letting the key that triggered it fall
+through to the pane behind the float (a raise on a key) — the same hazard the Critical review
+found in `items`, closed off everywhere else this module calls code it did not write.
 
 ### The state convention
 

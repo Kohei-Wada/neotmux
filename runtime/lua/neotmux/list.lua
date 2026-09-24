@@ -35,10 +35,17 @@
 -- when there is no input line, since a filtered list needs the letter as text; and while `ask`
 -- is up it replaces and freezes the query line, so nothing typed then reaches `filter`.
 --
--- `items`, `row` and `filter` are the caller's code, charged to this module's own tick budget
+-- `items`, `row`, `filter`, `footer`, `done`, `cancel`, a `keys` entry, and `ask`'s own
+-- `accept`/`done`/`cancel` are all the caller's code, charged to this module's own tick budget
 -- — `neotmux/list` — so a slow one parks every list in the process until
--- `neotmux.resubscribe('neotmux/list')` restores it. A raising `items` closes the list instead
--- of leaving it stuck: `on_key` and `on_tick` each guard their own call to it.
+-- `neotmux.resubscribe('neotmux/list')` restores it. Every one of those calls is guarded: a
+-- raise closes the list and says which callback it was through `neotmux.notify`, rather than
+-- leaving the float frozen on its last drawn frame (a raise on the tick) or letting the key
+-- that triggered it fall through to the pane behind the float (a raise on a key). Esc itself
+-- is checked before any of that for the list itself, so it closes even when every one of them
+-- is broken; while `ask` is up, Esc dismisses the input line first and only then runs
+-- `cancel` — guarded the same as everything else — so a raise in it cannot leak the key that
+-- dismissed it.
 local modes = require("neotmux.mode")
 local box = require("neotmux.box")
 
@@ -76,6 +83,15 @@ local function close()
     mode_handle = nil
   end
   state = nil
+end
+
+-- Closes a list whose caller's code just raised, and says which callback it was rather than
+-- leaving the float stuck open with nothing able to reach it: `items`, `row` and the rest are
+-- the caller's own code, not this module's, and a bug in one of them is not a reason a person
+-- can no longer press Esc.
+local function fail(label, err)
+  close()
+  neotmux.notify("error", "neotmux.list: " .. label .. ": " .. tostring(err))
 end
 
 -- `text` cut to at most `room` columns, on a character boundary — `neotmux.width`, never `#`,
@@ -181,7 +197,10 @@ M.commands = {
     end
     local item = state.items[state.at]
     if item and state.opts.done then
-      state.opts.done(item, state.handle)
+      local ok, err = pcall(state.opts.done, item, state.handle)
+      if not ok then
+        fail("done", err)
+      end
     end
   end,
   ["cancel"] = function()
@@ -191,7 +210,10 @@ M.commands = {
     local cancel = state.opts.cancel
     close()
     if cancel then
-      cancel()
+      local ok, err = pcall(cancel)
+      if not ok then
+        fail("cancel", err)
+      end
     end
   end,
 }
@@ -202,15 +224,23 @@ M.commands = {
 local function typing(key)
   local input = state.input
   if key == "Esc" then
+    -- The overlay is gone before `cancel` ever runs, so a raise in it cannot undo the
+    -- dismissal — only the guard below has anything left to do.
     state.input = nil
     if input.cancel then
-      input.cancel()
+      local ok, err = pcall(input.cancel)
+      if not ok then
+        fail("ask cancel", err)
+      end
     end
   elseif key == "Enter" then
     local value = input.value
     state.input = nil
     if input.done then
-      input.done(value)
+      local ok, err = pcall(input.done, value)
+      if not ok then
+        fail("ask done", err)
+      end
     end
   elseif key == "BS" or key == "Backspace" then
     input.value = input.value:sub(1, -2)
@@ -218,8 +248,15 @@ local function typing(key)
     -- `accept`, when given, is asked before the character joins the buffer: the picker's
     -- refusal of a leading `-` is "no" here and nowhere else, since this is the one place a
     -- character is ever added to it.
-    if not input.accept or input.accept(key, input.value) then
+    if not input.accept then
       input.value = input.value .. key
+    else
+      local ok, accepted = pcall(input.accept, key, input.value)
+      if not ok then
+        fail("ask accept", accepted)
+      elseif accepted then
+        input.value = input.value .. key
+      end
     end
   end
 end
@@ -236,14 +273,6 @@ local function wanted()
 end
 
 local registered = false
-
--- Closes a list whose caller's code just raised, and says why rather than leaving the float
--- stuck open with nothing able to reach it: `items()`, `row()` and `filter()` are the caller's,
--- not this module's, and a bug in one of them is not a reason a person can no longer press Esc.
-local function fail(err)
-  close()
-  neotmux.notify("error", "neotmux.list: " .. tostring(err))
-end
 
 local function arm()
   if registered then
@@ -267,7 +296,7 @@ local function arm()
     end
     local ok, err = pcall(refresh)
     if not ok then
-      fail(err)
+      fail("items", err)
       return true
     end
     if key == "Enter" then
@@ -276,7 +305,10 @@ local function arm()
     end
     local extra = state.opts.keys[key]
     if extra then
-      extra(state.items[state.at], state.handle)
+      local ok, err = pcall(extra, state.items[state.at], state.handle)
+      if not ok then
+        fail("a key", err)
+      end
       return true
     end
     if state.opts.input then
@@ -329,7 +361,7 @@ local function arm()
     end
     local ok, err = pcall(refresh)
     if not ok then
-      fail(err)
+      fail("items", err)
       return
     end
     local rect = ctx:float_rect(win)
@@ -356,8 +388,12 @@ local function arm()
       if chosen then
         ctx:rect(win, inner.x, row, inner.w, 1, { bg = M.colors.cursor })
       end
-      local runs = state.opts.row(item, chosen) or {}
-      draw_runs(ctx, win, inner.x, row, inner.w, runs, background)
+      local ok, runs = pcall(state.opts.row, item, chosen)
+      if not ok then
+        fail("row", runs)
+        return
+      end
+      draw_runs(ctx, win, inner.x, row, inner.w, runs or {}, background)
     end
 
     local last = inner.y + inner.h - 1
@@ -391,7 +427,11 @@ local function arm()
         { bg = M.colors.caret }
       )
     elseif state.opts.footer then
-      local text = state.opts.footer()
+      local ok, text = pcall(state.opts.footer)
+      if not ok then
+        fail("footer", text)
+        return
+      end
       if text then
         ctx:text(win, inner.x, last, text, { fg = M.colors.hint, bg = M.colors.frame })
       end
@@ -479,7 +519,7 @@ function M.open(opts)
   }
   local ok, err = pcall(refresh)
   if not ok then
-    fail(err)
+    fail("items", err)
     return nil
   end
   local float = neotmux.float(wanted())

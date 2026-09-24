@@ -714,3 +714,118 @@ end)
         "no notification named the failure: {said:?}"
     );
 }
+
+/// A raising `row` is the same hazard as a raising `items`, one drawing step later: without a
+/// guard the tick errors out partway through, but the frame around the rows was already drawn
+/// before `row()` ran — so it is every *later* tick, redrawing the same frame around nothing
+/// new forever, that would be the freeze. It closes instead.
+#[test]
+fn a_raising_row_closes_the_list_instead_of_freezing_it() {
+    let (_dir, sub) = built(
+        "
+local list = require('neotmux.list')
+neotmux.on_key(function(key)
+  if key == 'o' then
+    list.open({
+      items = function() return { 'apple' } end,
+      row = function() error('boom') end,
+      done = function() end,
+    })
+    return true
+  end
+  return false
+end)
+",
+    );
+    assert_eq!(sub.dispatch_key(support::one(), "o"), KeyOutcome::Consumed);
+    // The tick that hit the raise still drew the frame around it before row() ever ran, so it
+    // is this tick's own frame that would repeat forever, unclosed, without the guard; the
+    // next one is where a fix and a freeze tell apart.
+    frame(&sub);
+    assert!(
+        frame(&sub).is_empty(),
+        "the float kept redrawing after row() raised, rather than closing"
+    );
+    let said = logged(&sub);
+    assert!(
+        said.iter().any(|l| l.contains("row") && l.contains("boom")),
+        "no notification named row as the failing callback: {said:?}"
+    );
+}
+
+/// A raising `done` used to error out of the whole `on_key` handler, which the host reads as
+/// the key not being consumed — so `Enter` itself leaked into the pane behind the float. It is
+/// consumed and the list closes instead.
+#[test]
+fn a_raising_done_does_not_leak_its_key_into_the_pane() {
+    let (_dir, sub) = built(
+        "
+local list = require('neotmux.list')
+neotmux.on_key(function(key)
+  if key == 'o' then
+    list.open({
+      items = function() return { 'apple' } end,
+      row = function(item) return { { text = item } } end,
+      done = function() error('boom') end,
+    })
+    return true
+  end
+  return false
+end)
+",
+    );
+    assert_eq!(sub.dispatch_key(support::one(), "o"), KeyOutcome::Consumed);
+    assert_eq!(
+        sub.dispatch_key(support::one(), "Enter"),
+        KeyOutcome::Consumed,
+        "a raising done let the key that triggered it fall through"
+    );
+    assert!(
+        frame(&sub).is_empty(),
+        "the float stayed up after done() raised"
+    );
+}
+
+/// While `ask` is up, Esc dismisses the input line before `cancel` ever runs, so a raise in
+/// `cancel` cannot leak the Esc that dismissed it — the list closes (the guard's own doing, not
+/// a special case for `ask`) and a later key is no longer eaten.
+#[test]
+fn a_raising_ask_cancel_still_leaves_esc_working() {
+    let (_dir, sub) = built(
+        "
+local list = require('neotmux.list')
+neotmux.on_key(function(key)
+  if key == 'o' then
+    list.open({
+      items = function() return { 'apple' } end,
+      row = function(item) return { { text = item } } end,
+      done = function() end,
+      keys = {
+        ['a'] = function(item, handle)
+          handle:ask({
+            label = 'name',
+            cancel = function() error('boom') end,
+            done = function() end,
+          })
+        end,
+      },
+    })
+    return true
+  end
+  return false
+end)
+",
+    );
+    assert_eq!(sub.dispatch_key(support::one(), "o"), KeyOutcome::Consumed);
+    assert_eq!(sub.dispatch_key(support::one(), "a"), KeyOutcome::Consumed);
+    assert_eq!(
+        sub.dispatch_key(support::one(), "Esc"),
+        KeyOutcome::Consumed,
+        "Esc did not close the list once ask's own cancel raised"
+    );
+    assert_eq!(
+        sub.dispatch_key(support::one(), "z"),
+        KeyOutcome::Fallthrough,
+        "a closed list still ate a key"
+    );
+}
