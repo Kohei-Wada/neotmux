@@ -1394,6 +1394,11 @@ fork of the file. The first column is left to the markers on purpose: it is the 
 band when the sidebar is folded, and a fold showing a run of `│` says nothing about where you
 are.
 
+When the tree does not fit, it gives up the windows and panes of the session you are in before
+it gives up any session's name, and says `… n more` where it cut them. With more sessions than
+rows it keeps one row each and scrolls them around the one you are in, with `↑ n` and `↓ n` for
+the ones out of sight.
+
 A section is a table, and `require('plugin.sidebar').sections` is the list of them, top to
 bottom:
 

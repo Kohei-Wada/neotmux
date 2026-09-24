@@ -245,4 +245,50 @@ function M.build(sidebar)
   return { rows = rows, anchor = anchor, entries = entries, tree = tree }
 end
 
+-- What stands in for the subtree rows cut off either side of the pane you are in. Indented
+-- like a tree row, so the first column stays the markers'.
+local function more(n)
+  return { { text = "  \u{2026} " .. n .. " more", fg = colors.detail, bg = colors.bar } }
+end
+
+-- Sessions before panes. Every row if they fit; else every session's rows with the subtree of
+-- the one you are in cut to what is left around the focused pane; else each session at its first
+-- row and no subtree; else those first rows scrolled around the one you are in. Where a session
+-- is, is the thing the sidebar is for, and the panes of the one you are in are on your screen.
+function M.fit(model, height, sidebar)
+  colors = sidebar.colors
+  if #model.rows <= height then
+    return model.rows
+  end
+  local heads = 0
+  for _, it in ipairs(model.entries) do
+    heads = heads + #it.rows
+  end
+  if heads <= height then
+    local cut = sidebar.scroll(model.tree, height - heads, { above = more, below = more })
+    local out = {}
+    for _, it in ipairs(model.entries) do
+      for _, runs in ipairs(it.rows) do
+        out[#out + 1] = runs
+      end
+      if it.here then
+        for _, runs in ipairs(cut) do
+          out[#out + 1] = runs
+        end
+      end
+    end
+    return out
+  end
+  local firsts, here = {}, 1
+  for _, it in ipairs(model.entries) do
+    if #it.rows > 0 then
+      firsts[#firsts + 1] = it.rows[1]
+      if it.here then
+        here = #firsts
+      end
+    end
+  end
+  return sidebar.scroll({ rows = firsts, anchor = here }, height)
+end
+
 return M

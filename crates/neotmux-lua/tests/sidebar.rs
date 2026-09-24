@@ -36,6 +36,11 @@ impl Sess {
             agents: Vec::new(),
         }
     }
+
+    fn focused(mut self, pane: u32) -> Self {
+        self.focus = pane;
+        self
+    }
 }
 
 /// The shipped runtime with only the sidebar on, and no agent rulesets: a test about the tree
@@ -281,4 +286,106 @@ fn a_row_wider_than_the_widest_band_is_cut_at_it() {
     open(&sub, &s);
     let lines = settled(&sub, &s, 1);
     assert_eq!(lines[0], "x".repeat(36), "{lines:#?}");
+}
+
+/// `sidebar.scroll` on a section with no fit of its own: 20 rows centred on the tenth in 12,
+/// rows 4..15, with the first and last of those given over to what was cut.
+#[test]
+fn the_default_fit_says_how_much_it_cut_on_each_side() {
+    let (_dir, sub) = built(
+        "local rows = {}\n\
+         for i = 1, 20 do rows[i] = { { text = 'r' .. i } } end\n\
+         require('plugin.sidebar').sections = {\n\
+           { build = function() return { rows = rows, anchor = 10 } end },\n\
+         }",
+    );
+    let s = [Sess::new(1, "work", vec![vec![101]])];
+    open(&sub, &s);
+    let lines = settled(&sub, &s, 1);
+    assert_eq!(lines[0], "\u{2191} 4", "{lines:#?}");
+    assert_eq!(lines[1], "r5", "{lines:#?}");
+    assert_eq!(lines[10], "r14", "{lines:#?}");
+    assert_eq!(lines[11], "\u{2193} 6", "{lines:#?}");
+    line_with(&lines, "r10");
+}
+
+/// Step 2: four sessions of two rows each leave four rows for a subtree of 21, centred on the
+/// focused pane (row 6 of it): rows 4..7, the first and last of those given to the cut.
+#[test]
+fn every_session_stays_when_the_panes_do_not_fit() {
+    let (_dir, sub) = built("");
+    let s = [
+        Sess::new(1, "alpha", vec![vec![101]]),
+        Sess::new(2, "bravo", vec![(201..=220).collect()]).focused(205),
+        Sess::new(3, "charlie", vec![vec![301]]),
+        Sess::new(4, "delta", vec![vec![401]]),
+    ];
+    open(&sub, &s);
+    let lines = settled(&sub, &s, 2);
+    for name in ["alpha", "bravo", "charlie", "delta"] {
+        line_with(&lines, name);
+    }
+    let above = line_with(&lines, "\u{2026} 4 more");
+    let focused = line_with(&lines, "1.5 cat");
+    let below = line_with(&lines, "\u{2026} 15 more");
+    assert!(line_with(&lines, "bravo") < above, "{lines:#?}");
+    assert!(above < focused && focused < below, "{lines:#?}");
+    assert!(below < line_with(&lines, "charlie"), "{lines:#?}");
+}
+
+/// Step 3: ten sessions of two rows are more than twelve, so each is cut to its first row and
+/// the subtree goes — every name is still there, and nothing says anything was cut.
+#[test]
+fn ten_sessions_with_a_crowd_of_panes_keep_every_name() {
+    let (_dir, sub) = built("");
+    let names = [
+        "s00", "s01", "s02", "s03", "s04", "s05", "s06", "s07", "s08", "s09",
+    ];
+    let s: Vec<Sess> = names
+        .iter()
+        .enumerate()
+        .map(|(n, name)| {
+            let id = n as u32 + 1;
+            let panes: Vec<u32> = if *name == "s03" {
+                (1..=20).map(|p| id * 100 + p).collect()
+            } else {
+                vec![id * 100 + 1]
+            };
+            Sess::new(id, name, vec![panes])
+        })
+        .collect();
+    open(&sub, &s);
+    let lines = settled(&sub, &s, 4);
+    for name in names {
+        line_with(&lines, name);
+    }
+    assert!(
+        !lines
+            .iter()
+            .any(|l| l.contains("more") || l.contains('\u{2191}') || l.contains('\u{2193}')),
+        "{lines:#?}"
+    );
+}
+
+/// Step 4: twenty one-row sessions in twelve rows, centred on the eleventh.
+#[test]
+fn more_sessions_than_rows_scroll_around_the_one_you_are_in() {
+    let (_dir, sub) = built("");
+    let names = [
+        "s00", "s01", "s02", "s03", "s04", "s05", "s06", "s07", "s08", "s09", "s10", "s11", "s12",
+        "s13", "s14", "s15", "s16", "s17", "s18", "s19",
+    ];
+    let s: Vec<Sess> = names
+        .iter()
+        .enumerate()
+        .map(|(n, name)| {
+            let id = n as u32 + 1;
+            Sess::new(id, name, vec![vec![id * 100 + 1]])
+        })
+        .collect();
+    open(&sub, &s);
+    let lines = settled(&sub, &s, 11);
+    assert_eq!(lines[0], "\u{2191} 5", "{lines:#?}");
+    assert_eq!(lines[11], "\u{2193} 5", "{lines:#?}");
+    line_with(&lines, "s10");
 }

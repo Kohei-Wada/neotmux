@@ -85,9 +85,22 @@ function M.row(tokens, names, it)
   return runs
 end
 
+-- What `scroll` puts where it cut rows: `n` counts the row the mark itself stands in, so the
+-- number is how many rows are not on screen on that side.
+local function arrow(glyph)
+  return function(n)
+    return { { text = glyph .. " " .. n, fg = M.colors.detail, bg = M.colors.bar } }
+  end
+end
+
+M.marks = { above = arrow("\u{2191}"), below = arrow("\u{2193}") }
+
 -- The default fit: every row if they fit, and otherwise a window of them centred on `anchor`
--- and clamped to the ends, so the row that matters is always one of the ones that stayed.
-function M.scroll(model, height)
+-- and clamped to the ends, with the first and last rows of the window given over to saying how
+-- much was cut on that side. A mark never stands in for the anchor, so the row that matters is
+-- always one of the ones that stayed.
+function M.scroll(model, height, marks)
+  marks = marks or M.marks
   local rows = model.rows
   if height <= 0 then
     return {}
@@ -97,13 +110,21 @@ function M.scroll(model, height)
   end
   local anchor = model.anchor or 1
   local first = math.min(math.max(anchor - math.floor(height / 2), 1), #rows - height + 1)
+  local last = first + height - 1
   local out = {}
-  for at = first, first + height - 1 do
+  for at = first, last do
     out[#out + 1] = rows[at]
+  end
+  if first > 1 and first ~= anchor then
+    out[1] = marks.above(first)
+  end
+  if last < #rows and last ~= anchor then
+    out[#out] = marks.below(#rows - last + 1)
   end
   return out
 end
 
+-- `fit` is called with the sidebar as its third argument, which `scroll` would take for marks.
 local function default_fit(model, height)
   return M.scroll(model, height)
 end
