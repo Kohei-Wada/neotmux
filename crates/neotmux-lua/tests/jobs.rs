@@ -716,16 +716,21 @@ fn a_require_that_fails_takes_its_sources_jobs_with_it() {
     );
 }
 
-/// A session that is gone takes the jobs it adopted with it: the frame those callbacks belong
-/// in will never happen again.
+/// A session that is gone takes the jobs it adopted with it — but `on_exit` still runs, once,
+/// as it does for every other way a job can end. The chunk that wrote the callback is alive,
+/// and a plugin holding a lock for the length of a job has to hear that the job is over.
 #[test]
-fn forgetting_a_session_kills_the_jobs_it_adopted() {
+fn forgetting_a_session_ends_its_jobs_and_says_why() {
     let runner = FakeRunner::new();
     runner.will_say(vec![vec![JobChunk::Stdout(b"working\n".to_vec())]]);
     let (_dir, sub) = built(
         &on_key(
             "    neotmux.job.start({ 'sleep' }, {\n\
-                   on_exit = function() neotmux.log.info('exited') end,\n\
+                   on_exit = function(code, out, errout, err)\n\
+                     neotmux.log.info('exit code=' .. tostring(code)\n\
+                       .. ' out=[' .. tostring(out) .. ']'\n\
+                       .. ' err=' .. tostring(err))\n\
+                   end,\n\
                  })",
         ),
         Rc::clone(&runner),
@@ -737,9 +742,194 @@ fn forgetting_a_session_kills_the_jobs_it_adopted() {
 
     sub.forget_session(support::one());
     assert!(*runner.killed.borrow(), "a forgotten session's job ran on");
+    let said = logged(&sub);
+    assert_eq!(
+        said,
+        vec!["exit code=nil out=[working\n] err=session ended"],
+        "a session ending did not end its job exactly once"
+    );
+
+    frame(&sub);
+    assert!(logged(&sub).is_empty(), "the job ended twice");
+}
+
+/// A job killed by the budget one frame and caught by a session ending the next reports the
+/// budget, not the session: the ending it already has is the true one.
+#[test]
+fn a_session_ending_does_not_overwrite_an_ending_a_job_already_had() {
+    let runner = FakeRunner::new();
+    runner.will_say(vec![vec![JobChunk::Stdout(b"working\n".to_vec())]]);
+    let (_dir, sub) = built(
+        "local job\n\
+         neotmux.on_key(function(key)\n\
+           if key == 'J' then\n\
+             job = neotmux.job.start({ 'sleep' }, {\n\
+               on_exit = function(code, out, errout, err)\n\
+                 neotmux.log.info('exit err=' .. tostring(err))\n\
+               end,\n\
+             })\n\
+             return true\n\
+           end\n\
+           if key == 'K' then\n\
+             job:kill()\n\
+             return true\n\
+           end\n\
+           return false\n\
+         end)\n",
+        Rc::clone(&runner),
+    );
+
+    keys(&sub, &["J", "K"]);
+    sub.forget_session(support::one());
+    assert_eq!(
+        logged(&sub),
+        vec!["exit err=killed"],
+        "the session ending swallowed the ending the job already had"
+    );
+}
+
+/// The source sweep stays silent where the session sweep speaks: there is nobody left to tell,
+/// because the chunk that wrote `on_exit` is the thing that went away.
+#[test]
+fn a_failed_load_ends_its_jobs_without_calling_back_into_the_chunk() {
+    let runner = FakeRunner::new();
+    runner.will_say(vec![vec![JobChunk::Stdout(b"working\n".to_vec())]]);
+    let dir = tempfile::tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("lua/plugin")).unwrap();
+    fs::write(
+        dir.path().join("lua/plugin/worker.lua"),
+        "neotmux.job.start({ 'sleep' }, {\n\
+           on_exit = function() neotmux.log.info('exited') end,\n\
+         })\n\
+         error('nope')\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("init.lua"),
+        "local defaults = require('neotmux.defaults')\n\
+         for _, name in ipairs({ 'status', 'prefix', 'copy', 'sessions', 'palette',\n\
+           'notify', 'borders', 'sync', 'hints' }) do\n\
+           defaults[name] = false\n\
+         end\n\
+         require('plugin.worker')\n",
+    )
+    .unwrap();
+
+    let terminals = support::panes();
+    let sub = LuaSubsystem::build_with_runner(
+        Layers::from_paths(vec![dir.path().to_path_buf(), shipped_layer()]),
+        terminals.clone(),
+        Rc::new(neotmux_lua::clipboard::Absent),
+        Rc::clone(&runner) as Rc<dyn Runner>,
+    )
+    .unwrap();
+    assert_eq!(sub.run_init().len(), 1, "the load did not fail");
+    begin(&sub, support::one());
+    sub.forget_session(support::one());
+    let sub = Built::new(sub, terminals);
+
+    assert!(*runner.killed.borrow(), "the job was left running");
+    assert!(
+        !logged(&sub).iter().any(|line| line == "exited"),
+        "a dead chunk's on_exit was called anyway"
+    );
+}
+
+/// A streaming job whose `on_stdout` keeps overrunning is killed, and the plugin hears the one
+/// ending every job gets: no code, and the budget named as the reason.
+#[test]
+fn a_job_whose_callback_keeps_overrunning_is_killed_and_says_the_budget_did_it() {
+    let runner = FakeRunner::new();
+    runner.will_say(vec![
+        vec![JobChunk::Stdout(b"one\n".to_vec())],
+        vec![JobChunk::Stdout(b"two\n".to_vec())],
+    ]);
+    let (_dir, sub) = built(
+        &format!(
+            "neotmux.opt.tick_budget_ms = 1\n\
+             neotmux.opt.tick_overrun_limit = 2\n{}",
+            on_key(
+                "    neotmux.job.start({ 'tail' }, {\n\
+                       buffered = false,\n\
+                       on_stdout = function(lines)\n\
+                         local t = os.clock()\n\
+                         while os.clock() - t < 0.05 do end\n\
+                       end,\n\
+                       on_exit = function(code, out, errout, err)\n\
+                         neotmux.log.info('exit code=' .. tostring(code)\n\
+                           .. ' err=' .. tostring(err))\n\
+                       end,\n\
+                     })",
+            )
+        ),
+        Rc::clone(&runner),
+    );
+
+    keys(&sub, &["J"]);
     frame(&sub);
     assert!(
-        logged(&sub).is_empty(),
-        "a forgotten session was still called back"
+        !*runner.killed.borrow(),
+        "one overrun was enough to kill it"
+    );
+
+    frame(&sub);
+    assert!(*runner.killed.borrow(), "the runaway job was not killed");
+
+    frame(&sub);
+    let said = logged(&sub);
+    assert_eq!(
+        said.iter()
+            .filter(|line| *line == "exit code=nil err=budget")
+            .count(),
+        1,
+        "a job killed by the budget did not end exactly once, naming it: {said:?}"
+    );
+}
+
+/// The limit is a run, not a total: a callback that comes back inside its budget wipes its own
+/// job's slate, so the next overrun starts counting from one again.
+#[test]
+fn a_job_callback_inside_its_budget_forgives_the_overruns_before_it() {
+    let runner = FakeRunner::new();
+    runner.will_say(vec![
+        vec![JobChunk::Stdout(b"slow\n".to_vec())],
+        vec![JobChunk::Stdout(b"fast\n".to_vec())],
+        vec![JobChunk::Stdout(b"slow\n".to_vec())],
+        vec![JobChunk::Stdout(b"fast\n".to_vec())],
+    ]);
+    let (_dir, sub) = built(
+        &format!(
+            "neotmux.opt.tick_budget_ms = 1\n\
+             neotmux.opt.tick_overrun_limit = 2\n{}",
+            on_key(
+                "    neotmux.job.start({ 'tail' }, {\n\
+                       buffered = false,\n\
+                       on_stdout = function(lines)\n\
+                         neotmux.log.info('saw ' .. lines[1])\n\
+                         if lines[1] == 'slow' then\n\
+                           local t = os.clock()\n\
+                           while os.clock() - t < 0.05 do end\n\
+                         end\n\
+                       end,\n\
+                     })",
+            )
+        ),
+        Rc::clone(&runner),
+    );
+
+    keys(&sub, &["J"]);
+    for _ in 0..4 {
+        frame(&sub);
+    }
+    let said = logged(&sub);
+    assert!(
+        !*runner.killed.borrow(),
+        "two overruns a frame apart, with a\
+        callback inside its budget between them, killed the job: {said:?}"
+    );
+    assert_eq!(
+        said.iter().filter(|line| line.starts_with("saw ")).count(),
+        4,
+        "the job stopped being delivered to: {said:?}"
     );
 }

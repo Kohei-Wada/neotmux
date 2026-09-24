@@ -282,25 +282,54 @@ impl Jobs {
     }
 
     /// Kills and drops every job of a source that is going away, with no `Exit` delivery: the
-    /// callback that would receive it belongs to the chunk that is not there any more.
+    /// callback that would receive it belongs to the chunk that is not there any more, and
+    /// calling into it is worse than not calling.
     pub fn remove_all_of(&self, owner: SourceId) {
-        self.remove_matching(|job| job.owner == owner);
-    }
-
-    /// The same for a session that is over. A job still waiting to be adopted belongs to no
-    /// session yet and is left alone.
-    pub fn remove_all_for(&self, session: SessionId) {
-        self.remove_matching(|job| job.session == Some(session));
-    }
-
-    fn remove_matching(&self, doomed: impl Fn(&Job) -> bool) {
-        self.live.borrow_mut().retain(|_, job| {
-            if !doomed(job) {
-                return true;
-            }
+        for mut job in self.take_matching(|job| job.owner == owner) {
             job.running.kill();
-            false
-        });
+        }
+    }
+
+    /// The same for a session that is over, but with the ending each job is still owed: the
+    /// chunk that wrote `on_exit` is very much alive here, and a plugin holding a lock for the
+    /// length of a job has to learn that the job is over. A job whose `ending` was already set
+    /// but never emitted reports that ending rather than this one, so a budget kill a frame
+    /// earlier is not swallowed by the session going away a moment later. A job still waiting
+    /// to be adopted belongs to no session yet and is left alone.
+    pub fn end_session(&self, session: SessionId) -> Vec<Delivery> {
+        let mut out = Vec::new();
+        for mut job in self.take_matching(|job| job.session == Some(session)) {
+            job.running.kill();
+            let (code, err) = job
+                .ending
+                .take()
+                .unwrap_or((None, Some("session ended".to_string())));
+            let text = |bytes: Vec<u8>| String::from_utf8_lossy(&bytes).into_owned();
+            out.push(Delivery::Exit {
+                job: job.id,
+                owner: job.owner,
+                callback: job.callbacks.on_exit,
+                code,
+                stdout: job.buffered.then(|| text(job.stdout)),
+                stderr: job.buffered.then(|| text(job.stderr)),
+                err,
+            });
+        }
+        out
+    }
+
+    /// Takes the matching jobs out of the map, so that what is done with them next — killed
+    /// and dropped, or killed and reported — cannot be reached twice.
+    fn take_matching(&self, doomed: impl Fn(&Job) -> bool) -> Vec<Job> {
+        let mut live = self.live.borrow_mut();
+        let ids: Vec<JobId> = live
+            .iter()
+            .filter(|(_, job)| doomed(job))
+            .map(|(id, _)| *id)
+            .collect();
+        ids.into_iter()
+            .map(|id| live.remove(&id).expect("an id just taken from the map"))
+            .collect()
     }
 
     /// Everything this session's jobs have to say this frame, oldest job first. The limit is

@@ -307,19 +307,28 @@ fn a_timer_that_keeps_overrunning_is_stopped_and_the_tick_is_not() {
     );
     let start = Instant::now();
 
+    // Per frame, because the tick shares the timer's 1 ms budget: a frame the timer spun in
+    // may lose its own `tick` line to the overrun that spinning caused, and counting the
+    // whole run would make this test ride on that. What it is here to prove is that the
+    // frames *after* the timer is gone still tick.
+    let mut per_frame = Vec::new();
     for step in 1..=4 {
         frame(&sub, start + Duration::from_millis(100 * step));
+        per_frame.push(logged(&sub));
     }
-    let said = logged(&sub);
+    let said: Vec<&String> = per_frame.iter().flatten().collect();
     assert_eq!(
-        said.iter().filter(|line| *line == "timer").count(),
+        said.iter().filter(|line| **line == "timer").count(),
         2,
         "the timer was not stopped after two overruns: {said:?}"
     );
-    assert!(
-        said.iter().filter(|line| *line == "tick").count() >= 4,
-        "stopping the timer took the source's tick with it: {said:?}"
-    );
+    for (at, frame) in per_frame.iter().enumerate().skip(2) {
+        assert!(
+            frame.iter().any(|line| line == "tick"),
+            "stopping the timer took the source's tick with it, from frame {}: {per_frame:?}",
+            at + 1
+        );
+    }
 }
 
 /// A session that is gone takes its timers with it, including a one-shot that has already
