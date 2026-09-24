@@ -9,7 +9,8 @@
 //!
 //! What is left at this level is what both halves need and neither owns: the wire ([`link`],
 //! [`sock`]), the log ([`logging`]), the signals a process gets ([`signals`]), the waiting a
-//! poll is (`tty`) and what `/proc` says about a pid (`procinfo`).
+//! poll is — and, beside it, the file the client reads its keys from — (`tty`), and what
+//! `/proc` says about a pid (`procinfo`).
 //!
 //! Where a new module goes is decided by who calls it: a session's business is the server's,
 //! a terminal's is the client's, and something both halves call stays here. A module here

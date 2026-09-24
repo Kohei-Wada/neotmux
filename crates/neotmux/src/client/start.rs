@@ -30,13 +30,13 @@ const START_TIMEOUT: Duration = Duration::from_secs(10);
 /// Split in two so that the client can get on with whatever else it has to do while the
 /// server forks, execs and binds. That used to be loading the plugins; the plugins are the
 /// server's now, and what is left is the terminal.
-pub struct Starting {
+pub(crate) struct Starting {
     paths: Paths,
     connected: Option<UnixStream>,
 }
 
 /// Finds this session's server, or starts one, and returns without waiting for it.
-pub fn begin() -> anyhow::Result<Starting> {
+pub(crate) fn begin() -> anyhow::Result<Starting> {
     let paths = Paths::resolve(&|key| std::env::var_os(key))?;
     let connected = sock::connect(&paths.socket)?;
     if connected.is_none() {
@@ -47,7 +47,7 @@ pub fn begin() -> anyhow::Result<Starting> {
 
 impl Starting {
     /// The connection, once there is one to have.
-    pub fn finish(self) -> anyhow::Result<Rc<RefCell<Link>>> {
+    pub(crate) fn finish(self) -> anyhow::Result<Rc<RefCell<Link>>> {
         if let Some(stream) = self.connected {
             return open(stream);
         }

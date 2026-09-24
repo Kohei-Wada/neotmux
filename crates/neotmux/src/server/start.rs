@@ -2,7 +2,7 @@
 //!
 //! Everything a session needs before there is one: the lock that says this process is the
 //! server, the socket it binds, and the taking of both away on the way out. The loop itself
-//! is [`super::serve`]; this is only how it is entered and left.
+//! is `serve`; this is only how it is entered and left.
 
 use crate::signals::ShutdownSignal;
 use crate::sock::{self, Lock, Paths};

@@ -2,7 +2,7 @@
 //!
 //! `ls`, `kill` and the host commands are the client too: they say a sentence over the
 //! socket, read the one answer, and put it on stdout. There is no terminal in any of it —
-//! that is [`super::attach()`], the other thing a client can be asked to do.
+//! that is [`crate::client::attach()`], the other thing a client can be asked to do.
 
 use std::cell::RefCell;
 use std::env;

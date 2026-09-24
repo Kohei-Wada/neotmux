@@ -14,15 +14,16 @@
 //! is as far as this file goes; that a session sits waiting at all is the rest of it.
 //!
 //! This is the half's front door and the rest of it hangs below: [`session`] and `shells`
-//! are the panes and the children behind them, [`plugins`] and [`notify`] the Lua layer and
-//! what it raises, [`runner`] a job in a real process, [`clip`] a yank with nowhere of its
+//! are the panes and the children behind them, [`plugins`] and `notify` the Lua layer and
+//! what it raises, [`runner`] a job in a real process, `clip` a yank with nowhere of its
 //! own to go, [`input`] the bytes a key is typed as, [`command`] what the host answers
-//! without the Lua layer, and [`start`] how this half gets started at all.
+//! without the Lua layer, `paneinfo` what `/proc` last said about a pane's child, and
+//! [`start`] how this half gets started at all.
 
-pub mod clip;
+pub(crate) mod clip;
 pub mod command;
 pub mod input;
-pub mod notify;
+pub(crate) mod notify;
 pub(crate) mod paneinfo;
 pub mod plugins;
 pub mod runner;
@@ -163,7 +164,7 @@ struct Serving<'a> {
     terminals: &'a Rc<PaneTerminals>,
 }
 
-pub fn serve(listener: &UnixListener, shutdown: &ShutdownSignal) -> anyhow::Result<()> {
+pub(crate) fn serve(listener: &UnixListener, shutdown: &ShutdownSignal) -> anyhow::Result<()> {
     // Polled rather than blocked on, so the frame loop can answer a client instead of
     // leaving it in the backlog wondering.
     listener

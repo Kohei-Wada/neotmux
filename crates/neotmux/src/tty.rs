@@ -1,3 +1,16 @@
+//! Waiting, and the file the client's own keys arrive on.
+//!
+//! Two jobs in one file, and they are not the same job. [`wait_on`] and [`wait_any`] are a
+//! `poll(2)` with a deadline and nothing else — both halves wait, the client on its
+//! terminal and the socket, the server on its clients, its door and its panes. [`Terminal`]
+//! is the client's alone: the file neotmux reads keys from, waited on and read by the same
+//! code because nothing else can do it correctly.
+//!
+//! It sits here rather than in `client` because the server does the larger part of the
+//! waiting, and here rather than split in two because [`Terminal::wait_beside`] is one line
+//! calling [`wait_on`]. Neither half can own the other's half of it, so neither does. If
+//! [`Terminal`] ever grows enough to be worth its own file, `client` is where it goes.
+
 use std::fs::File;
 use std::io::{self, IsTerminal};
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};

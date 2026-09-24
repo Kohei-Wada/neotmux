@@ -4,7 +4,7 @@
 //! [`attach()`], [`ls`], [`kill`] and [`command`]. The last three say a sentence over the
 //! socket and print the answer; [`attach()`] is the one that takes a terminal, and what is
 //! in this file is the loop it then runs — it reads the terminal through `tty`, turns what
-//! it read into keys with [`decode`], sends them over a [`crate::link`] that [`start`]
+//! it read into keys with `decode`, sends them over a [`crate::link`] that `start`
 //! found or started a server for, and paints the frame that comes back with `draw` and
 //! `overlay`. It holds no session state — what it shows is what it was last sent.
 
@@ -42,12 +42,12 @@ const PATIENCE: Duration = Duration::from_millis(16);
 
 /// The terminal's size, asked of the terminal itself rather than of a renderer: it is wanted
 /// before there is one, because the attach happens before the alternate screen.
-pub fn screen_size() -> anyhow::Result<Size> {
+pub(crate) fn screen_size() -> anyhow::Result<Size> {
     let (cols, rows) = ratatui::crossterm::terminal::size().context("terminal size")?;
     Ok(clamp_to_min_grid(Size { rows, cols }))
 }
 
-pub fn terminal_size(terminal: &DefaultTerminal) -> anyhow::Result<Size> {
+pub(crate) fn terminal_size(terminal: &DefaultTerminal) -> anyhow::Result<Size> {
     let area = terminal.size().context("terminal size")?;
     Ok(clamp_to_min_grid(Size {
         rows: area.height,
@@ -88,12 +88,12 @@ impl Keyboard {
 }
 
 /// Why the client stopped.
-pub struct Left {
+pub(crate) struct Left {
     pub signal: Option<i32>,
 }
 
 /// What the session said when this client attached.
-pub enum Opened {
+pub(crate) enum Opened {
     /// It is over already — a plugin called `neotmux.quit()` while the session was loading.
     /// Nothing was drawn, and nothing should be.
     Over(Vec<String>),
@@ -107,7 +107,11 @@ pub enum Opened {
 /// it began must not leave a terminal switched to a screen nothing was ever drawn on. The
 /// first frame is always owed: a session that has just started, and one that has just been
 /// adopted, are both dirty by construction.
-pub fn open(link: &Rc<RefCell<Link>>, size: Size, session: String) -> anyhow::Result<Opened> {
+pub(crate) fn open(
+    link: &Rc<RefCell<Link>>,
+    size: Size,
+    session: String,
+) -> anyhow::Result<Opened> {
     send(link, &ToServer::Attach(Attach { size, session }))?;
     let mut transcript = Vec::new();
     loop {
@@ -139,7 +143,7 @@ pub fn open(link: &Rc<RefCell<Link>>, size: Size, session: String) -> anyhow::Re
 /// It holds no plugin and makes no decision. A key it reads is sent, not judged; the picture
 /// that comes back is painted, not composed. Both of those are the session's, and the session
 /// is in the other process.
-pub fn run(
+pub(crate) fn run(
     terminal: &mut DefaultTerminal,
     shutdown: &ShutdownSignal,
     link: &Rc<RefCell<Link>>,
