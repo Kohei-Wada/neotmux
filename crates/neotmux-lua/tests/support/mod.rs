@@ -106,6 +106,22 @@ pub fn built(extra: &str) -> (tempfile::TempDir, Built) {
     (dir, Built::new(sub, terminals))
 }
 
+/// What the host would have read out of `/proc` for the one pane: the shipped Claude ruleset
+/// asks it before any rule runs, and a test that never publishes it is a test about a pane
+/// nothing is known about.
+pub fn running(sub: &Built, command: &str) {
+    sub.publish_pane_info(
+        one(),
+        std::collections::BTreeMap::from([(
+            pane(),
+            neotmux_proto::PaneInfo {
+                command: Some(command.to_string()),
+                cwd: None,
+            },
+        )]),
+    );
+}
+
 pub fn feed(sub: &Built, text: &[u8]) {
     sub.terminals().open(pane(), SIZE, 100);
     sub.terminals().feed(pane(), text);

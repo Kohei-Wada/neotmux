@@ -20,6 +20,16 @@
 --   { id = 'spinner', state = 'working', priority = 9, visible = 'working',
 --     match = function(view) return ... end }
 --
+-- A ruleset may carry one field of its own beside its rules:
+--
+--   claims = function(info) return info.command == 'claude' end
+--
+-- asked once per look, before any rule runs, with `neotmux.pane.info(pane)`. A ruleset that
+-- answers false is skipped whole and the pane falls through to whatever `neotmux.state` does
+-- with a pane nobody claims. Without it a ruleset speaks for every pane on the screen alone,
+-- which is how a pane that once ran an agent goes on being answered for out of what the agent
+-- left behind — a title nothing resets when the program exits.
+--
 -- `priority` decides, not where the rule sits in the table. `state` is the answer, and a rule
 -- with none says "this screen is not a state" and stops the search. `visible` is the state the
 -- screen is *showing*, spelled out: it is read, not merely tested, and only `'idle'` or
@@ -225,6 +235,29 @@ function M.judge(rules, view)
   return nil
 end
 
+-- Whether a ruleset will speak for this pane at all, asked before any of its rules run. A
+-- ruleset with no `claims` speaks for every pane, which is what one that is only about what is
+-- drawn wants. One that names a program declines every pane not running it — and a pane whose
+-- agent has quit is then answered by the fallback rather than by the agent's leavings.
+--
+-- A `claims` that raises declines: the ruleset is the thing that is broken, and skipping it
+-- leaves the pane where it would have been had nobody written it.
+function M.claimed(rules, pane)
+  local ask = rules.claims
+  if ask == nil then
+    return true
+  end
+  local ok, yes = pcall(ask, neotmux.pane.info(pane))
+  if not ok then
+    if not complained[rules] then
+      complained[rules] = true
+      neotmux.notify("error", "neotmux.detect: claims: " .. tostring(yes))
+    end
+    return false
+  end
+  return yes and true or false
+end
+
 -- The last look at a pane, keyed by the revision it was taken at, and the state the pane is
 -- being held at. Two tables because they expire differently: the look is stale the moment the
 -- screen moves, the hold outlives any number of screens.
@@ -249,8 +282,18 @@ local function names()
   return out
 end
 
-local function hold(pane, state, visible)
+-- `matched` is whether a rule fired at all, which is a different fact from whether it named a
+-- state. A rule that fired and declined to say — a transcript scrolled back, a menu over the
+-- top — leaves the previous answer standing, because the pane is still the ruleset's and the
+-- screen simply is not evidence. Nothing firing is not that: the ruleset has nothing to say
+-- about this screen, and an answer it gave about some earlier one must not outlive it, or a
+-- pane that has ever been claimed is never unclaimed again.
+local function hold(pane, state, visible, matched)
   local was = held[pane]
+  if not matched then
+    held[pane] = nil
+    return nil
+  end
   if state == nil then
     return was and was.state or nil
   end
@@ -291,16 +334,19 @@ function M.of(pane)
     it = { revision = revision, view = M.view(pane) }
     if it.view ~= nil then
       for _, name in ipairs(names()) do
-        local state, id, visible = M.judge(M.agents[name], it.view)
-        if id ~= nil then
-          it.state, it.visible = state, visible
-          break
+        local rules = M.agents[name]
+        if M.claimed(rules, pane) then
+          local state, id, visible = M.judge(rules, it.view)
+          if id ~= nil then
+            it.state, it.visible, it.matched = state, visible, true
+            break
+          end
         end
       end
     end
     seen[pane] = it
   end
-  return hold(pane, it.state, it.visible), it.view
+  return hold(pane, it.state, it.visible, it.matched), it.view
 end
 
 return M

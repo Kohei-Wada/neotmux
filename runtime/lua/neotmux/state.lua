@@ -19,11 +19,17 @@
 -- answers for a pane no ruleset in `neotmux.detect.agents` claims: a shell, or an agent nobody
 -- has taught neotmux the screen of yet.
 --
+-- Which panes those are is the ruleset's own answer: `neotmux.detect` asks it, through its
+-- optional `claims(info)`, before running a rule. The shipped Claude ruleset names the commands
+-- it is about, so a pane where you have quit `claude` comes back here — it is the pane you go on
+-- working in, and the title Claude left behind would otherwise answer `idle` for it forever.
+--
 -- Two caches, `neotmux.detect`'s and this file's own, sit behind the one call: each keyed by a
 -- pane's revision, each rebuilt only when it moves. They cannot disagree today only because both
--- always recompute the moment the revision they last saw is stale — nothing enforces that a pane
--- crossing from unclaimed to claimed, or back, is handed off between them correctly, and no test
--- watches that crossing.
+-- always recompute the moment the revision they last saw is stale. The crossing from claimed to
+-- unclaimed has a test on it now (`state.rs`); the one thing still unenforced is that `claims` is
+-- re-asked only when the screen moves, so a pane whose program changed and printed nothing is
+-- answered by the last look for as long as that lasts.
 local M = {}
 
 -- Lua patterns, matched against the last `M.lines` non-blank lines of a pane. Replace the

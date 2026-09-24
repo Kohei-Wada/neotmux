@@ -131,6 +131,24 @@ case the previous answer stands.
 `visible` records *why* it fired: `idle` and `blocked` mean the screen is showing an idle
 prompt or a question right now, as against an absence of evidence. Only the hold reads it.
 
+A rule matching and declining to say is not the same as *nothing* matching. Nothing matching
+means the ruleset has nothing to say about this screen at all, and the previous answer does not
+stand: `detect.of` answers nil and the pane falls through to §4's fallback.
+
+### 3.2a A ruleset may decline a pane
+
+A ruleset may carry, beside its rules:
+
+```lua
+claims = function(info) return info.command == 'claude' end
+```
+
+asked once per look with `neotmux.pane.info(pane)`, before any rule runs. A ruleset that answers
+false is skipped whole. Without it a ruleset speaks for every pane on what is drawn alone, and
+Claude Code's `✳` title — which `neotmux-term` keeps after the program exits, because nothing
+resets it — makes the shell you go on using in that pane read as an idle agent forever. A
+ruleset with no `claims` speaks for every pane, as before.
+
 ### 3.3 The hold
 
 A working agent's spinner disappears for a frame between steps. Without a hold, that frame is

@@ -7,7 +7,7 @@
 
 mod support;
 
-use support::{built, feed, keys, logged};
+use support::{built, feed, keys, logged, pane, running};
 
 /// A Claude screen gets the detector's answer, not the fallback's clock. The first look
 /// establishes both: the detector's own cache, which persists a `working` verdict across looks
@@ -69,7 +69,11 @@ fn a_pane_no_ruleset_claims_falls_back_to_the_patterns() {
     feed(&sub, b"rm -i file\r\nremove file? [y/N] ");
     keys(&sub, &["J"]);
     assert!(
-        logged(&sub).iter().any(|l| l == "of=blocked"),
+        {
+            let g = logged(&sub);
+            eprintln!("{g:?}");
+            g.iter().any(|l| l == "of=blocked")
+        },
         "the fallback stopped working"
     );
 }
@@ -96,5 +100,47 @@ fn the_fallback_still_calls_a_pane_that_just_printed_working() {
     assert!(
         logged(&sub).iter().any(|l| l == "of=working"),
         "a pane that just printed is working"
+    );
+}
+
+/// The whole point of `claims`, end to end against the shipped ruleset. Claude Code writes a
+/// `✳` into the terminal title when a turn is over, and nothing resets it when the program
+/// exits — `neotmux-term` keeps the last title a pane set forever. So the shell you go on using
+/// in that pane still carries it, and `osc_title_idle` would answer `idle` for every screen
+/// thereafter: no `blocked` for an `rm -i`, no tint, no chime, in the most ordinary life a
+/// Claude pane has.
+///
+/// What tells the two apart is what the pane is running, which the host reads out of `/proc`:
+/// `claude` while it is up, the shell's own name the moment it is quit.
+#[test]
+fn a_pane_whose_agent_has_quit_stops_being_answered_for_by_what_it_left_behind() {
+    let (_dir, sub) = built(
+        "local state = require('neotmux.state')\n\
+         neotmux.on_key(function(key)\n\
+           if key == 'J' then\n\
+             neotmux.log.info('of=' .. tostring(state.of(1)))\n\
+             return true\n\
+           end\n\
+           return false\n\
+         end)\n",
+    );
+    feed(&sub, "\x1b]2;\u{2733} hostname の確認\x07".as_bytes());
+
+    running(&sub, "claude");
+    keys(&sub, &["J"]);
+    assert!(
+        logged(&sub).iter().any(|l| l == "of=idle"),
+        "the title rule stopped answering for a pane that is running Claude Code"
+    );
+
+    // Claude is quit; the title it left behind is still the pane's, so this writes into the
+    // same terminal rather than opening a fresh one — `open` would wipe the title with it.
+    running(&sub, "bash");
+    sub.terminals()
+        .feed(pane(), b"\r\nrm -i file\r\nremove file? [y/N] ");
+    keys(&sub, &["J"]);
+    assert!(
+        logged(&sub).iter().any(|l| l == "of=blocked"),
+        "a shell asking a question read as an idle agent, off a title nobody reset"
     );
 }

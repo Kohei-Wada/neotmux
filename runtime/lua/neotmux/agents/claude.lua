@@ -115,7 +115,7 @@ local function is_bare_prompt(line)
   return line:match("^%s*\u{2502}?%s*\u{276f}%s*\u{2502}?%s*$") ~= nil
 end
 
-return {
+local claude = {
   -- The title outranks everything on the screen: Claude Code spins it while a turn runs, and it
   -- keeps spinning over a transcript, a menu, or whatever else the screen has been given to.
   {
@@ -334,3 +334,28 @@ return {
     end,
   },
 }
+
+-- What a pane has to be running for these rules to be asked about it at all.
+--
+-- Measured, not guessed, on 2026-09-24 against Claude Code v2.1.281 on this machine, reading
+-- the foreground process group's `/proc/<pid>/comm` off a pty master the way the host does:
+-- `bash` for the bare shell, `claude` once it is started, and `bash` again the moment it is
+-- quit. v2.1.281 installs as a single native executable, so `comm` is its own name; an install
+-- that still runs the CLI through node reports `node`, which is why that one is here too and
+-- why the table is a table.
+--
+-- Without this, a pane that has ever run Claude Code is never unclaimed: `osc_title_idle` fires
+-- off a `✳` title that nothing resets when the program exits, so the shell you go on using
+-- reads as an idle agent forever — no `blocked` for an `rm -i`, and no chime.
+claude.commands = { claude = true, node = true }
+
+-- A pane nothing could be read about is claimed rather than declined: `pane.info` is `/proc`,
+-- which is Linux only and empty for a process that went away between the host asking and the
+-- answer coming back. There the screen is the only evidence there is, and refusing it would
+-- turn off the detector rather than narrow it.
+function claude.claims(info)
+  local command = info and info.command
+  return command == nil or claude.commands[command] == true
+end
+
+return claude

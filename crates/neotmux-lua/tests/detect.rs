@@ -253,6 +253,164 @@ fn forgetting_a_pane_drops_the_hold_and_not_only_the_look() {
     );
 }
 
+/// A ruleset whose only rule is flipped on and off by a value the test controls, so that the
+/// only thing under test is what happens when *nothing* matches — as against a rule that
+/// matched and declined to name a state, which `declining` below is for.
+fn matching(answers: bool) -> String {
+    let answers = if answers { "'idle'" } else { "nil" };
+    format!(
+        "local detect = require('neotmux.detect')\n\
+         local says = true\n\
+         detect.agents = {{\n\
+           test = {{\n\
+             {{ id = 'only', state = {answers}, priority = 1, visible = 'idle',\n\
+               match = function() return says end }},\n\
+           }},\n\
+         }}\n\
+         neotmux.on_key(function(key)\n\
+           if key == 'Q' then says = false return true end\n\
+           if key == 'J' then\n\
+             neotmux.log.info('of=' .. tostring(detect.of(1)))\n\
+             return true\n\
+           end\n\
+           return false\n\
+         end)\n"
+    )
+}
+
+/// Nothing matching is not "no news". A ruleset that has stopped recognising the screen has
+/// nothing to say about the pane at all, and an answer it gave about an earlier screen must
+/// not outlive it — otherwise a pane that has ever been claimed is never unclaimed, and
+/// `neotmux.state` never reaches the patterns it falls back to.
+#[test]
+fn a_screen_no_rule_matches_answers_nothing_rather_than_what_it_said_last() {
+    let (_dir, sub) = built(&matching(true));
+    feed(&sub, b"anything");
+    assert!(look(&sub).iter().any(|l| l == "of=idle"));
+
+    keys(&sub, &["Q"]);
+    assert!(
+        look(&sub).iter().any(|l| l == "of=nil"),
+        "a screen the ruleset no longer recognises kept its last answer"
+    );
+}
+
+/// The other half: a rule that matched and answered no state — a transcript scrolled back, a
+/// menu over the top — *does* leave the previous answer standing, because the pane is still
+/// the ruleset's and this screen simply is not evidence.
+#[test]
+fn a_rule_that_matches_and_names_no_state_leaves_the_last_answer_standing() {
+    let (_dir, sub) = built(&declining());
+    feed(&sub, b"anything");
+    assert!(look(&sub).iter().any(|l| l == "of=idle"));
+    keys(&sub, &["V"]);
+    assert!(
+        look(&sub).iter().any(|l| l == "of=idle"),
+        "a rule that matched and declined to say dropped the answer it was meant to keep"
+    );
+}
+
+/// An idle rule and a viewer rule above it, flipped by a value the test controls: the viewer
+/// matches and names no state, which is the one case the previous answer survives.
+fn declining() -> String {
+    "local detect = require('neotmux.detect')\n\
+     local mode = 'idle'\n\
+     detect.agents = {\n\
+       test = {\n\
+         { id = 'viewer', priority = 9, match = function() return mode == 'viewer' end },\n\
+         { id = 'quiet', state = 'idle', priority = 1, visible = 'idle',\n\
+           match = function() return mode == 'idle' end },\n\
+       },\n\
+     }\n\
+     neotmux.on_key(function(key)\n\
+       if key == 'V' then mode = 'viewer' return true end\n\
+       if key == 'J' then\n\
+         neotmux.log.info('of=' .. tostring(detect.of(1)))\n\
+         return true\n\
+       end\n\
+       return false\n\
+     end)\n"
+        .to_string()
+}
+
+/// A ruleset is asked whether the pane is its at all before any of its rules run, and one that
+/// says no is skipped whole — not one rule of it is evaluated. This is what keeps a ruleset
+/// from answering for a pane whose program has quit and left a title behind.
+#[test]
+fn a_ruleset_that_does_not_claim_the_pane_is_never_asked() {
+    let (_dir, sub) = built(
+        "local detect = require('neotmux.detect')\n\
+         detect.agents = {\n\
+           test = {\n\
+             claims = function(info) return info.command == 'claude' end,\n\
+             { id = 'only', state = 'idle', priority = 1, visible = 'idle',\n\
+               match = function()\n\
+                 neotmux.log.info('asked')\n\
+                 return true\n\
+               end },\n\
+           },\n\
+         }\n\
+         neotmux.on_key(function(key)\n\
+           if key == 'J' then\n\
+             neotmux.log.info('of=' .. tostring(detect.of(1)))\n\
+             return true\n\
+           end\n\
+           return false\n\
+         end)\n",
+    );
+    feed(&sub, b"anything");
+
+    support::running(&sub, "bash");
+    let said = look(&sub);
+    assert!(said.iter().any(|l| l == "of=nil"), "{said:?}");
+    assert!(
+        !said.iter().any(|l| l == "asked"),
+        "a rule ran for a pane its ruleset had declined: {said:?}"
+    );
+
+    support::running(&sub, "claude");
+    let said = look(&sub);
+    assert!(said.iter().any(|l| l == "of=idle"), "{said:?}");
+    assert!(said.iter().any(|l| l == "asked"), "{said:?}");
+}
+
+/// A `claims` that raises declines, and says so once: the ruleset is what is broken, and
+/// skipping it leaves the pane where it would have been had nobody written it.
+#[test]
+fn a_raising_claims_declines_the_pane_and_is_reported_once() {
+    let (_dir, sub) = built(
+        "local detect = require('neotmux.detect')\n\
+         detect.agents = {\n\
+           test = {\n\
+             claims = function() error('boom') end,\n\
+             { id = 'only', state = 'idle', priority = 1, match = function() return true end },\n\
+           },\n\
+         }\n\
+         neotmux.on_key(function(key)\n\
+           if key == 'J' then\n\
+             neotmux.log.info('of=' .. tostring(detect.of(1)))\n\
+             return true\n\
+           end\n\
+           return false\n\
+         end)\n",
+    );
+    feed(&sub, b"anything");
+    let mut said = look(&sub);
+    said.extend(look(&sub));
+    assert_eq!(
+        said.iter().filter(|l| *l == "of=nil").count(),
+        2,
+        "{said:?}"
+    );
+    assert_eq!(
+        said.iter()
+            .filter(|l| l.starts_with("neotmux.detect: claims:"))
+            .count(),
+        1,
+        "{said:?}"
+    );
+}
+
 /// A rule that raises is reported and skipped — once. `judge` runs for every pane on every
 /// frame, and a rule that raises on one screen raises on the next thousand: a notification per
 /// frame is not a report, it is the pane nobody can read any more.
