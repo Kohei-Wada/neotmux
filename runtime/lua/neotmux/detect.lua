@@ -80,7 +80,8 @@ local function is_rule(line)
 end
 
 -- A line without the `│` edges a program might have drawn around it, trimmed. Nothing Claude
--- Code draws has them, so the stripping is a courtesy to the next program in this directory.
+-- Code draws has them and no test exercises the stripping: it is a courtesy to the next program
+-- somebody points this at, and the trim is the part that earns its keep.
 local function unedge(line)
   local inner = line:gsub("^%s*\u{2502}", ""):gsub("\u{2502}%s*$", "")
   return (inner:match("^%s*(.-)%s*$"))

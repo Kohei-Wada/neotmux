@@ -367,9 +367,10 @@ fn a_raising_rule_is_reported_once_and_not_once_a_look() {
 /// same bytes as the screen, because opening a pane starts it over — and the answer is `judge`'s
 /// own rather than `of`'s, so that no hold stands between a fixture and the rule it is about.
 ///
-/// The pane is wider and taller than the rest of this file's: the captured screens below are a
-/// real terminal's, and wrapping one of Claude Code's rules onto a second line would hand the
-/// view two rules where the screen has one.
+/// The pane is wider and taller than the rest of this file's. Wider because wrapping one of
+/// Claude Code's rules onto a second line would hand the view two rules where the screen has
+/// one; taller because the captured permission screen is seventeen lines and the default pane
+/// is sixteen, and a fixture that scrolled off its own top would be testing the scrollback.
 fn assert_detects(screen: &str, title: &str, state: &str, id: &str) {
     const CAPTURED: Size = Size {
         rows: 40,
@@ -401,6 +402,9 @@ fn assert_detects(screen: &str, title: &str, state: &str, id: &str) {
 
 /// The rule Claude Code draws around its prompt, at the width the captures were taken at.
 const BAR: &str = "────────────────────────────────────────────────────────────────────────────";
+
+/// The lighter separators Claude Code draws around a diff. Not rules: a different character.
+const DASHED: &str = "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌";
 
 /// Captured: idle, nothing running. The prompt is a `❯` between two rules, with the status
 /// lines under the lower one.
@@ -477,12 +481,19 @@ fn the_title_outranks_the_screen() {
     );
 }
 
-/// Scrolled back into the transcript: whatever the pane is doing, this screen is not it.
-/// Written from the manifest — no capture of this screen.
+/// Captured: the transcript after ctrl+o. Whatever the pane is doing, this screen is not it —
+/// no state, and the previous answer stands.
 #[test]
 fn a_transcript_scrolled_back_is_not_a_state() {
-    let screen = "> what did you change\nShowing detailed transcript (ctrl+o)\n";
-    assert_detects(screen, "", "nil", "transcript_viewer");
+    let screen = format!(
+        "● こんにちは！\n\
+         \n\
+         ✻ Baked for 3s · done 9:14 PM\n\
+         \n\
+         {BAR}\n\
+         \x20 Showing detailed transcript · ctrl+o to toggle · ctrl+e to show all     verbose\n"
+    );
+    assert_detects(&screen, "✳ Claude Code", "nil", "transcript_viewer");
 }
 
 /// Captured: the trust dialog is a form with something to confirm, and is blocked.
@@ -491,7 +502,8 @@ fn a_form_waiting_to_be_confirmed_is_blocked() {
     assert_detects(trust_screen(), "", "blocked", "live_blocked_form");
 }
 
-/// The `/btw` overlay is typed at a turn that is still running. Written from the manifest.
+/// The `/btw` overlay is typed at a turn that is still running. Written from the manifest, and
+/// half of the manifest's rule is deliberately not ported — see the rule's own comment.
 #[test]
 fn a_btw_overlay_is_working() {
     let screen = "/btw the port is 8080\n";
@@ -570,6 +582,41 @@ fn a_generic_permission_prompt_is_blocked() {
 fn a_screen_waiting_for_permission_is_blocked() {
     let screen = "Waiting for permission to continue\n";
     assert_detects(screen, "", "blocked", "legacy_no_prompt_blocker");
+}
+
+/// Captured: a Write approval, and the reason the backstop is not a leftover. It asks
+/// "Do you want to create note.txt?" — the manifest's `generic_permission_prompt` gates on the
+/// literal "do you want to proceed?" and so never fires here. Its diff separators are `╌`
+/// (U+254C) rather than `─`, so the screen has one rule and no prompt box.
+#[test]
+fn a_write_approval_is_caught_by_the_backstop_and_not_by_its_own_rule() {
+    let screen = format!(
+        "● Write(note.txt)\n\
+         \n\
+         {BAR}\n\
+         \x20Create file\n\
+         \x20note.txt\n\
+         {DASHED}\n\
+         \x20 1 hello\n\
+         {DASHED}\n\
+         \x20Do you want to create note.txt?\n\
+         \x20❯ 1. Yes\n\
+         \x20  2. Yes, and switch to accept edits … for this\n\
+         \x20     session (shift+tab)\n\
+         \x20  3. No\n\
+         \n\
+         \x20Esc to cancel · Tab to amend\n"
+    );
+    assert!(
+        !screen.contains("proceed"),
+        "the capture this test is built on has changed"
+    );
+    assert_detects(
+        &screen,
+        "✳ note.txt ファイル作成",
+        "blocked",
+        "legacy_no_prompt_blocker",
+    );
 }
 
 /// Captured: what Claude Code leaves in the title when a turn is over — a `✳` and the

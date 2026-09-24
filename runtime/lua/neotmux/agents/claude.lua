@@ -115,7 +115,6 @@ local function is_bare_prompt(line)
   return line:match("^%s*\u{2502}?%s*\u{276f}%s*\u{2502}?%s*$") ~= nil
 end
 
-
 return {
   -- The title outranks everything on the screen: Claude Code spins it while a turn runs, and it
   -- keeps spinning over a transcript, a menu, or whatever else the screen has been given to.
@@ -163,6 +162,13 @@ return {
   },
 
   -- The `/btw` overlay: a note typed at a turn that is still running.
+  --
+  -- The manifest's other half — a line ending "esc to close" — is deliberately not ported. This
+  -- rule sits above the prompt and above both permission rules, and "esc to close" is a hint any
+  -- overlay might carry: were a permission screen ever to show it, a pane waiting for you would
+  -- read as working and nothing would make a sound, which is this whole feature failing in the
+  -- one direction that matters. Nobody here has a capture of `/btw` at all, so the half that is
+  -- kept is the half that cannot be mistaken for something else.
   {
     id = "btw_overlay_working",
     state = "working",
@@ -170,7 +176,7 @@ return {
     visible = "working",
     match = function(view)
       return any_line(lower(view.tail(5)), function(line)
-        return line:match("^%s*/btw") ~= nil or line:match("esc to close%s*$") ~= nil
+        return line:match("^%s*/btw") ~= nil
       end)
     end,
   },
@@ -266,6 +272,12 @@ return {
 
   -- Any other approval: the question and a numbered answer, below the last rule on the screen
   -- so that the same words scrolled up in the transcript do not count.
+  --
+  -- On the Claude Code we captured, this literal is the wrong literal: a Write approval asks
+  -- "Do you want to create note.txt?", naming the thing, and never says "proceed" at all — so
+  -- this rule does not fire on the one screen it was written for, and what catches it is the
+  -- backstop at 300. It is kept because it is the manifest's, and another version may yet word
+  -- it this way; it is not what is holding that screen up.
   {
     id = "generic_permission_prompt",
     state = "blocked",
@@ -282,7 +294,8 @@ return {
   },
 
   -- The backstop, from before Claude Code settled on the shapes above: anything that reads as a
-  -- question left standing. No `visible`, because what it has found is words rather than a
+  -- question left standing. Not a leftover — it is what catches a Write approval, whose wording
+  -- the rule above does not know. No `visible`, because what it has found is words rather than a
   -- prompt it can point at — a screen this is the best anyone can say about is not evidence
   -- enough to release the hold above it.
   {
