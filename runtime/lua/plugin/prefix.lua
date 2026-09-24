@@ -134,8 +134,17 @@ end
 -- Every verb, registered once under a name a palette or a CLI can call it by. `M.commands`
 -- below still maps the key that runs each one, but now to the name rather than the body: one
 -- definition, two ways in, rather than the body copied into a second table.
+--
+-- A refusal — another layer's `init.lua`, which runs first, already holding the name — is
+-- first-wins on purpose and stays that way; what is not on purpose is losing the news of it.
+-- `why` is kept here, by name, so it can be said once `M.commands` below is built and the key
+-- that silently lost its binding is known.
+local refused = {}
 local function register(name, fn, desc)
-  neotmux.command.add(name, fn, { desc = desc })
+  local ok, why = neotmux.command.add(name, fn, { desc = desc })
+  if not ok then
+    refused[name] = why
+  end
 end
 
 register("split-vertical", split_vertical, "split the focused pane, side by side")
@@ -175,6 +184,14 @@ local M = {
     ["d"] = "detach",
   },
 }
+
+-- Said now, with the key named alongside the name: silently, `C-b d` would run whichever
+-- layer got `detach` first, and the person pressing it has no way to know it was not this one.
+for key, name in pairs(M.commands) do
+  if refused[name] then
+    neotmux.notify("warn", M.key .. " " .. key .. ": " .. refused[name])
+  end
+end
 
 -- A key's entry is a command name, run through `neotmux.command.run` so it is one definition
 -- shared with the palette, or a function, for an entry a plugin assigned directly rather than

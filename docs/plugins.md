@@ -90,7 +90,7 @@ Each of these returns a handle with one method, `handle:remove()`, which is idem
 | `neotmux.float({ x =, y =, w =, h = })` | nothing runs; the grant is two-valued — a handle, or `nil` plus a message (below) |
 | `neotmux.keymap.set(spec, fn)` | for that one key; return `true` to consume it |
 | `neotmux.reserve(edge, cells)` | nothing runs; it takes a band of the surface (below) |
-| `neotmux.command.add(name, fn, { desc = })` | when `neotmux.command.run(name)` names it (below) |
+| `neotmux.command.add(name, fn, { desc = })` | when `neotmux.command.run(name)` names it; answers `true`, or `nil` plus a message — not a handle, and there is no `remove` (below) |
 
 Every event that fires, and the fields it carries:
 
@@ -147,6 +147,12 @@ A command is in-process only — nothing outside this VM can name one yet. What 
 is the palette below, and a plugin's own verbs being one definition two ways in: see
 [Changing what the prefix does](#changing-what-the-prefix-does), where `plugin.prefix` registers
 each of its verbs this way and its key table calls them by name.
+
+`list()`'s `source` names the chunk the handler was *defined* in, not the one whose `add` call
+registered it — a factory that hands out functions to other plugins attributes each one to
+itself, wherever it is registered from. And a command is permanent: there is no `remove`, so
+one whose plugin was later parked by the tick budget still runs when the palette, or a key,
+calls it.
 
 ### Drawing
 
