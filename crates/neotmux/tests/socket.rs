@@ -1447,6 +1447,42 @@ fn a_plugin_can_refuse_a_write_from_the_command_line() {
     drop(client);
 }
 
+/// `write.text` is exactly the bytes that would be written — including the carriage return
+/// `--enter` adds, which is not in the caller's argument and only ever appears once `send`
+/// builds it. A handler that saw the argument as typed, without it, would be guarding
+/// something other than what actually reaches the pty.
+#[test]
+fn write_text_carries_the_enter_key_enter_added() {
+    let runtime = TestRuntime::new();
+    let layer = layer_with(&[(
+        "init.lua",
+        "neotmux.on_write(function(write)
+           if write.text:find('ENTER%-CHECK') then
+             if write.text:find('\\r') then
+               return false, 'saw the carriage return'
+             end
+             return false, 'missing the carriage return'
+           end
+         end)",
+    )]);
+    let client = Client::start_with(runtime.path(), "/bin/cat", 24, 80, &[layer.path()]);
+    wait_for_socket(&socket_in(runtime.path()));
+
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .args(["send", "%1", "ENTER-CHECK", "--enter"])
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run send");
+    assert!(!out.status.success());
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        said.contains("saw the carriage return"),
+        "the handler did not see --enter's carriage return: {said}"
+    );
+    drop(client);
+}
+
 /// Fail closed, end to end: the handler is broken, so the write does not happen.
 #[test]
 fn a_write_handler_that_raises_refuses_the_write() {

@@ -246,11 +246,11 @@ fn send(args: &[String], session: Option<&str>, ctx: &mut Ctx<'_>) -> Ran {
     if rest.is_empty() {
         return Ran::failed("usage: neotmux send <pane> <text> [--enter]");
     }
-    let (text, enter) = split_enter(rest);
-    let mut bytes = text.clone().into_bytes();
+    let (mut text, enter) = split_enter(rest);
     if enter {
-        bytes.push(b'\r');
+        text.push('\r');
     }
+    let bytes = text.clone().into_bytes();
     // Pane ids are the server's, so the pane is looked for in every session rather than in the
     // one `-t` named — which is why `send` takes no `-t` at all.
     for id in ctx.sessions.ids() {
