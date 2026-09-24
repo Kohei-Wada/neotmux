@@ -753,6 +753,27 @@ fn forgetting_a_session_ends_its_jobs_and_says_why() {
     assert!(logged(&sub).is_empty(), "the job ended twice");
 }
 
+/// A streaming job's held fragment is handed over before the session's ending, the way the
+/// ordinary ending path hands it over: a session going away is not the one case where the
+/// plugin loses the last thing the job said.
+#[test]
+fn a_session_ending_flushes_what_a_streaming_job_still_held() {
+    let runner = FakeRunner::new();
+    runner.will_say(vec![vec![JobChunk::Stdout(b"whole\npart".to_vec())]]);
+    let (_dir, sub) = built(&streaming(STREAM_EXIT), Rc::clone(&runner));
+
+    keys(&sub, &["J"]);
+    frame(&sub);
+    assert_eq!(logged(&sub), vec!["out=[whole]"]);
+
+    sub.forget_session(support::one());
+    assert_eq!(
+        logged(&sub),
+        vec!["out=[part]", "exit code=nil err=session ended"],
+        "the fragment was lost, or arrived after the ending"
+    );
+}
+
 /// A job killed by the budget one frame and caught by a session ending the next reports the
 /// budget, not the session: the ending it already has is the true one.
 #[test]

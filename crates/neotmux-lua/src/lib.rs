@@ -467,18 +467,16 @@ impl LuaSubsystem {
 
     /// What the user is told when a runaway job or timer is taken away. Warn, where the
     /// per-callback overrun is logged at error, for the reason `unsubscribe_overrunning`
-    /// gives: this is the one part the user has to see. Named for the same reason that one
-    /// names its source — the user is being told which plugin to go and look at. Nothing is
+    /// gives: this is the one part the user has to see. The source is not named in the text —
+    /// every sink tags a notify with it already, and `unsubscribe_overrunning` spells it out
+    /// only because its name sits inside a `neotmux.resubscribe` the user can copy. Nothing is
     /// parked and nothing is restored: a stopped timer and a killed job do not come back.
     fn notify_stopped(&self, owner: SourceId, what: &str, limit: u32, ended: &str) {
-        let name = self.sources.name(owner).unwrap_or_default();
         self.ops.push(
             owner,
             Op::Notify {
                 level: Level::Warn,
-                text: format!(
-                    "a {what} of '{name}' exceeded its budget {limit} times and was {ended}"
-                ),
+                text: format!("a {what} exceeded its budget {limit} times and was {ended}"),
             },
         );
     }

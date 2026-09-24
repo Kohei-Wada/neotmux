@@ -300,6 +300,11 @@ impl Jobs {
         let mut out = Vec::new();
         for mut job in self.take_matching(|job| job.session == Some(session)) {
             job.running.kill();
+            // Before the ending, as `deliver` does it: a session going away is no reason for
+            // the plugin to lose the last thing the job said.
+            if !job.buffered {
+                job.flush(&mut out);
+            }
             let (code, err) = job
                 .ending
                 .take()
