@@ -32,6 +32,11 @@ return {
   -- typing back a url or a hash you can already see is the thing you would otherwise be doing
   -- by hand.
   hints = true,
+  -- On, and the one shipped plugin that makes a noise: the sounds ship with it, the state it
+  -- reads is the detector's rather than an opinion about what you run, and a pane that starts
+  -- waiting while you are looking somewhere else is the thing you would otherwise find out
+  -- about ten minutes later.
+  chime = true,
   -- Off, unlike the four above: which command is worth stopping to ask about is an opinion
   -- about what you run, and one with no rules in it would stop nothing anyway.
   guard = false,

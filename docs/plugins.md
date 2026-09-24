@@ -1334,7 +1334,7 @@ costs one plugin one frame instead of costing you the program.
 
 ## The shipped defaults
 
-neotmux ships thirteen plugins in the runtime layer an install puts on the search path:
+neotmux ships fourteen plugins in the runtime layer an install puts on the search path:
 
 | plugin | what it does |
 |---|---|
@@ -1346,13 +1346,14 @@ neotmux ships thirteen plugins in the runtime layer an install puts on the searc
 | `sessions` | the session picker on `C-b s`: every session and what it is running, `Enter` to go, `c` to make one, `r` to rename one, `d` to end one |
 | `palette` | the command palette on `C-b :`: every registered command, fuzzy-filtered as you type, `Enter` to run the one under the cursor |
 | `borders` | a rule along every boundary between two panes |
+| `chime` | plays a sound when a pane you are not looking at starts waiting for you, or stops working — see [The chime](#the-chime) below |
 | `sync` | relays every key to every pane of the window — tmux's `synchronize-panes`, turned on and off with `:sync-panes` or `C-b S`; the plugin loads by default, the relaying starts off |
 | `guard` | holds back the Enter that would run a line `neotmux.guard`'s rules name, until you press it again — **off by default** |
 | `watch` | notifies you when a pane looks like it is waiting for you, on `neotmux.state`'s guess — **off by default** |
 | `sidebar` | a tree of every session, and the windows and panes of the one you are in, down a reserved left band, folded by `C-b b` — **off by default** |
 | `footer` | whichever mode is raised through `neotmux.mode`, on one reserved bottom row — **off by default** |
 
-None of them is a host feature — all thirteen are ordinary files making ordinary API calls, and
+None of them is a host feature — all fourteen are ordinary files making ordinary API calls, and
 the prefix is the only reason a fresh install can make a second pane at all. `C-b v` splits
 vertically (the panes end up side by side, because `pane.split('vertical')` divides the
 width), `C-b -` splits horizontally (one above the other), `C-b o` focuses the next pane,
@@ -1893,6 +1894,62 @@ than on a tick of its own: every caller is already in one.
 The three words are herdr's, and so is what they are for: an agent you are running is either
 getting on with it, waiting for you, or doing nothing, and which of those it is, is the thing
 you open a sidebar to find out.
+
+### The chime
+
+`plugin.chime` is what the state convention above is *for*, and the one shipped plugin that
+makes a noise. On by default: it reads every pane of the window on each tick, and when one
+changes into a state it has a sound for, it plays it. Off with
+`require('neotmux.defaults').chime = false`.
+
+```lua
+local chime = require('plugin.chime')
+
+chime.sounds = { blocked = 'sounds/request.mp3', idle = 'sounds/done.mp3' }
+chime.only_when_away = true
+```
+
+`sounds` is a state name to a file. A relative path is resolved against the layer the plugin
+was loaded from — `package.searchpath` is how the file asks `require`'s loader which layer
+won, so your own copy of `plugin/chime.lua` gets your own sounds with it — and an absolute path
+is taken as it stands. A state with no entry makes no sound, which is why `working` has none:
+it is what most panes are most of the time. `only_when_away` is why the pane in front of you is
+silent — you can already see that it has stopped.
+
+One sound per *entry* into a state. A pane still blocked on the next frame is the same wait,
+not a second one, so nothing sounds again until the pane has been something else in between.
+Nothing calls `state.forget` to force a fresh look: forgetting a pane drops the hold that keeps
+a spinner's blink from reading as a finished turn, which is exactly the chime this plugin must
+not make.
+
+`idle` sounds only for a pane a ruleset in `neotmux.detect.agents` claims. A shell reaches
+`idle` at the end of every command it runs — that is what the pattern fallback is for — and a
+sound on that edge would chime for an `ls` in a pane nobody is looking at. `blocked` sounds for
+anything, because a shell asking you a question is waiting for you exactly as an agent is.
+
+There is no configuration for *which* program plays the file, only an order to try:
+
+```lua
+chime.players = {
+  { 'paplay' },
+  { 'pw-play' },
+  { 'ffplay', '-nodisp', '-autoexit', '-loglevel', 'quiet' },
+  { 'mpg123', '-q' },
+  { 'mpv', '--no-video', '--really-quiet' },
+}
+```
+
+Each is a program and the arguments that make it quiet; the path is appended. **A player is
+judged by how it ends, not by whether it started.** One that is not installed fails at the
+spawn, and one that is installed but cannot decode an mp3 starts perfectly happily and exits
+non-zero a moment later — so "it started" says nothing, and only a zero exit means the sound
+was played. The walk moves on from either, and the first player that exits zero is remembered
+and used from then on. A machine where none of them works is told once, through
+`neotmux.notify('error', ...)`, and the plugin stops trying.
+
+The two sounds in `runtime/sounds/` are herdr's (herdrdev/herdr, Apache-2.0), carried
+unchanged, as are the detection rules and the hold behind `neotmux.state`. `NOTICE` at the root
+of the repository says which files and from where.
 
 ### The box convention
 

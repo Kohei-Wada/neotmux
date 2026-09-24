@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+### A pane that starts waiting for you says so out loud
+
+`neotmux.state` used to guess with eight patterns over a pane's last five lines — enough to
+tint a row in a sidebar, and not enough to wake you up. The guess is now a detector:
+`neotmux.detect` reads a pane's screen as regions (the tail, what is under the last rule, the
+prompt between the last two) and judges it with a ruleset of prioritised rules, one file per
+program it has been taught. The shipped one is `neotmux/agents/claude.lua`, eleven rules for
+Claude Code, six of them checked against screens captured off a real one. A fall from working
+to idle is held for a moment unless the screen says idle in so many words, because the gap
+between two frames of a spinner is a screen that means "busy" and a notification fired on that
+blink is why this kind of detector gets turned off. `state.of` asks the detector first and
+keeps the pattern list for the panes no ruleset claims — a shell, or a program nobody has
+written rules for yet.
+
+What the detector is for is `plugin.chime`, on by default: a sound when a pane you are not
+looking at starts waiting for you, and another when it stops working. One sound per entry into
+a state, so a prompt that is still up next frame is the same wait. It finds a player by trying
+`paplay`, `pw-play`, `ffplay`, `mpg123` and `mpv` in turn and judging each by how it *ends*
+rather than by whether it started — one that is not installed fails at the spawn, one that
+cannot decode an mp3 starts happily and exits non-zero — and remembers the first that exits
+zero. A machine with none of them is told once. The two sounds are carried from herdr, as are
+the rules and the hold; `NOTICE` at the root says which files and from where.
+
 ### The wire lost the question nobody was asking any more
 
 When the Lua layer lived in the client, a plugin reading a pane's text had to ask the

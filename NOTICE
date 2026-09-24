@@ -1,0 +1,23 @@
+neotmux
+Copyright the neotmux authors.
+
+This product includes work derived from herdr (https://github.com/herdrdev/herdr),
+licensed under the Apache License, Version 2.0. A copy of that license is in
+LICENSE-APACHE at the root of this repository.
+
+What is carried, and from where:
+
+- runtime/sounds/done.mp3 and runtime/sounds/request.mp3 are herdr's
+  assets/sounds/done.mp3 and assets/sounds/request.mp3, carried unchanged. They are
+  what plugin.chime plays when a pane stops working or starts waiting for you.
+
+- runtime/lua/neotmux/detect.lua takes its shape from herdr: a rule with a priority,
+  a state and the screen regions it reads is herdr's src/detect/manifests/*.toml, and
+  the hold — a fall to idle disbelieved until it settles, unless the screen says idle
+  in so many words — is herdr's src/pane/agent_detection.rs.
+
+- runtime/lua/neotmux/agents/claude.lua is a port of herdr's Claude Code manifest,
+  src/detect/manifests/claude.toml: the rules, their priorities and their order are
+  herdr's reading of that program's screen.
+
+The three words a pane's state is spelled in — working, blocked, idle — are herdr's too.
