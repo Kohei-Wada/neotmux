@@ -1,23 +1,51 @@
 neotmux
 Copyright the neotmux authors.
 
-This product includes work derived from herdr (https://github.com/herdrdev/herdr),
-licensed under the Apache License, Version 2.0. A copy of that license is in
-LICENSE-APACHE at the root of this repository.
+Most of this repository is dual-licensed, MIT or Apache-2.0 at your option; see
+LICENSE-MIT and LICENSE-APACHE. **The files listed below are the exception. They are
+derived from herdr and are available under the Apache License, Version 2.0 only** — the
+MIT option does not extend to them, because Apache-2.0-licensed material cannot be
+relicensed under MIT. A copy of the Apache License is in LICENSE-APACHE.
 
-What is carried, and from where:
+    herdr — https://github.com/herdrdev/herdr
+    Copyright the herdr authors.
+    Licensed under the Apache License, Version 2.0.
 
-- runtime/sounds/done.mp3 and runtime/sounds/request.mp3 are herdr's
-  assets/sounds/done.mp3 and assets/sounds/request.mp3, carried unchanged. They are
-  what plugin.chime plays when a pane stops working or starts waiting for you.
+herdr's own LICENSE is the stock Apache-2.0 text with the copyright placeholder left
+unfilled, and the repository carries no NOTICE file, so there is nothing to reproduce
+under section 4(d); the copyright line above is retained under section 4(b).
 
-- runtime/lua/neotmux/detect.lua takes its shape from herdr: a rule with a priority,
-  a state and the screen regions it reads is herdr's src/detect/manifests/*.toml, and
-  the hold — a fall to idle disbelieved until it settles, unless the screen says idle
-  in so many words — is herdr's src/pane/agent_detection.rs.
+Taken from herdr v0.9.1, from the repository at commit
+d11c0c34cf8f9c2dc0d6fb45c58c307aa5ce8a6b (2026-09-24), which is the state "carried
+unchanged" below can be checked against.
 
-- runtime/lua/neotmux/agents/claude.lua is a port of herdr's Claude Code manifest,
-  src/detect/manifests/claude.toml: the rules, their priorities and their order are
-  herdr's reading of that program's screen.
+Apache-2.0 only:
+
+- runtime/sounds/done.mp3
+- runtime/sounds/request.mp3
+
+  herdr's assets/sounds/done.mp3 and assets/sounds/request.mp3, byte for byte, last
+  changed upstream in 0403775fd2a9458417c5349d5441125ab9b2553c. They are what
+  plugin.chime plays when a pane stops working or starts waiting for you.
+
+- runtime/lua/neotmux/detect.lua
+
+  Takes its shape from herdr: a rule with a priority, a state and the screen regions it
+  reads is herdr's src/detect/manifests/*.toml, and the hold — a fall to idle disbelieved
+  until it settles, unless the screen says idle in so many words — is herdr's
+  src/pane/agent_detection.rs, last changed upstream in
+  9c96f7ddb3be2cc575a159d4d1f1d49fb10d7006.
+
+- runtime/lua/neotmux/agents/claude.lua
+
+  A port of herdr's Claude Code manifest, src/detect/manifests/claude.toml, last changed
+  upstream in a05c403881c5a5a6b65317d3dd349b11591fc4c6: the rules, their priorities and
+  their order are herdr's reading of that program's screen. The ids are kept verbatim so
+  that the two files can be read against each other, and are quoted as such in this
+  repository's tests.
 
 The three words a pane's state is spelled in — working, blocked, idle — are herdr's too.
+
+The Cargo `license` field on the crates in crates/ stays "MIT OR Apache-2.0": no crate
+carries or packages any of the files above. runtime/ is installed beside the binary
+(see the Makefile's install-runtime target), not compiled into or published with one.

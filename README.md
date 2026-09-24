@@ -114,4 +114,8 @@ make check   # fmt + clippy + tests
 
 ## License
 
-Dual-licensed under MIT or Apache-2.0, at your option.
+Dual-licensed under MIT or Apache-2.0, at your option — with one exception: the two sounds in
+`runtime/sounds/`, `runtime/lua/neotmux/detect.lua` and `runtime/lua/neotmux/agents/claude.lua`
+are derived from [herdr](https://github.com/herdrdev/herdr) and are available under Apache-2.0
+only, since Apache-2.0 material cannot be taken under MIT. `NOTICE` says which files, from
+where, and at what version.

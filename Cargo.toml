@@ -11,6 +11,8 @@ readme = "README.md"
 keywords = ["terminal", "multiplexer", "tmux", "lua", "tui"]
 categories = ["command-line-utilities"]
 rust-version = "1.95"
+# The crates, which is all this field covers: none of them carries or packages the
+# herdr-derived files, which are Apache-2.0 only and live in `runtime/`. See NOTICE.
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/Kohei-Wada/neotmux"
 
