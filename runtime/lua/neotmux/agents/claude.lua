@@ -335,19 +335,48 @@ local claude = {
   },
 }
 
--- What a pane has to be running for these rules to be asked about it at all.
+-- What a pane has to be running for these rules to be declined outright.
+--
+-- The test is round this way because only one of the two sets can be written down. A shell is
+-- one of a dozen programs, named the same everywhere and unchanged for decades; the ways to
+-- start an agent are a private matter between a user and their `~/.config` — a wrapper function
+-- around `systemd-inhibit`, `env`, `nohup`, `sudo`, `npx`, a `direnv`-shimmed launcher — and the
+-- foreground process group's name is the wrapper's, not `claude`. Naming the programs that are
+-- Claude Code turns the detector off for everyone who launches it through anything; naming the
+-- programs that are certainly *not* Claude Code costs, at worst, a ruleset asked about a pane
+-- running `vim`, where none of its rules match and the pane falls through anyway.
 --
 -- Measured, not guessed, on 2026-09-24 against Claude Code v2.1.281 on this machine, reading
 -- the foreground process group's `/proc/<pid>/comm` off a pty master the way the host does:
 -- `bash` for the bare shell, `claude` once it is started, and `bash` again the moment it is
--- quit. v2.1.281 installs as a single native executable, so `comm` is its own name; an install
--- that still runs the CLI through node reports `node`, which is why that one is here too and
--- why the table is a table.
+-- quit. v2.1.281 installs as a single native executable, so `comm` is its own name — which is
+-- what made an allow-list of `claude` and `node` look sufficient until a wrapped launch showed
+-- up. What the measurement actually establishes is the half that still matters: quitting Claude
+-- Code puts the shell's own name back, and that is the edge this table has to catch.
 --
--- Without this, a pane that has ever run Claude Code is never unclaimed: `osc_title_idle` fires
--- off a `✳` title that nothing resets when the program exits, so the shell you go on using
--- reads as an idle agent forever — no `blocked` for an `rm -i`, and no chime.
-claude.commands = { claude = true, node = true }
+-- Without that edge, a pane that has ever run Claude Code is never unclaimed: `osc_title_idle`
+-- fires off a `✳` title that nothing resets when the program exits, so the shell you go on
+-- using reads as an idle agent forever — no `blocked` for an `rm -i`, and no chime.
+--
+-- Add your own, or take one away, the way you would any table:
+--
+--   require('neotmux.agents.claude').shells.osh = true
+claude.shells = {
+  bash = true,
+  sh = true,
+  dash = true,
+  zsh = true,
+  fish = true,
+  ksh = true,
+  mksh = true,
+  csh = true,
+  tcsh = true,
+  ash = true,
+  busybox = true,
+  nu = true,
+  elvish = true,
+  xonsh = true,
+}
 
 -- A pane nothing could be read about is claimed rather than declined: `pane.info` is `/proc`,
 -- which is Linux only and empty for a process that went away between the host asking and the
@@ -355,7 +384,7 @@ claude.commands = { claude = true, node = true }
 -- turn off the detector rather than narrow it.
 function claude.claims(info)
   local command = info and info.command
-  return command == nil or claude.commands[command] == true
+  return command == nil or claude.shells[command] ~= true
 end
 
 return claude

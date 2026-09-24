@@ -140,7 +140,7 @@ stand: `detect.of` answers nil and the pane falls through to §4's fallback.
 A ruleset may carry, beside its rules:
 
 ```lua
-claims = function(info) return info.command == 'claude' end
+claims = function(info) return not shells[info.command] end
 ```
 
 asked with `neotmux.pane.info(pane)` before any rule runs. A ruleset that answers false is
@@ -148,6 +148,19 @@ skipped whole. Without it a ruleset speaks for every pane on what is drawn alone
 Code's `✳` title — which `neotmux-term` keeps after the program exits, because nothing resets
 it — makes the shell you go on using in that pane read as an idle agent forever. A ruleset with
 no `claims` speaks for every pane, as before.
+
+The shipped ruleset names the *shells* and claims everything else, and that way round is the
+whole of it. The set of shells is small, stable and knowable — a dozen names that have not
+changed in decades. The set of ways to launch an agent is neither: a pane's foreground process
+group leader is whatever the user's own shell function put in front of it, `systemd-inhibit`,
+`env`, `nohup`, `sudo`, `npx`, and there is no enumerating that. An allow-list of `claude` and
+`node` is therefore not a narrower detector but a dead one for everybody who wraps the command
+— the ruleset never runs at all. A deny-list of shells errs the other way: at worst the ruleset
+is asked about a pane running `vim`, where no rule of its matches and the pane falls through to
+§4's fallback exactly as if it had declined. It keeps the one edge it was written for, because
+quitting Claude Code puts the shell's own name back in `comm` — the edge measured on 2026-09-24
+against v2.1.281, which installs as a native ELF, so `comm` reads `claude` and the allow-list
+looked sufficient.
 
 It is asked once per pane *revision*, not once per call: the ask sits inside `detect.of`'s
 cache, so a pane whose program changed and printed nothing keeps the last look's verdict until

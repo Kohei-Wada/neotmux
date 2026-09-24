@@ -20,9 +20,10 @@
 -- has taught neotmux the screen of yet.
 --
 -- Which panes those are is the ruleset's own answer: `neotmux.detect` asks it, through its
--- optional `claims(info)`, before running a rule. The shipped Claude ruleset names the commands
--- it is about, so a pane where you have quit `claude` comes back here — it is the pane you go on
--- working in, and the title Claude left behind would otherwise answer `idle` for it forever.
+-- optional `claims(info)`, before running a rule. The shipped Claude ruleset names the *shells*
+-- and claims every other program, so a pane where you have quit `claude` comes back here — it is
+-- the pane you go on working in, and the title Claude left behind would otherwise answer `idle`
+-- for it forever — while a pane running the agent under a wrapper of your own is still its.
 --
 -- Two caches, `neotmux.detect`'s and this file's own, sit behind the one call: each keyed by a
 -- pane's revision, each rebuilt only when it moves. They cannot disagree today only because both

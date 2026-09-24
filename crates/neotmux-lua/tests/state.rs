@@ -140,3 +140,38 @@ fn a_pane_whose_agent_has_quit_stops_being_answered_for_by_what_it_left_behind()
         "a shell asking a question read as an idle agent, off a title nobody reset"
     );
 }
+
+/// And the other half: a pane running Claude Code through a wrapper is still Claude Code's.
+/// A shell function that puts `systemd-inhibit` (or `env`, `nohup`, `sudo`, `npx`) in front of
+/// the binary leaves the foreground process group leader named after the wrapper, so an
+/// allow-list of `claude` and `node` declines the pane and the whole detector is dead for that
+/// user. The ruleset names the shells instead, and this screen — a live turn, which
+/// `live_turn_working` reads — has to come back `working` rather than falling through to the
+/// pattern list.
+#[test]
+fn a_pane_running_the_agent_under_a_wrapper_is_still_claimed() {
+    let (_dir, sub) = built(
+        "local state = require('neotmux.state')\n\
+         state.working_for = 1\n\
+         neotmux.on_key(function(key)\n\
+           if key == 'J' then\n\
+             neotmux.log.info('of=' .. tostring(state.of(1)))\n\
+             return true\n\
+           end\n\
+           return false\n\
+         end)\n",
+    );
+    running(&sub, "systemd-inhibit");
+    feed(
+        &sub,
+        "\u{273b} Herding… (12s \u{00b7} esc to interrupt)".as_bytes(),
+    );
+    // Past `working_for`, so the fallback would answer `idle` here and only the detector can
+    // still be saying `working` — the same trick as the first test in this file.
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    keys(&sub, &["J"]);
+    assert!(
+        logged(&sub).iter().any(|l| l == "of=working"),
+        "a wrapped Claude Code was declined, and with it the whole detector"
+    );
+}

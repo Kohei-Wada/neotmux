@@ -243,8 +243,10 @@ end
 
 -- Whether a ruleset will speak for this pane at all, asked before any of its rules run. A
 -- ruleset with no `claims` speaks for every pane, which is what one that is only about what is
--- drawn wants. One that names a program declines every pane not running it — and a pane whose
--- agent has quit is then answered by the fallback rather than by the agent's leavings.
+-- drawn wants. The shipped one declines the shells — a pane whose agent has quit is back at a
+-- prompt reporting `bash`, and is then answered by the fallback rather than by the agent's
+-- leavings — and claims everything else, because a wrapper is what the pane reports when an
+-- agent is started through one.
 --
 -- A `claims` that raises declines, and says which ruleset it was — once, for the same reason a
 -- rule that raises is reported once. The ruleset is the thing that is broken, and skipping it
