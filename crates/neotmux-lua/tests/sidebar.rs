@@ -51,10 +51,16 @@ impl Sess {
 /// The shipped runtime with only the sidebar on, and no agent rulesets: a test about the tree
 /// must not depend on whether the shipped Claude rules happen to match a blank `cat` pane. The
 /// agent tests install a ruleset of their own in `extra`.
+///
+/// The tick budget is off, for `chime.rs`'s reason: it is eight milliseconds of wall clock, and
+/// a debug build walking thirty panes across ten sessions overruns it on a loaded machine — the
+/// frame is then discarded and the band comes back blank. These tests are about what the sidebar
+/// draws, not about what the budget interrupts.
 fn built(extra: &str) -> (tempfile::TempDir, Built) {
     support::built(&format!(
         "require('neotmux.defaults').sidebar = true\n\
          require('neotmux.detect').agents = {{}}\n\
+         neotmux.opt.tick_budget_ms = 0\n\
          {extra}"
     ))
 }
