@@ -2,6 +2,7 @@ mod ambient;
 pub mod api;
 pub mod budget;
 pub mod clipboard;
+pub mod commands;
 pub mod draw;
 mod float;
 pub mod ops;
@@ -37,6 +38,7 @@ use ambient::Ambient;
 use api::ctx::Ctx;
 use budget::{Budget, Outcome};
 use clipboard::Clipboard;
+use commands::Commands;
 use draw::Buffers;
 use float::Floats;
 use ops::{Op, OpBuffer};
@@ -67,11 +69,31 @@ pub struct LoadFailure {
     pub message: String,
 }
 
+/// One registered command, named the way `commands()` hands them to a host caller: the
+/// owner already resolved to the display name `Sources` gives it, so the CLI never has to
+/// reach back into the Lua layer to say where a command came from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandInfo {
+    pub name: String,
+    pub desc: Option<String>,
+    pub source: String,
+}
+
+/// What `run_command` answered. The host caller — the CLI, in the spec's next half — tells
+/// these apart to decide whether a built-in of the same name should run instead (spec §5).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CommandOutcome {
+    Ran(Vec<String>),
+    Failed(String),
+    Unknown,
+}
+
 pub struct LuaSubsystem {
     lua: Lua,
     layers: Layers,
     sources: Rc<Sources>,
     registry: Rc<Registry>,
+    commands: Rc<Commands>,
     ops: Rc<OpBuffer>,
     opts: Rc<RefCell<Opts>>,
     load_failures: Rc<RefCell<Vec<LoadFailure>>>,
@@ -114,6 +136,7 @@ impl LuaSubsystem {
         source::install_loader(&lua, sources.clone()).map_err(|err| anyhow::anyhow!("{err:#}"))?;
 
         let registry = Rc::new(Registry::new());
+        let commands = Rc::new(Commands::new());
         let opts = Rc::new(RefCell::new(Opts::default()));
         let load_failures = Rc::new(RefCell::new(Vec::new()));
         let geometry = Rc::new(RefCell::new(Geometry::default()));
@@ -141,6 +164,7 @@ impl LuaSubsystem {
             api::Shared {
                 sources: sources.clone(),
                 registry: registry.clone(),
+                commands: commands.clone(),
                 buffers: buffers.clone(),
                 ops: ops.clone(),
                 opts: opts.clone(),
@@ -166,6 +190,7 @@ impl LuaSubsystem {
             layers,
             sources,
             registry,
+            commands,
             ops,
             opts,
             load_failures,
@@ -781,6 +806,85 @@ impl LuaSubsystem {
 
     pub fn registry(&self) -> &Registry {
         &self.registry
+    }
+
+    /// Every registered command, in name order, its owner already resolved to the name
+    /// `neotmux.command.list()` would give a plugin — the host caller this is for is the CLI,
+    /// which has no other way to say where a command came from.
+    pub fn commands(&self) -> Vec<CommandInfo> {
+        self.commands
+            .list()
+            .into_iter()
+            .map(|info| CommandInfo {
+                name: info.name,
+                desc: info.desc,
+                source: self.sources.name(info.owner).unwrap_or_default(),
+            })
+            .collect()
+    }
+
+    /// Runs a registered command by name, with `session` bound as the ambient session so the
+    /// handler's own calls — `neotmux.window.create()` and the rest — mean that session's, not
+    /// whichever one ticked last. Measured under the tick budget like every other callback; an
+    /// overrun is a `Failed`, not a hang.
+    pub fn run_command(&self, session: SessionId, name: &str, args: &[String]) -> CommandOutcome {
+        let _bound = self.ambient.bind(session);
+        let Some((callback, owner)) = self.commands.get(name) else {
+            return CommandOutcome::Unknown;
+        };
+        let tag = self.sources.name(owner).unwrap_or_default();
+
+        if let Err(err) = Budget::arm(&self.lua, &self.budget) {
+            self.report_text(source::ANONYMOUS, format!("the budget is off: {err}"));
+        }
+        let budget_ms = self.opts.borrow().tick_budget_ms;
+        self.budget.enter(Duration::from_millis(budget_ms));
+        let outcome = self.call_command(&callback, owner, &tag, args);
+        let final_outcome = self.budget.leave();
+        self.budget.disarm(&self.lua);
+
+        // The same backstop `dispatch_write` uses: an overrun neither the hook nor the call's
+        // own error path caught is only visible once the region closes, and only a success
+        // the budget disagrees with needs overriding — a `Failed` already names what went
+        // wrong.
+        if final_outcome != Outcome::WithinBudget && matches!(outcome, CommandOutcome::Ran(_)) {
+            return CommandOutcome::Failed(format!("{tag}: exceeded the {budget_ms} ms budget"));
+        }
+        outcome
+    }
+
+    fn call_command(
+        &self,
+        callback: &Rc<mlua::RegistryKey>,
+        owner: SourceId,
+        tag: &str,
+        args: &[String],
+    ) -> CommandOutcome {
+        let Ok(func) = self.lua.registry_value::<Function>(callback) else {
+            return CommandOutcome::Failed(format!("{tag}: the handler could not be read"));
+        };
+        let table = match self.lua.create_table() {
+            Ok(table) => table,
+            Err(err) => return CommandOutcome::Failed(format!("{tag}: {err}")),
+        };
+        for (at, arg) in args.iter().enumerate() {
+            if table.set(at + 1, arg.as_str()).is_err() {
+                return CommandOutcome::Failed(format!(
+                    "{tag}: the arguments could not be described"
+                ));
+            }
+        }
+
+        match func.call::<Value>(table) {
+            Ok(value) => match commands::lines_from(value) {
+                Ok(lines) => CommandOutcome::Ran(lines),
+                Err(why) => CommandOutcome::Failed(format!("{tag}: {why}")),
+            },
+            Err(err) => {
+                self.report(owner, &err);
+                CommandOutcome::Failed(format!("{tag}: {err}"))
+            }
+        }
     }
 
     pub fn sources(&self) -> &Sources {

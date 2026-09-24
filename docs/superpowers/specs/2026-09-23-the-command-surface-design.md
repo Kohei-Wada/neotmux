@@ -101,12 +101,17 @@ answer.
 ## 4. What a plugin command is
 
 ```lua
-neotmux.command('scratch', function(args)
+neotmux.command.add('scratch', function(args)
   local window = neotmux.window.create()
   neotmux.window.focus(window)
   return 'opened ' .. window
-end)
+end, { desc = 'open a scratch window' })
 ```
+
+It is `command.add`, not a callable `neotmux.command(...)`: the top-level tables in this ABI
+are sealed, and a callable table is a metatable the seal would have to make an exception for.
+`neotmux.keymap.set` is the shape this ABI already uses for "register a named thing", and this
+follows it — `desc` is optional, and is what `neotmux.command.list()` reports back for it.
 
 - The name is a word. Registering a name that is already registered is refused, logged, and
   answered with `nil, message` — the rule `neotmux.keymap.set` already follows, and it gives

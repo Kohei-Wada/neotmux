@@ -1,4 +1,5 @@
 pub mod clipboard;
+pub mod command;
 pub mod ctx;
 pub mod event;
 pub mod float;
@@ -19,6 +20,7 @@ use mlua::{Function, Lua, Table, Value};
 use neotmux_proto::read::PaneRead;
 
 use crate::LoadFailure;
+use crate::commands::Commands;
 use crate::draw::Buffers;
 use crate::float::Floats;
 use crate::ops::{Op, OpBuffer};
@@ -37,6 +39,7 @@ pub use opt::Opts;
 pub(crate) struct Shared {
     pub(crate) sources: Rc<Sources>,
     pub(crate) registry: Rc<Registry>,
+    pub(crate) commands: Rc<Commands>,
     pub(crate) buffers: Rc<Buffers>,
     pub(crate) ops: Rc<OpBuffer>,
     pub(crate) opts: Rc<RefCell<Opts>>,
@@ -185,6 +188,7 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
     let Shared {
         sources,
         registry,
+        commands,
         buffers,
         ops,
         opts,
@@ -269,6 +273,12 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
         )?;
         let keymap = seal(lua, keymap, "neotmux.keymap")?;
         neotmux.set("keymap", keymap)?;
+    }
+
+    {
+        let command = command::install(lua, sources.clone(), commands.clone(), ops.clone())?;
+        let command = seal(lua, command, "neotmux.command")?;
+        neotmux.set("command", command)?;
     }
 
     {
