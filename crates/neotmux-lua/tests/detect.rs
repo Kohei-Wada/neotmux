@@ -141,8 +141,9 @@ fn a_rule_with_no_state_stops_the_search_without_answering() {
     assert!(said.iter().any(|l| l == "state=nil id=viewer"), "{said:?}");
 }
 
-/// The view's regions, against one screen that has all three: a rule above, a box below, and
-/// blank lines that no region counts.
+/// The view's regions, against one screen that has all of them: a rule with something under it,
+/// a prompt between the last two rules, and blank lines that no region counts. The shape is the
+/// one a real Claude Code draws — `╭…╰` is a box and not a rule, so nothing here is one.
 #[test]
 fn the_view_names_the_regions_a_rule_reads() {
     let (_dir, sub) = built(
@@ -150,7 +151,7 @@ fn the_view_names_the_regions_a_rule_reads() {
          neotmux.on_key(function(key)\n\
            if key == 'J' then\n\
              local view = detect.view(1)\n\
-             neotmux.log.info('tail=' .. table.concat(view.tail(2), '|'))\n\
+             neotmux.log.info('tail=' .. table.concat(view.tail(5), '|'))\n\
              neotmux.log.info('after=' .. table.concat(view.after_rule(), '|'))\n\
              neotmux.log.info('box=' .. table.concat(view.prompt_box(), '|'))\n\
              return true\n\
@@ -164,24 +165,52 @@ fn the_view_names_the_regions_a_rule_reads() {
          \u{2500}\u{2500}\u{2500}\u{2500}\r\n\
          between\r\n\
          \r\n\
-         \u{256d}\u{2500}\u{2500}\u{256e}\r\n\
-         \u{2502} \u{276f} \u{2502}\r\n\
-         \u{2570}\u{2500}\u{2500}\u{256f}"
+         \u{2500}\u{2500}\u{2500}\u{2500}\r\n\
+         \u{276f}\r\n\
+         \u{2500}\u{2500}\u{2500}\u{2500}\r\n\
+         status"
             .as_bytes(),
     );
     keys(&sub, &["J"]);
     let said = logged(&sub);
-    // The blank line is in none of them: every region is built from the non-blank lines.
+    // The blank line is in none of them: every region is built from the non-blank lines, so the
+    // last five are the five a program wrote and not four and an empty row.
     assert!(
-        said.iter()
-            .any(|l| l == "tail=\u{2502} \u{276f} \u{2502}|\u{2570}\u{2500}\u{2500}\u{256f}"),
+        said.iter().any(|l| l
+            == "tail=between|\u{2500}\u{2500}\u{2500}\u{2500}|\u{276f}|\u{2500}\u{2500}\u{2500}\u{2500}|status"),
         "{said:?}"
     );
     assert!(
-        said.iter().any(|l| l.starts_with("after=between|")),
-        "the rule line itself or the blank leaked into after_rule: {said:?}"
+        said.iter().any(|l| l == "after=status"),
+        "the rule line itself leaked into after_rule: {said:?}"
     );
     assert!(said.iter().any(|l| l == "box=\u{276f}"), "{said:?}");
+}
+
+/// A screen with one rule on it has no prompt box: that is what a dialog looks like, and the
+/// region coming back empty rather than guessing is what keeps a rule from reading one as a
+/// prompt nobody has typed into.
+#[test]
+fn a_screen_with_a_single_rule_has_no_prompt_box() {
+    let (_dir, sub) = built(
+        "local detect = require('neotmux.detect')\n\
+         neotmux.on_key(function(key)\n\
+           if key == 'J' then\n\
+             neotmux.log.info('box=' .. #detect.view(1).prompt_box())\n\
+             return true\n\
+           end\n\
+           return false\n\
+         end)\n",
+    );
+    feed(
+        &sub,
+        "\u{2500}\u{2500}\u{2500}\u{2500}\r\n\
+         \u{276f} 1. Yes\r\n\
+         \x20 2. No"
+            .as_bytes(),
+    );
+    keys(&sub, &["J"]);
+    assert!(logged(&sub).iter().any(|l| l == "box=0"));
 }
 
 /// A two-rule ruleset flipped by a value the test controls, so that the only thing under test
@@ -337,7 +366,15 @@ fn a_raising_rule_is_reported_once_and_not_once_a_look() {
 /// One screen, one title, one answer. The title is set the way a program sets it — OSC 2 in the
 /// same bytes as the screen, because opening a pane starts it over — and the answer is `judge`'s
 /// own rather than `of`'s, so that no hold stands between a fixture and the rule it is about.
+///
+/// The pane is wider and taller than the rest of this file's: the captured screens below are a
+/// real terminal's, and wrapping one of Claude Code's rules onto a second line would hand the
+/// view two rules where the screen has one.
 fn assert_detects(screen: &str, title: &str, state: &str, id: &str) {
+    const CAPTURED: Size = Size {
+        rows: 40,
+        cols: 100,
+    };
     let (_dir, sub) = built(
         "local detect = require('neotmux.detect')\n\
          neotmux.on_key(function(key)\n\
@@ -349,121 +386,201 @@ fn assert_detects(screen: &str, title: &str, state: &str, id: &str) {
            return false\n\
          end)\n",
     );
-    let mut bytes = Vec::new();
+    sub.terminals().open(pane(), CAPTURED, 100);
     if !title.is_empty() {
-        bytes.extend_from_slice(format!("\x1b]2;{title}\x07").as_bytes());
+        sub.terminals()
+            .feed(pane(), format!("\x1b]2;{title}\x07").as_bytes());
     }
-    bytes.extend_from_slice(screen.replace('\n', "\r\n").as_bytes());
-    feed(&sub, &bytes);
+    sub.terminals()
+        .feed(pane(), screen.replace('\n', "\r\n").as_bytes());
     keys(&sub, &["J"]);
     let want = format!("state={state} id={id}");
     let said = logged(&sub);
     assert!(said.contains(&want), "want {want}: {said:?}");
 }
 
-/// The title outranks the screen: a screen that reads idle under a working title is working.
+/// The rule Claude Code draws around its prompt, at the width the captures were taken at.
+const BAR: &str = "────────────────────────────────────────────────────────────────────────────";
+
+/// Captured: idle, nothing running. The prompt is a `❯` between two rules, with the status
+/// lines under the lower one.
+fn idle_screen() -> String {
+    format!(
+        "✻ Cogitated for 6s · done 9:01 PM\n\
+         \n\
+         {BAR}\n\
+         ❯\n\
+         {BAR}\n\
+         \x20 ⚠ Transcript saving is off …\n\
+         \x20 [Opus 5.5 (1M context)] cmp ●─────────── 7% | ctx …\n\
+         \x20 -- INSERT -- ⏵⏵ auto mode on (shift+tab to cycle)\n"
+    )
+}
+
+/// Captured: a turn running. The same prompt is still on the screen under the spinner line.
+fn working_screen() -> String {
+    format!(
+        "\x20 Listing 1 directory… (ctrl+o to expand)\n\
+         \x20 ⎿  $ ls -la /etc/hostname\n\
+         \n\
+         * Actioning… (3s · ↓ 16 tokens)\n\
+         \n\
+         {BAR}\n\
+         ❯\n\
+         {BAR}\n"
+    )
+}
+
+/// Captured: a Bash permission prompt. One rule, and the dialog runs to the bottom of the
+/// screen — no second rule, so no prompt box, so nothing reads this as an idle prompt.
+fn permission_screen() -> String {
+    format!(
+        "\x20 Reading 1 file… (ctrl+o to expand)\n\
+         \x20 ⎿  $ cat /etc/hostname\n\
+         \n\
+         {BAR}\n\
+         \x20Bash command\n\
+         \x20Tip: auto mode handles these prompts for you — choose \"switch to auto mode\" below\n\
+         \n\
+         \x20  cat /etc/hostname\n\
+         \x20  Print hostname\n\
+         \n\
+         \x20Do you want to proceed?\n\
+         \x20❯ 1. Yes\n\
+         \x20  2. Yes, allow reading from /etc from this project\n\
+         \x20  3. Yes, and switch to auto mode · auto mode handles these prompts for you\n\
+         \x20  4. No\n\
+         \n\
+         \x20Esc to cancel · Tab to amend\n"
+    )
+}
+
+/// Captured: the trust dialog Claude Code opens on its first run in a directory.
+fn trust_screen() -> &'static str {
+    "  Security guide\n\
+     \n\
+     ❯ No, exit\n\
+     \x20 Yes, I trust this folder\n\
+     \n\
+     \x20 Enter to confirm · Esc to cancel\n"
+}
+
+/// Captured: the title spins a half-circle while a turn runs, and outranks the screen — which
+/// on this very screen still shows the prompt the pane is not waiting at.
 #[test]
 fn the_title_outranks_the_screen() {
-    let screen = "╭────────╮\n│ ❯      │\n╰────────╯\n";
-    assert_detects(screen, "⠋ Claude", "working", "osc_title_working");
+    assert_detects(
+        &working_screen(),
+        "◐ hostname ファイルの確認",
+        "working",
+        "osc_title_working",
+    );
 }
 
 /// Scrolled back into the transcript: whatever the pane is doing, this screen is not it.
+/// Written from the manifest — no capture of this screen.
 #[test]
 fn a_transcript_scrolled_back_is_not_a_state() {
     let screen = "> what did you change\nShowing detailed transcript (ctrl+o)\n";
     assert_detects(screen, "", "nil", "transcript_viewer");
 }
 
-/// A form with something to confirm is blocked; "esc to cancel" on its own would not be.
+/// Captured: the trust dialog is a form with something to confirm, and is blocked.
 #[test]
 fn a_form_waiting_to_be_confirmed_is_blocked() {
-    let screen = "Which branch?\nEnter to confirm · Esc to cancel\n";
-    assert_detects(screen, "", "blocked", "live_blocked_form");
+    assert_detects(trust_screen(), "", "blocked", "live_blocked_form");
 }
 
-/// The `/btw` overlay is typed at a turn that is still running.
+/// The `/btw` overlay is typed at a turn that is still running. Written from the manifest.
 #[test]
 fn a_btw_overlay_is_working() {
     let screen = "/btw the port is 8080\n";
     assert_detects(screen, "", "working", "btw_overlay_working");
 }
 
-/// A working turn: the spinner line Claude draws while it is going, with its interrupt hint.
+/// Captured: the spinner line of a running turn, read without the title that would outrank it.
 #[test]
 fn a_turn_in_progress_is_working() {
-    let screen = "✻ Herding… (12s · esc to interrupt)\n";
-    assert_detects(screen, "", "working", "live_turn_working");
+    assert_detects(&working_screen(), "", "working", "live_turn_working");
 }
 
-/// An input box with nothing running behind it, and none of the hints a dialog comes with.
-/// Both prompt characters: which one Claude Code draws has changed between versions.
+/// Captured: the idle screen. Two things at once — the prompt between its two rules is idle,
+/// and the finished turn above it (`✻ Cogitated for 6s · done 9:01 PM`) must not read as a
+/// running one. It starts with a spinner glyph and holds a `·`, and only the missing `…`
+/// tells it from `* Actioning… (3s · ↓ 16 tokens)`.
 #[test]
-fn an_empty_prompt_box_is_idle() {
-    for prompt in ["\u{276f}", ">"] {
-        let screen = format!("╭────────╮\n│ {prompt}      │\n╰────────╯\n");
-        assert_detects(&screen, "", "idle", "live_prompt_box");
-    }
+fn an_idle_prompt_is_idle_and_a_finished_turn_is_not_a_running_one() {
+    assert_detects(
+        &idle_screen(),
+        "✳ hostname ファイルの確認",
+        "idle",
+        "live_prompt_box",
+    );
 }
 
-/// Picking a model is a menu over the top, not a state.
+/// Picking a model is a menu over the top, not a state. Written from the manifest.
 #[test]
 fn the_model_picker_is_not_a_state() {
     let screen = "Select Model\n1. Default\nEnter to set as default, Esc to cancel\n";
     assert_detects(screen, "", "nil", "model_picker_menu");
 }
 
-/// A Bash approval names the command and offers numbered options.
+/// Captured: a Bash approval. It is `bash_permission_prompt` and not `live_blocked_form`, which
+/// outranks it — the footer is "Esc to cancel · Tab to amend", with nothing to confirm.
 #[test]
 fn a_bash_permission_prompt_is_blocked() {
-    let screen = "Bash command\n\
-                  ls -la\n\
-                  Do you want to proceed?\n\
-                  ❯ 1. Yes\n\
-                    2. Yes, and don't ask again for: ls\n\
-                    3. No\n";
-    assert_detects(screen, "", "blocked", "bash_permission_prompt");
+    assert_detects(
+        &permission_screen(),
+        "",
+        "blocked",
+        "bash_permission_prompt",
+    );
+}
+
+/// Captured, and the one this file exists for: a permission dialog is drawn under a *single*
+/// rule, so the screen has no prompt box, so `live_prompt_box` at 950 cannot claim it as idle
+/// on its `❯ 1. Yes`. The dialog is claimed by the rule that knows it is a dialog.
+#[test]
+fn a_permission_dialog_is_not_an_idle_prompt() {
+    let screen = permission_screen();
+    assert!(
+        !screen.contains("Enter to confirm"),
+        "the capture this test is built on has changed"
+    );
+    assert_detects(&screen, "", "blocked", "bash_permission_prompt");
 }
 
 /// Any other approval: the question and a numbered answer, with nothing naming a command.
+/// Written from the manifest — no capture of a non-Bash approval.
 #[test]
 fn a_generic_permission_prompt_is_blocked() {
-    let screen = "Edit src/main.rs\n\
-                  Do you want to proceed?\n\
-                  1. Yes\n\
-                  2. No\n\
-                  Esc to cancel\n";
-    assert_detects(screen, "", "blocked", "generic_permission_prompt");
+    let screen = format!(
+        "Edit src/main.rs\n\
+         {BAR}\n\
+         Do you want to proceed?\n\
+         1. Yes\n\
+         2. No\n\
+         Esc to cancel\n"
+    );
+    assert_detects(&screen, "", "blocked", "generic_permission_prompt");
 }
 
-/// The backstop: words that read as a question left standing, and no prompt to point at.
+/// The backstop: words that read as a question left standing. Written from the manifest.
 #[test]
 fn a_screen_waiting_for_permission_is_blocked() {
     let screen = "Waiting for permission to continue\n";
     assert_detects(screen, "", "blocked", "legacy_no_prompt_blocker");
 }
 
-/// What Claude Code leaves in the title when a turn is over.
+/// Captured: what Claude Code leaves in the title when a turn is over — a `✳` and the
+/// conversation's own summary, not its name. The screen under it here is the finished turn
+/// alone, with no prompt drawn yet, so the title is all there is to go on.
 #[test]
 fn an_idle_title_is_idle() {
-    assert_detects("all done\n", "✳ Claude", "idle", "osc_title_idle");
-}
-
-/// The shape a permission prompt is really drawn in: a rounded box, with the hint line below it
-/// rather than inside it. Our `prompt_box()` is the last rounded box — herdr's was narrower —
-/// so without an exclusion of its own `live_prompt_box` outranks this at 950 and calls a dialog
-/// waiting on you idle. Lines are cut to the test pane's forty columns.
-#[test]
-fn a_permission_prompt_inside_a_box_is_blocked_and_not_an_idle_prompt() {
-    let screen = "╭────────────────────────────────────╮\n\
-                  │ Bash command                       │\n\
-                  │ ls -la                             │\n\
-                  │                                    │\n\
-                  │ Do you want to proceed?            │\n\
-                  │ ❯ 1. Yes                           │\n\
-                  │   2. Yes, don't ask again          │\n\
-                  │   3. No, tell Claude what to do    │\n\
-                  ╰────────────────────────────────────╯\n\
-                  \x20 Esc to cancel\n";
-    assert_detects(screen, "", "blocked", "bash_permission_prompt");
+    assert_detects(
+        "✻ Cogitated for 6s · done 9:01 PM\n",
+        "✳ hostname ファイルの確認",
+        "idle",
+        "osc_title_idle",
+    );
 }

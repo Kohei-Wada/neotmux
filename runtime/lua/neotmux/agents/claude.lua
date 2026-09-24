@@ -9,9 +9,9 @@
 -- sight, and nobody here has a screen of either to check a rule against — a rule written from a
 -- pattern alone is one that only ever matches the fixture written from the same pattern.
 --
--- The fixtures in `crates/neotmux-lua/tests/detect.rs` are written from that manifest and from
--- what is known of the current Claude Code UI, not from captured screens: they say what these
--- rules mean, and only the ones a real session has been held against say what Claude draws.
+-- Four of the fixtures in `crates/neotmux-lua/tests/detect.rs` are screens captured off a real
+-- Claude Code (v2.1.281) and kept in this plan's `captures/`; the rest are written from the
+-- manifest's patterns, and say what these rules mean rather than what Claude draws.
 --
 --   detect.agents = { claude = require('neotmux.agents.claude') }
 
@@ -27,10 +27,7 @@ local SPINNER = {
   [0x273d] = true, -- ✽
 }
 local PAUSE, PLAY = 0x23f8, 0x23f5 -- ⏸ ⏵
-local BOTTOM = 0x2570 -- ╰
--- What the input box draws to the left of what you are typing. Two of them: which one it is
--- has changed between versions of Claude Code, and a rule betting on one goes blind on the other.
-local PROMPT = { [0x3e] = true, [0x276f] = true } -- > ❯
+local CHEVRON = 0x276f -- ❯
 local STAR = 0x2733 -- ✳
 local ELLIPSIS = "\u{2026}" -- …
 
@@ -101,10 +98,10 @@ local function title_opens(title, wanted)
   return after ~= nil and title:sub(after, after) == " "
 end
 
--- `❯ 1. Yes`, with the box edge and the chevron cut off first: an option list is drawn inside
--- the dialog's box, and `❯` is three bytes, so `❯?` would make only the last of them optional.
--- `numbered` is for the rule that wants the option list rather than any line that happens to
--- begin with a yes.
+-- `❯ 1. Yes`, with the chevron cut off first: `❯` is three bytes, so `❯?` would make only the
+-- last of them optional. The `│` that goes with it is defensive — no screen anybody has
+-- captured puts an option inside a box — and costs nothing to keep. `numbered` is for the rule
+-- that wants the option list rather than any line that happens to begin with a yes.
 local function is_option(line, numbered)
   local body = line:gsub("^%s*\u{2502}", ""):gsub("^%s*\u{276f}", "")
   local digit = numbered and "%d" or "%d?"
@@ -118,23 +115,6 @@ local function is_bare_prompt(line)
   return line:match("^%s*\u{2502}?%s*\u{276f}%s*\u{2502}?%s*$") ~= nil
 end
 
--- What is drawn *under* the last rounded box. `view.prompt_box()` is the box's body, and the
--- hint line that tells a dialog from an input box is below it — nothing for a box whose bottom
--- has not been drawn yet, because the body already runs to the end of the screen there.
-local function under_box(lines)
-  local from
-  for i = #lines, 1, -1 do
-    if first_ink(lines[i]) == BOTTOM then
-      from = i + 1
-      break
-    end
-  end
-  local out = {}
-  for i = from or (#lines + 1), #lines do
-    out[#out + 1] = lines[i]
-  end
-  return out
-end
 
 return {
   -- The title outranks everything on the screen: Claude Code spins it while a turn runs, and it
@@ -196,7 +176,9 @@ return {
   },
 
   -- A turn in progress: the interrupt hint against a paused or running marker, or a spinner
-  -- line with its trailing ellipsis.
+  -- line with its trailing ellipsis. The ellipsis is the whole of it — Claude Code leaves the
+  -- *finished* turn on the screen under the same glyph (`✻ Cogitated for 6s · done 9:01 PM`),
+  -- so a rule that fired on the glyph alone would read every idle screen as working.
   {
     id = "live_turn_working",
     state = "working",
@@ -216,13 +198,10 @@ return {
     end,
   },
 
-  -- The input box with nothing running behind it. A dialog is drawn in the same box and its
-  -- selected option starts with the same character, so the exclusions below are what tell the
-  -- two apart — and they read the lines *under* the box as well as its body, because that is
-  -- where Claude puts the hint. herdr could exclude less: its prompt box was cut at a plain
-  -- `───` rule, so a rounded dialog box was never the prompt box there and this rule could not
-  -- reach one. Ours is the last rounded box, which is the wider region, and the manifest's
-  -- priorities are only safe under it because of this list.
+  -- The prompt with nothing running behind it: a `❯` between the two rules Claude Code draws
+  -- around what you type. A dialog is drawn under a *single* rule and so has no prompt box at
+  -- all, which is what keeps one from reading as an empty prompt; the exclusions below are for
+  -- the menus that are drawn in the prompt's own place.
   {
     id = "live_prompt_box",
     state = "idle",
@@ -231,19 +210,16 @@ return {
     match = function(view)
       local box = lower(view.prompt_box())
       if not any_line(box, function(line)
-        return PROMPT[first_ink(line)] ~= nil
+        return first_ink(line) == CHEVRON
       end) then
         return false
       end
-      local asking = {
+      return not holds_any(box, {
         "enter to select",
         "esc to cancel",
         "arrow keys",
         "\u{2191}/\u{2193} to navigate",
-        -- A box putting a question to you is not an idle prompt, whatever its hint line says.
-        "do you want to proceed?",
-      }
-      return not holds_any(box, asking) and not holds_any(lower(under_box(view.lines)), asking)
+      })
     end,
   },
 

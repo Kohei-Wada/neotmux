@@ -44,8 +44,7 @@ M.settle = 700
 M.agents = { claude = require("neotmux.agents.claude") }
 
 local SPACE = { [0x20] = true, [0x09] = true }
-local DASH = { [0x2d] = true, [0x2500] = true } -- - ─
-local TOP, BOTTOM = 0x256d, 0x2570 -- ╭ ╰
+local RULE = 0x2500 -- ─
 
 -- Codepoints, not a character class: `─` is three bytes, and `[─]` is a class of those three
 -- bytes on their own, which matches half of every other box-drawing character on the screen.
@@ -58,24 +57,6 @@ local function ink(line)
     codes[#codes + 1] = code
   end
   return codes
-end
-
--- A line whose only ink is three or more dashes: what a program draws to say that everything
--- above it is over.
-local function is_rule(line)
-  local codes = ink(line)
-  if codes == nil then
-    return false
-  end
-  local dashes = 0
-  for _, code in ipairs(codes) do
-    if DASH[code] then
-      dashes = dashes + 1
-    elseif not SPACE[code] then
-      return false
-    end
-  end
-  return dashes >= 3
 end
 
 local function opens_with(line, want)
@@ -91,7 +72,15 @@ local function opens_with(line, want)
   return false
 end
 
--- A boxed line without its `│` edges, which are the box and not what a rule is reading.
+-- A line whose ink starts with `─`: what a program draws to say that what is above it is over
+-- and what is below it is something else. Only that one character counts — `╭───╮` is a box and
+-- `---` is a sentence with a dash in it, and a screen is full of both.
+local function is_rule(line)
+  return opens_with(line, RULE)
+end
+
+-- A line without the `│` edges a program might have drawn around it, trimmed. Nothing Claude
+-- Code draws has them, so the stripping is a courtesy to the next program in this directory.
 local function unedge(line)
   local inner = line:gsub("^%s*\u{2502}", ""):gsub("\u{2502}%s*$", "")
   return (inner:match("^%s*(.-)%s*$"))
@@ -141,27 +130,30 @@ function M.view(pane)
     return after
   end
 
-  -- The last box on the screen, without its edges. An unclosed box — one whose bottom has
-  -- scrolled off, which is what a box being typed into looks like — is still a box, so the
-  -- region runs to the end of the screen rather than coming back empty. The cost of that is a
-  -- stale `╭` high up dragging everything below it in, so a rule that cares should check what
-  -- it got rather than that it got something.
+  -- What is written between the second rule from the bottom and the one below it. A program
+  -- that draws a prompt draws it between two rules and draws whatever it wants an answer about
+  -- under a single one — so a screen with fewer than two rules has no prompt on it at all, and
+  -- the region is empty rather than a guess. That one fact is what keeps a dialog waiting on
+  -- you from being read as an empty prompt nobody has typed into.
   local box
   function view.prompt_box()
     if box == nil then
       box = {}
-      local top
+      local last, second
       for i = #full, 1, -1 do
-        if opens_with(full[i], TOP) then
-          top = i
-          break
+        if is_rule(full[i]) then
+          if last == nil then
+            last = i
+          else
+            second = i
+            break
+          end
         end
       end
-      for i = (top or #full) + 1, #full do
-        if opens_with(full[i], BOTTOM) then
-          break
+      if second ~= nil then
+        for i = second + 1, last - 1 do
+          box[#box + 1] = unedge(full[i])
         end
-        box[#box + 1] = unedge(full[i])
       end
     end
     return box
