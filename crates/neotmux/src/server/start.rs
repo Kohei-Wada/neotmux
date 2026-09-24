@@ -3,7 +3,7 @@
 //! `neotmux` with no arguments is a client. If something is listening on the session's
 //! socket it talks to that; if nothing is, it starts a copy of itself with `--server` and
 //! waits for it to come up. Which of those it is doing is decided by connecting, because
-//! that is the only question about a unix socket with no race in it — see [`neotmux::sock`].
+//! that is the only question about a unix socket with no race in it — see [`crate::sock`].
 
 use std::cell::RefCell;
 use std::os::unix::net::UnixStream;
@@ -14,8 +14,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
 
-use neotmux::link::Link;
-use neotmux::sock::{self, Lock, Paths};
+use crate::link::Link;
+use crate::sock::{self, Lock, Paths};
 
 use crate::server;
 use crate::signals::ShutdownSignal;
@@ -47,7 +47,7 @@ pub fn serve() -> anyhow::Result<()> {
     // The server's standard error goes to `/dev/null` — it has no screen to complain to —
     // so the log is the only place a failure can be read afterwards.
     if let Err(err) = &served {
-        neotmux::logging::log(
+        crate::logging::log(
             neotmux_proto::Level::Error,
             "neotmux-server",
             &format!("the session ended in an error: {err:#}"),

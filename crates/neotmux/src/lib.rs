@@ -1,30 +1,30 @@
-//! Both halves of neotmux, with no terminal in either.
+//! Both halves of neotmux, told apart by where they live.
 //!
-//! [`session`] is the panes, the windows and the shells behind them; [`plugins`] is the Lua
-//! layer and the notifications it raises. Both are the server's, in one process, so what is
-//! between them is a function call: a tick out of one, its reply out of the other, and the
-//! frame that comes of it. [`link`] and [`sock`] are the wire to the client that paints that
-//! frame, and where it lives.
+//! One executable is both: with no arguments it is a client, and [`server::start`] re-execs
+//! it with `--server` when nothing is listening. [`server`] is the half that owns the
+//! sessions — the panes, their children, the Lua layer beside them — and never draws.
+//! [`client`] is the half that owns a terminal — it reads keys off it and paints the frames
+//! the server sends — and owns no session. Between them is [`link`] over the socket
+//! [`sock`] says where to find, carrying what `neotmux-proto` defines.
 //!
-//! Nothing here knows what it is being looked at through. A session is told how big its
-//! surface is, handed the keys that were typed at it, and answers with a
-//! [`neotmux_proto::Frame`] — what to show, not how to show it. Turning that into a screen,
-//! reading a terminal, and catching the signals a process gets belong to the binary.
+//! What is left at this level is what both halves need and neither owns: the wire ([`link`],
+//! [`sock`]), the log ([`logging`]), the signals a process gets ([`signals`]), the waiting a
+//! poll is (`tty`) and what `/proc` says about a pid (`procinfo`).
+//!
+//! Where a new module goes is decided by who calls it: a session's business is the server's,
+//! a terminal's is the client's, and something both halves call stays here. A module here
+//! must never reach into either half — that is the direction that says the split has stopped
+//! being true.
 
-pub mod clip;
-pub mod decode;
-pub mod input;
+pub mod client;
+pub mod server;
+
 pub mod link;
 pub mod logging;
-pub mod notify;
-pub mod plugins;
-pub mod runner;
-pub mod session;
+pub(crate) mod procinfo;
+pub mod signals;
 pub mod sock;
+pub(crate) mod tty;
 
 // A frame, a key, the geometry and the events all live in `neotmux-proto`: they are what
 // the wire carries.
-
-mod paneinfo;
-mod procinfo;
-mod shells;

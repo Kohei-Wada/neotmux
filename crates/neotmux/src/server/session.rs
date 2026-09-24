@@ -14,11 +14,11 @@ use neotmux_term::state::clamp_to_min_grid;
 use neotmux_term::terminals::PaneTerminals;
 use neotmux_term::wakeup::Waker;
 
-use crate::input::encode_key;
 use crate::logging;
-use crate::paneinfo::PaneInfoCache;
 use crate::procinfo;
-use crate::shells::Shells;
+use crate::server::input::encode_key;
+use crate::server::paneinfo::PaneInfoCache;
+use crate::server::shells::Shells;
 use neotmux_core::windows::{PaneIds, Shown, Surface, Windows};
 use neotmux_proto::frame::{Frame, PaneFrame};
 use neotmux_proto::keys::Key;

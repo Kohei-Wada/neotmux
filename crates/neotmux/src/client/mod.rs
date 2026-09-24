@@ -1,3 +1,14 @@
+//! The half that drives a terminal, and owns no session.
+//!
+//! This is the client's loop: it attaches over a [`crate::link`], reads the terminal through
+//! `tty`, turns what it read into keys with [`decode`], sends them, and paints the
+//! frame that comes back with `draw` and `overlay`. It holds no session state — what it
+//! shows is what it was last sent.
+
+pub mod decode;
+pub(crate) mod draw;
+pub(crate) mod overlay;
+
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -9,11 +20,10 @@ use neotmux_proto::{OwnedToClient, Size};
 use neotmux_term::state::clamp_to_min_grid;
 use ratatui::DefaultTerminal;
 
-use neotmux::decode::Decoder;
-use neotmux::link::Link;
+use crate::client::decode::Decoder;
+use crate::link::Link;
 use neotmux_proto::keys::Key;
 
-use crate::draw;
 use crate::signals::{self, ShutdownSignal};
 use crate::tty::{Ready, Terminal};
 

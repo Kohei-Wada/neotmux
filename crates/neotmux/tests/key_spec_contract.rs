@@ -1,6 +1,6 @@
 //! The contract between the two spellings of a key.
 //!
-//! `neotmux::input::key_spec` turns the `Key` a terminal reports into a spec string, and
+//! `neotmux::server::input::key_spec` turns the `Key` a terminal reports into a spec string, and
 //! `neotmux_lua::api::keymap::normalise` turns the spec string a plugin types into the form
 //! that is stored and looked up. They are written in two crates that share no code, and the
 //! only thing in the whole program that makes them agree is that both sides end up under the
@@ -14,7 +14,7 @@
 //! 2. the name a plugin author would type for a key is the very key the host reports for it —
 //!    including its modifiers, in any order.
 
-use neotmux::input::key_spec;
+use neotmux::server::input::key_spec;
 use neotmux_lua::api::keymap::normalise;
 use neotmux_proto::keys::{Key, KeyCode, Modifiers};
 

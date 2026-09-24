@@ -12,6 +12,23 @@
 //! one else is looking, the one the old code refused with a reason, and the two
 //! difference being the one the other is not in. Which clients get to look at a session
 //! is as far as this file goes; that a session sits waiting at all is the rest of it.
+//!
+//! This is the half's front door and the rest of it hangs below: [`session`] and `shells`
+//! are the panes and the children behind them, [`plugins`] and [`notify`] the Lua layer and
+//! what it raises, [`runner`] a job in a real process, [`clip`] a yank with nowhere of its
+//! own to go, [`input`] the bytes a key is typed as, [`command`] what the host answers
+//! without the Lua layer, and [`start`] how this half gets started at all.
+
+pub mod clip;
+pub mod command;
+pub mod input;
+pub mod notify;
+pub(crate) mod paneinfo;
+pub mod plugins;
+pub mod runner;
+pub mod session;
+pub(crate) mod shells;
+pub mod start;
 
 use std::collections::BTreeMap;
 use std::os::fd::AsFd as _;
@@ -30,12 +47,12 @@ use neotmux_core::windows::PaneIds;
 use neotmux_term::terminals::PaneTerminals;
 use neotmux_term::wakeup::{Waker, Wakeup, wakeup};
 
+use crate::link::Link;
+use crate::logging;
+use crate::server::clip::Clip;
+use crate::server::plugins::{Plugins, ServerOp};
+use crate::server::session::{Pass, Session, Setup};
 use crate::signals::ShutdownSignal;
-use neotmux::clip::Clip;
-use neotmux::link::Link;
-use neotmux::logging;
-use neotmux::plugins::{Plugins, ServerOp};
-use neotmux::session::{Pass, Session, Setup};
 
 /// The frame's cadence, and so the closest together two frames can be. The same number
 /// the one-process loop used, for the same reason: it is a property of the loop rather
@@ -172,7 +189,7 @@ pub fn serve(listener: &UnixListener, shutdown: &ShutdownSignal) -> anyhow::Resu
     let layers = Layers::resolve(&|key| std::env::var_os(key), exe_dir.as_deref());
     // The waker the panes' reader threads already hold: a job's pipes are drained by threads
     // of its own and nudge the same wakeup, so nothing here is added to the poll set.
-    let runner = Rc::new(neotmux::runner::Processes::new(waker.clone()));
+    let runner = Rc::new(crate::server::runner::Processes::new(waker.clone()));
     let lua = LuaSubsystem::build_with_runner(layers, terminals.clone(), clip.clone(), runner)?;
     let mut plugins = Plugins::new(lua);
     for failure in plugins.lua().run_init() {
@@ -445,7 +462,7 @@ fn doorstep(pending: &mut Pending) -> Doorstep {
             // command line is not exempt from it: the name is a key in a map and a word in a
             // list, and both of those are the CLI's business too.
             Ok(ToServer::Attach(attach)) => {
-                match neotmux::sock::validate_session_name(&attach.session) {
+                match crate::sock::validate_session_name(&attach.session) {
                     Ok(()) => Doorstep::Attaching(attach),
                     Err(why) => {
                         logging::log(Level::Warn, "neotmux-server", &why);
@@ -641,7 +658,7 @@ pub(crate) fn start_session(
     terminals: &Rc<PaneTerminals>,
     waker: &Waker,
 ) -> Result<(), StartFailure> {
-    if let Err(why) = neotmux::sock::validate_session_name(name) {
+    if let Err(why) = crate::sock::validate_session_name(name) {
         return Err(StartFailure::Invalid(why));
     }
     if sessions.id_of(name).is_some() {
@@ -686,7 +703,7 @@ pub(crate) fn rename_session(
     plugins: &Plugins,
     sessions: &mut Sessions,
 ) -> Result<(), RenameFailure> {
-    if let Err(why) = neotmux::sock::validate_session_name(to) {
+    if let Err(why) = crate::sock::validate_session_name(to) {
         return Err(RenameFailure::Invalid(why));
     }
     let Some(id) = sessions.id_of(from) else {
@@ -784,14 +801,14 @@ fn answer(
             name,
             args,
         } => {
-            let mut ctx = crate::command::Ctx {
+            let mut ctx = crate::server::command::Ctx {
                 sessions,
                 plugins,
                 terminals: serving.terminals,
                 waker: serving.waker,
                 clients,
             };
-            let ran = crate::command::run(&name, &args, session.as_deref(), &mut ctx);
+            let ran = crate::server::command::run(&name, &args, session.as_deref(), &mut ctx);
             let _ = link.send(&wire::encode_to_client(&ToClient::Ran {
                 ok: ran.ok,
                 lines: &ran.lines,

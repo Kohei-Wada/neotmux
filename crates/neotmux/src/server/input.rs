@@ -406,7 +406,7 @@ mod tests {
             b"\x1b[24;3~",
             b"\x1b[1;5P",
         ] {
-            let keys = crate::decode::Decoder::default().feed(bytes);
+            let keys = crate::client::decode::Decoder::default().feed(bytes);
             assert_eq!(keys.len(), 1, "{bytes:?} did not decode to one key");
             assert_eq!(
                 encode_key(keys[0], false).as_deref(),

@@ -14,35 +14,35 @@ use neotmux_proto::{PaneId, Size, Want};
 use neotmux_term::terminals::PaneTerminals;
 use neotmux_term::wakeup::Waker;
 
-use neotmux::plugins::Plugins;
+use crate::server::plugins::Plugins;
 
-use neotmux::session::Session;
+use crate::server::session::Session;
 
 use crate::server::{
     Attached, RenameFailure, Sessions, StartFailure, rename_session, start_session, switch_clients,
 };
 
 /// What a command did.
-pub struct Ran {
-    pub ok: bool,
+pub(crate) struct Ran {
+    pub(crate) ok: bool,
     /// stdout where `ok`, and the one sentence that says why not where it is not.
-    pub lines: Vec<String>,
+    pub(crate) lines: Vec<String>,
 }
 
 impl Ran {
-    pub fn ok(lines: Vec<String>) -> Self {
+    pub(crate) fn ok(lines: Vec<String>) -> Self {
         Self { ok: true, lines }
     }
 
     /// The one line a command answers with when it has nothing more to say than that it did.
-    pub fn did(line: impl Into<String>) -> Self {
+    pub(crate) fn did(line: impl Into<String>) -> Self {
         Self {
             ok: true,
             lines: vec![line.into()],
         }
     }
 
-    pub fn failed(why: impl Into<String>) -> Self {
+    pub(crate) fn failed(why: impl Into<String>) -> Self {
         Self {
             ok: false,
             lines: vec![why.into()],
@@ -55,21 +55,21 @@ pub const NAMES: &[&str] = &[
     "new", "rename", "windows", "panes", "send", "capture", "switch",
 ];
 
-pub fn unknown(name: &str) -> Ran {
+pub(crate) fn unknown(name: &str) -> Ran {
     Ran::failed(format!("unknown command '{name}'"))
 }
 
 /// What a command reaches into the server for. Built fresh at the door, out of whatever
 /// `Serving` and the frame loop already hold.
-pub struct Ctx<'a> {
-    pub sessions: &'a mut Sessions,
-    pub plugins: &'a mut Plugins,
-    pub terminals: &'a Rc<PaneTerminals>,
-    pub waker: &'a Waker,
-    pub clients: &'a mut Vec<Attached>,
+pub(crate) struct Ctx<'a> {
+    pub(crate) sessions: &'a mut Sessions,
+    pub(crate) plugins: &'a mut Plugins,
+    pub(crate) terminals: &'a Rc<PaneTerminals>,
+    pub(crate) waker: &'a Waker,
+    pub(crate) clients: &'a mut Vec<Attached>,
 }
 
-pub fn run(name: &str, args: &[String], session: Option<&str>, ctx: &mut Ctx<'_>) -> Ran {
+pub(crate) fn run(name: &str, args: &[String], session: Option<&str>, ctx: &mut Ctx<'_>) -> Ran {
     match name {
         "new" => new(args, session, ctx),
         "rename" => rename(args, ctx),
@@ -92,7 +92,7 @@ fn new(args: &[String], session: Option<&str>, ctx: &mut Ctx<'_>) -> Ran {
         .first()
         .map(String::as_str)
         .or(session)
-        .unwrap_or(neotmux::sock::DEFAULT_SESSION)
+        .unwrap_or(crate::sock::DEFAULT_SESSION)
         .to_string();
     match start_session(
         &name,
@@ -145,7 +145,7 @@ fn switch(args: &[String], ctx: &mut Ctx<'_>) -> Ran {
 
 /// The session a command is addressed to, or the sentence that says there is none.
 fn addressed<'a>(session: Option<&str>, ctx: &'a mut Ctx<'_>) -> Result<&'a mut Session, Ran> {
-    let name = session.unwrap_or(neotmux::sock::DEFAULT_SESSION);
+    let name = session.unwrap_or(crate::sock::DEFAULT_SESSION);
     match ctx.sessions.id_of(name) {
         Some(id) => Ok(ctx.sessions.get_mut(id).expect("a session it just named")),
         None => Err(Ran::failed(format!(

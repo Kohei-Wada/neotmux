@@ -7,8 +7,8 @@
 use std::fs;
 use std::time::{Duration, Instant};
 
-use neotmux::plugins::Plugins;
-use neotmux::session::{Session, Setup};
+use neotmux::server::plugins::Plugins;
+use neotmux::server::session::{Session, Setup};
 use neotmux_lua::KeyOutcome;
 use neotmux_lua::LuaSubsystem;
 use neotmux_lua::runtime::Layers;
@@ -107,7 +107,10 @@ fn screen(frame: &Frame) -> String {
 /// One whole frame: the session says what happened, the plugins tick against it, and the
 /// session turns what they asked for into the picture. The two messages are exactly the ones
 /// that cross the socket in the real thing.
-fn frame<'a>(session: &'a mut Session, plugins: &mut Plugins) -> neotmux::session::Pass<'a> {
+fn frame<'a>(
+    session: &'a mut Session,
+    plugins: &mut Plugins,
+) -> neotmux::server::session::Pass<'a> {
     let tick = session.tick().expect("tick");
     // The server ops are the set of sessions changing, and there is one session here.
     let answer = plugins.respond(one(), tick);

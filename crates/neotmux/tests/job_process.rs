@@ -8,7 +8,7 @@ use neotmux_lua::runner::{JobChunk, JobSpec, Runner};
 #[test]
 fn a_real_process_runs_and_its_output_comes_back() {
     let (wakeup, waker) = neotmux_term::wakeup::wakeup().unwrap();
-    let runner = neotmux::runner::Processes::new(waker);
+    let runner = neotmux::server::runner::Processes::new(waker);
     let mut running = runner
         .start(&JobSpec {
             // `sh -c`, not `/bin/echo`: not every system has one — NixOS does not — and
@@ -45,7 +45,7 @@ fn a_real_process_runs_and_its_output_comes_back() {
 #[test]
 fn killing_a_job_ends_the_children_it_started() {
     let (wakeup, waker) = neotmux_term::wakeup::wakeup().unwrap();
-    let runner = neotmux::runner::Processes::new(waker);
+    let runner = neotmux::server::runner::Processes::new(waker);
     let mut running = runner
         .start(&JobSpec {
             cmd: vec!["/bin/sh".into(), "-c".into(), "sleep 300 | cat".into()],

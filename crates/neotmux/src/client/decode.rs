@@ -426,7 +426,7 @@ mod tests {
     /// for that key.
     #[test]
     fn a_csi_u_key_round_trips_to_its_conventional_bytes() {
-        use crate::input::encode_key;
+        use crate::server::input::encode_key;
         assert_eq!(
             encode_key(one(b"\x1b[27u"), false).as_deref(),
             Some(&[0x1b][..])

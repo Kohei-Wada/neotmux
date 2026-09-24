@@ -1,12 +1,3 @@
-mod command;
-mod draw;
-mod overlay;
-mod server;
-mod signals;
-mod start;
-mod tty;
-mod tui;
-
 use std::cell::RefCell;
 use std::env;
 use std::path::PathBuf;
@@ -128,7 +119,7 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Cli {
             // word after that is the command's own payload, taken verbatim. A command that
             // wrote `-t` into its text — `send %1 echo -t MARK` — must not have it read back
             // out as a session name.
-            arg if !arg.is_empty() && command::NAMES.contains(&arg) => {
+            arg if !arg.is_empty() && neotmux::server::command::NAMES.contains(&arg) => {
                 let name = arg.to_string();
                 if args.peek().is_some_and(|next| next == "-t") {
                     args.next();
@@ -293,7 +284,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     if cli.server {
-        return start::serve();
+        return neotmux::server::start::serve();
     }
     match cli.action {
         Action::Ls => list_sessions(),
@@ -341,7 +332,7 @@ fn ask(
     start_if_needed: bool,
 ) -> anyhow::Result<Option<neotmux_proto::OwnedToClient>> {
     let link = if start_if_needed {
-        Some(start::begin()?.finish()?)
+        Some(neotmux::server::start::begin()?.finish()?)
     } else {
         let paths = neotmux::sock::Paths::resolve(&|key| env::var_os(key))?;
         match neotmux::sock::connect(&paths.socket)? {
@@ -428,23 +419,23 @@ fn client(session: Option<String>) -> anyhow::Result<()> {
     let name = session
         .clone()
         .unwrap_or_else(|| neotmux::sock::DEFAULT_SESSION.to_string());
-    let link = start::begin()?.finish()?;
+    let link = neotmux::server::start::begin()?.finish()?;
 
     // The attach, and the session's answer, before the screen: a session that a plugin ended
     // while it was loading must not flash the alternate screen on its way past.
-    let first = match tui::open(&link, tui::screen_size()?, name)? {
-        tui::Opened::Over(transcript) => {
+    let first = match neotmux::client::open(&link, neotmux::client::screen_size()?, name)? {
+        neotmux::client::Opened::Over(transcript) => {
             for line in &transcript {
                 eprintln!("neotmux: {line}");
             }
             return Ok(());
         }
-        tui::Opened::Running(done) => *done,
+        neotmux::client::Opened::Running(done) => *done,
     };
 
-    let shutdown = signals::ShutdownSignal::install()?;
+    let shutdown = neotmux::signals::ShutdownSignal::install()?;
     let mut terminal = ratatui::init();
-    let result = tui::run(&mut terminal, &shutdown, &link, first);
+    let result = neotmux::client::run(&mut terminal, &shutdown, &link, first);
     // Not `ratatui::restore`: it reports a failure with `eprintln!`, which panics when the
     // terminal it is trying to restore is the one that has gone away.
     if let Err(err) = ratatui::try_restore() {
@@ -456,7 +447,7 @@ fn client(session: Option<String>) -> anyhow::Result<()> {
     }
     let left = result?;
     match left.signal {
-        Some(signal) => signals::die_of(signal),
+        Some(signal) => neotmux::signals::die_of(signal),
         None => Ok(()),
     }
 }
