@@ -12,6 +12,12 @@
 -- The three words are herdr's, and so is the shape of the answer: an agent you are running is
 -- either getting on with it, waiting for you, or doing nothing, and which of those it is, is
 -- the thing you open a sidebar to find out.
+--
+-- The guess itself now lives in `neotmux.detect`, which reads a screen by rules rather than by
+-- pattern, and knows the difference between a spinner's blink and a turn actually finishing.
+-- `M.of` asks it first. What follows in this file — the pattern list, `M.working_for` — is what
+-- answers for a pane no ruleset in `neotmux.detect.agents` claims: a shell, or an agent nobody
+-- has taught neotmux the screen of yet.
 local M = {}
 
 -- Lua patterns, matched against the last `M.lines` non-blank lines of a pane. Replace the
@@ -38,10 +44,11 @@ M.patterns = {
 -- program said, and matching the whole screen would fire on anything it ever printed.
 M.lines = 5
 
--- How long after a pane last said something it still counts as working, in seconds. A shell
--- that printed a prompt and stopped is idle a moment later; an agent printing as it goes stays
--- working between its lines.
-M.working_for = 2
+-- How long after a pane last said something it still counts as working, in milliseconds against
+-- `neotmux.now()`. Only the fallback uses it: a pane a ruleset claims is believed outright. A
+-- shell that printed a prompt and stopped is idle a moment later; a program printing as it goes
+-- stays working between its lines.
+M.working_for = 2000
 
 M.icons = {
   working = "\u{25cf}", -- ●
@@ -86,12 +93,15 @@ end
 
 function M.forget(pane)
   seen[pane] = nil
+  require("neotmux.detect").forget(pane)
 end
 
--- The whole cost control: the lines are built only for a pane that has been fed since it was
--- last looked at, which on a session nobody is typing into is none of them. The stamp is one
--- call and no copying; the content is the expensive one.
-function M.of(pane)
+-- A pane a ruleset in `neotmux.detect.agents` claims is answered there; everything below is
+-- what a pane none of them recognise falls back to.
+local function fallback(pane)
+  -- The whole cost control: the lines are built only for a pane that has been fed since it was
+  -- last looked at, which on a session nobody is typing into is none of them. The stamp is one
+  -- call and no copying; the content is the expensive one.
   local revision = neotmux.pane.revision(pane)
   if revision == nil then
     seen[pane] = nil
@@ -104,16 +114,24 @@ function M.of(pane)
       seen[pane] = nil
       return nil
     end
-    it = { revision = revision, at = os.time(), blocked = blocked }
+    it = { revision = revision, at = neotmux.now(), blocked = blocked }
     seen[pane] = it
   end
   if it.blocked then
     return "blocked"
   end
-  if os.time() - it.at < M.working_for then
+  if neotmux.now() - it.at < M.working_for then
     return "working"
   end
   return "idle"
+end
+
+function M.of(pane)
+  local detected = require("neotmux.detect").of(pane)
+  if detected ~= nil then
+    return detected
+  end
+  return fallback(pane)
 end
 
 function M.icon(name)

@@ -1861,9 +1861,9 @@ and whether to press Enter is left to whoever is reading the line.
 ### The state convention
 
 The host knows a pane's bytes and a stamp that moves when they change. Whether that means the
-thing in it is *working*, *blocked* on a question, or *idle* is a guess about text on a screen,
-and `neotmux.state` is where the shipped guess lives — so the plugin that notifies you and the
-sidebar that draws you a list agree about what a pane is doing.
+thing in it is *working*, *blocked* on a question, or *idle* is a guess, and `neotmux.state` is
+where the shipped guess lives — so the plugin that notifies you and the sidebar that draws you a
+list agree about what a pane is doing.
 
 ```lua
 local state = require('neotmux.state')
@@ -1872,15 +1872,23 @@ state.of(pane)          --> 'working' | 'blocked' | 'idle', or nil for a pane th
 state.worst(panes)      --> the same three, for a set: blocked beats working beats idle
 state.icon('blocked')   --> ◉
 
-state.patterns          -- the Lua patterns that mean "this is a question"; replace the table
-state.lines = 5         -- how many of a pane's last non-blank lines to match against
-state.working_for = 2   -- seconds after a pane last said something that it still reads as working
+state.patterns             -- the fallback's patterns for "this is a question"; replace the table
+state.lines = 5             -- how many of a pane's last non-blank lines the fallback matches against
+state.working_for = 2000    -- ms after a pane last said something that the fallback still calls working
 ```
+
+The guess itself lives in `neotmux.detect`, which reads a pane's screen by rules rather than by
+pattern, and knows a program's own idea of running from the blink of a spinner between two of its
+lines. `state.of` asks it first and returns its answer when it has one. The pattern list above,
+and `working_for`, are what a pane no ruleset in `neotmux.detect.agents` claims falls back to — a
+shell, or a program nobody has written a ruleset for yet. Writing one is a file in
+`neotmux/agents/*.lua` and a line in `neotmux.detect.agents`; the shipped one, `claude`, is that
+file's own model.
 
 The expensive half — reading the pane's text — happens only for a pane whose revision has moved
 since it was last asked about, so a session nobody is typing into costs one stamp per pane per
-tick and nothing else. `of` is answered on demand rather than on a tick of its own: every caller
-is already in one.
+tick and nothing else, in both the detector and the fallback. `of` is answered on demand rather
+than on a tick of its own: every caller is already in one.
 
 The three words are herdr's, and so is what they are for: an agent you are running is either
 getting on with it, waiting for you, or doing nothing, and which of those it is, is the thing
