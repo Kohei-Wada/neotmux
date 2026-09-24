@@ -71,6 +71,10 @@ pub fn pane() -> PaneId {
 /// convention modules — nothing registers them — so the only thing running here is what the
 /// test's `init.lua` asks for. Shared by `detect.rs` and `state.rs`, which want the exact same
 /// plugins-off list and must not drift apart from each other.
+///
+/// `chime` is on the list like the rest. It is built with the real job runner, so a test that
+/// ticked a pane into `blocked` would spawn a player and `cargo test` would make a noise at
+/// whoever ran it; `chime.rs` builds its own runtime and turns it on there.
 pub fn built(extra: &str) -> (tempfile::TempDir, Built) {
     let dir = tempfile::tempdir().unwrap();
     fs::write(
@@ -79,7 +83,7 @@ pub fn built(extra: &str) -> (tempfile::TempDir, Built) {
             "local defaults = require('neotmux.defaults')\n\
              for _, name in ipairs({{ 'status', 'prefix', 'copy', 'sessions', 'palette',\n\
                'notify', 'borders', 'guard', 'sync', 'watch', 'sidebar', 'footer',\n\
-               'hints' }}) do\n\
+               'hints', 'chime' }}) do\n\
                defaults[name] = false\n\
              end\n\
              {extra}"

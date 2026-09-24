@@ -2243,13 +2243,7 @@ fn the_shipped_watcher_says_when_a_hidden_pane_is_waiting_for_you() {
     let scratch = tempfile::tempdir().expect("scratch dir");
     let trigger = scratch.path().join("go");
     let shell = triggered_shell(scratch.path(), &trigger, "Do you want to proceed? [y/N]");
-    // The chime reads the same prompt out of the same pane, and this is a real server with a
-    // real runner: left on, `cargo test` plays a sound out loud at whoever is running it.
-    let init = harness::runtime(&[(
-        "init.lua",
-        "require('neotmux.defaults').watch = true\n\
-         require('neotmux.defaults').chime = false\n",
-    )]);
+    let init = harness::runtime(&[("init.lua", "require('neotmux.defaults').watch = true\n")]);
     let mut nt = Neotmux::start_layered(
         &[init.path(), &shipped_layer()],
         shell.to_str().expect("a utf-8 path"),
@@ -2279,9 +2273,7 @@ fn the_shipped_watcher_is_off_by_default() {
     let scratch = tempfile::tempdir().expect("scratch dir");
     let trigger = scratch.path().join("go");
     let shell = triggered_shell(scratch.path(), &trigger, "Do you want to proceed? [y/N]");
-    // `chime` off for the same reason as above: this pane is about to show a prompt, and a
-    // test suite that plays sounds at you is a test suite nobody runs twice.
-    let init = harness::runtime(&[("init.lua", "require('neotmux.defaults').chime = false\n")]);
+    let init = harness::runtime(&[("init.lua", "")]);
     let mut nt = Neotmux::start_layered(
         &[init.path(), &shipped_layer()],
         shell.to_str().expect("a utf-8 path"),

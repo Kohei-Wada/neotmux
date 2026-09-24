@@ -28,6 +28,16 @@ pub fn base_command(exe: &Path, log: &Path, isolation: &Path) -> CommandBuilder 
     cmd
 }
 
+/// What every runtime this harness writes turns off before the test's own `init.lua` runs.
+///
+/// These are real servers with the real job runner, and `chime` is on by default: any pane a
+/// fixture drives into `blocked` or out of `working` spawns a player and `cargo test` makes a
+/// noise at whoever ran it. A test about the chime turns it back on for itself.
+///
+/// Under a `pcall` because not every test stacks the shipped layer behind this one, and where
+/// it is absent there is no `neotmux.defaults` to reach and nothing to silence either.
+const QUIET: &str = "pcall(function() require('neotmux.defaults').chime = false end)\n";
+
 /// Writes a small plugin runtime layout (`init.lua`, `lua/plugin/*.lua`, ...)
 /// to a fresh temp dir, suitable for `NEOTMUX_RUNTIME`.
 pub fn runtime(files: &[(&str, &str)]) -> tempfile::TempDir {
@@ -37,6 +47,10 @@ pub fn runtime(files: &[(&str, &str)]) -> tempfile::TempDir {
         if let Some(parent) = full.parent() {
             std::fs::create_dir_all(parent).expect("create runtime subdir");
         }
+        let content = match *path {
+            "init.lua" => format!("{QUIET}{content}"),
+            _ => content.to_string(),
+        };
         std::fs::write(&full, content).expect("write runtime file");
     }
     dir
