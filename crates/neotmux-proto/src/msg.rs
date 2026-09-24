@@ -5,9 +5,8 @@
 //! knows (its size, the keys it read) and is sent the picture; the frame loop is a function
 //! call inside the server.
 //!
-//! [`Tick`], [`Tock`], [`Step`], [`Read`] and [`Reading`] are the vocabulary of the frame as
-//! a conversation, from when the Lua layer was the client's. Nothing sends them now; they go
-//! out with the sweep.
+//! [`Tick`], [`Tock`] and [`Step`] are the vocabulary of the frame as a conversation, from
+//! when the Lua layer was the client's. Nothing sends them now; they go out with the sweep.
 //!
 //! Everything here is data. [`crate::wire`] turns it into bytes; who reads and writes those
 //! bytes is the socket's owner's business.
@@ -151,57 +150,6 @@ pub enum End {
     Detach,
 }
 
-/// A question the Lua layer asks about a pane's text. The panes are the server's, so these
-/// are asked across the socket — and only from inside a tick, where the server is already
-/// waiting for the answer to come back.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Read {
-    Revision {
-        pane: PaneId,
-    },
-    Content {
-        pane: PaneId,
-        last: Option<u64>,
-        want: Want,
-    },
-    HistoryExtent {
-        pane: PaneId,
-    },
-    History {
-        pane: PaneId,
-        from: u64,
-        count: u64,
-        want: Want,
-    },
-    Freeze {
-        pane: PaneId,
-    },
-    Unfreeze {
-        pane: PaneId,
-    },
-    IsFrozen {
-        pane: PaneId,
-    },
-}
-
-// Re-exported here because they are what the wire's messages carry: `msg::Lines` etc. keep
-// working as a path.
-pub use crate::read::{Extent, Lines, Want};
-
-/// The answer to a [`Read`]. `None` throughout is a pane that does not exist, which is not
-/// an error: a shell that exited between two passes of a watcher's loop is not the caller's
-/// mistake.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Reading {
-    Revision(Option<u64>),
-    Text(Option<Lines>),
-    Extent(Option<Extent>),
-    /// `freeze` and `unfreeze`, which answer whether the pane was there.
-    Did(bool),
-    /// `frozen`, which answers `nil` for a pane that is not there.
-    Frozen(Option<bool>),
-}
-
 /// Client to server.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ToServer {
@@ -210,7 +158,6 @@ pub enum ToServer {
     Key(crate::Key),
     /// The terminal changed size. The client owns the terminal, so it owns `SIGWINCH`.
     Resize(Size),
-    Read(Read),
     Tock(Tock),
     /// Not a client at all: a connection asking what sessions there are. The answer is the
     /// whole of what it wanted, and it is let go afterwards.
@@ -236,7 +183,6 @@ pub enum ToServer {
 pub enum ToClient<'a> {
     Tick(&'a Tick),
     Done(&'a Done<'a>),
-    Reading(&'a Reading),
     /// Why this connection is not getting a session: something else already has it.
     Refused(&'a str),
     /// Every session this server holds, in name order.
@@ -263,7 +209,6 @@ pub enum ToClient<'a> {
 pub enum OwnedToClient {
     Tick(Tick),
     Done(OwnedDone),
-    Reading(Reading),
     Refused(String),
     Clip(String),
     Bye(Vec<String>),

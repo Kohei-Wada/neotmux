@@ -108,7 +108,6 @@ pub fn open(link: &Rc<RefCell<Link>>, size: Size, session: String) -> anyhow::Re
             OwnedToClient::Clip(text) => yank(&text),
             OwnedToClient::Refused(why) => anyhow::bail!("{why}"),
             OwnedToClient::Tick(_)
-            | OwnedToClient::Reading(_)
             | OwnedToClient::Sessions(_)
             | OwnedToClient::Killed(_)
             | OwnedToClient::Ran { .. } => {}
@@ -206,7 +205,6 @@ pub fn run(
                 // only ever given at the door. Nothing sends any of these to a client that
                 // has attached.
                 OwnedToClient::Tick(_)
-                | OwnedToClient::Reading(_)
                 | OwnedToClient::Sessions(_)
                 | OwnedToClient::Killed(_)
                 | OwnedToClient::Ran { .. } => {}

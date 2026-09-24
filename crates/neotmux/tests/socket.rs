@@ -925,56 +925,6 @@ fn one_client_s_impossible_message_costs_that_client_and_no_other() {
     let _ = &bad;
 }
 
-/// A question one client asks about a pane is answered on that client's link, and on no
-/// other: the `Read` and the `Reading` are the two ends of the same question, and the other
-/// client had not asked it.
-#[test]
-fn a_read_is_answered_on_the_link_that_asked_it_only() {
-    let runtime = TestRuntime::new();
-    let _session = started(runtime.path());
-
-    let mut a = raw_client(&runtime);
-    let mut b = raw_client(&runtime);
-
-    send_message(
-        &mut a,
-        &neotmux_proto::wire::encode_to_server(&neotmux_proto::msg::ToServer::Read(
-            neotmux_proto::msg::Read::Revision {
-                pane: neotmux_proto::PaneId::from(1),
-            },
-        )),
-    );
-    // The frames the session keeps sending are not the answer, and not a failure either: the
-    // answer comes on this link, after whatever was already on its way to it.
-    let answered = loop {
-        if let OwnedToClient::Reading(reading) = read_message(&mut a) {
-            break reading;
-        }
-    };
-    assert!(
-        matches!(answered, neotmux_proto::msg::Reading::Revision(Some(_))),
-        "A's question is answered with the revision it asked for: {answered:?}"
-    );
-
-    // Whatever B is told from here on is the frames of a session that is alive. It must
-    // never be a `Reading`: the question was asked on A's link and on no other.
-    b.set_read_timeout(Some(Duration::from_millis(300)))
-        .expect("b takes a patience");
-    let mut len = [0u8; 4];
-    for _ in 0..8 {
-        let Ok(()) = b.read_exact(&mut len) else {
-            break;
-        };
-        let mut body = vec![0u8; usize::try_from(u32::from_le_bytes(len)).unwrap()];
-        b.read_exact(&mut body).expect("b owes a body");
-        let message = neotmux_proto::wire::decode_to_client(&body).expect("b's message decodes");
-        assert!(
-            !matches!(message, OwnedToClient::Reading(_)),
-            "the link that did not ask was answered: {message:?}"
-        );
-    }
-}
-
 /// What the whole move is for: a plugin goes on running when nobody is looking at it, and it
 /// is the same plugin — one Lua layer for the session, not one per client, so its count
 /// carries across the client that left.

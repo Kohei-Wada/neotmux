@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### The wire lost the question nobody was asking any more
+
+When the Lua layer lived in the client, a plugin reading a pane's text had to ask the
+server for it across the socket and wait for the answer to come back. The layer runs in
+the server now, beside the panes it reads, so that question has been a function call for
+several versions while the messages that used to carry it sat on the wire unsent. They are
+gone: the read, the answer, the client-side asker that spoke them, and the server's arm
+that replied. Nothing a plugin can do changes; `neotmux.pane.content` and its neighbours
+read the same terminals they were already reading.
+
+`PROTOCOL_VERSION` is now 12, because the wire's vocabulary is smaller than it was, so a
+client and a server built either side of this refuse each other by name and number rather
+than misreading a byte.
+
 ### A plugin can run a program, and ask to be called again later
 
 `neotmux.job.start` runs a program in the server and calls you back with what it said;

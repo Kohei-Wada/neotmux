@@ -153,7 +153,7 @@ impl Session {
         self.surface.size
     }
 
-    /// The pane terminals, which answer the reads the Lua layer asks across the socket.
+    /// The pane terminals, which answer the reads the Lua layer asks.
     pub fn terminals(&self) -> &Rc<PaneTerminals> {
         &self.terminals
     }

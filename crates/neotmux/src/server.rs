@@ -35,7 +35,6 @@ use neotmux::clip::Clip;
 use neotmux::link::Link;
 use neotmux::logging;
 use neotmux::plugins::{Plugins, ServerOp};
-use neotmux::reads;
 use neotmux::session::{Pass, Session, Setup};
 
 /// The frame's cadence, and so the closest together two frames can be. The same number
@@ -1148,18 +1147,6 @@ fn deliver(clients: &mut [Attached], i: usize, sessions: &mut Sessions, plugins:
                     && session.resize(size).is_err()
                 {
                     clients[i].gone = true;
-                }
-            }
-            Ok(ToServer::Read(read)) => {
-                if let Some(session) = sessions.get_mut(which) {
-                    let reading = reads::answer(session.terminals().as_ref(), read);
-                    if clients[i]
-                        .link
-                        .send(&wire::encode_to_client(&ToClient::Reading(&reading)))
-                        .is_err()
-                    {
-                        clients[i].gone = true;
-                    }
                 }
             }
             Ok(ToServer::Tock(_))

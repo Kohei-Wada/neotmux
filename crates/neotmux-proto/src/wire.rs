@@ -17,10 +17,7 @@ use std::collections::BTreeMap;
 
 use crate::frame::{Frame, OwnedFrame, OwnedPaneFrame, PaneFrame};
 use crate::keys::{Key, KeyCode, Modifiers};
-use crate::msg::{
-    Attach, End, OwnedToClient, Read, Reading, SessionOp, Step, Tick, ToClient, ToServer, Tock,
-};
-use crate::read::{Extent, Lines, Trailing, Want};
+use crate::msg::{Attach, End, OwnedToClient, SessionOp, Step, Tick, ToClient, ToServer, Tock};
 use crate::{
     Color, Dir, DrawCmd, Edge, Epoch, Event, Geometry, GridSnapshot, LineMode, PROTOCOL_VERSION,
     PaneId, PaneInfo, PaneRects, PaneTty, Rect, Reserved, Size, SnapCell, SplitDir, Window,
@@ -599,7 +596,6 @@ impl<'a> Reader<'a> {
 const TO_SERVER_ATTACH: u8 = 0;
 const TO_SERVER_KEY: u8 = 1;
 const TO_SERVER_RESIZE: u8 = 2;
-const TO_SERVER_READ: u8 = 3;
 const TO_SERVER_TOCK: u8 = 4;
 const TO_SERVER_LIST: u8 = 5;
 const TO_SERVER_KILL: u8 = 6;
@@ -607,7 +603,6 @@ const TO_SERVER_COMMAND: u8 = 7;
 
 const TO_CLIENT_TICK: u8 = 0;
 const TO_CLIENT_DONE: u8 = 1;
-const TO_CLIENT_READING: u8 = 2;
 const TO_CLIENT_REFUSED: u8 = 3;
 const TO_CLIENT_CLIP: u8 = 4;
 const TO_CLIENT_BYE: u8 = 5;
@@ -646,20 +641,6 @@ const DIR_RIGHT: u8 = 1;
 const DIR_UP: u8 = 2;
 const DIR_DOWN: u8 = 3;
 
-const READ_REVISION: u8 = 0;
-const READ_CONTENT: u8 = 1;
-const READ_HISTORY_EXTENT: u8 = 2;
-const READ_HISTORY: u8 = 3;
-const READ_FREEZE: u8 = 4;
-const READ_UNFREEZE: u8 = 5;
-const READ_IS_FROZEN: u8 = 6;
-
-const READING_REVISION: u8 = 0;
-const READING_TEXT: u8 = 1;
-const READING_EXTENT: u8 = 2;
-const READING_DID: u8 = 3;
-const READING_FROZEN: u8 = 4;
-
 const END_QUIT: u8 = 0;
 const END_EOF: u8 = 1;
 const END_DETACH: u8 = 2;
@@ -679,10 +660,6 @@ pub fn encode_to_server(msg: &ToServer) -> Vec<u8> {
         ToServer::Resize(size) => {
             w.u8(TO_SERVER_RESIZE);
             w.size(*size);
-        }
-        ToServer::Read(read) => {
-            w.u8(TO_SERVER_READ);
-            w.read(*read);
         }
         ToServer::Tock(tock) => {
             w.u8(TO_SERVER_TOCK);
@@ -720,7 +697,6 @@ pub fn decode_to_server(bytes: &[u8]) -> Result<ToServer, WireError> {
         }),
         TO_SERVER_KEY => ToServer::Key(r.key()?),
         TO_SERVER_RESIZE => ToServer::Resize(r.size()?),
-        TO_SERVER_READ => ToServer::Read(r.read()?),
         TO_SERVER_TOCK => ToServer::Tock(r.tock()?),
         TO_SERVER_LIST => ToServer::List,
         TO_SERVER_KILL => ToServer::Kill {
@@ -756,10 +732,6 @@ pub fn encode_to_client(msg: &ToClient<'_>) -> Vec<u8> {
         ToClient::Done(done) => {
             w.u8(TO_CLIENT_DONE);
             w.done(done);
-        }
-        ToClient::Reading(reading) => {
-            w.u8(TO_CLIENT_READING);
-            w.reading(reading);
         }
         ToClient::Refused(why) => {
             w.u8(TO_CLIENT_REFUSED);
@@ -804,7 +776,6 @@ pub fn decode_to_client(bytes: &[u8]) -> Result<OwnedToClient, WireError> {
     let msg = match r.u8()? {
         TO_CLIENT_TICK => OwnedToClient::Tick(r.tick()?),
         TO_CLIENT_DONE => OwnedToClient::Done(r.done()?),
-        TO_CLIENT_READING => OwnedToClient::Reading(r.reading()?),
         TO_CLIENT_REFUSED => OwnedToClient::Refused(r.string()?),
         TO_CLIENT_SESSIONS => {
             let n = r.len()?;
@@ -841,16 +812,6 @@ pub fn decode_to_client(bytes: &[u8]) -> Result<OwnedToClient, WireError> {
 impl Writer {
     fn u64(&mut self, v: u64) {
         self.bytes.extend_from_slice(&v.to_le_bytes());
-    }
-
-    fn opt_u64(&mut self, v: Option<u64>) {
-        match v {
-            None => self.bool(false),
-            Some(n) => {
-                self.bool(true);
-                self.u64(n);
-            }
-        }
     }
 
     fn opt_str(&mut self, v: Option<&str>) {
@@ -1082,113 +1043,6 @@ impl Writer {
         self.bool(v.wants_pane_output);
     }
 
-    fn read(&mut self, v: Read) {
-        match v {
-            Read::Revision { pane } => {
-                self.u8(READ_REVISION);
-                self.u32(pane.get());
-            }
-            Read::Content { pane, last, want } => {
-                self.u8(READ_CONTENT);
-                self.u32(pane.get());
-                self.opt_u64(last);
-                self.bool(matches!(want.trailing, Trailing::Pad));
-                self.bool(want.wrapped);
-            }
-            Read::HistoryExtent { pane } => {
-                self.u8(READ_HISTORY_EXTENT);
-                self.u32(pane.get());
-            }
-            Read::History {
-                pane,
-                from,
-                count,
-                want,
-            } => {
-                self.u8(READ_HISTORY);
-                self.u32(pane.get());
-                self.u64(from);
-                self.u64(count);
-                self.bool(matches!(want.trailing, Trailing::Pad));
-                self.bool(want.wrapped);
-            }
-            Read::Freeze { pane } => {
-                self.u8(READ_FREEZE);
-                self.u32(pane.get());
-            }
-            Read::Unfreeze { pane } => {
-                self.u8(READ_UNFREEZE);
-                self.u32(pane.get());
-            }
-            Read::IsFrozen { pane } => {
-                self.u8(READ_IS_FROZEN);
-                self.u32(pane.get());
-            }
-        }
-    }
-
-    fn lines(&mut self, v: &Lines) {
-        self.len(v.lines.len());
-        for line in &v.lines {
-            self.str(line);
-        }
-        match &v.wrapped {
-            None => self.bool(false),
-            Some(wrapped) => {
-                self.bool(true);
-                self.len(wrapped.len());
-                for flag in wrapped {
-                    self.bool(*flag);
-                }
-            }
-        }
-        self.u64(v.revision);
-    }
-
-    fn reading(&mut self, v: &Reading) {
-        match v {
-            Reading::Revision(revision) => {
-                self.u8(READING_REVISION);
-                self.opt_u64(*revision);
-            }
-            Reading::Text(text) => {
-                self.u8(READING_TEXT);
-                match text {
-                    None => self.bool(false),
-                    Some(text) => {
-                        self.bool(true);
-                        self.lines(text);
-                    }
-                }
-            }
-            Reading::Extent(extent) => {
-                self.u8(READING_EXTENT);
-                match extent {
-                    None => self.bool(false),
-                    Some(extent) => {
-                        self.bool(true);
-                        self.u64(extent.len);
-                        self.u64(extent.dropped);
-                    }
-                }
-            }
-            Reading::Did(did) => {
-                self.u8(READING_DID);
-                self.bool(*did);
-            }
-            Reading::Frozen(frozen) => {
-                self.u8(READING_FROZEN);
-                match frozen {
-                    None => self.bool(false),
-                    Some(frozen) => {
-                        self.bool(true);
-                        self.bool(*frozen);
-                    }
-                }
-            }
-        }
-    }
-
     fn done(&mut self, v: &crate::msg::Done<'_>) {
         self.len(v.steps.len());
         for step in &v.steps {
@@ -1235,14 +1089,6 @@ impl Reader<'_> {
         Ok(u64::from_le_bytes([
             b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
         ]))
-    }
-
-    fn opt_u64(&mut self) -> Result<Option<u64>, WireError> {
-        if self.bool()? {
-            Ok(Some(self.u64()?))
-        } else {
-            Ok(None)
-        }
     }
 
     fn opt_string(&mut self) -> Result<Option<String>, WireError> {
@@ -1483,89 +1329,6 @@ impl Reader<'_> {
             reserved: self.reserved()?,
             gutter: self.u16()?,
             wants_pane_output: self.bool()?,
-        })
-    }
-
-    fn read(&mut self) -> Result<Read, WireError> {
-        Ok(match self.u8()? {
-            READ_REVISION => Read::Revision { pane: self.pane()? },
-            READ_CONTENT => Read::Content {
-                pane: self.pane()?,
-                last: self.opt_u64()?,
-                want: Want {
-                    trailing: if self.bool()? {
-                        Trailing::Pad
-                    } else {
-                        Trailing::Trim
-                    },
-                    wrapped: self.bool()?,
-                },
-            },
-            READ_HISTORY_EXTENT => Read::HistoryExtent { pane: self.pane()? },
-            READ_HISTORY => Read::History {
-                pane: self.pane()?,
-                from: self.u64()?,
-                count: self.u64()?,
-                want: Want {
-                    trailing: if self.bool()? {
-                        Trailing::Pad
-                    } else {
-                        Trailing::Trim
-                    },
-                    wrapped: self.bool()?,
-                },
-            },
-            READ_FREEZE => Read::Freeze { pane: self.pane()? },
-            READ_UNFREEZE => Read::Unfreeze { pane: self.pane()? },
-            READ_IS_FROZEN => Read::IsFrozen { pane: self.pane()? },
-            _ => return Err(WireError::Malformed("read discriminant")),
-        })
-    }
-
-    fn lines(&mut self) -> Result<Lines, WireError> {
-        let mut lines = Vec::new();
-        for _ in 0..self.len()? {
-            lines.push(self.string()?);
-        }
-        let wrapped = if self.bool()? {
-            let mut flags = Vec::new();
-            for _ in 0..self.len()? {
-                flags.push(self.bool()?);
-            }
-            Some(flags)
-        } else {
-            None
-        };
-        Ok(Lines {
-            lines,
-            wrapped,
-            revision: self.u64()?,
-        })
-    }
-
-    fn reading(&mut self) -> Result<Reading, WireError> {
-        Ok(match self.u8()? {
-            READING_REVISION => Reading::Revision(self.opt_u64()?),
-            READING_TEXT => Reading::Text(if self.bool()? {
-                Some(self.lines()?)
-            } else {
-                None
-            }),
-            READING_EXTENT => Reading::Extent(if self.bool()? {
-                Some(Extent {
-                    len: self.u64()?,
-                    dropped: self.u64()?,
-                })
-            } else {
-                None
-            }),
-            READING_DID => Reading::Did(self.bool()?),
-            READING_FROZEN => Reading::Frozen(if self.bool()? {
-                Some(self.bool()?)
-            } else {
-                None
-            }),
-            _ => return Err(WireError::Malformed("reading discriminant")),
         })
     }
 
@@ -2059,112 +1822,9 @@ mod tests {
     }
 
     #[test]
-    fn a_key_a_resize_and_every_read_round_trip() {
+    fn a_key_and_a_resize_round_trip() {
         round_trip_to_server(ToServer::Key(Key::plain(KeyCode::Char('q'))));
         round_trip_to_server(ToServer::Resize(Size { rows: 3, cols: 9 }));
-        for read in [
-            Read::Revision {
-                pane: PaneId::from(1),
-            },
-            Read::Content {
-                pane: PaneId::from(1),
-                last: Some(4),
-                want: Want {
-                    trailing: Trailing::Pad,
-                    wrapped: false,
-                },
-            },
-            Read::Content {
-                pane: PaneId::from(1),
-                last: None,
-                want: Want {
-                    trailing: Trailing::Trim,
-                    wrapped: true,
-                },
-            },
-            Read::HistoryExtent {
-                pane: PaneId::from(2),
-            },
-            Read::History {
-                pane: PaneId::from(2),
-                from: 3,
-                count: u64::MAX,
-                want: Want {
-                    trailing: Trailing::Trim,
-                    wrapped: true,
-                },
-            },
-            Read::Freeze {
-                pane: PaneId::from(3),
-            },
-            Read::Unfreeze {
-                pane: PaneId::from(3),
-            },
-            Read::IsFrozen {
-                pane: PaneId::from(3),
-            },
-        ] {
-            round_trip_to_server(ToServer::Read(read));
-        }
-    }
-
-    /// The bytes did not move when `pad: bool, wrapped: bool` became `want: Want`.
-    ///
-    /// A `Trailing` has two variants, so it encodes as the one byte the `pad` bool encoded as,
-    /// and `Want` is that byte followed by the `wrapped` byte — the order the two were already
-    /// written in. The fixture is the encoding as it was before the change, recorded by hand, so
-    /// that this is a claim about bytes and not about the code that produces them: if it fails,
-    /// `PROTOCOL_VERSION` moves and the design's §4 is wrong.
-    #[test]
-    fn a_content_read_encodes_the_bytes_it_encoded_before_want() {
-        let read = Read::Content {
-            pane: PaneId::from(7),
-            last: Some(3),
-            want: Want {
-                trailing: Trailing::Pad,
-                wrapped: false,
-            },
-        };
-        let encoded = encode_to_server(&ToServer::Read(read));
-
-        // pad = true, wrapped = false — the last two bytes of the message, unchanged.
-        assert_eq!(
-            &encoded[encoded.len() - 2..],
-            &[1, 0],
-            "the two option bytes moved: {encoded:?}"
-        );
-        assert_eq!(
-            decode_to_server(&encoded).expect("decodes"),
-            ToServer::Read(read)
-        );
-    }
-
-    /// `Read::History`'s encode arm changed identically to `Read::Content`'s; `Trailing::Trim`
-    /// and `wrapped: true` make its fixture `[0, 1]`, the opposite of `Content`'s `[1, 0]`
-    /// above, so a copy-paste error between the two arms fails this rather than passing it.
-    #[test]
-    fn a_history_read_encodes_the_bytes_it_encoded_before_want() {
-        let read = Read::History {
-            pane: PaneId::from(7),
-            from: 3,
-            count: 5,
-            want: Want {
-                trailing: Trailing::Trim,
-                wrapped: true,
-            },
-        };
-        let encoded = encode_to_server(&ToServer::Read(read));
-
-        // pad = false, wrapped = true — the last two bytes of the message, unchanged.
-        assert_eq!(
-            &encoded[encoded.len() - 2..],
-            &[0, 1],
-            "the two option bytes moved: {encoded:?}"
-        );
-        assert_eq!(
-            decode_to_server(&encoded).expect("decodes"),
-            ToServer::Read(read)
-        );
     }
 
     #[test]
@@ -2357,28 +2017,6 @@ mod tests {
                     frame: None,
                     end,
                 }))
-            );
-        }
-
-        for reading in [
-            Reading::Revision(Some(12)),
-            Reading::Revision(None),
-            Reading::Text(Some(Lines {
-                lines: vec!["one".to_string(), "two".to_string()],
-                wrapped: Some(vec![true, false]),
-                revision: 3,
-            })),
-            Reading::Text(None),
-            Reading::Extent(Some(Extent { len: 4, dropped: 1 })),
-            Reading::Extent(None),
-            Reading::Did(true),
-            Reading::Frozen(Some(false)),
-            Reading::Frozen(None),
-        ] {
-            let bytes = encode_to_client(&ToClient::Reading(&reading));
-            assert_eq!(
-                decode_to_client(&bytes),
-                Ok(OwnedToClient::Reading(reading))
             );
         }
 

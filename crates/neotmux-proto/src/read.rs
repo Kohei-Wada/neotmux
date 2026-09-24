@@ -1,14 +1,13 @@
 //! Asking a pane for its text, and what comes back.
 //!
-//! One vocabulary, not two. These are the types the Lua layer names, the types
-//! [`crate::msg::Read`] and [`crate::msg::Reading`] carry across the socket, and the types
-//! the local terminals answer in — which is §2.1's rule about the frame ("one definition
-//! each, no conversion layer") applied to the reads, where it had not been.
+//! One vocabulary, not two. These are the types the Lua layer names and the types the
+//! terminals answer in — which is §2.1's rule about the frame ("one definition each, no
+//! conversion layer") applied to the reads, where it had not been.
 //!
-//! [`PaneRead`] is here rather than beside either implementation because a contract belongs
-//! in the lowest crate that both its consumer and every one of its implementors can see. The
-//! consumer is the Lua layer; the implementors are the session's own terminals and, in the
-//! client, a stand-in that asks the socket. Nothing below this crate is common to all three.
+//! [`PaneRead`] is here rather than beside its implementation because a contract belongs in
+//! the lowest crate that both its consumer and its implementor can see. The consumer is the
+//! Lua layer; the implementor is the session's own terminals. Nothing below this crate is
+//! common to both.
 
 use crate::PaneId;
 
@@ -57,12 +56,11 @@ pub struct Extent {
     pub dropped: u64,
 }
 
-/// Reading a pane's text, from wherever the pane's terminal happens to be.
+/// Reading a pane's text.
 ///
-/// `neotmux-term`'s `PaneTerminals` is the local answer, and the one the session holds. The
-/// Lua layer runs in the process with the screen rather than the one with the panes, so its
-/// reads are answered across a socket instead — same questions, a different distance, and
-/// since M4 the same types either way.
+/// `neotmux-term`'s `PaneTerminals` answers it, and the session holds it. The Lua layer runs
+/// in the server, beside the panes, so a read is a function call; the trait is what keeps
+/// the Lua crate from having to know a terminal.
 pub trait PaneRead {
     fn revision(&self, pane: PaneId) -> Option<u64>;
     fn content(&self, pane: PaneId, last: Option<u64>, want: Want) -> Option<Lines>;

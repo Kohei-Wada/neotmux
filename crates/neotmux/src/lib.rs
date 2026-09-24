@@ -18,7 +18,6 @@ pub mod link;
 pub mod logging;
 pub mod notify;
 pub mod plugins;
-pub mod reads;
 pub mod runner;
 pub mod session;
 pub mod sock;
