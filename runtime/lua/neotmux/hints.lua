@@ -30,7 +30,9 @@
 -- targets to letter them singly, two when there are not; a target never gets a label another
 -- target's label is a prefix of, which two-character labels get for free here since this
 -- module never mixes the two lengths in one session. Nearest targets get the shortest labels:
--- the focused pane first, then the row closest to the top of the screen.
+-- the focused pane first, then the row closest to the top of the screen. Past `#M.keys ^ 2`
+-- targets there are no labels left to give out; the farthest ones are left unlabelled rather
+-- than handed a label that collides with another's.
 local modes = require("neotmux.mode")
 
 local M = {}
@@ -112,6 +114,45 @@ function M.finders.ip(line)
   return scan(line, "%d+%.%d+%.%d+%.%d+:?%d*")
 end
 
+-- One target where two or more finders read the same stretch of the line — `/home/user/abc123`
+-- is a whole path to `path` and a hash to `hash`, both true, but a person picking between them
+-- should not have to. Longest span wins; anything another kept hit's span fully contains is
+-- dropped, so the label goes on the one that reads as "the whole thing" rather than a piece of
+-- it. Two spans of the same length that do not contain one another — different stretches of
+-- the line — both keep their target.
+local function drop_contained(hits)
+  local by_length = {}
+  for i, hit in ipairs(hits) do
+    by_length[i] = hit
+  end
+  table.sort(by_length, function(a, b)
+    return neotmux.width(a.text) > neotmux.width(b.text)
+  end)
+  local kept = {}
+  for _, hit in ipairs(by_length) do
+    local start = hit.col
+    local stop = hit.col + neotmux.width(hit.text)
+    local contained = false
+    for _, k in ipairs(kept) do
+      if start >= k.start and stop <= k.stop then
+        contained = true
+        break
+      end
+    end
+    if not contained then
+      kept[#kept + 1] = { start = start, stop = stop, hit = hit }
+    end
+  end
+  local out = {}
+  for _, k in ipairs(kept) do
+    out[#out + 1] = k.hit
+  end
+  table.sort(out, function(a, b)
+    return a.col < b.col
+  end)
+  return out
+end
+
 -- The state of the one session that may be open, and nil the rest of the time. `state.generation`
 -- names which `open()` this state belongs to, the same as `neotmux.list`'s.
 local state = nil
@@ -182,15 +223,19 @@ local function gather(opts)
         end
       else
         for row, line in ipairs(lines) do
+          local hits = {}
           for _, finder in ipairs(finder_fns) do
-            local ok, hits = pcall(finder, line)
+            local ok, found_hits = pcall(finder, line)
             if not ok then
-              return nil, "find", hits
+              return nil, "find", found_hits
             end
-            for _, hit in ipairs(hits or {}) do
-              found[#found + 1] =
-                { pane = pane, line = row - 1, col = hit.col, text = hit.text }
+            for _, hit in ipairs(found_hits or {}) do
+              hits[#hits + 1] = hit
             end
+          end
+          for _, hit in ipairs(drop_contained(hits)) do
+            found[#found + 1] =
+              { pane = pane, line = row - 1, col = hit.col, text = hit.text }
           end
         end
       end
@@ -388,12 +433,15 @@ function M.open(opts)
 
   -- Frozen once per pane, and only where it was not already: copy mode, or an earlier hint
   -- session, may have gotten there first, and this session must not be the one that thaws it.
+  -- `freeze` answers `true` for any pane that exists, frozen or not already — it is `frozen`
+  -- that says which, and it has to be asked before `freeze` runs and makes the question moot.
   local frozen = {}
   local seen = {}
   for _, hit in ipairs(found) do
     if not seen[hit.pane] then
       seen[hit.pane] = true
-      if neotmux.pane.freeze(hit.pane) then
+      local already = neotmux.pane.frozen(hit.pane)
+      if not already and neotmux.pane.freeze(hit.pane) then
         frozen[hit.pane] = true
       end
     end

@@ -43,6 +43,10 @@ fn trigger(opts: &str) -> String {
              neotmux.log.info('frozen=' .. tostring(neotmux.pane.frozen(1)))\n\
              return true\n\
            end\n\
+           if key == 'Z' then\n\
+             neotmux.pane.freeze(1)\n\
+             return true\n\
+           end\n\
            return false\n\
          end)\n"
     )
@@ -59,6 +63,17 @@ fn default_trigger() -> String {
            end,\n\
            cancel = function()\n\
              neotmux.log.info('cancelled')\n\
+           end,\n\
+         }",
+    )
+}
+
+/// A trigger whose `done` always raises, for the close path that goes through `fail`.
+fn raising_trigger() -> String {
+    trigger(
+        "{\n\
+           done = function(target)\n\
+             error('boom')\n\
            end,\n\
          }",
     )
@@ -354,5 +369,144 @@ fn a_caller_supplied_find_replaces_the_built_in_ones() {
     assert!(
         said.iter().any(|line| line == "done text=[CUSTOM]"),
         "{said:?}"
+    );
+}
+
+/// A path and a hash can both be true of the same stretch of a line — `hash` reads
+/// `/home/user/1234567890abcdef`'s last segment as a hex run on its own — but a person picking
+/// between them should not have to. The longer span, the whole path, keeps the label.
+#[test]
+fn a_target_inside_another_targets_span_does_not_get_its_own_label() {
+    let (_dir, sub) = built(&default_trigger());
+    feed(&sub, b"look at /home/user/1234567890abcdef amount");
+    open(&sub);
+    let marks = labels(&frame(&sub));
+    assert_eq!(
+        marks.len(),
+        1,
+        "the path and the hash inside it both got labelled: {marks:?}"
+    );
+    // "look at " is eight columns, ascii, so the path starts at column 8.
+    assert_eq!(marks[0].0, 8);
+}
+
+/// The same overlap between `url` and `ip`: `192.168.1.1:8080` inside
+/// `http://192.168.1.1:8080/status` is a whole url to one finder and an ip to the other.
+#[test]
+fn a_url_and_the_ip_address_inside_it_do_not_both_get_labelled() {
+    let (_dir, sub) = built(&default_trigger());
+    feed(&sub, b"curl http://192.168.1.1:8080/status");
+    open(&sub);
+    let marks = labels(&frame(&sub));
+    assert_eq!(
+        marks.len(),
+        1,
+        "the url and the ip inside it both got labelled: {marks:?}"
+    );
+    // "curl " is five columns, so the url starts at column 5.
+    assert_eq!(marks[0].0, 5);
+}
+
+/// `neotmux.pane.freeze` answers `true` for any pane that exists, frozen already or not — it
+/// is `neotmux.pane.frozen` that says which. A module that branches on `freeze`'s own answer
+/// marks a pane copy mode (or anything else) had already frozen as one it froze itself, and
+/// then thaws it on the way out — exactly the bug ruling 1 was written against. Covers all
+/// three ways a session ends: a label typed, Esc, and a raising `done` that reaches `fail`.
+#[test]
+fn a_pane_frozen_before_hints_opened_stays_frozen_after_hints_closes_any_way() {
+    // Closed by typing a label.
+    {
+        let (_dir, sub) = built(&default_trigger());
+        feed(&sub, b"http://example.com");
+        keys(&sub, &["Z"]);
+        open(&sub);
+        let marks = labels(&frame(&sub));
+        assert_eq!(marks.len(), 1, "{marks:?}");
+        keys(&sub, &[&marks[0].2]);
+        keys(&sub, &["F"]);
+        assert!(
+            logged(&sub).iter().any(|line| line == "frozen=true"),
+            "hints thawed a pane it did not freeze, picking a label"
+        );
+    }
+
+    // Closed by Esc.
+    {
+        let (_dir, sub) = built(&default_trigger());
+        feed(&sub, b"http://example.com");
+        keys(&sub, &["Z"]);
+        open(&sub);
+        keys(&sub, &["Esc"]);
+        keys(&sub, &["F"]);
+        assert!(
+            logged(&sub).iter().any(|line| line == "frozen=true"),
+            "hints thawed a pane it did not freeze, on Esc"
+        );
+    }
+
+    // Closed through `fail`, by a `done` that raises.
+    {
+        let (_dir, sub) = built(&raising_trigger());
+        feed(&sub, b"http://example.com");
+        keys(&sub, &["Z"]);
+        open(&sub);
+        let marks = labels(&frame(&sub));
+        assert_eq!(marks.len(), 1, "{marks:?}");
+        keys(&sub, &[&marks[0].2]);
+        let said = logged(&sub);
+        assert!(
+            said.iter()
+                .any(|line| line.starts_with("neotmux.hints: done:") && line.contains("boom")),
+            "the raising done was not reported: {said:?}"
+        );
+        keys(&sub, &["F"]);
+        assert!(
+            logged(&sub).iter().any(|line| line == "frozen=true"),
+            "hints thawed a pane it did not freeze, on a raising done"
+        );
+    }
+}
+
+/// A pane can leave the layout while hints are up — closed, or moved to a window nobody is
+/// looking at. Neither the tick, which asks `ctx:pane_rect` for a pane that is no longer in
+/// it, nor closing the session afterwards, is the pane's problem to have caused.
+#[test]
+fn a_pane_removed_from_the_layout_mid_session_does_not_stop_hints_closing_cleanly() {
+    let (_dir, sub) = built(&default_trigger());
+    feed(&sub, b"http://example.com");
+    open(&sub);
+    assert!(!labels(&frame(&sub)).is_empty());
+
+    sub.republish_geometry(
+        support::one(),
+        Geometry {
+            area: Rect::new(0, 0, SIZE.cols, SIZE.rows),
+            panes: vec![],
+            focus: None,
+            ..Default::default()
+        },
+    );
+
+    let cmds = frame(&sub);
+    assert!(
+        labels(&cmds).is_empty(),
+        "a label was drawn for a pane no longer in the layout: {cmds:?}"
+    );
+    assert!(
+        !logged(&sub)
+            .iter()
+            .any(|line| line.starts_with("neotmux.hints:")),
+        "the tick over a removed pane raised"
+    );
+
+    assert_eq!(
+        sub.dispatch_key(support::one(), "Esc"),
+        KeyOutcome::Consumed
+    );
+    let said = logged(&sub);
+    assert!(said.iter().any(|line| line == "cancelled"), "{said:?}");
+    assert!(
+        !said.iter().any(|line| line.starts_with("neotmux.hints:")),
+        "closing over a removed pane raised: {said:?}"
     );
 }
