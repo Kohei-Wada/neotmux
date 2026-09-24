@@ -11,6 +11,7 @@ pub mod pane;
 pub(crate) mod rect;
 pub mod reserve;
 pub mod session;
+pub mod timer;
 pub mod window;
 
 use std::cell::{Cell, RefCell};
@@ -52,6 +53,7 @@ pub(crate) struct Shared {
     pub(crate) panes: Rc<dyn PaneRead>,
     pub(crate) clipboard: Rc<dyn crate::clipboard::Clipboard>,
     pub(crate) jobs: Rc<crate::jobs::Jobs>,
+    pub(crate) timers: Rc<crate::timers::Timers>,
     pub(crate) overrun: Rc<Overrun>,
     pub(crate) reservations: Rc<Reservations>,
     pub(crate) window_ids: Rc<WindowIds>,
@@ -202,6 +204,7 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
         panes,
         clipboard,
         jobs,
+        timers,
         overrun,
         reservations,
         window_ids,
@@ -484,6 +487,12 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
         let job = job::install(lua, jobs, sources.clone(), ambient.clone(), opts.clone())?;
         let job = seal(lua, job, "neotmux.job")?;
         neotmux.set("job", job)?;
+    }
+
+    {
+        let timer = timer::install(lua, timers, sources.clone(), ambient.clone())?;
+        let timer = seal(lua, timer, "neotmux.timer")?;
+        neotmux.set("timer", timer)?;
     }
 
     let neotmux = seal(lua, neotmux, "neotmux")?;

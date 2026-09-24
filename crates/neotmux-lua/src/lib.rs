@@ -14,6 +14,7 @@ pub mod reserve;
 pub mod runner;
 pub mod runtime;
 pub mod source;
+pub mod timers;
 pub mod vm;
 pub mod window;
 
@@ -21,7 +22,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::fs;
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use mlua::chunk::ChunkMode;
 use mlua::{Function, Lua, Value};
@@ -52,6 +53,7 @@ use reserve::Reservations;
 use runner::Runner;
 use runtime::Layers;
 use source::{SourceId, Sources};
+use timers::Timers;
 use window::WindowIds;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -116,6 +118,7 @@ pub struct LuaSubsystem {
     window_ids: Rc<WindowIds>,
     floats: Rc<Floats>,
     jobs: Rc<Jobs>,
+    timers: Rc<Timers>,
 }
 
 impl LuaSubsystem {
@@ -172,6 +175,7 @@ impl LuaSubsystem {
         let buffers = Rc::new(Buffers::new());
 
         let jobs = Rc::new(Jobs::new(runner));
+        let timers = Rc::new(Timers::default());
         let overrun = Rc::new(Overrun::new());
         let budget = Budget::new(opts.clone());
         Budget::seal(&lua, &budget).map_err(|err| anyhow::anyhow!("{err:#}"))?;
@@ -193,6 +197,7 @@ impl LuaSubsystem {
                 panes,
                 clipboard,
                 jobs: jobs.clone(),
+                timers: timers.clone(),
                 overrun: overrun.clone(),
                 reservations: reservations.clone(),
                 window_ids: window_ids.clone(),
@@ -225,6 +230,7 @@ impl LuaSubsystem {
             window_ids,
             floats,
             jobs,
+            timers,
         })
     }
 
@@ -373,6 +379,25 @@ impl LuaSubsystem {
         let _bound = self.ambient.bind(session);
         for delivery in deliveries {
             self.run_delivery(delivery);
+        }
+    }
+
+    /// The timers this session owes a call at `now`, before the tick that will draw what they
+    /// changed. The instant is the caller's rather than read here, so that every timer in a
+    /// frame is judged against the one moment the frame happened at.
+    pub fn dispatch_timers(&self, session: SessionId, now: Instant) {
+        let due = self.timers.due(session, now);
+        if due.is_empty() {
+            return;
+        }
+        let _bound = self.ambient.bind(session);
+        for timer in due {
+            // The whole due list was taken before any of it ran, so a callback that stopped a
+            // later timer — or itself, if it is repeating — has to be honoured here.
+            if !self.timers.is_armed(timer.timer) {
+                continue;
+            }
+            self.run_job_callback(timer.owner, &timer.callback, ());
         }
     }
 
