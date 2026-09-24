@@ -1,7 +1,7 @@
 -- The session picker: every session there is, which one you are in, what each is running —
 -- and a way to make one, go to one, or end one.
 --
---   C-b s       open it, again to leave without choosing
+--   C-b s       open it
 --   j k         the cursor, one row
 --   Enter       go to the session under the cursor
 --   c           make one: type a name, Enter to make it and go there, Esc to think again
@@ -11,7 +11,8 @@
 --
 -- A composition on `neotmux.list`: the float, the cursor, the scrolling and the caret are
 -- that module's. What is left here is what makes this list a session picker rather than any
--- other one — what a row says, and what `Enter`, `c`, `r` and `d` do.
+-- other one — what a row says, and what `Enter`, `c`, `r` and `d` do. The frame, the cursor row
+-- and the caret are coloured through `require('neotmux.list').colors`, not this file's.
 local list = require("neotmux.list")
 local pane_state = require("neotmux.state")
 
@@ -82,23 +83,13 @@ local function row(name)
   return runs
 end
 
--- The list up right now, or nil the rest of the time — kept so a second `open()` while one is
--- already up closes it, the same toggle `C-b s` has always been.
-local handle = nil
-
 function M.open()
-  if handle and handle:selected() ~= nil then
-    handle:close()
-    handle = nil
-    return
-  end
-
   -- Names ended since this open that the host has not caught up with yet: `d` reads like it
   -- worked at once, the same as it always has, rather than waiting a frame for the list it
   -- came from to change out from under it.
   local killed = {}
 
-  handle = list.open({
+  list.open({
     title = "sessions",
     mode = "sessions",
     width = M.width,

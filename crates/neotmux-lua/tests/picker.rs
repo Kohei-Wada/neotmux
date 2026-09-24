@@ -37,6 +37,14 @@ neotmux.on_key(function(key)
 end)
 ";
 
+/// `plugin.prefix` itself, wired to `plugin.sessions` the way a real `init.lua` would: needed
+/// only by the test that pins what a real `C-b s` does, since every other test here opens the
+/// picker through its own stand-in key.
+const WITH_PREFIX: &str = "
+require('plugin.prefix')
+require('plugin.sessions')
+";
+
 fn built(init: &str) -> (tempfile::TempDir, Built) {
     let dir = tempfile::tempdir().unwrap();
     fs::write(dir.path().join("init.lua"), init).unwrap();
@@ -281,6 +289,33 @@ fn d_is_refused_on_the_current_session() {
         "the current session was killed"
     );
     assert!(!frame(&sub).is_empty(), "the picker closed after a kill");
+}
+
+/// A second `C-b s` while the picker is up changes nothing: the picker is a float, and its own
+/// key handler is offered before `plugin.prefix`'s and swallows every key while it is up, `C-b`
+/// included — so `C-b` never re-arms the prefix and `s` never reaches it either. This is not a
+/// regression from the rebuild: the old picker was a float with the same all-consuming key
+/// handler and never closed on a second `C-b s` either. `Esc` is what leaves it, the same as
+/// every other modal float here.
+#[test]
+fn a_second_c_b_s_does_nothing_while_the_picker_is_up_and_esc_still_closes_it() {
+    let (_dir, sub) = built(WITH_PREFIX);
+    two_sessions(&sub);
+    keys(&sub, &["C-b", "s"]);
+    assert!(!frame(&sub).is_empty(), "the picker did not open on C-b s");
+
+    keys(&sub, &["C-b", "s"]);
+    assert!(
+        session_ops(&sub).is_empty(),
+        "a second C-b s raised a session op"
+    );
+    assert!(!frame(&sub).is_empty(), "a second C-b s closed the picker");
+
+    assert_eq!(
+        sub.dispatch_key(support::one(), "Esc"),
+        KeyOutcome::Consumed
+    );
+    assert!(frame(&sub).is_empty(), "Esc did not close the picker");
 }
 
 /// `Esc` and `q` both close the picker with no session op raised.
