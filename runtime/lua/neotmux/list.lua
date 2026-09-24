@@ -20,6 +20,25 @@
 -- A stack of lists has no consumer here. `on_key` and `on_tick` are armed the first time a
 -- list opens, the way `neotmux.guard` arms itself — a layer that requires this file and never
 -- opens a list holds no subscription for it.
+--
+-- `input = true` turns the line at the bottom on: every printable key joins a query,
+-- `C-j`/`C-k` move the cursor instead of the plain `j`/`k`, and `handle:query()` reads what
+-- has been typed. `filter` is a separate, optional predicate — `function(item, query) return
+-- ... end` — that narrows `items()` by that query. A list can take `input` with no `filter`
+-- (the query is there to read; nothing narrows because of it — see `plugin.palette`, which
+-- ranks inside `items` itself against `handle:query()`) or `filter` with no `input`, which then
+-- does nothing on its own: there is no query for it to be handed.
+--
+-- A few combinations are quiet rather than refused, worth knowing rather than discovering:
+-- `input` takes the last row, so `footer` never draws while it is on; a key claimed in `keys`
+-- steals that character away from the query instead of it being typed; `q` is only a cancel
+-- when there is no input line, since a filtered list needs the letter as text; and while `ask`
+-- is up it replaces and freezes the query line, so nothing typed then reaches `filter`.
+--
+-- `items`, `row` and `filter` are the caller's code, charged to this module's own tick budget
+-- — `neotmux/list` — so a slow one parks every list in the process until
+-- `neotmux.resubscribe('neotmux/list')` restores it. A raising `items` closes the list instead
+-- of leaving it stuck: `on_key` and `on_tick` each guard their own call to it.
 local modes = require("neotmux.mode")
 local box = require("neotmux.box")
 
@@ -59,9 +78,27 @@ local function close()
   state = nil
 end
 
+-- `text` cut to at most `room` columns, on a character boundary — `neotmux.width`, never `#`,
+-- since a run can hold a wide character and a byte count would cut one in half.
+local function truncate(text, room)
+  if neotmux.width(text) <= room then
+    return text
+  end
+  local out = ""
+  for _, code in utf8.codes(text) do
+    local ch = utf8.char(code)
+    if neotmux.width(out .. ch) > room then
+      break
+    end
+    out = out .. ch
+  end
+  return out
+end
+
 -- Draws one row of runs, left to right from `x`, clipped to `limit` columns rather than
 -- allowed to run past the frame into somebody else's cells. Columns are `neotmux.width`,
--- never `#`: a run can hold a wide character.
+-- never `#`: a run can hold a wide character. A run longer than the room left is truncated to
+-- it, not merely refused — the frame is the caller's, not a run's to paint over.
 local function draw_runs(ctx, target, x, y, limit, runs, bg)
   local at = x
   for _, run in ipairs(runs) do
@@ -69,7 +106,7 @@ local function draw_runs(ctx, target, x, y, limit, runs, bg)
     if room <= 0 then
       break
     end
-    local text = run.text or ""
+    local text = truncate(run.text or "", room)
     ctx:text(target, at, y, text, { fg = run.fg, bg = run.bg or bg })
     at = at + neotmux.width(text)
   end
@@ -79,7 +116,7 @@ end
 -- the cursor is clamped to whatever is there now rather than to what was there on the way in.
 local function refresh()
   local items = state.opts.items() or {}
-  if state.query then
+  if state.query and state.opts.filter then
     local filter = state.opts.filter
     local kept = {}
     for _, item in ipairs(items) do
@@ -116,26 +153,41 @@ local function window_over(count, rows, at)
   return first
 end
 
+-- `M.commands` is exported so `M.keys` can name an entry by string, the same shape
+-- `plugin.copy` uses — but nothing stops it being called with no list open, so every entry is a
+-- no-op then rather than indexing `state` when it is `nil`.
 M.commands = {
   ["down"] = function()
+    if not state then
+      return
+    end
     state.at = state.at + 1
     if state.at > #state.items then
       state.at = 1
     end
   end,
   ["up"] = function()
+    if not state then
+      return
+    end
     state.at = state.at - 1
     if state.at < 1 then
       state.at = #state.items
     end
   end,
   ["choose"] = function()
+    if not state then
+      return
+    end
     local item = state.items[state.at]
     if item and state.opts.done then
       state.opts.done(item, state.handle)
     end
   end,
   ["cancel"] = function()
+    if not state then
+      return
+    end
     local cancel = state.opts.cancel
     close()
     if cancel then
@@ -185,6 +237,14 @@ end
 
 local registered = false
 
+-- Closes a list whose caller's code just raised, and says why rather than leaving the float
+-- stuck open with nothing able to reach it: `items()`, `row()` and `filter()` are the caller's,
+-- not this module's, and a bug in one of them is not a reason a person can no longer press Esc.
+local function fail(err)
+  close()
+  neotmux.notify("error", "neotmux.list: " .. tostring(err))
+end
+
 local function arm()
   if registered then
     return
@@ -199,13 +259,19 @@ local function arm()
       typing(key)
       return true
     end
-    refresh()
-    if key == "Enter" then
-      M.commands.choose()
-      return true
-    end
+    -- Esc is handled before `refresh()` — before any caller code runs at all — so a list is
+    -- always dismissable even when `items()` is the thing that is broken.
     if key == "Esc" then
       M.commands.cancel()
+      return true
+    end
+    local ok, err = pcall(refresh)
+    if not ok then
+      fail(err)
+      return true
+    end
+    if key == "Enter" then
+      M.commands.choose()
       return true
     end
     local extra = state.opts.keys[key]
@@ -213,10 +279,10 @@ local function arm()
       extra(state.items[state.at], state.handle)
       return true
     end
-    if state.opts.filter then
-      -- A filtered list is typed into rather than moved through by letter: `j` and `k` are
-      -- characters a query may hold, so movement while filtering is `C-j`/`C-k` instead —
-      -- nothing above claims those, and nothing here changes what a filter-less list does
+    if state.opts.input then
+      -- A list with `input` on is typed into rather than moved through by letter: `j` and `k`
+      -- are characters a query may hold, so movement while typing is `C-j`/`C-k` instead —
+      -- nothing above claims those, and nothing here changes what an `input`-less list does
       -- with a plain `j`/`k`.
       if key == "C-j" then
         M.commands.down()
@@ -261,7 +327,11 @@ local function arm()
     if state == nil or win == nil then
       return
     end
-    refresh()
+    local ok, err = pcall(refresh)
+    if not ok then
+      fail(err)
+      return
+    end
     local rect = ctx:float_rect(win)
     if rect == nil then
       return
@@ -307,7 +377,7 @@ local function arm()
         1,
         { bg = M.colors.caret }
       )
-    elseif state.opts.filter then
+    elseif state.opts.input then
       ctx:text(win, inner.x, last, "/ " .. (state.query or ""), {
         fg = M.colors.text,
         bg = M.colors.frame,
@@ -331,8 +401,8 @@ end
 
 -- `j`/`k` and nothing else: every mode neotmux ships moves with the vim four, so a hand that
 -- has learned one has learned all of them. `q` is with them here rather than beside `Esc` in
--- the key handler, because a filtered list gives `q` back to the query text — the search is
--- what the letter belongs to once there is one to type into.
+-- the key handler, because a list with `input` on gives `q` back to the query text — the
+-- search is what the letter belongs to once there is one to type into.
 M.keys = {
   ["j"] = "down",
   ["k"] = "up",
@@ -392,7 +462,7 @@ function M.open(opts)
     items = {},
     first = 1,
     input = nil,
-    query = opts.filter and "" or nil,
+    query = opts.input and "" or nil,
     opts = {
       title = opts.title,
       width = opts.width or 40,
@@ -404,9 +474,14 @@ function M.open(opts)
       done = opts.done,
       cancel = opts.cancel,
       filter = opts.filter,
+      input = opts.input,
     },
   }
-  refresh()
+  local ok, err = pcall(refresh)
+  if not ok then
+    fail(err)
+    return nil
+  end
   local float = neotmux.float(wanted())
   if not float then
     state = nil

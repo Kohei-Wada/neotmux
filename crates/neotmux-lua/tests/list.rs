@@ -347,6 +347,7 @@ neotmux.on_key(function(key)
       items = function() return { 'jam', 'jar', 'cherry' } end,
       row = function(item) return { { text = item } } end,
       done = function(item) neotmux.log.info('chosen=' .. item) end,
+      input = true,
       filter = function(item, query) return item:find(query, 1, true) ~= nil end,
     })
     return true
@@ -460,7 +461,8 @@ end)
     assert!(said.iter().any(|line| line == "typed=abc"), "{said:?}");
 }
 
-/// `filter` turns the input line on for the life of the list and narrows what is drawn.
+/// `input` turns the query line on for the life of the list, and `filter` alongside it narrows
+/// what is drawn.
 #[test]
 fn a_filtered_list_narrows_as_it_is_typed_into() {
     let (_dir, sub) = built(
@@ -472,6 +474,7 @@ neotmux.on_key(function(key)
       items = function() return { 'apple', 'banana', 'cherry' } end,
       row = function(item) return { { text = item } } end,
       done = function() end,
+      input = true,
       filter = function(item, query) return item:find(query, 1, true) ~= nil end,
     })
     return true
@@ -499,5 +502,215 @@ end)
     assert!(
         !said.iter().any(|t| t.contains("cherry")),
         "cherry survived a query it does not match: {said:?}"
+    );
+}
+
+/// `input` alone, with no `filter`, turns the query line on but narrows nothing: every item
+/// stays drawn no matter what is typed, the way `plugin.palette` relies on when it ranks
+/// inside `items` itself.
+#[test]
+fn input_alone_turns_on_the_query_without_narrowing() {
+    let (_dir, sub) = built(
+        "
+local list = require('neotmux.list')
+neotmux.on_key(function(key)
+  if key == 'o' then
+    list.open({
+      items = function() return { 'apple', 'banana', 'cherry' } end,
+      row = function(item) return { { text = item } } end,
+      done = function() end,
+      input = true,
+    })
+    return true
+  end
+  return false
+end)
+",
+    );
+    assert_eq!(sub.dispatch_key(support::one(), "o"), KeyOutcome::Consumed);
+    keys(&sub, &["z"]);
+    let said = texts(&frame(&sub));
+    assert!(
+        said.iter().any(|t| t == "/ z"),
+        "the query did not show `z`: {said:?}"
+    );
+    assert!(said.iter().any(|t| t.contains("apple")), "{said:?}");
+    assert!(said.iter().any(|t| t.contains("banana")), "{said:?}");
+    assert!(said.iter().any(|t| t.contains("cherry")), "{said:?}");
+}
+
+/// `filter` with no `input` does nothing on its own: there is no query line, and a letter
+/// moves the cursor exactly as it would on a list with neither.
+#[test]
+fn filter_without_input_does_nothing_on_its_own() {
+    let (_dir, sub) = built(
+        "
+local list = require('neotmux.list')
+neotmux.on_key(function(key)
+  if key == 'o' then
+    list.open({
+      items = function() return { 'apple', 'banana', 'cherry' } end,
+      row = function(item) return { { text = item } } end,
+      done = function(item) neotmux.log.info('chosen=' .. item) end,
+      filter = function(item, query) return item:find(query, 1, true) ~= nil end,
+    })
+    return true
+  end
+  return false
+end)
+",
+    );
+    assert_eq!(sub.dispatch_key(support::one(), "o"), KeyOutcome::Consumed);
+    let said = texts(&frame(&sub));
+    assert!(
+        !said.iter().any(|t| t == "/ "),
+        "a query line showed up with no `input`: {said:?}"
+    );
+    keys(&sub, &["j", "Enter"]);
+    let said = logged(&sub);
+    assert!(
+        said.iter().any(|l| l == "chosen=banana"),
+        "`j` did not move the cursor with no `input`: {said:?}"
+    );
+}
+
+/// `M.commands` is exported so `M.keys` can rebind by name, but nothing stops it being called
+/// with no list open — every entry is then a no-op rather than an index into a `nil` state.
+#[test]
+fn m_commands_is_a_no_op_with_no_list_open() {
+    let (_dir, sub) = built(
+        "
+local list = require('neotmux.list')
+neotmux.on_key(function(key)
+  if key == 'o' then
+    list.commands.down()
+    list.commands.up()
+    list.commands.choose()
+    list.commands.cancel()
+    neotmux.log.info('survived')
+    return true
+  end
+  return false
+end)
+",
+    );
+    assert_eq!(sub.dispatch_key(support::one(), "o"), KeyOutcome::Consumed);
+    let said = logged(&sub);
+    assert!(said.iter().any(|l| l == "survived"), "{said:?}");
+}
+
+/// A run wider than the row is truncated to the columns left rather than painted over the
+/// frame: at a float ten columns wide, the frame takes two and a run of thirty `X`s is cut to
+/// the eight that are left.
+#[test]
+fn a_run_longer_than_the_row_is_truncated_to_the_room_left() {
+    let (_dir, sub) = built(
+        "
+local list = require('neotmux.list')
+neotmux.on_key(function(key)
+  if key == 'o' then
+    list.open({
+      width = 10,
+      rows = 3,
+      items = function() return { 'x' } end,
+      row = function() return { { text = string.rep('X', 30) } } end,
+      done = function() end,
+    })
+    return true
+  end
+  return false
+end)
+",
+    );
+    assert_eq!(sub.dispatch_key(support::one(), "o"), KeyOutcome::Consumed);
+    let said = texts(&frame(&sub));
+    assert!(
+        said.iter().any(|t| t == "XXXXXXXX"),
+        "the run was not truncated to the room left: {said:?}"
+    );
+    assert!(
+        !said.iter().any(|t| t.starts_with('X') && t.len() > 8),
+        "a run of X's ran past the frame: {said:?}"
+    );
+}
+
+/// `items()` that starts raising after the list is already open does not make it
+/// undismissable: `Esc` is handled before any of the caller's code runs, so it closes the list
+/// regardless, and a closed list stops eating keys.
+#[test]
+fn a_list_whose_items_raises_after_opening_still_closes_on_esc() {
+    let (_dir, sub) = built(
+        "
+local list = require('neotmux.list')
+local calls = 0
+neotmux.on_key(function(key)
+  if key == 'o' then
+    list.open({
+      items = function()
+        calls = calls + 1
+        if calls > 1 then
+          error('boom')
+        end
+        return { 'apple' }
+      end,
+      row = function(item) return { { text = item } } end,
+      done = function() end,
+    })
+    return true
+  end
+  return false
+end)
+",
+    );
+    assert_eq!(sub.dispatch_key(support::one(), "o"), KeyOutcome::Consumed);
+    assert_eq!(
+        sub.dispatch_key(support::one(), "Esc"),
+        KeyOutcome::Consumed
+    );
+    assert!(frame(&sub).is_empty(), "the float stayed up after Esc");
+    assert_eq!(
+        sub.dispatch_key(support::one(), "z"),
+        KeyOutcome::Fallthrough,
+        "a closed list still ate a key"
+    );
+}
+
+/// The same hazard reaches `on_tick` as well as `on_key`: once `items` starts raising, the very
+/// next tick closes the list on its own, with no key needed, instead of leaving the float
+/// stuck open forever.
+#[test]
+fn a_list_whose_items_raises_closes_on_its_own_tick() {
+    let (_dir, sub) = built(
+        "
+local list = require('neotmux.list')
+local calls = 0
+neotmux.on_key(function(key)
+  if key == 'o' then
+    list.open({
+      items = function()
+        calls = calls + 1
+        if calls > 1 then
+          error('boom')
+        end
+        return { 'apple' }
+      end,
+      row = function(item) return { { text = item } } end,
+      done = function() end,
+    })
+    return true
+  end
+  return false
+end)
+",
+    );
+    assert_eq!(sub.dispatch_key(support::one(), "o"), KeyOutcome::Consumed);
+    assert!(
+        frame(&sub).is_empty(),
+        "the float stayed up after items() started raising on tick"
+    );
+    let said = logged(&sub);
+    assert!(
+        said.iter().any(|l| l.contains("boom")),
+        "no notification named the failure: {said:?}"
     );
 }

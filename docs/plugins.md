@@ -1517,26 +1517,41 @@ local handle = list.open({
 ```
 
 `items` is read fresh on every tick, so a list stays current while it is up. `row` answers a
-list of runs — `{ text =, fg =, bg = }` — drawn left to right and clipped to the row's width,
-the same shape `ctx:text` takes one of. `done` fires on `Enter` and is not itself a close: the
-handle is the caller's to close, so a rename or a kill can run one and leave the list open,
-which is why `plugin.sessions`'s own `done` calls `handle:close()` and its `r` and `d` do not.
-`cancel` fires on `Esc`/`q` instead, when given. `keys` adds more of them, keyed by spec and
-called with the item under the cursor and the handle, the same as `done`.
+list of runs — `{ text =, fg =, bg = }` — drawn left to right and truncated to the row's width
+in columns, never bytes, the same shape `ctx:text` takes one of. `done` fires on `Enter` and is
+not itself a close: the handle is the caller's to close, so a rename or a kill can run one and
+leave the list open, which is why `plugin.sessions`'s own `done` calls `handle:close()` and its
+`r` and `d` do not. `cancel` fires on `Esc` always, and `keys` adds more of them, keyed by spec
+and called with the item under the cursor and the handle, the same as `done`. **`Esc` is
+handled before any of the caller's own code runs** — a list can always be dismissed, even one
+whose `items` has started raising.
 
-Give `filter` a predicate — `function(item, query) return ... end` — and the list becomes one
-you type into rather than move through by letter: the input line is always up, every printable
-key joins the query, and the cursor moves on `C-j`/`C-k` instead of the plain `j`/`k` a
-filter-less list uses, because a filtered list still needs `j` and `k` to be characters a query
-can hold. `handle:query()` reads what has been typed, and `items` reading it back is how a list
-ranks or narrows itself rather than merely keeping or dropping in place — see `plugin.palette`,
-below, whose own `items` sorts by a fuzzy score computed against `handle:query()` and whose
-`filter` only confirms what `items` already decided.
+Give `input = true` and the list becomes one you type into rather than move through by
+letter: the input line comes up, every printable key joins a query, and the cursor moves on
+`C-j`/`C-k` instead of the plain `j`/`k` an `input`-less list uses, because a query still needs
+`j` and `k` to be characters it can hold — which is also why `q` is a cancel only when `input`
+is off. `handle:query()` reads what has been typed. Give `filter` a predicate —
+`function(item, query) return ... end` — alongside it and `items` is narrowed by whatever the
+query matches; `filter` on its own, with no `input`, does nothing, since there is then no query
+for it to be handed. `plugin.palette`, below, takes `input` with no `filter`: its own `items`
+ranks by a fuzzy score computed against `handle:query()` itself, so nothing here needs to
+narrow anything twice.
+
+A few combinations are quiet rather than refused, so they are worth knowing rather than
+discovering: `input` takes the last row, so `footer` never draws while it is on; a key claimed
+in `keys` steals that character away from a query instead of it being typed; and while `ask` is
+up it replaces and freezes the query line, so nothing typed then reaches `filter`.
 
 `handle:ask({ label =, value =, accept =, done =, cancel = })` raises the same input line for a
 question that is not the filter — a name to create or rename, say — with `accept(key, text)`
 given the chance to refuse a character before it joins the buffer. One list is open at a time:
 opening a second closes the first, the same rule `neotmux.prompt` follows.
+
+`items`, `row` and `filter` are the caller's own code, and run on `neotmux/list`'s own tick
+budget rather than the caller's, so a slow one parks every list open in the process — every
+caller of `neotmux.list`, not just the one that was slow — recoverable with
+`neotmux.resubscribe('neotmux/list')`. A raising `items` closes the list it belongs to, on the
+next key or tick, rather than leaving it stuck open with nothing able to reach it.
 
 ### The state convention
 
