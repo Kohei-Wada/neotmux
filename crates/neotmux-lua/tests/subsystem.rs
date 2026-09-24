@@ -1283,6 +1283,10 @@ fn a_float_owners_binding_still_waits_behind_every_on_key() {
 /// The only clock a plugin had counted whole seconds, which is too coarse for anything that
 /// happens between two frames. Monotonic and relative: what it is zeroed at is nobody's
 /// business, and only differences mean anything.
+///
+/// The unit is pinned by a real wait rather than taken on trust — a clock answering seconds or
+/// microseconds is monotonic too — and the type by `math.type`, since a float that arithmetic
+/// silently widens to is a `number` like any other and would reach a plugin as `1.0`.
 #[test]
 fn the_clock_answers_milliseconds_that_never_go_backwards() {
     let dir = layer(&[(
@@ -1297,7 +1301,11 @@ fn the_clock_answers_milliseconds_that_never_go_backwards() {
            last = now\n\
          end\n\
          neotmux.log.info('span=' .. tostring(last - first >= 0))\n\
-         neotmux.log.info('number=' .. type(first))\n",
+         neotmux.log.info('number=' .. tostring(math.type(first)))\n\
+         neotmux.on_key(function()\n\
+           neotmux.log.info('waited=' .. tostring(neotmux.now() - first))\n\
+           return true\n\
+         end)\n",
     )]);
     let sub = LuaSubsystem::build(
         Layers::from_paths(vec![dir.path().to_path_buf()]),
@@ -1314,5 +1322,26 @@ fn the_clock_answers_milliseconds_that_never_go_backwards() {
         })
         .collect();
     assert!(said.iter().any(|line| line == "span=true"), "{said:?}");
-    assert!(said.iter().any(|line| line == "number=number"), "{said:?}");
+    assert!(said.iter().any(|line| line == "number=integer"), "{said:?}");
+
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    assert_eq!(sub.dispatch_key(support::one(), "x"), KeyOutcome::Consumed);
+    let said: Vec<String> = sub
+        .drain_ops(Some(support::one()))
+        .into_iter()
+        .filter_map(|(_, op)| match op {
+            Op::Log { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect();
+    let waited: i64 = said
+        .iter()
+        .find_map(|line| line.strip_prefix("waited=")?.parse().ok())
+        .unwrap_or_else(|| panic!("{said:?}"));
+    // Wide enough for a loaded machine to oversleep, tight enough that seconds (0) or
+    // microseconds (200000) land outside it.
+    assert!(
+        (150..5_000).contains(&waited),
+        "a 200ms wait read as {waited}, which is not milliseconds"
+    );
 }
