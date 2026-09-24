@@ -90,6 +90,7 @@ Each of these returns a handle with one method, `handle:remove()`, which is idem
 | `neotmux.float({ x =, y =, w =, h = })` | nothing runs; the grant is two-valued — a handle, or `nil` plus a message (below) |
 | `neotmux.keymap.set(spec, fn)` | for that one key; return `true` to consume it |
 | `neotmux.reserve(edge, cells)` | nothing runs; it takes a band of the surface (below) |
+| `neotmux.command.add(name, fn, { desc = })` | when `neotmux.command.run(name)` names it (below) |
 
 Every event that fires, and the fields it carries:
 
@@ -113,6 +114,39 @@ when the spec itself is unparseable: losing a race is something to handle, a typ
 Key specs are `C-`, `M-`, `S-` prefixes in any order plus a key: `C-b`, `M-Enter`, `F5`, `x`.
 `x` and `X` are different keys, because that is what the terminal reports. `S-` does not
 combine with a single character for the same reason.
+
+### Commands
+
+A name a plugin registers once, that anything — a key, another plugin, the palette below —
+can call by it afterward:
+
+```lua
+neotmux.command.add('scratch', function(args)
+  neotmux.window.focus(neotmux.window.create())
+end, { desc = 'open a scratch window' })
+
+neotmux.command.list()          --> { { name =, desc =, source = }, ... }, in name order
+local ok, why = neotmux.command.run('scratch', { 'arg' })
+```
+
+`add` answers `true`, or `nil, message` when the name is already held — the first registration
+wins, so a config layer's own `init.lua` (which runs first) can claim a name before the shipped
+plugin that would otherwise take it does. `run` takes the name and an array of strings, and
+answers `ok, err, lines`: `false` and a message on a name nobody registered, on a handler that
+raised, or on a handler whose return was not one of the three shapes below; `true`, `nil` and
+the lines otherwise. A handler answers `nil`, a string, or an array of strings, which become no
+lines, one line, or that many — anything else is a failure against the plugin that registered
+it, the same as a handler that raises.
+
+It is shipped as `command.add`, not a callable `neotmux.command(...)`: every top-level table in
+this ABI is sealed, and a callable table is a metatable the seal would have to make an
+exception for. `keymap.set` is the shape this ABI already uses for "register a named thing",
+and `command.add` follows it.
+
+A command is in-process only — nothing outside this VM can name one yet. What it buys you today
+is the palette below, and a plugin's own verbs being one definition two ways in: see
+[Changing what the prefix does](#changing-what-the-prefix-does), where `plugin.prefix` registers
+each of its verbs this way and its key table calls them by name.
 
 ### Drawing
 
@@ -1103,7 +1137,7 @@ costs one plugin one frame instead of costing you the program.
 
 ## The shipped defaults
 
-neotmux ships nine plugins in the runtime layer an install puts on the search path:
+neotmux ships ten plugins in the runtime layer an install puts on the search path:
 
 | plugin | what it does |
 |---|---|
@@ -1112,20 +1146,27 @@ neotmux ships nine plugins in the runtime layer an install puts on the search pa
 | `copy` | copy mode: read back over a pane's scrollback, select a region, yank it |
 | `notify` | draws each notification in a frame of its own, stacked up from the bottom-right |
 | `sessions` | the session picker on `C-b s`: every session and what it is running, `Enter` to go, `c` to make one, `r` to rename one, `d` to end one |
+| `palette` | the command palette on `C-b :`: every registered command, fuzzy-filtered as you type, `Enter` to run the one under the cursor |
 | `borders` | a rule along every boundary between two panes |
 | `guard` | holds back the Enter that would run a line `neotmux.guard`'s rules name, until you press it again — **off by default** |
 | `watch` | notifies you when a pane looks like it is waiting for you, on `neotmux.state`'s guess — **off by default** |
 | `sidebar` | a tree of every session, and the windows and panes of the one you are in, down a reserved left band, folded by `C-b b` — **off by default** |
 | `footer` | whichever mode is raised through `neotmux.mode`, on one reserved bottom row — **off by default** |
 
-None of them is a host feature — all nine are ordinary files making ordinary API calls, and
+None of them is a host feature — all ten are ordinary files making ordinary API calls, and
 the prefix is the only reason a fresh install can make a second pane at all. `C-b v` splits
 vertically (the panes end up side by side, because `pane.split('vertical')` divides the
 width), `C-b -` splits horizontally (one above the other), `C-b o` focuses the next pane,
 `C-b h/j/k/l` focuses the pane to the left, below, above or to the right, `C-b r` enters
-resize mode, `C-b [` enters copy mode, `C-b s` opens the session picker, `C-b c` opens a window
-and switches to it, and `C-b n` and `C-b p`
+resize mode, `C-b [` enters copy mode, `C-b s` opens the session picker, `C-b :` opens the
+command palette, `C-b c` opens a window and switches to it, and `C-b n` and `C-b p`
 walk to the next window and the one before, each wrapping around.
+
+Every one of the prefix's own verbs is a `neotmux.command`, registered by `plugin.prefix`
+itself — the palette lists **commands, not keys**, so what it shows is whatever has been
+registered, from any plugin, and a plugin that calls `neotmux.command.add` gets a palette entry
+for free without doing anything else. `plugin.prefix`'s verbs are simply the first ones there,
+which is what gives a fresh install something to open the palette onto.
 
 Every mode moves with `j`/`k` (and `h`/`l` where sideways means anything): one spelling across
 the picker, copy mode, pane focus and resize, so a hand that has learned one has learned all of
@@ -1219,9 +1260,13 @@ prefix.commands['!'] = function()             -- and one of your own
 end
 ```
 
-A command is a function of no arguments, keyed by the key spec that runs it — the same specs
-`keymap.set` takes. The prefix swallows the key after itself whether or not the table has an
-entry for it, so a mistyped command never leaks a character into the shell.
+An entry, keyed by the key spec that runs it — the same specs `keymap.set` takes — is either a
+`neotmux.command` name, run through `neotmux.command.run` so the palette can run the same verb,
+or a function of no arguments, for one that has not been registered. The prefix's own verbs are
+all named (`split-vertical`, `focus-left`, `window-new`, and so on — see
+[Commands](#commands)), so copying an entry, as `%` and `"` do above, copies a name, and one of
+your own can be either. The prefix swallows the key after itself whether or not the table has
+an entry for it, so a mistyped command never leaks a character into the shell.
 
 `require`ing it from your `init.lua` loads it there instead of later, which is fine: the
 shipped layer's `require` finds it already loaded. Do not do it *and* set
@@ -1451,6 +1496,47 @@ caret is drawn rather than placed: the terminal's own cursor belongs to the focu
 float cannot take it — which is what a text field does everywhere else too.
 
 `C-b ,` is the shipped use of it, naming the window you are in.
+
+### The list convention
+
+A keyboard-driven list in a float — a cursor that moves and wraps, a window that follows it,
+and, where the caller wants one, an input line for a filter or for asking a question mid-list.
+The session picker and the palette below grew their own cursor, their own scrolling and their
+own row drawing before this existed; `neotmux.list` is those parts with the data taken out, in
+the same spirit `neotmux.prompt` and `neotmux.box` are one line and one frame with the data
+taken out.
+
+```lua
+local list = require('neotmux.list')
+local handle = list.open({
+  title = 'sessions',
+  items = function() return neotmux.session.list() end,
+  row = function(item, chosen) return { { text = item } } end,
+  done = function(item, handle) neotmux.session.switch(item) handle:close() end,
+})
+```
+
+`items` is read fresh on every tick, so a list stays current while it is up. `row` answers a
+list of runs — `{ text =, fg =, bg = }` — drawn left to right and clipped to the row's width,
+the same shape `ctx:text` takes one of. `done` fires on `Enter` and is not itself a close: the
+handle is the caller's to close, so a rename or a kill can run one and leave the list open,
+which is why `plugin.sessions`'s own `done` calls `handle:close()` and its `r` and `d` do not.
+`cancel` fires on `Esc`/`q` instead, when given. `keys` adds more of them, keyed by spec and
+called with the item under the cursor and the handle, the same as `done`.
+
+Give `filter` a predicate — `function(item, query) return ... end` — and the list becomes one
+you type into rather than move through by letter: the input line is always up, every printable
+key joins the query, and the cursor moves on `C-j`/`C-k` instead of the plain `j`/`k` a
+filter-less list uses, because a filtered list still needs `j` and `k` to be characters a query
+can hold. `handle:query()` reads what has been typed, and `items` reading it back is how a list
+ranks or narrows itself rather than merely keeping or dropping in place — see `plugin.palette`,
+below, whose own `items` sorts by a fuzzy score computed against `handle:query()` and whose
+`filter` only confirms what `items` already decided.
+
+`handle:ask({ label =, value =, accept =, done =, cancel = })` raises the same input line for a
+question that is not the filter — a name to create or rename, say — with `accept(key, text)`
+given the chance to refuse a character before it joins the buffer. One list is open at a time:
+opening a second closes the first, the same rule `neotmux.prompt` follows.
 
 ### The state convention
 

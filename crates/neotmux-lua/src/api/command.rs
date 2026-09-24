@@ -91,12 +91,17 @@ pub fn install(
         // `run` is always already inside its caller's region. A dispatch path added later
         // that reaches Lua without arming one first would leave this uncovered too; the
         // budget belongs to whoever enters Lua, not to each thing Lua then calls.
+        // Answers `ok, err, lines`: `err` is a message when `ok` is false and nil otherwise,
+        // and `lines` is the array `lines_from` turned the handler's return into, nil on a
+        // failure. A caller after only pass/fail — the common case, `a_command_can_be_called_
+        // from_lua_by_name` among them — reads the first two and never sees the third.
         let run = lua.create_function(move |lua, (name, args): (String, Option<Table>)| {
             let Some((callback, owner)) = commands.get(&name) else {
                 let message = format!("'{name}' is not a registered command");
                 return Ok((
                     Value::Boolean(false),
                     Value::String(lua.create_string(message)?),
+                    Value::Nil,
                 ));
             };
             let tag = sources.name(owner).unwrap_or_default();
@@ -107,12 +112,19 @@ pub fn install(
             };
             match func.call::<Value>(arg_table) {
                 Ok(value) => match crate::commands::lines_from(value) {
-                    Ok(_lines) => Ok((Value::Boolean(true), Value::Nil)),
+                    Ok(lines) => {
+                        let table = lua.create_table()?;
+                        for (at, line) in lines.into_iter().enumerate() {
+                            table.set(at + 1, line)?;
+                        }
+                        Ok((Value::Boolean(true), Value::Nil, Value::Table(table)))
+                    }
                     Err(why) => {
                         let message = format!("{tag}: {why}");
                         Ok((
                             Value::Boolean(false),
                             Value::String(lua.create_string(message)?),
+                            Value::Nil,
                         ))
                     }
                 },
@@ -121,6 +133,7 @@ pub fn install(
                     Ok((
                         Value::Boolean(false),
                         Value::String(lua.create_string(message)?),
+                        Value::Nil,
                     ))
                 }
             }

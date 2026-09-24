@@ -17,6 +17,10 @@ return {
   -- key, and with more than one session going, a list of them with what each is running is
   -- the thing you would otherwise be keeping in your head.
   sessions = true,
+  -- With them, for the same bargain again: nothing is on screen until `C-b :` is pressed, and
+  -- every command any plugin has registered is something you would otherwise have to remember
+  -- the key for, or not be able to reach at all.
+  palette = true,
   -- With them: a notification nobody draws is a notification that only reaches the log, and
   -- the host stopped drawing them when what one looks like became a plugin's decision.
   notify = true,

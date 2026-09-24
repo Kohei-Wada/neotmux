@@ -2,13 +2,18 @@
 -- it never registered, and the modal flag is the plugin's own state, not the host's.
 --
 -- The key and the command table are both fields of the table this file returns, so a user
--- can rebind, add or drop a command without editing this file:
+-- can rebind, add or drop a command without editing this file. Every verb here is also a
+-- named `neotmux.command`, so `commands` holds the name rather than the body, and the palette
+-- lists every one of these on a fresh install:
 --
 --   local prefix = require('plugin.prefix')
 --   prefix.key = 'C-a'
 --   prefix.commands['%'] = prefix.commands['v']   -- tmux's muscle memory, alongside v and -
 --   prefix.commands['"'] = prefix.commands['-']
 --   prefix.commands['o'] = nil                    -- and one dropped
+--   prefix.commands['!'] = function()             -- and one of your own, unnamed
+--     neotmux.notify('info', 'panes: ' .. #neotmux.pane.list())
+--   end
 --
 -- Both are read inside the callback rather than captured at load time, which is what makes
 -- such an assignment take effect on the next key instead of never.
@@ -87,53 +92,104 @@ end
 
 -- `split('vertical')` divides the width, so `v` puts the two panes side by side; `-` divides
 -- the height, which is what the glyph looks like.
+local function split_vertical()
+  neotmux.pane.split("vertical")
+end
+
+local function split_horizontal()
+  neotmux.pane.split("horizontal")
+end
+
+local function begin_resize()
+  resizing = modes.raise("resize")
+end
+
+-- `create()` answers with the id before the window exists, so the two ops go out in one
+-- tick and are applied in that order: opened, then shown.
+local function new_window()
+  neotmux.window.focus(neotmux.window.create())
+end
+
+local function rename_window()
+  local id = neotmux.window.current()
+  if id == nil then
+    return
+  end
+  prompt.open({
+    title = "name window",
+    value = neotmux.window.name(id) or "",
+    mode = "rename",
+    -- An empty name is not a name: it takes the one there was away and leaves the window
+    -- the number it had before anybody called it anything.
+    done = function(text)
+      neotmux.window.rename(id, text ~= "" and text or nil)
+    end,
+  })
+end
+
+local function leave_session()
+  neotmux.detach()
+end
+
+-- Every verb, registered once under a name a palette or a CLI can call it by. `M.commands`
+-- below still maps the key that runs each one, but now to the name rather than the body: one
+-- definition, two ways in, rather than the body copied into a second table.
+local function register(name, fn, desc)
+  neotmux.command.add(name, fn, { desc = desc })
+end
+
+register("split-vertical", split_vertical, "split the focused pane, side by side")
+register("split-horizontal", split_horizontal, "split the focused pane, one above the other")
+register("focus-next", focus_next, "focus the next pane in layout order")
+register("focus-left", focus_toward("left"), "focus the pane to the left")
+register("focus-down", focus_toward("down"), "focus the pane below")
+register("focus-up", focus_toward("up"), "focus the pane above")
+register("focus-right", focus_toward("right"), "focus the pane to the right")
+register("resize", begin_resize, "enter resize mode: h/j/k/l move the boundary, anything else leaves")
+register("window-new", new_window, "open a new window and switch to it")
+register("window-next", next_window, "switch to the next window")
+register("window-prev", prev_window, "switch to the window before this one")
+register("window-rename", rename_window, "name the window you are in")
+register("detach", leave_session, "leave the session running and let go of this terminal")
+
 local M = {
   key = "C-b",
   -- How many cells one press moves the boundary.
   resize_step = 1,
+  -- The key-to-name mapping: a key runs the command its entry names. An entry may also hold a
+  -- function directly, for a plugin like `plugin.sessions` that binds a key of its own without
+  -- registering one — `dispatch`, below, takes either.
   commands = {
-    ["v"] = function()
-      neotmux.pane.split("vertical")
-    end,
-    ["-"] = function()
-      neotmux.pane.split("horizontal")
-    end,
-    ["o"] = focus_next,
-    ["h"] = focus_toward("left"),
-    ["j"] = focus_toward("down"),
-    ["k"] = focus_toward("up"),
-    ["l"] = focus_toward("right"),
-    ["r"] = function()
-      resizing = modes.raise("resize")
-    end,
-    -- `create()` answers with the id before the window exists, so the two ops go out in one
-    -- tick and are applied in that order: opened, then shown.
-    ["c"] = function()
-      neotmux.window.focus(neotmux.window.create())
-    end,
-    ["n"] = next_window,
-    ["p"] = prev_window,
-    [","] = function()
-      local id = neotmux.window.current()
-      if id == nil then
-        return
-      end
-      prompt.open({
-        title = "name window",
-        value = neotmux.window.name(id) or "",
-        mode = "rename",
-        -- An empty name is not a name: it takes the one there was away and leaves the window
-        -- the number it had before anybody called it anything.
-        done = function(text)
-          neotmux.window.rename(id, text ~= "" and text or nil)
-        end,
-      })
-    end,
-    ["d"] = function()
-      neotmux.detach()
-    end,
+    ["v"] = "split-vertical",
+    ["-"] = "split-horizontal",
+    ["o"] = "focus-next",
+    ["h"] = "focus-left",
+    ["j"] = "focus-down",
+    ["k"] = "focus-up",
+    ["l"] = "focus-right",
+    ["r"] = "resize",
+    ["c"] = "window-new",
+    ["n"] = "window-next",
+    ["p"] = "window-prev",
+    [","] = "window-rename",
+    ["d"] = "detach",
   },
 }
+
+-- A key's entry is a command name, run through `neotmux.command.run` so it is one definition
+-- shared with the palette, or a function, for an entry a plugin assigned directly rather than
+-- through the registry.
+local function dispatch(key)
+  local target = M.commands[key]
+  if type(target) == "function" then
+    target()
+  elseif type(target) == "string" then
+    local ok, why = neotmux.command.run(target)
+    if not ok then
+      neotmux.notify("error", why)
+    end
+  end
+end
 
 neotmux.on_key(function(key)
   if resizing then
@@ -152,10 +208,7 @@ neotmux.on_key(function(key)
   if armed then
     armed:lower()
     armed = nil
-    local command = M.commands[key]
-    if command then
-      command()
-    end
+    dispatch(key)
     return true
   end
   if key == M.key then
