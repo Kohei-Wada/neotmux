@@ -41,6 +41,7 @@
 -- targets there are no labels left to give out; the farthest ones are left unlabelled rather
 -- than handed a label that collides with another's.
 local modes = require("neotmux.mode")
+local g = neotmux.group("neotmux.hints")
 
 local M = {}
 
@@ -179,6 +180,8 @@ local function close()
   end
   state = nil
 end
+
+g.on_event("unload", close)
 
 -- Closes a session whose caller's code just raised, and says which callback it was rather
 -- than leaving the labels stuck on screen with nothing able to reach them: `find`, `done` and
@@ -386,7 +389,7 @@ local function arm()
   end
   registered = true
 
-  neotmux.on_key(function(key)
+  g.on_key(function(key)
     if state == nil then
       return false
     end
@@ -400,7 +403,7 @@ local function arm()
     return true
   end)
 
-  neotmux.on_tick(function(ctx)
+  g.on_tick(function(ctx)
     if state == nil then
       return
     end

@@ -33,6 +33,7 @@ local selection = require("neotmux.selection")
 local words = require("neotmux.words")
 local modes = require("neotmux.mode")
 local hints = require("neotmux.hints")
+local g = neotmux.group("plugin.copy")
 
 local M = {}
 
@@ -407,7 +408,7 @@ function M.enter()
   mode_handle = modes.raise("copy")
 end
 
-neotmux.on_key(function(key)
+g.on_key(function(key)
   if state == nil then
     return false
   end
@@ -438,19 +439,19 @@ end)
 
 -- The mode belongs to the pane it was entered on. Both of these would otherwise leave it
 -- drawing a cursor over a pane nobody is looking at.
-neotmux.on_event("pane_closed", function(event)
+g.on_event("pane_closed", function(event)
   if state and state.pane == event.pane then
     leave()
   end
 end)
 
-neotmux.on_event("focus_changed", function(event)
+g.on_event("focus_changed", function(event)
   if state and state.pane ~= event.pane then
     leave()
   end
 end)
 
-neotmux.on_tick(function(ctx)
+g.on_tick(function(ctx)
   if state == nil then
     return
   end
@@ -493,6 +494,12 @@ neotmux.on_tick(function(ctx)
     fg = M.colors.cursor_text,
     bg = M.colors.cursor,
   })
+end)
+
+-- A reload runs this file again with a copy mode that has not entered anything; the pane
+-- this one froze would stay frozen with nobody left who knows it.
+g.on_event("unload", function()
+  leave()
 end)
 
 -- The prefix is the standard plugin and this one hangs off it, so this is the direction the

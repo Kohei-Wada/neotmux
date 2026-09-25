@@ -28,6 +28,7 @@
 -- Nothing here is a host feature. `neotmux.reserve('left', n)` takes the band,
 -- `handle:resize_to(n)` widens and folds it, and `ctx:reserved()` answers where it landed.
 local segments = require("status.segments")
+local g = neotmux.group("plugin.sidebar")
 
 local M = {}
 
@@ -93,7 +94,7 @@ end
 -- The column down the band's right edge that says where the panes start.
 M.rule = "\u{2502}" -- │
 
-M.band = neotmux.reserve("left", M.widths.min)
+M.band = g.reserve("left", M.widths.min)
 
 -- Which of the two the band is in. Folded, a section with a `rail` draws that, and one without is
 -- its open rows cut to the rail's width.
@@ -331,7 +332,7 @@ if prefix() then
   prefix().commands["b"] = M.toggle
 end
 
-neotmux.on_tick(function(ctx)
+g.on_tick(function(ctx)
   local band = ctx:reserved()
   -- Nil while the terminal is too narrow to spare the columns. The panes have them back, so
   -- there is nowhere to draw and nothing to draw over.

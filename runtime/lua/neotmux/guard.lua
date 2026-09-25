@@ -28,6 +28,8 @@
 -- anyone meant to name. A rule that looks armed and is not is the worst failure a checkpoint
 -- can have, so a literal command is written with `guard.plain`, not typed as a string on its
 -- own.
+local g = neotmux.group("neotmux.guard")
+
 local M = {}
 
 -- Lua patterns, each with what to say when it matches and which writer it is for. Read on every
@@ -77,7 +79,7 @@ local function arm()
     return
   end
   registered = true
-  neotmux.on_write(answer)
+  g.on_write(answer)
 end
 
 -- A pattern to refuse, and the sentence whoever wrote it is told. `from` narrows this one rule

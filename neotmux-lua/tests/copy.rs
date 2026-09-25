@@ -849,3 +849,23 @@ fn leaving_does_not_thaw_a_pane_the_mode_did_not_freeze() {
         "copy mode thawed a pane it never froze"
     );
 }
+
+/// A reload with copy mode open leaves the pane moving again: the new copy mode never
+/// entered anything, so only the old one's `unload` can thaw what it froze.
+#[test]
+fn a_reload_with_copy_mode_open_leaves_no_pane_frozen() {
+    let (_dir, sub) = built("");
+    scrolled(&sub);
+    enter(&sub);
+    assert_eq!(
+        sub.terminals().is_frozen(pane()),
+        Some(true),
+        "copy mode did not freeze the pane"
+    );
+    sub.reload(Some(support::one()));
+    assert_eq!(
+        sub.terminals().is_frozen(pane()),
+        Some(false),
+        "the reload left the pane frozen"
+    );
+}

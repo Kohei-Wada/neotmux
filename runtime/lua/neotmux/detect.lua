@@ -60,6 +60,8 @@
 -- screen regions it reads is `src/detect/manifests/*.toml`, and the hold below — a fall to
 -- idle disbelieved until it settles, unless the screen says idle in so many words — is
 -- `src/pane/agent_detection.rs`.
+local g = neotmux.group("neotmux.detect")
+
 local M = {}
 
 -- How long a pane that was working keeps counting as working after the screen stops saying
@@ -302,7 +304,7 @@ end
 
 -- This module's own, not its consumers': an id is reused, and a dead pane's hold is no evidence
 -- about the next pane given it, whichever plugins happen to be loaded.
-neotmux.on_event("pane_closed", function(event)
+g.on_event("pane_closed", function(event)
   M.forget(event.pane)
 end)
 

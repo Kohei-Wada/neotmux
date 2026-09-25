@@ -61,6 +61,7 @@
 -- dismissed it.
 local modes = require("neotmux.mode")
 local box = require("neotmux.box")
+local g = neotmux.group("neotmux.list")
 
 local M = {}
 
@@ -353,7 +354,7 @@ local function arm()
   end
   registered = true
 
-  neotmux.on_key(function(key)
+  g.on_key(function(key)
     if state == nil then
       return false
     end
@@ -417,7 +418,7 @@ local function arm()
     return true
   end)
 
-  neotmux.on_tick(function(ctx)
+  g.on_tick(function(ctx)
     area = pane_area(function(pane)
       return ctx:pane_rect(pane)
     end) or area
@@ -604,7 +605,7 @@ function M.open(opts)
     return nil
   end
   area = pane_area(neotmux.pane.rect) or area
-  local float = neotmux.float(wanted())
+  local float = g.float(wanted())
   if not float then
     state = nil
     return nil

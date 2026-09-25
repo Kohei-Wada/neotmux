@@ -15,6 +15,7 @@
 -- Nothing here is a host feature. It is `neotmux.window.panes` read from a tick, the shared
 -- guess, and `neotmux.notify`.
 local state = require("neotmux.state")
+local g = neotmux.group("plugin.watch")
 
 local M = {}
 
@@ -25,11 +26,11 @@ M.ignore_focused = true
 -- rather than on every frame the prompt is still up.
 local waiting = {}
 
-neotmux.on_event("pane_closed", function(event)
+g.on_event("pane_closed", function(event)
   waiting[event.pane] = nil
 end)
 
-neotmux.on_tick(function()
+g.on_tick(function()
   local focused = M.ignore_focused and neotmux.pane.current() or nil
   -- Every pane the session owns, hidden windows included: an agent you started in a window you
   -- are not looking at has said nothing yet, and that is exactly the pane worth watching.

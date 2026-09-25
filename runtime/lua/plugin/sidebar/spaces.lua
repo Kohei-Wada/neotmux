@@ -17,6 +17,7 @@ local sessions = require("plugin.sidebar.sessions")
 local seen = require("neotmux.seen")
 local state = require("neotmux.state")
 local modes = require("neotmux.mode")
+local g = neotmux.group("plugin.sidebar.spaces")
 
 local M = { title = "spaces" }
 
@@ -103,7 +104,7 @@ local function ask(cwd)
   local asked_before = known.at
   known.busy, known.at = true, now
   git[cwd] = known
-  local started = neotmux.job.start({ "git", "-C", cwd, "rev-parse", "--abbrev-ref", "HEAD" }, {
+  local started = g.job.start({ "git", "-C", cwd, "rev-parse", "--abbrev-ref", "HEAD" }, {
     on_exit = function(code, stdout)
       if code ~= 0 then
         known.branch, known.ahead, known.behind, known.busy = nil, 0, 0, false
@@ -112,7 +113,7 @@ local function ask(cwd)
       known.branch = (stdout or ""):match("^%s*(.-)%s*$")
       -- `@{upstream}...HEAD` counts what only the upstream has, then what only HEAD has: behind,
       -- then ahead. No upstream is a failure, and no counts.
-      local counted = neotmux.job.start(
+      local counted = g.job.start(
         { "git", "-C", cwd, "rev-list", "--left-right", "--count", "@{upstream}...HEAD" },
         {
           on_exit = function(status, out)
@@ -304,7 +305,7 @@ end
 -- `C-b` while the cursor is up leaves it. The prefix sees the key first — it was loaded first —
 -- and raises its mode, so this looks for that rather than for the key, which also follows a
 -- prefix rebound to something else. What comes after the prefix key is then the prefix's.
-neotmux.on_tick(function(ctx)
+g.on_tick(function(ctx)
   if M.cursor and modes.current() == "prefix" then
     leave()
   end
@@ -313,7 +314,7 @@ neotmux.on_tick(function(ctx)
   end
 end)
 
-neotmux.on_key(function(key)
+g.on_key(function(key)
   if not M.cursor then
     return false
   end

@@ -15,6 +15,7 @@
 local detect = require("neotmux.detect")
 local seen = require("neotmux.seen")
 local state = require("neotmux.state")
+local g = neotmux.group("plugin.sidebar.agents")
 
 local M = { title = "agents", share = 0.5, always = true }
 
@@ -180,10 +181,10 @@ local function step(by)
   M.focus(all[next_at])
 end
 
-neotmux.command.add("agent-next", function()
+g.command.add("agent-next", function()
   step(1)
 end, { desc = "go to the next agent" })
-neotmux.command.add("agent-prev", function()
+g.command.add("agent-prev", function()
   step(-1)
 end, { desc = "go to the previous agent" })
 

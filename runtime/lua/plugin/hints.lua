@@ -21,6 +21,7 @@
 -- target came from — the point of `hint-send` is "type this where I am typing", and with hints
 -- spanning every visible pane, that can be a different pane than the one you pointed at.
 local hints = require("neotmux.hints")
+local g = neotmux.group("plugin.hints")
 
 local M = {}
 
@@ -39,7 +40,7 @@ local function shell_quote(text)
   return "'" .. text:gsub("'", "'\\''") .. "'"
 end
 
-neotmux.command.add("hint-copy", function()
+g.command.add("hint-copy", function()
   pick(function(target)
     local ok, err = neotmux.clipboard.set(target.text)
     if ok then
@@ -50,13 +51,13 @@ neotmux.command.add("hint-copy", function()
   end)
 end, { desc = "label the screen, copy what you point at" })
 
-neotmux.command.add("hint-send", function()
+g.command.add("hint-send", function()
   pick(function(target)
     neotmux.pane.send(neotmux.pane.current(), target.text)
   end)
 end, { desc = "label the screen, type what you point at into the focused pane" })
 
-neotmux.command.add("hint-open", function()
+g.command.add("hint-open", function()
   pick(function(target)
     neotmux.pane.send(neotmux.pane.current(), M.opener .. " " .. shell_quote(target.text))
   end)

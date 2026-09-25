@@ -6,6 +6,8 @@
 --
 -- The modal state is an ordinary Lua upvalue. neotmux has no idea what a prefix is.
 
+local g = neotmux.group("plugin.prefix")
+
 local M = { key = "C-a" }
 
 local armed = false
@@ -34,7 +36,7 @@ local commands = {
   end,
 }
 
-neotmux.on_key(function(key)
+g.on_key(function(key)
   if armed then
     armed = false
     local command = commands[key]

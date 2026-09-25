@@ -7,9 +7,11 @@
 -- `ctx:text(pane, ...)` places text in that pane's coordinate space, so the label follows
 -- the pane through splits and resizes without this plugin tracking geometry itself.
 
+local g = neotmux.group("plugin.pane_labels")
+
 local M = { focused_fg = 2, other_fg = 8 }
 
-neotmux.on_tick(function(ctx)
+g.on_tick(function(ctx)
   local current = neotmux.pane.current()
   for _, id in ipairs(neotmux.pane.list()) do
     local rect = ctx:pane_rect(id)

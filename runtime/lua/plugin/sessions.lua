@@ -16,6 +16,7 @@
 local list = require("neotmux.list")
 local prompt = require("neotmux.prompt")
 local pane_state = require("neotmux.state")
+local g = neotmux.group("plugin.sessions")
 
 local M = {}
 
@@ -157,7 +158,7 @@ function M.open()
 end
 
 -- The picker's `c` and `r` without the picker, for the palette: a name asked for in a prompt.
-neotmux.command.add("session-new", function()
+g.command.add("session-new", function()
   prompt.open({
     title = "new session",
     mode = "rename",
@@ -170,7 +171,7 @@ neotmux.command.add("session-new", function()
   })
 end, { desc = "make a session and go there" })
 
-neotmux.command.add("session-rename", function()
+g.command.add("session-rename", function()
   local name = neotmux.session.current()
   if not name then
     return

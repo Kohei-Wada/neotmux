@@ -8,6 +8,7 @@
 -- Off by default, for the same kind of reason `watch` and `sidebar` are: it spends a row,
 -- whether or not a mode is ever raised into it.
 local modes = require("neotmux.mode")
+local g = neotmux.group("plugin.footer")
 
 local M = {}
 
@@ -18,9 +19,9 @@ M.colors = {
   text = "#f9e2af", -- yellow: a mode is a thing to notice, not to blend in
 }
 
-M.band = neotmux.reserve("bottom", 1)
+M.band = g.reserve("bottom", 1)
 
-neotmux.on_tick(function(ctx)
+g.on_tick(function(ctx)
   local row = ctx:reserved()
   if not row then
     return

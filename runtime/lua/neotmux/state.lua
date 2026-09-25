@@ -31,6 +31,8 @@
 -- unclaimed has a test on it now (`state.rs`); the one thing still unenforced is that `claims` is
 -- re-asked only when the screen moves, so a pane whose program changed and printed nothing is
 -- answered by the last look for as long as that lasts.
+local g = neotmux.group("neotmux.state")
+
 local M = {}
 
 -- Lua patterns, matched against the last `M.lines` non-blank lines of a pane. Replace the
@@ -107,7 +109,7 @@ function M.forget(pane)
   require("neotmux.detect").forget(pane)
 end
 
-neotmux.on_event("pane_closed", function(event)
+g.on_event("pane_closed", function(event)
   seen[event.pane] = nil
 end)
 

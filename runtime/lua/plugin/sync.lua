@@ -18,6 +18,7 @@
 -- run, this file is a key handler that answers no. What is on by default is the command being
 -- there to run.
 local modes = require("neotmux.mode")
+local g = neotmux.group("plugin.sync")
 
 local M = {}
 
@@ -45,7 +46,7 @@ function M.toggle()
   return "sync on: every key goes to all " .. #panes() .. " panes of this window"
 end
 
-neotmux.command.add("sync-panes", function()
+g.command.add("sync-panes", function()
   return M.toggle()
 end, { desc = "type into every pane of this window at once" })
 
@@ -53,7 +54,7 @@ if package.loaded["plugin.prefix"] or require("neotmux.defaults").prefix then
   require("plugin.prefix").commands["S"] = "sync-panes"
 end
 
-neotmux.on_key(function(key)
+g.on_key(function(key)
   if not on then
     return false
   end

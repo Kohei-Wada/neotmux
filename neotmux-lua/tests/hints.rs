@@ -867,3 +867,22 @@ fn the_commands_are_registered_for_the_palette() {
         );
     }
 }
+
+#[test]
+fn a_reload_with_a_pick_open_leaves_no_pane_frozen() {
+    let (_dir, sub) = built(&default_trigger());
+    feed(&sub, b"http://example.com");
+    open(&sub);
+    let one = neotmux_proto::PaneId::from(1);
+    assert_eq!(
+        sub.terminals().is_frozen(one),
+        Some(true),
+        "hints did not freeze the pane"
+    );
+    sub.reload(Some(support::one()));
+    assert_eq!(
+        sub.terminals().is_frozen(one),
+        Some(false),
+        "the reload left the pane frozen"
+    );
+}

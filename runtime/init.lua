@@ -22,3 +22,8 @@ for _, name in ipairs({
     require(module)
   end
 end
+
+-- Here rather than in a plugin: turning every shipped plugin off must not take the way back.
+neotmux.group("neotmux.reload").command.add("config-reload", function()
+  neotmux.reload()
+end, { desc = "run the config again, keeping the panes" })

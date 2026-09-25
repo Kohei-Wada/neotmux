@@ -28,6 +28,7 @@
 local nav = require("neotmux.nav")
 local modes = require("neotmux.mode")
 local prompt = require("neotmux.prompt")
+local g = neotmux.group("plugin.prefix")
 
 -- Two modes, not one: the armed prefix and resize mode are different states, and a reader
 -- should be able to tell them apart. Each local holds the handle `neotmux.mode.raise` hands
@@ -141,7 +142,7 @@ end
 -- that silently lost its binding is known.
 local refused = {}
 local function register(name, fn, desc)
-  local ok, why = neotmux.command.add(name, fn, { desc = desc })
+  local ok, why = g.command.add(name, fn, { desc = desc })
   if not ok then
     refused[name] = why
   end
@@ -212,7 +213,7 @@ local function dispatch(key)
   end
 end
 
-neotmux.on_key(function(key)
+g.on_key(function(key)
   if resizing then
     local dir = DIRECTIONS[key]
     if dir then

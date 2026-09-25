@@ -16,6 +16,7 @@
 -- ask what a pane is doing, and this is about what you have and have not looked at.
 local detect = require("neotmux.detect")
 local state = require("neotmux.state")
+local g = neotmux.group("neotmux.seen")
 
 local M = {}
 
@@ -42,7 +43,7 @@ end
 -- Its own tick, one per session per frame, over that session's panes: what a pane went through
 -- is recorded here whether or not anything is drawing it, so the palette on `C-b g` knows with
 -- the sidebar off, and a reader that last looked long ago is not mistaken for a transition.
-neotmux.on_tick(function()
+g.on_tick(function()
   local name = neotmux.session.current()
   if name == nil then
     return

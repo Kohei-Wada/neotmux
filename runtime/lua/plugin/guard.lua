@@ -28,6 +28,7 @@
 -- is a second pair of eyes, not a proof.
 local guard = require("neotmux.guard")
 local modes = require("neotmux.mode")
+local g = neotmux.group("plugin.guard")
 
 local M = {}
 
@@ -65,7 +66,7 @@ local function readable(mode)
   return not (mode.canonical and mode.echo == false)
 end
 
-neotmux.on_key(function(key)
+g.on_key(function(key)
   if key ~= "Enter" then
     return false
   end

@@ -11,11 +11,13 @@
 -- Reading it inside the tick rather than capturing it at load time is what makes that
 -- assignment take effect on the next frame instead of never.
 
+local g = neotmux.group("plugin.clock")
+
 local M = { format = "%H:%M:%S" }
 
-M.band = neotmux.reserve("bottom", 1)
+M.band = g.reserve("bottom", 1)
 
-neotmux.on_tick(function(ctx)
+g.on_tick(function(ctx)
   local band = ctx:reserved()
   -- Nil on a terminal too small to spare the row: the panes keep it and the clock waits.
   if band then

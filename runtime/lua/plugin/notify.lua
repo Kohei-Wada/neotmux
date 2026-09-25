@@ -15,6 +15,7 @@
 -- is the corner to put them in — the pane area, so a sidebar or a footer moves them rather
 -- than being drawn over — and `neotmux.width` is what keeps the lines inside the frame.
 local box = require("neotmux.box")
+local g = neotmux.group("plugin.notify")
 
 local M = {}
 
@@ -68,14 +69,14 @@ end
 -- exists while something is showing — not a claim on a handle and a place.
 local function draw(ctx, x, y, w, h)
   ctx:rect(nil, x, y, w, h, { bg = M.colors.frame })
-  local g = box.glyphs
-  local across = string.rep(g.horizontal, w - 2)
+  local glyphs = box.glyphs
+  local across = string.rep(glyphs.horizontal, w - 2)
   local edge = { fg = box.colors.line, bg = M.colors.frame }
-  ctx:text(nil, x, y, g.top_left .. across .. g.top_right, edge)
-  ctx:text(nil, x, y + h - 1, g.bottom_left .. across .. g.bottom_right, edge)
+  ctx:text(nil, x, y, glyphs.top_left .. across .. glyphs.top_right, edge)
+  ctx:text(nil, x, y + h - 1, glyphs.bottom_left .. across .. glyphs.bottom_right, edge)
   for row = 1, h - 2 do
-    ctx:text(nil, x, y + row, g.vertical, edge)
-    ctx:text(nil, x + w - 1, y + row, g.vertical, edge)
+    ctx:text(nil, x, y + row, glyphs.vertical, edge)
+    ctx:text(nil, x + w - 1, y + row, glyphs.vertical, edge)
   end
 end
 
@@ -85,7 +86,7 @@ if package.loaded["plugin.prefix"] then
   end
 end
 
-neotmux.on_tick(function(ctx)
+g.on_tick(function(ctx)
   local list = neotmux.notifications.list()
   if #list == 0 then
     return

@@ -14,6 +14,7 @@
 local position = require("status.position")
 local segments = require("status.segments")
 local path = require("status.path")
+local g = neotmux.group("plugin.status")
 
 local M = {}
 
@@ -48,7 +49,7 @@ M.icons = { command = "\u{f1ae}", directory = "\u{f07b}" }
 -- nil where it had no `HOME`. Assign to it from your own init.lua to write a different prefix.
 M.home = neotmux.home
 
-M.band = neotmux.reserve("top", 1)
+M.band = g.reserve("top", 1)
 
 local function append(runs, more)
   for _, run in ipairs(more) do
@@ -112,7 +113,7 @@ local function module_chrome(icon)
   return segments.columns(M.caps.left) + segments.columns(icon) + 3
 end
 
-neotmux.on_tick(function(ctx)
+g.on_tick(function(ctx)
   local row = ctx:reserved()
   -- Nil while the terminal is too small to spare the row. The panes have it back, so there
   -- is nowhere to draw and nothing to draw over.

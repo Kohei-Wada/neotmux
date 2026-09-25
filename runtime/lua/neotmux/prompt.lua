@@ -15,6 +15,7 @@
 -- text field is anywhere else too.
 local modes = require("neotmux.mode")
 local box = require("neotmux.box")
+local g = neotmux.group("neotmux.prompt")
 
 local M = {}
 
@@ -59,7 +60,7 @@ end
 function M.open(opts)
   close()
   state = { title = opts.title or "", value = opts.value or "", done = opts.done }
-  local handle = neotmux.float(wanted())
+  local handle = g.float(wanted())
   if not handle then
     state = nil
     return
@@ -72,7 +73,7 @@ function M.is_open()
   return state ~= nil
 end
 
-neotmux.on_key(function(key)
+g.on_key(function(key)
   if state == nil then
     return false
   end
@@ -92,7 +93,7 @@ neotmux.on_key(function(key)
   return true
 end)
 
-neotmux.on_tick(function(ctx)
+g.on_tick(function(ctx)
   local left, top, right, bottom
   for _, pane in ipairs(neotmux.pane.list()) do
     local r = ctx:pane_rect(pane)

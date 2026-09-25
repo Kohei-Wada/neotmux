@@ -22,6 +22,7 @@
 -- `neotmux.notify`, over the shared guess.
 local detect = require("neotmux.detect")
 local state = require("neotmux.state")
+local g = neotmux.group("plugin.chime")
 
 local M = {}
 
@@ -77,7 +78,7 @@ local function reconsider()
   end
 end
 
-neotmux.on_event("pane_closed", function(event)
+g.on_event("pane_closed", function(event)
   seen[event.pane] = nil
 end)
 
@@ -143,7 +144,7 @@ local function play(path, from, trouble)
   end
   local cmd = { table.unpack(spec) }
   cmd[#cmd + 1] = path
-  local job, why = neotmux.job.start(cmd, {
+  local job, why = g.job.start(cmd, {
     on_exit = function(code)
       if code == 0 then
         using = from
@@ -193,7 +194,7 @@ local function watch(pane, focused)
   seen[pane] = now
 end
 
-neotmux.on_tick(function()
+g.on_tick(function()
   reconsider()
   local focused = M.only_when_away and neotmux.pane.current() or nil
   for _, window in ipairs(neotmux.window.list()) do

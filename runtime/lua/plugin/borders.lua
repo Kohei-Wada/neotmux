@@ -18,6 +18,7 @@
 -- such a cell; this file only decides what to put there, and draws it after the segments so
 -- the junction wins the cell.
 local junctions = require("neotmux.junctions")
+local g = neotmux.group("plugin.borders")
 
 local GUTTER = 1
 
@@ -57,7 +58,7 @@ end
 
 neotmux.opt.pane_gutter = GUTTER
 
-neotmux.on_tick(function(ctx)
+g.on_tick(function(ctx)
   local colours = { fg = M.fg }
   local panes = neotmux.pane.list()
   local right, bottom = 0, 0

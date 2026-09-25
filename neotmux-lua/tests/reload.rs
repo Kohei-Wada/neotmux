@@ -199,3 +199,37 @@ fn a_reload_forgets_the_ticks_the_budget_parked() {
     sub.dispatch_key(support::one(), "C-r");
     assert_eq!(notified(&sub), vec!["nil".to_string()]);
 }
+
+fn shipped_with_everything_on() -> (tempfile::TempDir, LuaSubsystem) {
+    let dir = tempfile::tempdir().unwrap();
+    write(
+        dir.path(),
+        "init.lua",
+        "local d = require('neotmux.defaults')
+         for k in pairs(d) do d[k] = true end",
+    );
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf(), support::shipped_layer()]),
+        support::panes(),
+    )
+    .unwrap();
+    assert!(sub.run_init().is_empty());
+    (dir, sub)
+}
+
+/// The test the design rests on: a reload leaves what a start leaves.
+#[test]
+fn a_reload_of_the_shipped_runtime_leaves_what_a_start_leaves() {
+    let (_dir, sub) = shipped_with_everything_on();
+    let started = sub.census();
+    assert!(sub.reload(None).is_empty());
+    assert_eq!(sub.census(), started);
+    assert!(sub.reload(None).is_empty());
+    assert_eq!(sub.census(), started, "a second reload drifted");
+}
+
+#[test]
+fn config_reload_is_a_command() {
+    let (_dir, sub) = shipped_with_everything_on();
+    assert!(sub.commands().iter().any(|c| c.name == "config-reload"));
+}
