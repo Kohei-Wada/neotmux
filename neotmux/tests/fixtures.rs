@@ -2290,10 +2290,8 @@ fn the_shipped_watcher_is_off_by_default() {
     );
 }
 
-/// `plugin/sidebar.lua` takes its width from what there is to show, between a floor and a
-/// ceiling. One session called `default` running `cat` does not reach the floor, so these
-/// tests see the band at its narrowest.
-const SIDEBAR_COLS: u16 = 27;
+/// `plugin/sidebar.lua`'s width, herdr's: 25 columns and the rule down its edge.
+const SIDEBAR_COLS: u16 = 26;
 /// The state icon against a session: idle, working, or waiting for you. Which one it is
 /// depends on what the shell said and when, so a test that only cares that the band is there
 /// asks whether the cell holds any of them.
@@ -2306,10 +2304,13 @@ fn is_a_state_icon(cell: &str) -> bool {
 const CURRENT_WINDOW_MARKER: &str = "\u{25b8}";
 
 /// The tree of the session you are in, which these tests are about: herdr's spaces are the
-/// shipped default now, and the tree is still shipped, one assignment away.
+/// shipped default now, and the tree is still shipped, one assignment away — shared out by what
+/// each section has rather than cut at half, since a tree wants the rows an idle agent list is
+/// not using.
 const TREE_SIDEBAR: &str = "require('neotmux.defaults').sidebar = true\n\
-    require('plugin.sidebar').sections =\n\
-      { require('plugin.sidebar.sessions'), require('plugin.sidebar.agents') }";
+    local sidebar = require('plugin.sidebar')\n\
+    sidebar.sections = { require('plugin.sidebar.sessions'), require('plugin.sidebar.agents') }\n\
+    sidebar.split = nil";
 
 /// The sidebar's rows are two columns — a label on the left and what the thing is running
 /// against the right edge — so what names a pane is one row holding both, not one string.
@@ -2366,8 +2367,8 @@ fn the_shipped_sidebar_lists_the_session_and_narrows_the_panes() {
     sidebar_row_naming(&mut nt, "1.1", "cat", PATIENCE);
 }
 
-/// What is left of the band when the sidebar is folded: the markers column.
-const SIDEBAR_RAIL_COLS: u16 = 1;
+/// What is left of the band when the sidebar is folded: herdr's rail, a number and a state.
+const SIDEBAR_RAIL_COLS: u16 = 4;
 
 /// The fold, on the screen a user sees: `C-b b` hands the columns back to the panes and
 /// leaves the marker column behind, and pressing it again brings the sidebar back the width
@@ -2444,7 +2445,7 @@ fn the_shipped_sidebar_is_herdrs_spaces() {
     let init = harness::runtime(&[("init.lua", "require('neotmux.defaults').sidebar = true")]);
     let mut nt = Neotmux::start_layered(&[init.path(), &shipped_layer()], "cat");
     nt.wait_for_status("cat", PATIENCE);
-    nt.wait_for_screen("\u{2500} spaces \u{2500}", PATIENCE);
+    nt.wait_for_screen(" spaces", PATIENCE);
     nt.wait_for_screen(" default", PATIENCE);
 
     nt.send("\x02w"); // C-b w

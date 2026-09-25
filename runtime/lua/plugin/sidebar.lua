@@ -14,11 +14,14 @@
 --   table.insert(require('plugin.sidebar').sections, {
 --     title = 'mine',   -- a header above it; nil for none
 --     share = 0.3,      -- the most of the band it takes when there is not room for everybody
+--     always = true,    -- headed even with nothing to show
 --     build = function(sidebar) return { rows = { runs, ... }, anchor = 1 } end,
 --     fit = function(model, height, sidebar) return { runs, ... } end,   -- optional
+--     rail = function(sidebar) return { runs, ... } end,   -- optional: what it is folded
 --   })
 --
--- A row is a list of runs, the shape `status.segments.draw` takes. `build` is handed this module
+-- A row is a list of runs, the shape `status.segments.draw` takes, and a row with a `fill` has the
+-- band's width behind it painted that colour. `build` is handed this module
 -- rather than requiring it, because the shipped sections are required from here while this file
 -- is still loading. Without a `fit`, a section is cut by `sidebar.scroll`.
 --
@@ -32,18 +35,25 @@ local M = {}
 -- these two, so a session called `feature/long-branch-name` is not cut to nothing — and `min`
 -- is what it settles at when there is nothing long to show, which is most of the time.
 M.widths = {
-  min = 27,
-  max = 36,
-  -- What is left when it is folded: one column, so the markers still say how many sessions and
-  -- panes there are and which of them you are in. A band of nothing would be a band you have to
-  -- remember is there.
-  closed = 1,
+  min = 26,
+  max = 26,
+  -- herdr's rail: a number and a state a row, which is what is left of a session or an agent
+  -- when there is no room for its name.
+  closed = 4,
 }
 
 -- Catppuccin Mocha, the palette the status bar was drawn from. Every section reads these, and
 -- every field is read on the tick, so assigning to one from your own `init.lua` takes effect.
 M.colors = {
-  bar = "#181825", -- mantle: the band everything else sits on
+  -- The band everything sits on: nil is the terminal's own background, which is herdr's.
+  bar = nil,
+  text = "#cdd6f4",
+  subtext = "#a6adc8", -- subtext0: a name you are not at
+  overlay = "#6c7086", -- overlay0: headers, and what is detail rather than name
+  branch = "#cba6f7", -- mauve: the branch of the session you are in
+  -- The rows you are at: the session you are in and the agent you are focused on.
+  here = "#1e1e2e", -- base
+  header = "#6c7086",
   session = "#9399b2", -- overlay2: a session you are not in
   current_session = "#f9e2af", -- yellow, so a session reads as a different kind of row
   window = "#cdd6f4",
@@ -52,15 +62,16 @@ M.colors = {
   focused_pane = "#a6e3a1", -- green
   -- The second row of an entry, and anything else that is detail rather than name.
   detail = "#585b70", -- surface2
-  rule = "#45475a", -- surface1: a section's header
+  rule = "#1e1e2e", -- base: the band's right edge and the line between sections
   -- One per state, so the icon carries its meaning in the colour as well as the shape.
   -- herdr's, so a herdr user reads them without learning them again.
   working = "#f9e2af", -- yellow
   blocked = "#f38ba8", -- red: the one that wants you
   done = "#94e2d5", -- teal: finished while you were not looking (`neotmux.seen`)
   idle = "#a6e3a1", -- green
+  unknown = "#6c7086", -- a session with no agent in it, which has no state to say
   -- The navigate cursor (`C-b w`).
-  selection = "#45475a", -- surface1
+  selection = "#313244", -- surface0
 }
 
 -- One per state, herdr's `dots`: the colour says which, the shape only whether anything is
@@ -72,10 +83,11 @@ M.icons = {
   blocked = "\u{25cf}",
   done = "\u{25cf}",
   idle = "\u{25cb}", -- ○
+  unknown = "\u{b7}", -- ·
 }
 
 function M.icon(state)
-  return M.icons[state] or M.icons.idle
+  return M.icons[state] or M.icons.unknown
 end
 
 -- The column down the band's right edge that says where the panes start.
@@ -83,25 +95,32 @@ M.rule = "\u{2502}" -- │
 
 M.band = neotmux.reserve("left", M.widths.min)
 
--- Which of the two the band is in. The rows are the same either way: `segments.draw` cuts a run
--- that does not fit, so the rail is the open sidebar with everything but the first column
--- clipped off, and there is no second way of drawing this to keep in step with the first.
+-- Which of the two the band is in. Folded, a section with a `rail` draws that, and one without is
+-- its open rows cut to the rail's width.
 M.open = true
 
+-- Where the band is cut between two sections, as a part of its height; herdr cuts at half. Nil
+-- shares it out by what each section has, which is also what three or more sections get.
+M.split = 0.5
+
+-- The bottom row's corner: what `C-b b` would do. Nil gives the row back to the sections.
+M.folds = { open = "\u{ab}", closed = "\u{bb}" } -- «, »
+
 -- One row: every token in `names` that has something to say, in order, separated by a space.
--- A token that answers nil or an empty string is left out, so a row whose tokens are all empty
--- is no row.
+-- A token answers its text, its colour and whether it is bold. One that answers nil or an empty
+-- string is left out, so a row whose tokens are all empty is no row.
 function M.row(tokens, names, it)
   local runs = {}
   for _, name in ipairs(names) do
     local token = tokens[name]
     if token then
-      local text, colour = token(it)
+      local text, colour, bold = token(it)
       if text and text ~= "" then
         if #runs > 0 then
           runs[#runs + 1] = { text = " ", bg = M.colors.bar }
         end
-        runs[#runs + 1] = { text = text, fg = colour or M.colors.detail, bg = M.colors.bar }
+        runs[#runs + 1] =
+          { text = text, fg = colour or M.colors.detail, bg = M.colors.bar, bold = bold }
       end
     end
   end
@@ -175,7 +194,7 @@ end
 local function share_out(live, height)
   local wants, total = {}, 0
   for i, it in ipairs(live) do
-    wants[i] = #it.model.rows + (it.titled and 1 or 0)
+    wants[i] = #it.model.rows + it.heading
     total = total + wants[i]
   end
   if total <= height then
@@ -204,27 +223,55 @@ local function share_out(live, height)
   return got
 end
 
--- `─ agents ─────── grouped`: the title, a rule to the edge, and on the right whatever the
--- section's `aside` says — a string, or a function asked each frame.
+-- ` agents          grouped`: the title, and on the right whatever the section's `aside` says —
+-- a string, or a function asked each frame.
 local function header(section, width)
   local aside = section.aside
   if type(aside) == "function" then
     aside = aside()
   end
-  local left = "\u{2500} " .. section.title .. " "
-  local right = aside and (" " .. aside) or ""
-  local rest = width - segments.columns(left) - segments.columns(right)
-  if rest < 0 then
-    right, rest = "", width - segments.columns(left)
+  local left = " " .. section.title
+  local right = aside or ""
+  local gap = width - segments.columns(left) - segments.columns(right)
+  if gap < 1 then
+    right, gap = "", 0
   end
+  local style = { fg = M.colors.header, bg = M.colors.bar, bold = true }
   return {
-    {
-      text = left .. string.rep("\u{2500}", math.max(0, rest)),
-      fg = M.colors.rule,
-      bg = M.colors.bar,
-    },
-    { text = right, fg = M.colors.detail, bg = M.colors.bar },
+    { text = left, fg = style.fg, bg = style.bg, bold = true },
+    { text = string.rep(" ", gap), bg = style.bg },
+    { text = right, fg = style.fg, bg = style.bg, bold = true },
   }
+end
+
+-- The rows a section's header takes: the line between it and the section above, then its title
+-- and a blank under it. The first section has no line above it; a rail has no titles.
+local function heading(section, first, rail)
+  local rows = first and 0 or 1
+  if section.title and not rail then
+    rows = rows + 2
+  end
+  return rows
+end
+
+local function draw_row(ctx, x, y, width, runs)
+  if runs.fill then
+    ctx:rect(nil, x, y, width, 1, { bg = runs.fill })
+    for _, run in ipairs(runs) do
+      run.bg = run.bg or runs.fill
+    end
+  end
+  segments.draw(ctx, x, y, width, runs)
+end
+
+-- How many rows each live section gets out of `height`: cut at `M.split` when there are two,
+-- shared out by what they have otherwise.
+local function heights_of(live, height)
+  if M.split and #live == 2 then
+    local top = math.min(height, math.floor((height + 1) * M.split))
+    return { top, height - top }
+  end
+  return share_out(live, height)
 end
 
 -- How wide the band wants to be: the widest row any section has, between the two bounds.
@@ -288,20 +335,24 @@ neotmux.on_tick(function(ctx)
   if not band then
     return
   end
+  local rail = not M.open
 
-  -- A section with nothing to show takes no room and draws no header. One with a title draws it,
-  -- the first as well: herdr heads its top half `spaces` as it heads the agents.
+  -- A section with nothing to show takes no room and draws no header, unless it is `always`.
   local live = {}
   for at, section in ipairs(M.sections) do
     local model = guarded(section, at, "build", section.build, M)
-    if type(model) == "table" and type(model.rows) == "table" and #model.rows > 0 then
-      live[#live + 1] = {
-        section = section,
-        at = at,
-        model = model,
-        titled = section.title ~= nil,
-      }
+    if type(model) == "table" and type(model.rows) == "table" then
+      if rail and section.rail then
+        local rows = guarded(section, at, "rail", section.rail, M)
+        model = { rows = type(rows) == "table" and rows or {} }
+      end
+      if #model.rows > 0 or section.always then
+        live[#live + 1] = { section = section, at = at, model = model }
+      end
     end
+  end
+  for i, it in ipairs(live) do
+    it.heading = heading(it.section, i == 1, rail)
   end
 
   -- The width the content wants, asked for once it is known. `resize_to` lands on the next
@@ -315,7 +366,6 @@ neotmux.on_tick(function(ctx)
 
   ctx:rect(nil, band.x, band.y, band.w, band.h, { bg = M.colors.bar })
 
-  -- Folded, the band is the markers column and nothing else; open, its last column is the rule.
   local ruled = band.w > 1
   local inner = ruled and band.w - 1 or band.w
   if ruled then
@@ -324,21 +374,37 @@ neotmux.on_tick(function(ctx)
     end
   end
 
-  local heights = share_out(live, band.h)
+  -- The bottom row is the fold's: `«` in its corner open, `»` in the middle of the rail.
+  local height = band.h
+  if M.band and M.folds and height > 1 then
+    height = height - 1
+    local glyph = rail and M.folds.closed or M.folds.open
+    local x = rail and band.x + math.floor((inner - 1) / 2) or band.x + inner - 1
+    ctx:text(nil, x, band.y + height, glyph, { fg = M.colors.overlay, bg = M.colors.bar })
+  end
+
+  local heights = heights_of(live, height)
   local y = band.y
   for i, it in ipairs(live) do
-    local body = heights[i] - (it.titled and 1 or 0)
+    local body = heights[i] - it.heading
+    -- A header with no room for a row under it is not drawn, unless there are no rows to want.
+    local room = heights[i] >= it.heading and (body >= 1 or #it.model.rows == 0)
+    local top = y
+    if i > 1 and room then
+      local line = string.rep("\u{2500}", inner)
+      ctx:text(nil, band.x, top, line, { fg = M.colors.rule, bg = M.colors.bar })
+      top = top + 1
+    end
+    if it.section.title and not rail and room then
+      segments.draw(ctx, band.x, top, inner, header(it.section, inner))
+      top = top + 2
+    end
     if body >= 1 then
-      local fit = it.section.fit or default_fit
+      local fit = (not rail or not it.section.rail) and it.section.fit or default_fit
       local rows = guarded(it.section, it.at, "fit", fit, it.model, body, M)
       if type(rows) == "table" then
-        local top = y
-        if it.titled then
-          segments.draw(ctx, band.x, top, inner, header(it.section, inner))
-          top = top + 1
-        end
         for k = 1, math.min(#rows, body) do
-          segments.draw(ctx, band.x, top + k - 1, inner, rows[k])
+          draw_row(ctx, band.x, top + k - 1, inner, rows[k])
         end
       end
     end

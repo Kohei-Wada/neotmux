@@ -12,6 +12,7 @@
 -- The tree this replaced, every window and pane of the session you are in, is still
 -- `plugin.sidebar.sessions`, and goes back with one assignment to `require('plugin.sidebar')
 -- .sections`.
+local detect = require("neotmux.detect")
 local seen = require("neotmux.seen")
 local state = require("neotmux.state")
 local modes = require("neotmux.mode")
@@ -38,10 +39,13 @@ M.tokens = {
     return sidebar.icon(it.state), sidebar.colors[it.state]
   end,
   name = function(it)
-    return it.name, it.here and sidebar.colors.current_session or sidebar.colors.session
+    if it.here then
+      return it.name, sidebar.colors.text, true
+    end
+    return it.name, sidebar.colors.subtext
   end,
   branch = function(it)
-    return it.git and it.git.branch, sidebar.colors.current_window
+    return it.git and it.git.branch, it.here and sidebar.colors.branch or sidebar.colors.overlay
   end,
   ahead = function(it)
     local n = it.git and it.git.ahead or 0
@@ -53,14 +57,16 @@ M.tokens = {
   end,
 }
 
--- herdr's rollup order: a session is what the most urgent of its panes is.
-local RANK = { blocked = 1, done = 2, working = 3, idle = 4 }
+-- herdr's rollup order: a session is what the most urgent of its agents is, and `unknown` when
+-- it has none — a shell has no state worth a colour.
+local RANK = { blocked = 1, done = 2, working = 3, idle = 4, unknown = 5 }
 
 local function rollup(panes)
-  local worst = "idle"
+  local worst = "unknown"
   for _, pane in ipairs(panes) do
+    -- `state.of` first: it is what asks the detector, and `agent` reads what it found.
     local one = seen.of(pane, state.of(pane))
-    if one and RANK[one] and RANK[one] < RANK[worst] then
+    if one and detect.agent(pane) and RANK[one] and RANK[one] < RANK[worst] then
       worst = one
     end
   end
@@ -157,7 +163,7 @@ function M.build(given)
   local rows, anchor = {}, 1
   for at, it in ipairs(entries()) do
     local selected = M.cursor == at
-    local bg = selected and sidebar.colors.selection or sidebar.colors.bar
+    local fill = selected and sidebar.colors.selection or it.here and sidebar.colors.here or nil
     if it.here and not M.cursor then
       anchor = #rows + 1
     elseif selected then
@@ -166,10 +172,8 @@ function M.build(given)
     for line, names in ipairs(M.rows) do
       local runs = sidebar.row(M.tokens, names, it)
       if #runs > 0 then
-        table.insert(runs, 1, { text = line == 1 and " " or "   ", bg = bg })
-        for _, run in ipairs(runs) do
-          run.bg = bg
-        end
+        table.insert(runs, 1, { text = line == 1 and " " or "   " })
+        runs.fill = fill
         rows[#rows + 1] = runs
       end
     end
@@ -178,6 +182,21 @@ function M.build(given)
     end
   end
   return { rows = rows, anchor = anchor }
+end
+
+-- Folded: `1 ●`, a session a row, numbered as `1`-`9` in navigate go to them.
+function M.rail(given)
+  sidebar = given
+  local rows = {}
+  for at, it in ipairs(entries()) do
+    rows[#rows + 1] = {
+      { text = tostring(at), fg = it.here and sidebar.colors.text or sidebar.colors.overlay },
+      { text = " " },
+      { text = sidebar.icon(it.state), fg = sidebar.colors[it.state] },
+      fill = it.here and sidebar.colors.here or nil,
+    }
+  end
+  return rows
 end
 
 -- Navigate: the cursor, and the keys that move it and act on it, for as long as it is up.
@@ -231,12 +250,31 @@ end
 
 local MOVES = { j = 1, Down = 1, k = -1, Up = -1 }
 
+-- herdr's, along the bottom row while the cursor is up: that you are in it and what the keys do.
+M.bar_colors = { mode = "#89b4fa", on = "#181825", text = "#6c7086" }
+
+local function help_bar(ctx)
+  local area = ctx:area()
+  local y = area.y + area.h - 1
+  local c = M.bar_colors
+  ctx:rect(nil, area.x, y, area.w, 1, { bg = c.on })
+  require("status.segments").draw(ctx, area.x, y, area.w, {
+    { text = " NAVIGATE ", fg = c.on, bg = c.mode, bold = true },
+    { text = " esc back  ", fg = c.text, bg = c.on },
+    { text = "\u{2191}/\u{2193}", fg = c.mode, bg = c.on, bold = true },
+    { text = " workspace", fg = c.text, bg = c.on },
+  })
+end
+
 -- `C-b` while the cursor is up leaves it. The prefix sees the key first — it was loaded first —
 -- and raises its mode, so this looks for that rather than for the key, which also follows a
 -- prefix rebound to something else. What comes after the prefix key is then the prefix's.
-neotmux.on_tick(function()
+neotmux.on_tick(function(ctx)
   if M.cursor and modes.current() == "prefix" then
     leave()
+  end
+  if M.cursor then
+    help_bar(ctx)
   end
 end)
 

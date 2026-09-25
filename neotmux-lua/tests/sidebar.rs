@@ -66,9 +66,13 @@ fn built(extra: &str) -> (tempfile::TempDir, Built) {
 /// The sidebar these tests were written against before herdr's became the default: the tree of
 /// the session you are in, and agent rows that say where and how long. They are about how the
 /// container shares the band and how those two sections cut their rows, and both sections are
-/// still shipped, so they are built by name here.
+/// still shipped, so they are built by name here, in the band they were written against: wider,
+/// shared out rather than cut at half, no fold corner, and agents only when there are some.
 const TREE: &str = "local sidebar = require('plugin.sidebar')\n\
     sidebar.sections = { require('plugin.sidebar.sessions'), require('plugin.sidebar.agents') }\n\
+    sidebar.widths = { min = 27, max = 36, closed = 1 }\n\
+    sidebar.split, sidebar.folds = nil, nil\n\
+    require('plugin.sidebar.agents').always = false\n\
     sidebar.icons = { working = '\u{25cf}', blocked = '\u{25c9}', done = '\u{2713}', idle = '\u{25cb}' }\n\
     local agents = require('plugin.sidebar.agents')\n\
     agents.rows = { { 'state_icon', 'location', 'agent', 'age' } }\n\
@@ -249,9 +253,9 @@ fn a_section_added_from_init_lua_draws_under_its_title() {
     open(&sub, &s);
     let lines = settled(&sub, &s, 1);
     let tree = line_with(&lines, "work");
-    let header = line_with(&lines, "\u{2500} mine \u{2500}");
+    let header = line_with(&lines, " mine");
     assert!(tree < header, "{lines:#?}");
-    assert_eq!(lines[header + 1], "hello", "{lines:#?}");
+    assert_eq!(lines[header + 2], "hello", "{lines:#?}");
 }
 
 #[test]
@@ -288,8 +292,8 @@ fn a_section_that_raises_is_skipped_and_named_once() {
     assert_eq!(said.len(), 1, "{said:?}");
 }
 
-/// 12 rows, wants of 3 and 31: the capped section is held to 6, the uncapped one takes its 3,
-/// and the 3 left over go back to the capped one — a header and eight rows.
+/// 12 rows, wants of 3 and 33: the capped section is held to 6, the uncapped one takes its 3,
+/// and the 3 left over go back to the capped one — a line, a title, a blank and six rows.
 #[test]
 fn a_capped_section_takes_its_share_and_then_what_is_left() {
     let (_dir, sub) = built(
@@ -314,9 +318,10 @@ fn a_capped_section_takes_its_share_and_then_what_is_left() {
     open(&sub, &s);
     let lines = settled(&sub, &s, 1);
     assert_eq!(&lines[0..3], &["a1", "a2", "a3"], "{lines:#?}");
-    assert!(lines[3].starts_with("\u{2500} b \u{2500}"), "{lines:#?}");
-    let b: Vec<String> = (1..=8).map(|i| format!("b{i}")).collect();
-    assert_eq!(&lines[4..12], b.as_slice(), "{lines:#?}");
+    assert_eq!(lines[3], "\u{2500}".repeat(26), "{lines:#?}");
+    assert_eq!(lines[4], " b", "{lines:#?}");
+    let b: Vec<String> = (1..=6).map(|i| format!("b{i}")).collect();
+    assert_eq!(&lines[6..12], b.as_slice(), "{lines:#?}");
 }
 
 #[test]
@@ -330,14 +335,14 @@ fn a_share_is_not_applied_when_everything_fits() {
          end\n\
          sidebar.sections = {\n\
            { build = function() return { rows = rows('a', 3) } end },\n\
-           { title = 'b', share = 0.5, build = function() return { rows = rows('b', 8) } end },\n\
+           { title = 'b', share = 0.5, build = function() return { rows = rows('b', 6) } end },\n\
          }",
     );
     let s = [Sess::new(1, "work", vec![vec![101]])];
     open(&sub, &s);
     let lines = settled(&sub, &s, 1);
-    let b: Vec<String> = (1..=8).map(|i| format!("b{i}")).collect();
-    assert_eq!(&lines[4..12], b.as_slice(), "{lines:#?}");
+    let b: Vec<String> = (1..=6).map(|i| format!("b{i}")).collect();
+    assert_eq!(&lines[6..12], b.as_slice(), "{lines:#?}");
 }
 
 /// Review focus 1: a row wider than the widest band is cut at the band, not drawn into the panes.
@@ -497,7 +502,7 @@ fn agents_are_listed_across_sessions_in_state_order() {
     show(&sub, 201, "DONE");
     show(&sub, 202, "DONE");
     let lines = settled(&sub, &s, 1);
-    let header = line_with(&lines, "\u{2500} agents \u{2500}");
+    let header = line_with(&lines, " agents");
     let blocked = line_with(&lines, "\u{25c9} work:1.2 fake  0s");
     let working = line_with(&lines, "\u{25cf} work:1.1 fake  0s");
     let idle = line_with(&lines, "\u{25cb} home:1.1 fake  0s");
@@ -563,11 +568,11 @@ fn more_agents_than_half_the_band_stop_at_half() {
     }
     let lines = settled(&sub, &s, 1);
     assert!(lines.iter().any(|l| l.ends_with(" work")), "{lines:#?}");
-    let header = line_with(&lines, "\u{2500} agents \u{2500}");
-    assert_eq!(header, 6, "{lines:#?}");
-    assert_eq!(lines[11], "\u{2193} 8", "{lines:#?}");
+    let header = line_with(&lines, " agents");
+    assert_eq!(header, 7, "{lines:#?}");
+    assert_eq!(lines[11], "\u{2193} 10", "{lines:#?}");
     let listed = lines.iter().filter(|l| l.contains("work:1.")).count();
-    assert_eq!(listed, 4, "{lines:#?}");
+    assert_eq!(listed, 2, "{lines:#?}");
 }
 
 /// Review focus 4: folded, the band is one column whatever the agent list has in it.
@@ -653,11 +658,14 @@ fn the_shipped_sidebar_is_herdrs_spaces_over_its_agents() {
     show(&sub, 101, "BUSY");
     show(&sub, 201, "ASK");
     show(&sub, 202, "BUSY");
-    let lines = settled(&sub, &s, 1);
-    let spaces = line_with(&lines, "\u{2500} spaces \u{2500}");
+    // Tall enough that the lower half holds all three agents.
+    let tall = Size { rows: 20, cols: 80 };
+    frame_in(&sub, tall, &s, 1);
+    let lines = frame_in(&sub, tall, &s, 1);
+    let spaces = line_with(&lines, " spaces");
     let home = line_with(&lines, " B home");
     let work = line_with(&lines, " W work");
-    let agents = line_with(&lines, "\u{2500} agents \u{2500}");
+    let agents = line_with(&lines, " agents");
     assert!(spaces < home && home < work && work < agents, "{lines:#?}");
     assert!(lines[agents].ends_with("grouped"), "{lines:#?}");
     // Grouped: home's two before work's one, and home names its windows because it has two.
@@ -898,7 +906,8 @@ fn every_space_gets_its_branch_however_many_there_are() {
         })
         .collect();
     open(&sub, &s);
-    let big = Size { rows: 40, cols: 80 };
+    // Tall enough that half of it holds ten spaces of two rows each.
+    let big = Size { rows: 60, cols: 80 };
     let mut lines = Vec::new();
     for _ in 0..30 {
         lines = frame_in(&sub, big, &s, 1);
@@ -920,4 +929,137 @@ fn typing_a_state_in_the_agents_palette_narrows_to_it() {
     let lines = frame(&sub, &s, 1);
     line_with(&lines, "blocked");
     assert!(!lines.iter().any(|l| l.contains("working")), "{lines:#?}");
+}
+
+// ---- herdr's look, as read off a real herdr 0.9.1 with catppuccin (2026-09-25) ----
+
+const TEXT: neotmux_proto::Color = neotmux_proto::Color::Rgb(0xcd, 0xd6, 0xf4);
+const SUBTEXT: neotmux_proto::Color = neotmux_proto::Color::Rgb(0xa6, 0xad, 0xc8);
+const OVERLAY: neotmux_proto::Color = neotmux_proto::Color::Rgb(0x6c, 0x70, 0x86);
+const HERE: neotmux_proto::Color = neotmux_proto::Color::Rgb(0x1e, 0x1e, 0x2e);
+const CURSOR: neotmux_proto::Color = neotmux_proto::Color::Rgb(0x31, 0x32, 0x44);
+
+/// The first text drawn that holds `needle`: its colour and whether it is bold.
+fn style_of(sub: &Built, needle: &str) -> (neotmux_proto::Color, bool) {
+    sub.frame_output()
+        .into_iter()
+        .find_map(|cmd| match cmd {
+            DrawCmd::Text { text, fg, bold, .. } if text.contains(needle) => Some((fg, bold)),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("nothing drawn holds {needle:?}"))
+}
+
+/// What row `y` of the band is painted with, if anything paints it.
+fn fill_on(sub: &Built, y: u16) -> Option<neotmux_proto::Color> {
+    sub.frame_output().into_iter().find_map(|cmd| match cmd {
+        DrawCmd::Rect { rect, bg, .. } if rect.y == y && rect.h == 1 => Some(bg),
+        _ => None,
+    })
+}
+
+/// Row for row what herdr draws: ` spaces` and a blank, the sessions, then at half the band a
+/// rule across it, ` agents` with the order on its right and a blank, the agents one column in
+/// with what they are three columns in, and the fold's `«` in the corner.
+#[test]
+fn the_sidebar_is_laid_out_row_for_row_as_herdrs() {
+    let (_dir, sub) = built_herdr(AGENTS);
+    let s = [
+        Sess::new(1, "work", vec![vec![101]]).agents(&[101]),
+        Sess::new(2, "home", vec![vec![201]]),
+    ];
+    open(&sub, &s);
+    show(&sub, 101, "BUSY");
+    let lines = settled(&sub, &s, 1);
+    assert_eq!(lines[0], " spaces", "{lines:#?}");
+    assert_eq!(lines[1], "", "{lines:#?}");
+    assert_eq!(lines[2], " \u{b7} home", "{lines:#?}");
+    assert_eq!(lines[3], " \u{25cf} work", "{lines:#?}");
+    assert_eq!(lines[6], "\u{2500}".repeat(25), "{lines:#?}");
+    assert!(
+        lines[7].starts_with(" agents") && lines[7].ends_with("grouped"),
+        "{lines:#?}"
+    );
+    assert_eq!(lines[8], "", "{lines:#?}");
+    assert_eq!(lines[9], " \u{25cf} work", "{lines:#?}");
+    assert_eq!(lines[10], "   fake", "{lines:#?}");
+    assert_eq!(lines[11].trim(), "\u{ab}", "{lines:#?}");
+}
+
+/// Nothing paints the band but the rows you are in: herdr leaves the terminal's own background
+/// and marks the session and the agent you are at. Names are bold where herdr's are.
+#[test]
+fn only_the_rows_you_are_in_are_painted_and_names_are_herdrs_colours() {
+    let (_dir, sub) = built_herdr(AGENTS);
+    let s = [
+        Sess::new(1, "work", vec![vec![101]]).agents(&[101]),
+        Sess::new(2, "home", vec![vec![201]]),
+    ];
+    open(&sub, &s);
+    show(&sub, 101, "BUSY");
+    settled(&sub, &s, 1);
+    assert_eq!(fill_on(&sub, 2), None, "home is not where you are");
+    assert_eq!(fill_on(&sub, 3), Some(HERE), "work is");
+    assert_eq!(fill_on(&sub, 9), Some(HERE), "the agent you are at");
+    assert_eq!(fill_on(&sub, 10), Some(HERE), "both of its rows");
+    assert_eq!(style_of(&sub, "spaces"), (OVERLAY, true));
+    assert_eq!(style_of(&sub, "home"), (SUBTEXT, false));
+    assert_eq!(style_of(&sub, "work"), (TEXT, true));
+    assert_eq!(style_of(&sub, "fake"), (OVERLAY, false));
+}
+
+/// The agents are headed whether or not there are any, as herdr's are.
+#[test]
+fn the_agents_are_headed_with_no_agents() {
+    let (_dir, sub) = built_herdr("");
+    let s = [Sess::new(1, "work", vec![vec![101]])];
+    open(&sub, &s);
+    let lines = settled(&sub, &s, 1);
+    line_with(&lines, " agents");
+}
+
+/// Folded, it is herdr's rail: every session numbered with its state, a rule, every agent
+/// numbered with its state, and `»` to open it again.
+#[test]
+fn folded_it_is_herdrs_rail() {
+    let (_dir, sub) = built_herdr(AGENTS);
+    let s = [
+        Sess::new(1, "work", vec![vec![101]]).agents(&[101]),
+        Sess::new(2, "home", vec![vec![201]]),
+    ];
+    open(&sub, &s);
+    show(&sub, 101, "BUSY");
+    settled(&sub, &s, 1);
+    support::keys(&sub, &["B"]);
+    let lines = settled(&sub, &s, 1);
+    assert_eq!(lines[0], "1 \u{b7}", "{lines:#?}");
+    assert_eq!(lines[1], "2 \u{25cf}", "{lines:#?}");
+    assert_eq!(lines[6], "\u{2500}".repeat(3), "{lines:#?}");
+    assert_eq!(lines[7], "1 \u{25cf}", "{lines:#?}");
+    assert_eq!(lines[11].trim(), "\u{bb}", "{lines:#?}");
+}
+
+/// While the cursor is up the bottom row says so, as herdr's does, and the cursor's rows are
+/// painted with herdr's selection.
+#[test]
+fn navigate_says_so_along_the_bottom_and_paints_the_cursor() {
+    let (_dir, sub) = built_herdr(
+        "neotmux.on_key(function(key)\n\
+           if key == 'W' then require('plugin.sidebar.spaces').navigate() return true end\n\
+           return false\n\
+         end)\n",
+    );
+    let s = [
+        Sess::new(1, "alpha", vec![vec![101]]),
+        Sess::new(2, "bravo", vec![vec![201]]),
+    ];
+    open(&sub, &s);
+    settled(&sub, &s, 1);
+    support::keys(&sub, &["W", "j"]);
+    let lines = settled(&sub, &s, 1);
+    line_with(&lines, "NAVIGATE");
+    assert_eq!(fill_on(&sub, 3), Some(CURSOR), "{lines:#?}");
+    support::keys(&sub, &["Esc"]);
+    let lines = settled(&sub, &s, 1);
+    assert!(!lines.iter().any(|l| l.contains("NAVIGATE")), "{lines:#?}");
 }

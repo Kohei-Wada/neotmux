@@ -1381,19 +1381,25 @@ optional plugin and the prefix is the standard one. `C-b f` is `plugin.hints`'s 
 the same way — see [The hints convention](#the-hints-convention) below.
 
 The sidebar is herdr's (herdrdev/herdr), section for section, so a herdr user finds what they
-had. A herdr **space** is a neotmux session and a herdr **tab** a window. Its width is taken
-from what there is to show, between `require('plugin.sidebar').widths.min` (27) and `.max` (36),
-and its last column is a rule, `│`, where the panes start.
+had, and drawn the way herdr draws it. A herdr **space** is a neotmux session and a herdr
+**tab** a window. It is herdr's 26 columns wide — `require('plugin.sidebar').widths.min` and
+`.max`, the width taken from what there is to show between the two — and its last column is a
+rule, `│`, where the panes start. Nothing paints the band but the rows you are at; the rest is
+the terminal's own background. It is cut at half its height between the two sections
+(`require('plugin.sidebar').split = 0.5`), each headed in bold with a blank row under it, a line
+across above the second, and the bottom row's corner is `«`, what `C-b b` does.
 
 **`spaces`**, on top, is every session: its state and name, then the git branch its focused
 pane's directory is on and how far that is from its upstream (`↑` ahead in green, `↓` behind in
-red). A session's state is its most urgent pane's, in herdr's order: blocked, done, working,
-idle. Git is asked as a job — the sandbox has no `io` — at most every
+red). A session's state is its most urgent agent's, in herdr's order: blocked, done, working,
+idle; with no agent it is `·`. The session you are in is bold on a painted row, its branch in
+mauve. Git is asked as a job — the sandbox has no `io` — at most every
 `require('plugin.sidebar.spaces').refresh` ms (5000) per directory.
 
 **`C-b w`** is herdr's navigate: a cursor over the spaces, starting on the session you are in.
 `j`/`k` move it, Enter goes to the session under it, `1`-`9` go straight to that one, Esc
-leaves. The sidebar unfolds while it is up if it was folded.
+leaves. The sidebar unfolds while it is up if it was folded, and the bottom row says
+`NAVIGATE` and what the keys do, as herdr's does.
 
 **`agents`**, under it, is every pane a ruleset in `neotmux.detect.agents` answered for, in every
 session — where it is on the first row, what it is on the second:
@@ -1405,8 +1411,11 @@ session — where it is on the first row, what it is on the second:
 `'priority'` (blocked, done, working, idle), and the header says which. `rows` and `tokens`
 take `state_icon`, `state_text`, `session`, `window`, `agent`, `command`, `location` and `age`;
 `agent` is the ruleset that answered, where `command` is what the pane reports — for an agent
-started through a wrapper, the wrapper. With no agents it takes no room; with many it takes at
-most half the band (`share = 0.5`).
+started through a wrapper, the wrapper. It is headed with no agents too (`always = true`), as
+herdr's is, and the agent you are focused on is on a painted row.
+
+Folded (`C-b b`), the band is herdr's rail, four columns: every session numbered with its state,
+a line, every agent numbered with its state, and `»` at the bottom.
 
 **States and colours** are herdr's: working yellow, blocked red, done teal, idle green, each a
 `●` except idle's `○` (`require('plugin.sidebar').icons` and `.colors`; herdr's `symbols` are
@@ -1421,6 +1430,7 @@ in — is still shipped as `plugin.sidebar.sessions`, and is one assignment away
 ```lua
 local sidebar = require('plugin.sidebar')
 sidebar.sections = { require('plugin.sidebar.sessions'), require('plugin.sidebar.agents') }
+sidebar.split = nil   -- shared out by what each has, so the tree has the rows no agent is using
 ```
 
 Its rows are tables too:
@@ -1443,13 +1453,17 @@ table.insert(require('plugin.sidebar').sections, {
   title = 'mine',     -- a header above it; nil for none
   aside = 'right',    -- optional: text, or a function, on the header's right
   share = 0.3,        -- the most of the band it takes when there is not room for everybody
+  always = true,      -- optional: headed even with no rows
   build = function(sidebar) return { rows = { { { text = 'hello' } } }, anchor = 1 } end,
   fit = function(model, height, sidebar) ... end,   -- optional: cut the rows to a height
+  rail = function(sidebar) return { ... } end,      -- optional: its rows when folded
 })
 ```
 
-A row is a list of runs, the shape `status.segments.draw` takes, and `sidebar.row(tokens, names,
-it)` builds one out of a token table the way the tree does. Without a `fit` a section is cut by
+A row is a list of runs, the shape `status.segments.draw` takes; a row with `fill = '#1e1e2e'`
+has the band's width behind it painted that colour. `sidebar.row(tokens, names, it)` builds one
+out of a token table the way the tree does, a token answering its text, its colour and whether
+it is bold. A section with no `rail` is its open rows cut to the rail's width. Without a `fit` a section is cut by
 `sidebar.scroll`, which keeps `anchor` on screen. A section whose `build` or `fit` raises is left
 out of that frame and named once through `neotmux.notify`.
 
@@ -1480,7 +1494,7 @@ require('neotmux.defaults').copy = false
 ```
 
 `watch`, `sidebar` and `footer` go the other way: they are off until you turn them on. What
-counts as a pane waiting for you is an opinion about what you run, and twenty-four columns of
+counts as a pane waiting for you is an opinion about what you run, and twenty-six columns of
 sidebar is an opinion about screen real estate; a status line is neither, and neither is copy
 mode — it takes no band, no gutter and no cell from any pane, and what it reads is a buffer the
 host is already keeping whether or not anything ever looks at it. `footer` is off for the same
@@ -1488,9 +1502,9 @@ reason `status` would be if it were optional: a row is a row whether or not a mo
 raised into it.
 
 The sidebar has two widths rather than an on and an off — `require('plugin.sidebar').widths`
-is `{ open = 24, closed = 1 }`, and `C-b b` swaps them. Closed is the markers column: you can
-still see how many windows and panes there are and which one you are in, you just cannot read
-their names. A band of nothing would be a band you have to remember is there.
+is `{ min = 26, max = 26, closed = 4 }`, and `C-b b` swaps them. Closed is the rail: you can
+still see how many sessions and agents there are and what state each is in, you just cannot
+read their names. A band of nothing would be a band you have to remember is there.
 
 ```lua
 require('neotmux.defaults').watch = true

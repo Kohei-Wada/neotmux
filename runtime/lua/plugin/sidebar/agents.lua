@@ -16,7 +16,7 @@ local detect = require("neotmux.detect")
 local seen = require("neotmux.seen")
 local state = require("neotmux.state")
 
-local M = { title = "agents", share = 0.5 }
+local M = { title = "agents", share = 0.5, always = true }
 
 -- herdr's rows: where it is on the first, what it is on the second. `window` says nothing for a
 -- session with one window, as herdr's `tab` does. `location`, `command`, `state_text` and `age`
@@ -48,26 +48,26 @@ M.tokens = {
     return it.state, sidebar.colors[it.state]
   end,
   session = function(it)
-    return it.session, it.here and sidebar.colors.current_session or sidebar.colors.session
+    return it.session, it.focused and sidebar.colors.text or sidebar.colors.subtext, true
   end,
   window = function(it)
     if it.windows < 2 then
       return nil
     end
-    return it.window_name or tostring(it.window), sidebar.colors.window
+    return it.window_name or tostring(it.window), sidebar.colors.subtext
   end,
   location = function(it)
     return it.session .. ":" .. it.window .. "." .. it.pane,
       it.focused and sidebar.colors.focused_pane or sidebar.colors.window
   end,
   agent = function(it)
-    return it.agent, sidebar.colors.detail
+    return it.agent, sidebar.colors.overlay
   end,
   command = function(it)
-    return it.command, sidebar.colors.detail
+    return it.command, sidebar.colors.overlay
   end,
   age = function(it)
-    return it.age, sidebar.colors.detail
+    return it.age, sidebar.colors.overlay
   end,
 }
 
@@ -197,14 +197,28 @@ function M.build(given)
     for at, names in ipairs(M.rows) do
       local runs = sidebar.row(M.tokens, names, it)
       if #runs > 0 then
-        if at > 1 then
-          table.insert(runs, 1, { text = "  ", bg = sidebar.colors.bar })
-        end
+        table.insert(runs, 1, { text = at == 1 and " " or "   " })
+        runs.fill = it.focused and sidebar.colors.here or nil
         rows[#rows + 1] = runs
       end
     end
   end
   return { rows = rows, anchor = anchor }
+end
+
+-- Folded: `1 ●`, an agent a row.
+function M.rail(given)
+  sidebar = given
+  local rows = {}
+  for at, it in ipairs(M.collect()) do
+    rows[#rows + 1] = {
+      { text = tostring(at), fg = it.focused and sidebar.colors.text or sidebar.colors.overlay },
+      { text = " " },
+      { text = sidebar.icon(it.state), fg = sidebar.colors[it.state] },
+      fill = it.focused and sidebar.colors.here or nil,
+    }
+  end
+  return rows
 end
 
 return M

@@ -14,6 +14,13 @@ where nobody was looking stays done until somebody looks, which needed
 `C-b w` is herdr's navigate, a cursor over the spaces with Enter to go and `1`-`9` to jump, and
 `C-b g` herdr's goto: the palette on its agents, Enter to focus one in whatever session it is.
 
+And it is drawn as herdr draws it, read off a real herdr 0.9.1 row by row: 26 columns on the
+terminal's own background with only the rows you are at painted, bold headers over a blank row,
+the band cut at half with a line across, a session's state taken from its agents alone (`·` with
+none), herdr's colours and weights for names and branches, `«` in the corner, a four-column rail
+of numbered states when folded, and `NAVIGATE` along the bottom while the cursor is up. A draw's
+text can be bold for it — `ctx:text(..., { bold = true })` — which is protocol 13.
+
 The palette takes providers: `@` lists the sessions, `#` the agents, anything else the commands,
 and a plugin adds its own to `require('plugin.palette').providers`. `agent-next` and
 `agent-prev` step through the agents, bound to nothing. The tree the sidebar was is still shipped
