@@ -224,6 +224,16 @@ pub(crate) fn taken(listener: &UnixListener) -> anyhow::Result<Option<UnixStream
 }
 
 /// What a plugin asked of the set of sessions, applied once every session has had its frame.
+/// The session whose reload wins the frame, if any of this frame's ops asked for one: the
+/// first to ask, since every other reload asked by the same frame is the same config reread
+/// twice over.
+fn reload_requested(asked: &[(SessionId, String, ServerOp)]) -> Option<SessionId> {
+    asked
+        .iter()
+        .find(|(_, _, op)| matches!(op, ServerOp::Reload))
+        .map(|(from, _, _)| *from)
+}
+
 fn apply_server_ops(
     asked: Vec<(SessionId, String, ServerOp)>,
     plugins: &mut Plugins,
@@ -232,6 +242,7 @@ fn apply_server_ops(
     terminals: &Rc<PaneTerminals>,
     waker: &Waker,
 ) {
+    let reload = reload_requested(&asked);
     for (from, tag, op) in asked {
         match op {
             ServerOp::Create { name } => {
@@ -292,7 +303,15 @@ fn apply_server_ops(
                     &format!("session.kill('{name}') refused: no session by that name"),
                 ),
             },
+            // Applied once, after the loop: however many sessions asked this frame, the
+            // config is read once.
+            ServerOp::Reload => {}
         }
+    }
+    // Last, and once however many asked: every other op this frame was raised by the old
+    // code and is carried out as the old code meant it.
+    if let Some(from) = reload {
+        plugins.reload(sessions.get_mut(from).is_some().then_some(from));
     }
 }
 
@@ -597,5 +616,36 @@ fn deliver(clients: &mut [Attached], i: usize, sessions: &mut Sessions, plugins:
         if clients[i].gone {
             break;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Two sessions asking for a reload in the same frame reload the config once, as the
+    /// first to ask meant it — not twice, and not as whichever happened to be last in the
+    /// vec.
+    #[test]
+    fn two_reloads_in_one_frame_reload_once() {
+        let first = SessionId::from(1);
+        let second = SessionId::from(2);
+        let asked = vec![
+            (first, "one".to_string(), ServerOp::Reload),
+            (second, "two".to_string(), ServerOp::Reload),
+        ];
+        assert_eq!(reload_requested(&asked), Some(first));
+    }
+
+    #[test]
+    fn no_reload_asked_is_none() {
+        let asked = vec![(
+            SessionId::from(1),
+            "one".to_string(),
+            ServerOp::Kill {
+                name: "x".to_string(),
+            },
+        )];
+        assert_eq!(reload_requested(&asked), None);
     }
 }

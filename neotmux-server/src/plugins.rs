@@ -219,6 +219,10 @@ impl Plugins {
                     server.push((tag, ServerOp::Rename { from, to }));
                     continue;
                 }
+                Op::Reload => {
+                    server.push((tag, ServerOp::Reload));
+                    continue;
+                }
             };
             out.push((tag, op));
         }
@@ -279,6 +283,10 @@ impl Plugins {
                     format!("session.rename('{from}', '{to}')"),
                     "no session exists until one starts",
                 ),
+                ServerOp::Reload => (
+                    "neotmux.reload()".to_string(),
+                    "the config is loading already",
+                ),
             };
             refuse(&tag, &call, why);
         }
@@ -328,6 +336,24 @@ impl Plugins {
             }
         }
         quit
+    }
+
+    /// Runs a reload the server carried out of the frame that asked for it, once every other
+    /// op of that frame was already applied. Every failure the reload raised is logged at
+    /// warn, and whatever the reloaded layers raised while loading is refused: a load acts on
+    /// no session, so nothing it asked for has anywhere to land.
+    pub fn reload(&mut self, session: Option<SessionId>) {
+        for failure in self.lua.reload(session) {
+            logging::log(Level::Warn, &failure.source, &failure.message);
+        }
+        let (ops, server) = self.drain_ops(None, &BTreeMap::new());
+        let why = "the config was reloading, and a load acts on no session";
+        for (tag, op) in server {
+            refuse(&tag, &format!("{op:?}"), why);
+        }
+        for (tag, op) in ops {
+            refuse(&tag, &format!("{op:?}"), why);
+        }
     }
 }
 
@@ -495,5 +521,19 @@ mod tests {
             })
             .collect();
         assert_eq!(kinds, vec!["split", "send", "focus"], "{ops:?}");
+    }
+
+    #[test]
+    fn a_reload_raised_by_a_key_reaches_the_server_as_a_server_op() {
+        let (_dir, mut plugins) =
+            built("neotmux.keymap.set('C-r', function() neotmux.reload() return true end)");
+        let session = SessionId::from(1);
+        begin(&plugins, session);
+        plugins.key(session, Key::from_spec("C-r").unwrap());
+        let (_ops, server) = plugins.drain_ops(Some(session), &BTreeMap::new());
+        assert!(
+            server.iter().any(|(_, op)| matches!(op, ServerOp::Reload)),
+            "{server:?}"
+        );
     }
 }

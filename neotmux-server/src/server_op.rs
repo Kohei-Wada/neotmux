@@ -6,4 +6,5 @@ pub enum ServerOp {
     Switch { name: String },
     Kill { name: String },
     Rename { from: String, to: String },
+    Reload,
 }
