@@ -1,6 +1,6 @@
 //! Keys out: the spec a binding is looked up by, and the bytes a pane's child is typed.
 
-use neotmux_proto::keys::{Key, KeyCode};
+use neotmux_proto::{Key, KeyCode};
 
 /// `ESC [ A` normally, `ESC O A` when the pane has asked for the application form — and the
 /// CSI form either way once a modifier is on it, because `ESC O` has nowhere to put the
@@ -138,7 +138,7 @@ pub fn encode_key(key: Key, application_cursor: bool) -> Option<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
-    use neotmux_proto::keys::{Key, KeyCode, Modifiers};
+    use neotmux_proto::{Key, KeyCode, Modifiers};
 
     use super::encode_key;
 

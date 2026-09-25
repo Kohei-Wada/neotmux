@@ -90,7 +90,7 @@ fn draw_text(
     let (x, y) = pos;
     let mut cx = x;
     for ch in text.chars() {
-        let width = neotmux_proto::screen::of_char(ch) as u16;
+        let width = neotmux_proto::screen::width::of_char(ch) as u16;
         // A combining mark belongs to the cell before it and claims none of its own. Nothing
         // here can attach it, so it is dropped rather than given a cell it would corrupt.
         if width == 0 {

@@ -15,7 +15,7 @@
 //!    including its modifiers, in any order.
 
 use neotmux_lua::api::keymap::normalise;
-use neotmux_proto::keys::{Key, KeyCode, Modifiers};
+use neotmux_proto::{Key, KeyCode, Modifiers};
 use neotmux_server::input::key_spec;
 
 /// What a key comes to once both sides have had their say at the shared `normalise`: the

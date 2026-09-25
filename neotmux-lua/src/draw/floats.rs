@@ -114,7 +114,7 @@ pub fn place(cmd: &DrawCmd, float: &Rect) -> Vec<DrawCmd> {
 }
 
 /// Same truncation rule as the renderer's `overlay.rs::draw_text`, because both call
-/// `neotmux_proto::screen::of_char`: a zero-width (combining) char rides the previous cell rather than
+/// `neotmux_proto::screen::width::of_char`: a zero-width (combining) char rides the previous cell rather than
 /// being measured, and a wide char that would straddle the cap drops as a whole rather than
 /// being half-drawn.
 fn clip_text(x: u16, y: u16, text: &str, fg: Color, bg: Color, float: &Rect) -> Vec<DrawCmd> {
@@ -125,7 +125,7 @@ fn clip_text(x: u16, y: u16, text: &str, fg: Color, bg: Color, float: &Rect) -> 
     let mut acc: u16 = 0;
     let mut out = String::new();
     for ch in text.chars() {
-        let width = neotmux_proto::screen::of_char(ch) as u16;
+        let width = neotmux_proto::screen::width::of_char(ch) as u16;
         if width == 0 {
             out.push(ch);
             continue;

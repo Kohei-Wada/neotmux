@@ -40,6 +40,12 @@ settles is the convention the other crates follow. No behaviour changes.
    part has separable concerns, the part moves to a private directory named after the item
    (`codec/` beside `codec.rs` becomes `codec/mod.rs` with its pieces). Each crate's spec decides
    where this applies.
+8. **A constant used as a `match` pattern must be in scope in the file the `match` moves to.** If it
+   is not, Rust reads the name as a new binding that matches anything, and the only sign is an
+   "unused variable" warning — which `cargo fix` silences by renaming the binding `_NAME`. Split
+   a file whose `match` arms name constants by importing the constants' module whole
+   (`use super::tags::*;`), and after any automatic fix check that no identifier gained a leading
+   `_`.
 
 ## 2. neotmux-layout after
 
@@ -120,3 +126,14 @@ warnings.
   `crate::host::JobSpec`; a private item another directory uses is imported by that path too.
   `sched/timers` stays whole (rule 5), and `jobs.rs` keeps its `Sweeping` guard beside `Jobs` so the
   two `Sweeping`s never meet. `api/` is one Lua namespace per file and stays (rule 6).
+- **neotmux-proto** (2026-09-25): `wire/codec.rs` (2119 lines) is split under rule 7 into
+  `codec.rs` (the public `encode_*`/`decode_*` functions and their round-trip tests),
+  `writer.rs` and `reader.rs` (the private byte writer and reader), `tags.rs` (the wire's tag
+  constants) and `wire_error.rs`; `wire/msg.rs` gives each message type a file and its module doc
+  to `wire/mod.rs`. Every other file with several types is split per type (`geom/`, `screen/`,
+  and at the root `ids` → `pane_id`/`window_id`/`session_id`, `keys` → `key`/`key_code`/
+  `modifiers`, `paneinfo` → `pane_info`/`pane_tty`/`line_mode`), and root files are flattened
+  (`neotmux_proto::Key`). `screen/width` becomes a named module again under rule 6
+  (`screen::width::of_str`), undoing the flattening review had flagged. Rule 8 came from this
+  crate: `reader.rs` matches on tag constants, the first automatic fix turned 22 of them into
+  catch-all bindings, and the file was rebuilt from the split with `use super::tags::*;`.

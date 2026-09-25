@@ -7,8 +7,8 @@ use crate::Shells;
 use crate::input::encode_key;
 use anyhow::Context as _;
 use neotmux_layout::{PaneIds, Shown, Surface, Windows};
+use neotmux_proto::Key;
 use neotmux_proto::clamp_to_min_grid;
-use neotmux_proto::keys::Key;
 use neotmux_proto::screen::{Frame, PaneFrame};
 use neotmux_proto::wire::{End, SessionOp, Step, Tick, Tock};
 use neotmux_proto::{

@@ -1,23 +1,5 @@
-use crate::{Color, PaneId, Size};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-#[non_exhaustive]
-pub struct Rect {
-    pub x: u16,
-    pub y: u16,
-    pub w: u16,
-    pub h: u16,
-}
-
-impl Rect {
-    pub fn new(x: u16, y: u16, w: u16, h: u16) -> Self {
-        Self { x, y, w, h }
-    }
-
-    pub fn contains(&self, x: u16, y: u16) -> bool {
-        x >= self.x && y >= self.y && x < self.x + self.w && y < self.y + self.h
-    }
-}
+use crate::screen::Rect;
+use crate::{Color, PaneId};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -54,40 +36,10 @@ pub enum DrawCmd {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-#[non_exhaustive]
-pub struct Epoch {
-    size: Size,
-    panes: Vec<PaneId>,
-    focus: Option<PaneId>,
-}
-
-impl Epoch {
-    pub fn new(size: Size, mut panes: Vec<PaneId>, focus: Option<PaneId>) -> Self {
-        panes.sort();
-        Self { size, panes, focus }
-    }
-
-    pub fn matches(&self, other: &Self) -> bool {
-        self == other
-    }
-
-    pub fn size(&self) -> Size {
-        self.size
-    }
-
-    pub fn panes(&self) -> &[PaneId] {
-        &self.panes
-    }
-
-    pub fn focus(&self) -> Option<PaneId> {
-        self.focus
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::screen::Epoch;
     use crate::{PaneId, Size};
 
     #[test]

@@ -23,7 +23,7 @@
 //! did not ask for it (neotmux enables no such mode), so forwarding it would type garbage.
 //! A malformed sequence loses its `ESC` and the rest is decoded again from the next byte.
 
-use neotmux_proto::keys::{Key, KeyCode, Modifiers};
+use neotmux_proto::{Key, KeyCode, Modifiers};
 
 /// The longest unfinished sequence worth holding for the next read. A `CSI` with more
 /// parameter bytes than this is not a key neotmux has, so keeping it would only corrupt the

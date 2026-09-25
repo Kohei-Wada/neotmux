@@ -389,7 +389,7 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
         // one entry at the column it starts in, and everything that takes a column — a
         // tint, a rect, a draw — counts cells. `#line` counts neither.
         let width = lua.create_function(move |_, text: String| {
-            Ok(neotmux_proto::screen::of_str(&text) as i64)
+            Ok(neotmux_proto::screen::width::of_str(&text) as i64)
         })?;
         neotmux.set("width", width)?;
     }

@@ -10,7 +10,7 @@ use neotmux_proto::{OwnedToClient, Size};
 use ratatui::DefaultTerminal;
 
 use crate::decoder::Decoder;
-use neotmux_proto::keys::Key;
+use neotmux_proto::Key;
 use neotmux_sys::Link;
 
 use neotmux_sys::tty::{Ready, Terminal};

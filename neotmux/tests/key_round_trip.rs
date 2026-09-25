@@ -3,7 +3,7 @@
 //! in the crate that has both.
 
 use neotmux_client::Decoder;
-use neotmux_proto::keys::Key;
+use neotmux_proto::Key;
 use neotmux_server::input::encode_key;
 
 fn one(bytes: &[u8]) -> Key {

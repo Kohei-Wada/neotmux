@@ -1,0 +1,33 @@
+//! Asking a pane for its text, and what comes back.
+//!
+//! One vocabulary, not two. These are the types the Lua layer names and the types the
+//! terminals answer in — which is §2.1's rule about the frame ("one definition each, no
+//! conversion layer") applied to the reads, where it had not been.
+//!
+//! [`PaneRead`] is here rather than beside its implementation because a contract belongs in
+//! the lowest crate that both its consumer and its implementor can see. The consumer is the
+//! Lua layer; the implementor is the session's own terminals. Nothing below this crate is
+//! common to both.
+
+use crate::PaneId;
+use crate::screen::Extent;
+use crate::screen::Lines;
+use crate::screen::Want;
+
+/// Reading a pane's text.
+///
+/// `neotmux-pty`'s `PaneTerminals` answers it, and the session holds it. The Lua layer runs
+/// in the server, beside the panes, so a read is a function call; the trait is what keeps
+/// the Lua crate from having to know a terminal.
+pub trait PaneRead {
+    fn revision(&self, pane: PaneId) -> Option<u64>;
+    /// The title the pane's program set on itself — the program's own claim, not anything
+    /// read out of `/proc`. `None` for a pane that never set one, or that does not exist.
+    fn title(&self, pane: PaneId) -> Option<String>;
+    fn content(&self, pane: PaneId, last: Option<u64>, want: Want) -> Option<Lines>;
+    fn history_extent(&self, pane: PaneId) -> Option<Extent>;
+    fn history(&self, pane: PaneId, from: u64, count: u64, want: Want) -> Option<Lines>;
+    fn freeze(&self, pane: PaneId) -> bool;
+    fn unfreeze(&self, pane: PaneId) -> bool;
+    fn is_frozen(&self, pane: PaneId) -> Option<bool>;
+}
