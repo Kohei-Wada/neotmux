@@ -27,6 +27,14 @@ and a plugin adds its own to `require('plugin.palette').providers`. `agent-next`
 as `plugin.sidebar.sessions`, one assignment away, and requiring `plugin.sidebar` from your own
 `init.lua` no longer loses `C-b b`.
 
+### What you type straight after a switch goes to the session you switched to
+
+A key a plugin took and acted on — `session.switch`, `pane.focus`, `pane.send` — is carried out
+by the next frame, and the keys that came in the same read after it went to the old session's
+pane before it was. Typed quickly after a switch, the first letters landed in the session you had
+left. A client's input now waits after such a key until the frame that carries it out, which
+is also what a test that failed one run in many was catching (#44).
+
 ### Killing a job can no longer signal somebody else's processes
 
 A job's waiting thread reaped the child and only then cleared the pid a kill would signal, so a

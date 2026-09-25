@@ -348,6 +348,7 @@ fn admit(
         session,
         size: attach.size,
         gone: false,
+        held: false,
     })
 }
 

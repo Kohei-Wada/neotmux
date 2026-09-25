@@ -489,6 +489,10 @@ fn frame(
         serving.terminals,
         serving.waker,
     );
+    // Every op a key raised has been carried out, so what its client sent after it can go.
+    for client in clients.iter_mut() {
+        client.held = false;
+    }
     // After the ops: a `session.kill` of the last one is the server being over too.
     if over || sessions.live.is_empty() {
         return Ok(true);
@@ -516,7 +520,8 @@ fn frame(
             break;
         }
         live.clear();
-        live.extend((0..clients.len()).filter(|&i| !clients[i].gone));
+        // Not a held client: what it has is waiting on purpose, and would wake this every time.
+        live.extend((0..clients.len()).filter(|&i| !clients[i].gone && !clients[i].held));
         let ready = wait_over(clients, &live, serving.wakeup, frame_end)?;
         match ready {
             neotmux_sys::tty::Any::Ready(slot) => match live.get(slot).copied() {
@@ -549,18 +554,22 @@ fn frame(
 fn deliver(clients: &mut [Attached], i: usize, sessions: &mut Sessions, plugins: &mut Plugins) {
     // Everything this client says is about the session it is looking at.
     let which = clients[i].session;
-    while let Some(message) = next_message(&mut clients[i]) {
+    while !clients[i].held
+        && let Some(message) = next_message(&mut clients[i])
+    {
         match wire::decode_to_server(&message) {
             Ok(ToServer::Key(key)) => {
                 // Offered to the plugins first and passed on only if nobody wanted it: which
                 // pane an unbound key belongs to is the session's to know, and both halves
                 // are here now.
-                if plugins.key(which, key) == KeyOutcome::Fallthrough
+                let (outcome, raised) = plugins.key(which, key);
+                if outcome == KeyOutcome::Fallthrough
                     && let Some(session) = sessions.get_mut(which)
                     && session.key(key).is_err()
                 {
                     clients[i].gone = true;
                 }
+                clients[i].held = raised;
             }
             Ok(ToServer::Resize(size)) => {
                 clients[i].size = size;

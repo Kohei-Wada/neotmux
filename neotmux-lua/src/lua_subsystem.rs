@@ -928,6 +928,12 @@ impl LuaSubsystem {
         self.reservations.lay_out(surface, applied);
     }
 
+    /// How many ops are waiting to be drained, for a caller that wants to know whether
+    /// something it just offered raised any.
+    pub fn ops_raised(&self) -> usize {
+        self.ops.mark().0
+    }
+
     /// What was raised for this session, taken out. `None` is the load path: an op raised
     /// before any session existed belongs to none of them.
     pub fn drain_ops(&self, session: Option<SessionId>) -> Vec<(SourceId, Op)> {

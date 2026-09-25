@@ -73,7 +73,7 @@ fn halves(files: &[(&str, &str)]) -> (tempfile::TempDir, Wakeup, Session, Plugin
 /// A key as the client would offer it: to the plugins first, and on to the focused pane only
 /// if nobody wanted it.
 fn key(session: &mut Session, plugins: &Plugins, key: Key) {
-    if plugins.key(one(), key) == KeyOutcome::Fallthrough {
+    if plugins.key(one(), key).0 == KeyOutcome::Fallthrough {
         session.key(key).expect("key");
     }
 }

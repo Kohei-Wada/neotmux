@@ -71,9 +71,12 @@ impl Plugins {
     }
 
     /// Offers a key to the plugins. `Fallthrough` means nobody wanted it, and it belongs to
-    /// whichever pane has the focus — which is the session's to know, not this side's.
-    pub fn key(&self, session: SessionId, key: Key) -> KeyOutcome {
-        self.lua.dispatch_key(session, &key_spec(&key))
+    /// whichever pane has the focus — which is the session's to know, not this side's. The
+    /// flag is whether taking it raised an op, which only the next frame carries out.
+    pub fn key(&self, session: SessionId, key: Key) -> (KeyOutcome, bool) {
+        let before = self.lua.ops_raised();
+        let outcome = self.lua.dispatch_key(session, &key_spec(&key));
+        (outcome, self.lua.ops_raised() > before)
     }
 
     /// What the session did, replayed into the Lua layer in the order it happened.

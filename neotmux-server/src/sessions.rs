@@ -25,6 +25,9 @@ pub(crate) struct Attached {
     /// slot is still a slot the wait is waiting over, and dropping it out from under a wait
     /// is what this flag prevents.
     pub(crate) gone: bool,
+    /// A key it sent raised an op, and what it sent after waits for the frame that carries the
+    /// op out: typed straight after a switch, it is the new session's, not the old one's.
+    pub(crate) held: bool,
 }
 
 /// Every session this server holds, and the ids still to come.

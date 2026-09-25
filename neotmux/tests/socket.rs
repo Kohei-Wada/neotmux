@@ -1101,12 +1101,28 @@ fn the_picker_makes_a_session_switches_to_it_and_ends_one() {
 /// looked up by id out of one table for the whole server, and every session numbered its panes
 /// from one — so the second session's first pane *was* the first session's, and ending either
 /// closed the other's shell under it.
+///
+/// What reached which pane is read out of the panes, not the terminal: the client is sent a
+/// frame's difference from the last, so text drawn over the other session's text arrives in
+/// pieces.
 #[test]
 fn ending_one_session_leaves_the_other_typing_into_its_own_shell() {
     let runtime = TestRuntime::new();
     let layer = layer_with(&[(
         "init.lua",
-        "neotmux.keymap.set('C-y', function()\n\
+        "local said = {}\n\
+         neotmux.on_tick(function()\n\
+           local name = neotmux.session.current()\n\
+           local pane = neotmux.pane.current()\n\
+           for _, line in ipairs(pane and neotmux.pane.content(pane) or {}) do\n\
+             local word = line:match('^(%S+)$')\n\
+             if word and not said[name .. word] then\n\
+               said[name .. word] = true\n\
+               neotmux.log.info(name .. ' has ' .. word)\n\
+             end\n\
+           end\n\
+         end)\n\
+         neotmux.keymap.set('C-y', function()\n\
            neotmux.session.create('second')\n\
            neotmux.session.switch('second')\n\
            return true\n\
@@ -1124,11 +1140,51 @@ fn ending_one_session_leaves_the_other_typing_into_its_own_shell() {
 
     client.send("\x19"); // C-y: a second session, and into it
     client.send("in-second\r");
-    client.wait_for_output("in-second");
+    wait_for_log(runtime.path(), "second has in-second");
 
     client.send("\x07"); // C-g: end the one we are not in
     client.send("after-the-kill\r");
-    client.wait_for_output("after-the-kill");
+    wait_for_log(runtime.path(), "second has after-the-kill");
+}
+
+/// What is typed after a key that switches sessions is the new session's, however fast it
+/// follows: here it is in the same write, so it reaches the server in the same read, before
+/// the frame that carries the switch out. Issue #44 was this, one time in many, when the test
+/// above happened to send its two writes close enough together.
+#[test]
+fn what_is_typed_straight_after_a_switch_goes_to_the_session_switched_to() {
+    let runtime = TestRuntime::new();
+    let layer = layer_with(&[(
+        "init.lua",
+        "local said = {}\n\
+         neotmux.on_tick(function()\n\
+           local name = neotmux.session.current()\n\
+           local pane = neotmux.pane.current()\n\
+           for _, line in ipairs(pane and neotmux.pane.content(pane) or {}) do\n\
+             if line:find('typed') and not said[name] then\n\
+               said[name] = true\n\
+               neotmux.log.info('typed into ' .. name)\n\
+             end\n\
+           end\n\
+         end)\n\
+         neotmux.keymap.set('C-y', function()\n\
+           neotmux.session.create('second')\n\
+           neotmux.session.switch('second')\n\
+           return true\n\
+         end)\n",
+    )]);
+
+    let mut client = Client::start_with_prefix_and_layer(runtime.path(), "/bin/cat", layer.path());
+    wait_for_socket(&socket_in(runtime.path()));
+    client.send("ready\r");
+    client.wait_for_output("ready");
+
+    client.send("\x19typed\r");
+    let log = wait_for_log(runtime.path(), "typed into");
+    assert!(
+        log.contains("typed into second") && !log.contains("typed into default"),
+        "{log}"
+    );
 }
 
 /// A session name is a word a person types and reads, and no longer a filename: the socket is
