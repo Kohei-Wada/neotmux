@@ -27,7 +27,6 @@ local waiting = {}
 
 neotmux.on_event("pane_closed", function(event)
   waiting[event.pane] = nil
-  state.forget(event.pane)
 end)
 
 neotmux.on_tick(function()

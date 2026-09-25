@@ -79,9 +79,6 @@ end
 
 neotmux.on_event("pane_closed", function(event)
   seen[event.pane] = nil
-  -- The hold is worth keeping for a live pane and worth nothing for a dead one: an id is
-  -- reused, and what the pane before it was doing is not evidence about its successor.
-  state.forget(event.pane)
 end)
 
 local function file(name)

@@ -5,7 +5,7 @@
 //! `state.rs`: a real pane fed real bytes through `support::panes()`, with the shipped plugins
 //! off so that every log line in a dispatch belongs to the test's own `on_key`.
 
-use neotmux_proto::Size;
+use neotmux_proto::{Event, Size};
 
 mod support;
 
@@ -250,6 +250,26 @@ fn forgetting_a_pane_drops_the_hold_and_not_only_the_look() {
     assert!(
         look(&sub).iter().any(|l| l == "of=idle"),
         "the pane was still being held at working after it was forgotten"
+    );
+}
+
+/// A closed pane is forgotten by the module itself, with no plugin that happens to listen for
+/// `pane_closed` loaded: an id is reused, and the next pane given it must not inherit the dead
+/// one's hold (#47).
+#[test]
+fn a_closed_pane_is_forgotten_without_a_plugin_to_do_it() {
+    let (_dir, sub) = built(&holding(5000, None));
+    feed(&sub, b"anything");
+    keys(&sub, &["W"]);
+    assert!(look(&sub).iter().any(|l| l == "of=working"));
+
+    keys(&sub, &["I"]);
+    assert!(look(&sub).iter().any(|l| l == "of=working"));
+
+    sub.dispatch_event(support::one(), &Event::PaneClosed { pane: pane() });
+    assert!(
+        look(&sub).iter().any(|l| l == "of=idle"),
+        "a pane that reused a closed pane's id inherited its hold"
     );
 }
 

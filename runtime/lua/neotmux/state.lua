@@ -107,6 +107,10 @@ function M.forget(pane)
   require("neotmux.detect").forget(pane)
 end
 
+neotmux.on_event("pane_closed", function(event)
+  seen[event.pane] = nil
+end)
+
 -- A pane a ruleset in `neotmux.detect.agents` claims is answered there; everything below is
 -- what a pane none of them recognise falls back to. `lines`, when given, is the view
 -- `neotmux.detect` already read this pane's screen into — reused rather than read again.

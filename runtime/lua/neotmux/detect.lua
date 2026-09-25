@@ -300,6 +300,12 @@ function M.forget(pane)
   titled[pane] = nil
 end
 
+-- This module's own, not its consumers': an id is reused, and a dead pane's hold is no evidence
+-- about the next pane given it, whichever plugins happen to be loaded.
+neotmux.on_event("pane_closed", function(event)
+  M.forget(event.pane)
+end)
+
 -- What the pane is running, or nil for a pane nothing can be read about. `pane.info` answers
 -- nil rather than raising today; the pcall is for the day it does not.
 local function command_of(pane)
