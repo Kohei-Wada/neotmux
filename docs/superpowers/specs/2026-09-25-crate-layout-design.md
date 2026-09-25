@@ -123,7 +123,7 @@ neotmux-lua/src/         lib.rs  subsystem.rs
                          api/     (as it is)
                          host/    ambient ops paneinfo window clipboard runner   — the host's contracts
                          sched/   jobs timers budget overrun                     — when what is called
-                         draw/    draw float reserve                             — what goes on screen
+                         draw/    buffers(was draw) float reserve                — what goes on screen
                          plugin/  registry source commands runtime vm            — where plugins come from
 neotmux-pty/src/         lib.rs  terminals
                          child/   pty wakeup                                     — the child's I/O
@@ -131,14 +131,21 @@ neotmux-pty/src/         lib.rs  terminals
                          parse/   query hvp                                      — either side of the parser
 neotmux-layout/src/      lib.rs  layout panes windows
 neotmux-proto/src/       lib.rs  version.rs (PROTOCOL_VERSION)
-                         wire/    msg wire
-                         geom/    geom geometry panerects reserve grid
+                         wire/    msg codec(was wire)
+                         geom/    size(was geom) geometry panerects reserve grid
                          screen/  draw frame read width
                          ids keys event level paneinfo
 ```
 
-A glob re-export that collides — two files in one directory exporting the same name — is a
-compile error, and is resolved by naming, not by dropping the glob.
+Three files are renamed on the way in, because a file named after the directory it sits in is
+`clippy::module_inception`, which `-D warnings` refuses: `neotmux-proto`'s `wire.rs` becomes
+`wire/codec.rs` (it is the encoders and decoders), its `geom.rs` becomes `geom/size.rs` (`Size`,
+`SplitDir`, `Dir`), and `neotmux-lua`'s `draw.rs` becomes `draw/buffers.rs` (`Buffers`).
+
+A module that was private stays private under the directory: `mod x; pub(crate) use x::*;`, so
+flattening never widens what a crate exports. Two files in one directory exporting the same name
+is an error only where the name is used; if one arises, that file stays a named `pub mod x;` in its
+directory rather than being flattened, and the plan's ledger records which.
 
 ## 4. Order of work
 
