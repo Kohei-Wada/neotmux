@@ -57,10 +57,31 @@ impl Sess {
 /// frame is then discarded and the band comes back blank. These tests are about what the sidebar
 /// draws, not about what the budget interrupts.
 fn built(extra: &str) -> (tempfile::TempDir, Built) {
+    built_as(TREE, extra)
+}
+
+/// The sidebar these tests were written against before herdr's became the default: the tree of
+/// the session you are in, and agent rows that say where and how long. They are about how the
+/// container shares the band and how those two sections cut their rows, and both sections are
+/// still shipped, so they are built by name here.
+const TREE: &str = "local sidebar = require('plugin.sidebar')\n\
+    sidebar.sections = { require('plugin.sidebar.sessions'), require('plugin.sidebar.agents') }\n\
+    sidebar.icons = { working = '\u{25cf}', blocked = '\u{25c9}', done = '\u{2713}', idle = '\u{25cb}' }\n\
+    local agents = require('plugin.sidebar.agents')\n\
+    agents.rows = { { 'state_icon', 'location', 'agent', 'age' } }\n\
+    agents.sort = 'priority'\n";
+
+/// The shipped sidebar as it is: herdr's spaces and agents.
+fn built_herdr(extra: &str) -> (tempfile::TempDir, Built) {
+    built_as("", extra)
+}
+
+fn built_as(layout: &str, extra: &str) -> (tempfile::TempDir, Built) {
     support::built(&format!(
         "require('neotmux.defaults').sidebar = true\n\
          require('neotmux.detect').agents = {{}}\n\
          neotmux.opt.tick_budget_ms = 0\n\
+         {layout}\
          {extra}"
     ))
 }
@@ -83,6 +104,8 @@ fn frame_in(sub: &Built, surface: Size, sessions: &[Sess], current: u32) -> Vec<
     for s in sessions {
         let id = SessionId::from(s.id);
         sub.name_session(id, s.name);
+        // The session being looked at has the one client; every other is nobody's.
+        sub.publish_attached(id, usize::from(s.id == current));
         sub.lay_out_reservations(id, surface, reserved);
         let focus = PaneId::from(s.focus);
         let at = s
@@ -159,8 +182,14 @@ fn band(sub: &Built, surface: Size) -> Vec<String> {
             }
         }
     }
+    // Without the rule down the band's right edge, which every open row ends in and no
+    // assertion here is about.
     grid.into_iter()
-        .map(|row| row.into_iter().collect::<String>().trim_end().to_string())
+        .map(|row| {
+            let line = row.into_iter().collect::<String>();
+            let line = line.trim_end();
+            line.strip_suffix('\u{2502}').unwrap_or(line).trim_end().to_string()
+        })
         .collect()
 }
 
@@ -296,7 +325,7 @@ fn a_row_wider_than_the_widest_band_is_cut_at_it() {
     let s = [Sess::new(1, "work", vec![vec![101]])];
     open(&sub, &s);
     let lines = settled(&sub, &s, 1);
-    assert_eq!(lines[0], "x".repeat(36), "{lines:#?}");
+    assert_eq!(lines[0], "x".repeat(35), "{lines:#?}");
 }
 
 /// `sidebar.scroll` on a section with no fit of its own: 20 rows centred on the tenth in 12,

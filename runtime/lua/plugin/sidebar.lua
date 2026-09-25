@@ -1,6 +1,6 @@
 -- A sidebar down the left: a stack of sections, each a table saying what rows it has and how to
--- cut them to a height. The shipped ones are the session tree, `plugin.sidebar.sessions`, and
--- under it every agent in every session, `plugin.sidebar.agents`.
+-- cut them to a height. The shipped ones are herdr's: every session, `plugin.sidebar.spaces`,
+-- and under it every agent in every session, `plugin.sidebar.agents`.
 -- `C-b b` folds the band to its first column and back, when the prefix is loaded.
 --
 -- Off by default, unlike the status bar: a status line spends a row nobody was using for
@@ -54,10 +54,32 @@ M.colors = {
   detail = "#585b70", -- surface2
   rule = "#45475a", -- surface1: a section's header
   -- One per state, so the icon carries its meaning in the colour as well as the shape.
-  working = "#a6e3a1", -- green
-  blocked = "#f9e2af", -- yellow: the one that wants you
-  idle = "#585b70", -- surface2
+  -- herdr's, so a herdr user reads them without learning them again.
+  working = "#f9e2af", -- yellow
+  blocked = "#f38ba8", -- red: the one that wants you
+  done = "#94e2d5", -- teal: finished while you were not looking (`neotmux.seen`)
+  idle = "#a6e3a1", -- green
+  -- The navigate cursor (`C-b w`).
+  selection = "#45475a", -- surface1
 }
+
+-- One per state, herdr's `dots`: the colour says which, the shape only whether anything is
+-- going on. herdr's `symbols` are one assignment away:
+--
+--   require('plugin.sidebar').icons = { working = '◐', blocked = '×', done = '✓', idle = '○' }
+M.icons = {
+  working = "\u{25cf}", -- ●
+  blocked = "\u{25cf}",
+  done = "\u{25cf}",
+  idle = "\u{25cb}", -- ○
+}
+
+function M.icon(state)
+  return M.icons[state] or M.icons.idle
+end
+
+-- The column down the band's right edge that says where the panes start.
+M.rule = "\u{2502}" -- │
 
 M.band = neotmux.reserve("left", M.widths.min)
 
@@ -182,13 +204,27 @@ local function share_out(live, height)
   return got
 end
 
-local function header(title, width)
-  local text = "\u{2500} " .. title .. " "
-  local rest = width - segments.columns(text)
-  if rest > 0 then
-    text = text .. string.rep("\u{2500}", rest)
+-- `─ agents ─────── grouped`: the title, a rule to the edge, and on the right whatever the
+-- section's `aside` says — a string, or a function asked each frame.
+local function header(section, width)
+  local aside = section.aside
+  if type(aside) == "function" then
+    aside = aside()
   end
-  return { { text = text, fg = M.colors.rule, bg = M.colors.bar } }
+  local left = "\u{2500} " .. section.title .. " "
+  local right = aside and (" " .. aside) or ""
+  local rest = width - segments.columns(left) - segments.columns(right)
+  if rest < 0 then
+    right, rest = "", width - segments.columns(left)
+  end
+  return {
+    {
+      text = left .. string.rep("\u{2500}", math.max(0, rest)),
+      fg = M.colors.rule,
+      bg = M.colors.bar,
+    },
+    { text = right, fg = M.colors.detail, bg = M.colors.bar },
+  }
 end
 
 -- How wide the band wants to be: the widest row any section has, between the two bounds.
@@ -199,7 +235,8 @@ local function width_for(live)
       widest = math.max(widest, segments.width(runs))
     end
   end
-  return math.max(M.widths.min, math.min(M.widths.max, widest + 1))
+  -- One for a column of air, one for the rule.
+  return math.max(M.widths.min, math.min(M.widths.max, widest + 2))
 end
 
 -- Swap the two. A resize keeps the band's place on the left edge, which a remove and a fresh
@@ -244,8 +281,8 @@ neotmux.on_tick(function(ctx)
     return
   end
 
-  -- A section with nothing to show takes no room and draws no header. The first section that
-  -- does show something draws no header either: the top of the band says where it starts.
+  -- A section with nothing to show takes no room and draws no header. One with a title draws it,
+  -- the first as well: herdr heads its top half `spaces` as it heads the agents.
   local live = {}
   for at, section in ipairs(M.sections) do
     local model = guarded(section, at, "build", section.build, M)
@@ -254,7 +291,7 @@ neotmux.on_tick(function(ctx)
         section = section,
         at = at,
         model = model,
-        titled = #live > 0 and section.title ~= nil,
+        titled = section.title ~= nil,
       }
     end
   end
@@ -270,6 +307,15 @@ neotmux.on_tick(function(ctx)
 
   ctx:rect(nil, band.x, band.y, band.w, band.h, { bg = M.colors.bar })
 
+  -- Folded, the band is the markers column and nothing else; open, its last column is the rule.
+  local ruled = band.w > 1
+  local inner = ruled and band.w - 1 or band.w
+  if ruled then
+    for row = band.y, band.y + band.h - 1 do
+      ctx:text(nil, band.x + inner, row, M.rule, { fg = M.colors.rule, bg = M.colors.bar })
+    end
+  end
+
   local heights = share_out(live, band.h)
   local y = band.y
   for i, it in ipairs(live) do
@@ -280,11 +326,11 @@ neotmux.on_tick(function(ctx)
       if type(rows) == "table" then
         local top = y
         if it.titled then
-          segments.draw(ctx, band.x, top, band.w, header(it.section.title, band.w))
+          segments.draw(ctx, band.x, top, inner, header(it.section, inner))
           top = top + 1
         end
         for k = 1, math.min(#rows, body) do
-          segments.draw(ctx, band.x, top + k - 1, band.w, rows[k])
+          segments.draw(ctx, band.x, top + k - 1, inner, rows[k])
         end
       end
     end
@@ -293,9 +339,17 @@ neotmux.on_tick(function(ctx)
 end)
 
 -- Last, so a section's own file can already find everything above in the module it is handed.
+-- herdr's two halves. The tree of the session you are in is `plugin.sidebar.sessions`, kept for
+-- anyone who wants it: `table.insert(sidebar.sections, 1, require('plugin.sidebar.sessions'))`.
 M.sections = {
-  require("plugin.sidebar.sessions"),
+  require("plugin.sidebar.spaces"),
   require("plugin.sidebar.agents"),
 }
+
+-- `C-b w`, herdr's navigate: a cursor over the spaces. Bound here rather than in the section, for
+-- the reason `b` is: the prefix is the standard plugin and this one is optional.
+if package.loaded["plugin.prefix"] then
+  require("plugin.prefix").commands["w"] = M.sections[1].navigate
+end
 
 return M
