@@ -24,8 +24,14 @@ M.rows = { { "state_icon", "name" }, { "branch", "ahead", "behind" } }
 M.row_gap = 0
 
 -- The windows and panes of the session you are in, under its space, drawn as
--- `plugin.sidebar.sessions` draws them — its `markers`, `tree` and `tokens` apply here too.
+-- `plugin.sidebar.sessions` draws them — its `markers`, `tree` and `tokens` apply here too — to
+-- these rows. Where a pane is, not what it runs: the agents below say that for the ones that
+-- matter. `{ 'marker', 'tree', 'number', 'command' }` puts it back.
 M.tree = true
+M.tree_rows = {
+  windows = { rows = { { "marker", "tree", "number", "name" } } },
+  panes = { rows = { { "marker", "tree", "number" } } },
+}
 
 -- How often a directory's branch is asked again, in milliseconds.
 M.refresh = 5000
@@ -188,7 +194,7 @@ function M.build(given)
     spaces[#spaces + 1] = { rows = own, here = it.here }
     if it.here and M.tree then
       local base = #rows
-      tree.anchor = sessions.subtree(sidebar, tree.rows)
+      tree.anchor = sessions.subtree(sidebar, tree.rows, M.tree_rows)
       for _, runs in ipairs(tree.rows) do
         table.insert(runs, 1, { text = "   " })
         rows[#rows + 1] = runs

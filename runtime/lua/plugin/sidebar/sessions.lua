@@ -174,9 +174,11 @@ end
 
 -- The windows and panes of the session that is open, into `out`. Answers the row worth keeping
 -- on screen: the pane you are in, or failing that the window, or nil when there is neither.
--- `plugin.sidebar.spaces` hangs the same rows under the space you are in.
-function M.subtree(sidebar, out)
+-- `plugin.sidebar.spaces` hangs the same rows under the space you are in, laid out by its own
+-- `levels`: `{ windows = ..., panes = ... }`, shaped as `M.windows` and `M.panes` are.
+function M.subtree(sidebar, out, levels)
   colors = sidebar.colors
+  levels = levels or M
   local anchor
   local current_window = neotmux.window.current()
   local focused = neotmux.pane.current()
@@ -187,7 +189,7 @@ function M.subtree(sidebar, out)
     if current then
       anchor = #out + 1
     end
-    entry(sidebar, M.windows, "windows", {
+    entry(sidebar, levels.windows, "windows", {
       number = window_at,
       name = neotmux.window.name(window),
       current = current,
@@ -201,7 +203,7 @@ function M.subtree(sidebar, out)
       if is_focused then
         anchor = #out + 1
       end
-      entry(sidebar, M.panes, "panes", {
+      entry(sidebar, levels.panes, "panes", {
         number = window_at .. "." .. pane_at,
         focused = is_focused,
         command = command_of(pane) or UNKNOWN,

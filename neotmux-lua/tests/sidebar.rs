@@ -1099,13 +1099,16 @@ fn the_space_you_are_in_shows_its_windows_and_panes() {
     let lines = frame_in(&sub, tall, &s, 1);
     let work = line_with(&lines, " work");
     let rule = line_with(&lines, "\u{2500}\u{2500}\u{2500}");
-    for pane in ["1.1 cat", "1.2 cat", "2.1 cat"] {
+    for pane in ["1.1", "1.2", "2.1"] {
         let at = line_with(&lines, pane);
         assert!(work < at && at < rule, "{pane}: {lines:#?}");
+        assert!(lines[at].ends_with(pane), "no command after it: {lines:#?}");
     }
-    assert_eq!(
-        lines.iter().filter(|l| l.contains(" cat")).count(),
-        3,
+    assert!(
+        !lines[rule..]
+            .iter()
+            .chain(&lines[..work])
+            .any(|l| l.contains("1.1")),
         "only the session you are in is opened out: {lines:#?}"
     );
 }
@@ -1132,5 +1135,5 @@ fn a_tree_too_tall_for_the_half_keeps_the_names_and_the_pane_you_are_in() {
     let lines = settled(&sub, &s, 1);
     line_with(&lines, " home");
     line_with(&lines, " work");
-    line_with(&lines, "8.1 cat");
+    line_with(&lines, "8.1");
 }
