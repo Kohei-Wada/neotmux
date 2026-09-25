@@ -120,16 +120,23 @@ fn an_array_holding_a_number_is_a_failure_naming_its_source() {
 }
 
 #[test]
-fn a_second_registration_of_a_name_is_refused_and_the_first_holds() {
-    let (_dir, sub) = built(&[(
-        "init.lua",
-        "local ok1 = neotmux.command.add('scratch', function() return 'first' end)
-         local ok2, err2 = neotmux.command.add('scratch', function() return 'second' end)
-         assert(ok1 == true)
-         assert(ok2 == nil, 'the second registration should have been refused')
-         assert(err2 ~= nil)
-         neotmux.log.info(err2)",
-    )]);
+fn a_second_registration_from_another_source_is_refused_and_the_first_holds() {
+    let (_dir, sub) = built(&[
+        (
+            "lua/plugin/first.lua",
+            "neotmux.command.add('scratch', function() return 'first' end)",
+        ),
+        (
+            "lua/plugin/second.lua",
+            "local ok, err = neotmux.command.add('scratch', function() return 'second' end)
+             assert(ok == nil, 'the second registration should have been refused')
+             neotmux.log.info(err)",
+        ),
+        (
+            "init.lua",
+            "require('plugin.first') require('plugin.second')",
+        ),
+    ]);
     assert_eq!(
         sub.run_command(support::one(), "scratch", &[]),
         CommandOutcome::Ran(vec!["first".to_string()])
@@ -139,6 +146,35 @@ fn a_second_registration_of_a_name_is_refused_and_the_first_holds() {
         lines.iter().any(|l| l.contains("already registered")),
         "{lines:?}"
     );
+}
+
+/// A plugin run again registers its commands again, and they are its own: the second one is
+/// the one that answers.
+#[test]
+fn a_second_registration_from_the_same_source_replaces_the_first() {
+    let (_dir, sub) = built(&[(
+        "init.lua",
+        "assert(neotmux.command.add('scratch', function() return 'first' end))
+         assert(neotmux.command.add('scratch', function() return 'second' end))",
+    )]);
+    assert_eq!(
+        sub.run_command(support::one(), "scratch", &[]),
+        CommandOutcome::Ran(vec!["second".to_string()])
+    );
+}
+
+#[test]
+fn a_removed_command_is_unknown_and_a_second_remove_says_so() {
+    let (_dir, sub) = built(&[(
+        "init.lua",
+        "neotmux.command.add('scratch', function() return 'x' end)
+         assert(neotmux.command.remove('scratch') == true)
+         assert(neotmux.command.remove('scratch') == false)",
+    )]);
+    assert!(matches!(
+        sub.run_command(support::one(), "scratch", &[]),
+        CommandOutcome::Unknown
+    ));
 }
 
 #[test]

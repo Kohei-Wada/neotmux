@@ -424,6 +424,25 @@ fn on_key_callbacks_run_in_registration_order_and_the_first_to_consume_stops_the
     );
 }
 
+/// The same source binding a key it already holds replaces its own binding.
+#[test]
+fn the_same_source_rebinding_a_key_replaces_its_own_binding() {
+    let (_d, sub) = built(&[(
+        "init.lua",
+        "neotmux.keymap.set('C-x', function() neotmux.log.info('first') return true end)
+         local h, err = neotmux.keymap.set('C-x', function() neotmux.log.info('second') return true end)
+         assert(h ~= nil, tostring(err))",
+    )]);
+    assert!(sub.run_init().is_empty());
+    assert_eq!(
+        sub.dispatch_key(support::one(), "C-x"),
+        KeyOutcome::Consumed
+    );
+    let text = format!("{:?}", sub.drain_ops(Some(support::one())));
+    assert!(text.contains("second"), "{text}");
+    assert!(!text.contains("first"), "{text}");
+}
+
 #[test]
 fn a_raising_on_key_is_blamed_by_name_and_does_not_swallow_the_key() {
     let (_d, sub) = built(&[

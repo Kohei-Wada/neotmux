@@ -90,7 +90,7 @@ Each of these returns a handle with one method, `handle:remove()`, which is idem
 | `neotmux.float({ x =, y =, w =, h = })` | nothing runs; the grant is two-valued — a handle, or `nil` plus a message (below) |
 | `neotmux.keymap.set(spec, fn)` | for that one key; return `true` to consume it |
 | `neotmux.reserve(edge, cells)` | nothing runs; it takes a band of the surface (below) |
-| `neotmux.command.add(name, fn, { desc = })` | when `neotmux.command.run(name)` names it; answers `true`, or `nil` plus a message — not a handle, and there is no `remove` (below) |
+| `neotmux.command.add(name, fn, { desc = })` | when `neotmux.command.run(name)` names it; answers `true`, or `nil` plus a message — not a handle, and `neotmux.command.remove(name)` takes one away (below) |
 
 Every event that fires, and the fields it carries:
 
@@ -114,6 +114,9 @@ when the spec itself is unparseable: losing a race is something to handle, a typ
 Key specs are `C-`, `M-`, `S-` prefixes in any order plus a key: `C-b`, `M-Enter`, `F5`, `x`.
 `x` and `X` are different keys, because that is what the terminal reports. `S-` does not
 combine with a single character for the same reason.
+
+The same source setting a key it already holds replaces its own binding, and the same goes for
+`command.add`: a plugin run again keeps its keys and commands.
 
 ### Commands
 

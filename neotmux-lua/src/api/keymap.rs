@@ -93,18 +93,13 @@ pub fn normalise(spec: &str) -> Result<String, String> {
     Ok(with_mods(mods, &key))
 }
 
-/// The one scan `holder_of` and `dispatch_key` both need: the registration,
-/// if any, bound to this normalised spec.
+/// The one scan the keymap lookups need: the registration, if any, bound to this normalised
+/// spec.
 pub(crate) fn find(registry: &Registry, spec: &str) -> Option<RegistrationId> {
     registry
         .snapshot(KindTag::Keymap)
         .into_iter()
         .find(|id| matches!(registry.kind(*id), Some(Kind::Keymap(existing)) if existing == spec))
-}
-
-fn holder_of(registry: &Registry, sources: &Sources, spec: &str) -> Option<String> {
-    let owner = registry.owner(find(registry, spec)?)?;
-    sources.name(owner)
 }
 
 pub fn install(
@@ -120,25 +115,30 @@ pub fn install(
         // argument in the ABI, so it raises. Losing a conflict is not, so that still returns.
         let normalised = normalise(&spec).map_err(mlua::Error::RuntimeError)?;
 
-        if let Some(holder) = holder_of(&registry, &sources, &normalised) {
-            let attempter = attribute(&sources, &callback);
-            let attempted_by = sources.name(attempter).unwrap_or_default();
-            let message = format!("'{normalised}' is already bound by {holder}");
-            ops.push(
-                attempter,
-                Op::Log {
-                    level: Level::Warn,
-                    text: format!(
-                        "keymap conflict on '{normalised}': held by {holder}, refused for {attempted_by}"
-                    ),
-                },
-            );
-            return Ok((Value::Nil, Value::String(lua.create_string(message)?)));
+        let attempter = attribute(&sources, &callback);
+        if let Some(existing) = find(&registry, &normalised) {
+            let held_by = registry.owner(existing);
+            if held_by == Some(attempter) {
+                registry.remove(existing);
+            } else {
+                let holder = held_by.and_then(|id| sources.name(id)).unwrap_or_default();
+                let attempted_by = sources.name(attempter).unwrap_or_default();
+                let message = format!("'{normalised}' is already bound by {holder}");
+                ops.push(
+                    attempter,
+                    Op::Log {
+                        level: Level::Warn,
+                        text: format!(
+                            "keymap conflict on '{normalised}': held by {holder}, refused for {attempted_by}"
+                        ),
+                    },
+                );
+                return Ok((Value::Nil, Value::String(lua.create_string(message)?)));
+            }
         }
 
-        let owner = attribute(&sources, &callback);
         let key = Rc::new(lua.create_registry_value(callback)?);
-        let id = registry.add(owner, Kind::Keymap(normalised), key);
+        let id = registry.add(attempter, Kind::Keymap(normalised), key);
         let handle = make_handle(lua, registry.clone(), buffers.clone(), id)?;
         Ok((Value::Table(handle), Value::Nil))
     })?;

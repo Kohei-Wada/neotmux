@@ -29,9 +29,11 @@ pub fn install(
         let sources = sources.clone();
         let commands = commands.clone();
         let ops = ops.clone();
-        // A name already registered is refused, logged, and answered `nil, message`; the
-        // first registration holds. A config layer's `init.lua` runs before the shipped one,
-        // so the user's name wins over whatever a plugin would have taken it as.
+        // A name already held by another source is refused, logged, and answered `nil,
+        // message`; the first registration holds. A config layer's `init.lua` runs before the
+        // shipped one, so the user's name wins over whatever a plugin would have taken it as.
+        // The same source registering its own name again replaces it: a plugin run again
+        // keeps its own commands.
         let add = lua.create_function(
             move |lua, (name, callback, opts): (String, Function, Option<Table>)| {
                 let desc = match &opts {
@@ -61,6 +63,12 @@ pub fn install(
             },
         )?;
         command.set("add", add)?;
+    }
+
+    {
+        let commands = commands.clone();
+        let remove = lua.create_function(move |_, name: String| Ok(commands.remove(&name)))?;
+        command.set("remove", remove)?;
     }
 
     {

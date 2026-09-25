@@ -26,9 +26,11 @@ impl Commands {
         Self::default()
     }
 
-    /// Registers `name` unless it is already held, in which case the existing owner is
-    /// returned so the caller can name who is holding it. The first registration holds; a
-    /// config layer's `init.lua` runs before the shipped one, so the user's name always wins.
+    /// Registers `name` unless it is already held by another source, in which case that
+    /// owner is returned so the caller can name who is holding it. The first registration
+    /// holds against another source; a config layer's `init.lua` runs before the shipped
+    /// one, so the user's name always wins. The same source registering its own name again
+    /// replaces it: a plugin run again keeps its own commands.
     pub fn add(
         &self,
         name: String,
@@ -37,7 +39,9 @@ impl Commands {
         callback: Rc<RegistryKey>,
     ) -> Result<(), SourceId> {
         let mut inner = self.inner.borrow_mut();
-        if let Some(existing) = inner.get(&name) {
+        if let Some(existing) = inner.get(&name)
+            && existing.owner != owner
+        {
             return Err(existing.owner);
         }
         inner.insert(
@@ -49,6 +53,25 @@ impl Commands {
             },
         );
         Ok(())
+    }
+
+    /// Answers whether there was a command of that name. Any source may remove any command:
+    /// plugins are trusted, and the one that asks is the one that knows why.
+    pub fn remove(&self, name: &str) -> bool {
+        self.inner.borrow_mut().remove(name).is_some()
+    }
+
+    /// Removes `name` only while it is still the registration `callback` made — a group being
+    /// emptied must not take away a command its source has since registered again.
+    pub fn remove_if(&self, name: &str, callback: &Rc<RegistryKey>) -> bool {
+        let mut inner = self.inner.borrow_mut();
+        match inner.get(name) {
+            Some(entry) if Rc::ptr_eq(&entry.callback, callback) => {
+                inner.remove(name);
+                true
+            }
+            _ => false,
+        }
     }
 
     /// In name order, free from the `BTreeMap`.
