@@ -135,5 +135,5 @@ warnings.
   `modifiers`, `paneinfo` → `pane_info`/`pane_tty`/`line_mode`), and root files are flattened
   (`neotmux_proto::Key`). `screen/width` becomes a named module again under rule 6
   (`screen::width::of_str`), undoing the flattening review had flagged. Rule 8 came from this
-  crate: `reader.rs` matches on tag constants, the first automatic fix turned 22 of them into
+  crate: `reader.rs` matches on tag constants, the first automatic fix turned them into
   catch-all bindings, and the file was rebuilt from the split with `use super::tags::*;`.
