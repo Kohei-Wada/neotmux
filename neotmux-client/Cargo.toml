@@ -16,6 +16,5 @@ neotmux-proto.workspace = true
 neotmux-sys.workspace = true
 anyhow.workspace = true
 base64.workspace = true
-libc.workspace = true
 nix.workspace = true
 ratatui.workspace = true

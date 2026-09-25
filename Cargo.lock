@@ -769,7 +769,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64",
- "libc",
  "neotmux-proto",
  "neotmux-sys",
  "nix 0.28.0",

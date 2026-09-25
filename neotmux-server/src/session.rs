@@ -76,7 +76,7 @@ pub struct Session {
 /// What draining the panes found: `Eof` means the last pane is gone and the session ends
 /// after one final frame.
 #[derive(PartialEq, Eq)]
-enum Drained {
+enum DrainOutcome {
     More,
     Eof,
 }
@@ -214,7 +214,7 @@ impl Session {
 
     /// At most `MAX_CHUNKS_PER_FRAME` chunks per pane, so a flooding child cannot starve
     /// input or the other panes.
-    fn drain_panes(&mut self) -> anyhow::Result<Drained> {
+    fn drain_panes(&mut self) -> anyhow::Result<DrainOutcome> {
         let wanted = self.wants_pane_output;
         let steps = &mut self.steps;
         let drained = self.shells.drain(MAX_CHUNKS_PER_FRAME, |pane, bytes| {
@@ -229,12 +229,12 @@ impl Session {
         // more frame is what renders that output before the session ends (M0a's guarantee).
         // Dropping the session after that frame is what reaps the children.
         if !drained.closed.is_empty() && drained.closed.len() == self.shells.len() {
-            return Ok(Drained::Eof);
+            return Ok(DrainOutcome::Eof);
         }
         for pane in drained.closed {
             self.close_pane(pane)?;
         }
-        Ok(Drained::More)
+        Ok(DrainOutcome::More)
     }
 
     /// A pane's child ended: reap it, give its space to its sibling, and move focus if it
@@ -248,7 +248,7 @@ impl Session {
         let Some(closed) = self.windows.close_pane(pane, self.surface) else {
             return Ok(());
         };
-        // The last pane anywhere never reaches here: it is `Drained::Eof`, which ends the
+        // The last pane anywhere never reaches here: it is `DrainOutcome::Eof`, which ends the
         // session after one more frame so that pane's final output is drawn.
         if self.windows.is_empty() {
             return Ok(());
@@ -749,7 +749,7 @@ impl Session {
     /// The first half of a frame: the panes' output, and everything the client's Lua layer
     /// has to be told before it ticks. The tick itself happens in the other process.
     pub fn tick(&mut self) -> anyhow::Result<Tick> {
-        if self.drain_panes()? == Drained::Eof {
+        if self.drain_panes()? == DrainOutcome::Eof {
             self.ended = true;
         }
         let pane_info = self.refresh_pane_info();

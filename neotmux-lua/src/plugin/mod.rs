@@ -1,19 +1,19 @@
-mod command_info;
 mod commands;
 mod kind;
 mod kind_tag;
 mod layers;
+mod registered_command;
 mod registration_id;
 mod registry;
 mod source_id;
 mod sources;
 mod vm;
 
-pub use command_info::*;
 pub use commands::*;
 pub use kind::*;
 pub use kind_tag::*;
 pub use layers::*;
+pub use registered_command::*;
 pub use registration_id::*;
 pub use registry::*;
 pub use source_id::*;

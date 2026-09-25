@@ -3,7 +3,7 @@
 //! Mirrors `registry.rs`'s shape and borrow discipline: every accessor clones what it needs
 //! out from under its `RefCell` borrow before the caller can call back into Lua with it.
 
-use crate::plugin::CommandInfo;
+use crate::plugin::RegisteredCommand;
 use crate::plugin::SourceId;
 use mlua::{RegistryKey, Value};
 use std::cell::RefCell;
@@ -52,11 +52,11 @@ impl Commands {
     }
 
     /// In name order, free from the `BTreeMap`.
-    pub fn list(&self) -> Vec<CommandInfo> {
+    pub fn list(&self) -> Vec<RegisteredCommand> {
         self.inner
             .borrow()
             .iter()
-            .map(|(name, entry)| CommandInfo {
+            .map(|(name, entry)| RegisteredCommand {
                 name: name.clone(),
                 desc: entry.desc.clone(),
                 owner: entry.owner,
