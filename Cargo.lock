@@ -753,10 +753,10 @@ name = "neotmux"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "neotmux-core",
+ "neotmux-layout",
  "neotmux-lua",
  "neotmux-proto",
- "neotmux-term",
+ "neotmux-pty",
  "nix 0.28.0",
  "portable-pty",
  "ratatui",
@@ -766,7 +766,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "neotmux-core"
+name = "neotmux-layout"
 version = "0.1.0"
 dependencies = [
  "neotmux-proto",
@@ -779,7 +779,7 @@ dependencies = [
  "anyhow",
  "mlua",
  "neotmux-proto",
- "neotmux-term",
+ "neotmux-pty",
  "tempfile",
 ]
 
@@ -791,7 +791,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "neotmux-term"
+name = "neotmux-pty"
 version = "0.1.0"
 dependencies = [
  "anyhow",

@@ -51,14 +51,14 @@ pub struct Extent {
     /// How many lines have fallen out of the front of it since the pane opened, so history
     /// line `i` is the `dropped + i`th line the pane ever scrolled away. A single feed that
     /// appends a whole ring's worth of lines in one go can undercount this (pinned by
-    /// `a_feed_that_appends_a_whole_ring_undercounts` in `neotmux-term`), so a plugin must
+    /// `a_feed_that_appends_a_whole_ring_undercounts` in `neotmux-pty`), so a plugin must
     /// not treat it as exact.
     pub dropped: u64,
 }
 
 /// Reading a pane's text.
 ///
-/// `neotmux-term`'s `PaneTerminals` answers it, and the session holds it. The Lua layer runs
+/// `neotmux-pty`'s `PaneTerminals` answers it, and the session holds it. The Lua layer runs
 /// in the server, beside the panes, so a read is a function call; the trait is what keeps
 /// the Lua crate from having to know a terminal.
 pub trait PaneRead {

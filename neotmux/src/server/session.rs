@@ -9,17 +9,17 @@ use neotmux_proto::{
     DrawCmd, Event, Geometry, Level, PaneId, PaneInfo, PaneTty, Rect as PRect, Reserved, Size,
     Window as LuaWindow, WindowId,
 };
-use neotmux_term::pty::PtyHandle;
-use neotmux_term::state::clamp_to_min_grid;
-use neotmux_term::terminals::PaneTerminals;
-use neotmux_term::wakeup::Waker;
+use neotmux_pty::pty::PtyHandle;
+use neotmux_pty::state::clamp_to_min_grid;
+use neotmux_pty::terminals::PaneTerminals;
+use neotmux_pty::wakeup::Waker;
 
 use crate::logging;
 use crate::procinfo;
 use crate::server::input::encode_key;
 use crate::server::paneinfo::PaneInfoCache;
 use crate::server::shells::Shells;
-use neotmux_core::windows::{PaneIds, Shown, Surface, Windows};
+use neotmux_layout::windows::{PaneIds, Shown, Surface, Windows};
 use neotmux_proto::frame::{Frame, PaneFrame};
 use neotmux_proto::keys::Key;
 
@@ -115,7 +115,7 @@ impl Session {
             size: clamp_to_min_grid(setup.size),
             reserved: setup.reserved,
             gutter: setup.gutter,
-            minimum: neotmux_term::state::MIN_GRID,
+            minimum: neotmux_pty::state::MIN_GRID,
         };
         let (windows, first) = Windows::new(setup.first_window, surface, pane_ids);
         let mut shells = Shells::new(waker, terminals.clone());
@@ -870,9 +870,9 @@ fn pane_size(rect: Option<PRect>, pane: PaneId) -> anyhow::Result<Size> {
 
 #[cfg(test)]
 mod tests {
-    use neotmux_term::pty::CommandBuilder;
-    use neotmux_term::state::{MIN_GRID, TermState};
-    use neotmux_term::wakeup::wakeup;
+    use neotmux_pty::pty::CommandBuilder;
+    use neotmux_pty::state::{MIN_GRID, TermState};
+    use neotmux_pty::wakeup::wakeup;
 
     use super::*;
 
@@ -918,7 +918,7 @@ mod tests {
             size,
             reserved: Reserved::default(),
             gutter: 0,
-            minimum: neotmux_term::state::MIN_GRID,
+            minimum: neotmux_pty::state::MIN_GRID,
         };
         let (windows, first) = Windows::new(WindowId::from(1), surface, PaneIds::new());
         assert_eq!(

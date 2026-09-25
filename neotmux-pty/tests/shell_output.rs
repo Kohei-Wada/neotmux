@@ -1,9 +1,9 @@
 use std::time::{Duration, Instant};
 
 use neotmux_proto::{GridSnapshot, Size};
-use neotmux_term::pty::{PtyEvent, PtyHandle};
-use neotmux_term::state::TermState;
-use neotmux_term::wakeup::wakeup;
+use neotmux_pty::pty::{PtyEvent, PtyHandle};
+use neotmux_pty::state::TermState;
+use neotmux_pty::wakeup::wakeup;
 use portable_pty::CommandBuilder;
 
 #[test]

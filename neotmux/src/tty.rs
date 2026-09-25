@@ -340,7 +340,7 @@ mod tests {
     fn a_pane_nudge_ends_the_wait_long_before_the_deadline() {
         let (_master, slave) = pty_pair();
         let tty = slave_terminal(&slave);
-        let (wakeup, waker) = neotmux_term::wakeup::wakeup().expect("wakeup");
+        let (wakeup, waker) = neotmux_pty::wakeup::wakeup().expect("wakeup");
         waker.wake();
 
         let started = Instant::now();
@@ -365,7 +365,7 @@ mod tests {
     fn a_reported_nudge_does_not_wake_the_next_wait_as_well() {
         let (_master, slave) = pty_pair();
         let tty = slave_terminal(&slave);
-        let (wakeup, waker) = neotmux_term::wakeup::wakeup().expect("wakeup");
+        let (wakeup, waker) = neotmux_pty::wakeup::wakeup().expect("wakeup");
         waker.wake();
 
         let deadline = Instant::now() + Duration::from_secs(5);
@@ -396,7 +396,7 @@ mod tests {
     fn a_wait_that_was_given_no_wakeup_ignores_a_nudge() {
         let (_master, slave) = pty_pair();
         let tty = slave_terminal(&slave);
-        let (_wakeup, waker) = neotmux_term::wakeup::wakeup().expect("wakeup");
+        let (_wakeup, waker) = neotmux_pty::wakeup::wakeup().expect("wakeup");
         waker.wake();
 
         let started = Instant::now();
@@ -413,7 +413,7 @@ mod tests {
     fn input_is_reported_first_and_the_nudge_survives_for_the_next_wait() {
         let (master, slave) = pty_pair();
         let tty = slave_terminal(&slave);
-        let (wakeup, waker) = neotmux_term::wakeup::wakeup().expect("wakeup");
+        let (wakeup, waker) = neotmux_pty::wakeup::wakeup().expect("wakeup");
         waker.wake();
         nix::unistd::write(master.as_fd(), b"x\n").expect("write");
 

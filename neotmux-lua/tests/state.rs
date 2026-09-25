@@ -101,7 +101,7 @@ fn the_fallback_still_calls_a_pane_that_just_printed_working() {
 
 /// The whole point of `claims`, end to end against the shipped ruleset. Claude Code writes a
 /// `✳` into the terminal title when a turn is over, and nothing resets it when the program
-/// exits — `neotmux-term` keeps the last title a pane set forever. So the shell you go on using
+/// exits — `neotmux-pty` keeps the last title a pane set forever. So the shell you go on using
 /// in that pane still carries it, and `osc_title_idle` would answer `idle` for every screen
 /// thereafter: no `blocked` for an `rm -i`, no tint, no chime, in the most ordinary life a
 /// Claude pane has.

@@ -12,7 +12,7 @@
 //! character below U+0100 adds nothing either, because `vt100` refuses to draw one at all;
 //! a tab never reaches a cell, it moves the cursor, so it has no width here.
 //!
-//! The test that checks this rule against `vt100`'s own grid lives in `neotmux-term`'s
+//! The test that checks this rule against `vt100`'s own grid lives in `neotmux-pty`'s
 //! `lines.rs`, because the claim is about `vt100` and this crate does not depend on it.
 
 use unicode_width::UnicodeWidthChar as _;

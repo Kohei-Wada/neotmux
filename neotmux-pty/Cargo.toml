@@ -1,5 +1,5 @@
 [package]
-name = "neotmux-term"
+name = "neotmux-pty"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

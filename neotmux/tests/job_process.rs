@@ -7,7 +7,7 @@ use neotmux_lua::runner::{JobChunk, JobSpec, Runner};
 
 #[test]
 fn a_real_process_runs_and_its_output_comes_back() {
-    let (wakeup, waker) = neotmux_term::wakeup::wakeup().unwrap();
+    let (wakeup, waker) = neotmux_pty::wakeup::wakeup().unwrap();
     let runner = neotmux::server::runner::Processes::new(waker);
     let mut running = runner
         .start(&JobSpec {
@@ -44,7 +44,7 @@ fn a_real_process_runs_and_its_output_comes_back() {
 /// leave both reader threads blocked in `read` and the exit never reported at all.
 #[test]
 fn killing_a_job_ends_the_children_it_started() {
-    let (wakeup, waker) = neotmux_term::wakeup::wakeup().unwrap();
+    let (wakeup, waker) = neotmux_pty::wakeup::wakeup().unwrap();
     let runner = neotmux::server::runner::Processes::new(waker);
     let mut running = runner
         .start(&JobSpec {

@@ -16,7 +16,7 @@ use nix::sys::signal::{Signal, kill, killpg};
 use nix::unistd::Pid;
 
 use neotmux_lua::runner::{JobChunk, JobSpec, Runner, Running};
-use neotmux_term::wakeup::Waker;
+use neotmux_pty::wakeup::Waker;
 
 const OUTPUT_CHANNEL_BOUND: usize = 64;
 
@@ -134,7 +134,7 @@ fn end_group(group: Pid) {
 }
 
 /// One pipe's reader. Every chunk is followed by a nudge, because a channel is not something
-/// the frame loop can wait on — the same reason `neotmux-term`'s `read_loop` gives.
+/// the frame loop can wait on — the same reason `neotmux-pty`'s `read_loop` gives.
 fn reader<R: Read + Send + 'static>(
     name: &str,
     mut pipe: R,

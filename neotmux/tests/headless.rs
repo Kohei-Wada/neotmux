@@ -16,7 +16,7 @@ use neotmux_proto::frame::Frame;
 use neotmux_proto::keys::{Key, KeyCode};
 use neotmux_proto::msg::End;
 use neotmux_proto::{DrawCmd, Reserved, SessionId, Size, WindowId};
-use neotmux_term::wakeup::{Wakeup, wakeup};
+use neotmux_pty::wakeup::{Wakeup, wakeup};
 
 const SURFACE: Size = Size { rows: 10, cols: 40 };
 
@@ -40,7 +40,7 @@ fn halves(files: &[(&str, &str)]) -> (tempfile::TempDir, Wakeup, Session, Plugin
         fs::write(path, body).expect("write layer file");
     }
     let (wakeup, waker) = wakeup().expect("wakeup");
-    let terminals = std::rc::Rc::new(neotmux_term::terminals::PaneTerminals::new());
+    let terminals = std::rc::Rc::new(neotmux_pty::terminals::PaneTerminals::new());
     let session = Session::new(
         &Setup {
             size: SURFACE,
@@ -51,7 +51,7 @@ fn halves(files: &[(&str, &str)]) -> (tempfile::TempDir, Wakeup, Session, Plugin
         },
         waker,
         terminals.clone(),
-        neotmux_core::windows::PaneIds::new(),
+        neotmux_layout::windows::PaneIds::new(),
     )
     .expect("start a session");
     let lua = LuaSubsystem::build(
