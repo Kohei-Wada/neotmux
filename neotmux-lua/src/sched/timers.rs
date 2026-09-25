@@ -13,14 +13,14 @@ use std::time::{Duration, Instant};
 use mlua::RegistryKey;
 use neotmux_proto::SessionId;
 
-use crate::source::SourceId;
+use crate::plugin::SourceId;
 
 /// The shortest interval that means anything: the frame. Asking for less is asking for every
 /// frame, which is what this clamps it to.
 pub const FRAME: Duration = Duration::from_millis(16);
 
 /// What `timer.every` and `timer.after` answered with, and what `timer:stop()` names. Minted
-/// here rather than by the host for the reason [`crate::jobs::JobId`] gives: the call has to
+/// here rather than by the host for the reason [`crate::sched::JobId`] gives: the call has to
 /// answer before the frame ends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TimerId(pub u64);
@@ -65,7 +65,7 @@ impl Timers {
     /// from inside one of that sweep's `on_exit` callbacks would take the dying session as
     /// its own — the ambient session is still bound — and then never be fired, never be
     /// swept and never be adopted, holding its callback for the life of the server, so
-    /// `arm` refuses while this is on. The same guard [`crate::jobs::Jobs::sweeping`] is,
+    /// `arm` refuses while this is on. The same guard [`crate::sched::Jobs::sweeping`] is,
     /// and for the same reason.
     pub fn sweeping(&self) -> Sweeping<'_> {
         self.sweeping.set(true);
@@ -225,7 +225,7 @@ impl Drop for Sweeping<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source::ANONYMOUS;
+    use crate::plugin::ANONYMOUS;
 
     fn callback(lua: &mlua::Lua) -> Rc<RegistryKey> {
         let function = lua.create_function(|_, ()| Ok(())).unwrap();

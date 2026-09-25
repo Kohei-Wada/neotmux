@@ -1,6 +1,6 @@
 use std::fs;
 
-use neotmux_lua::runtime::Layers;
+use neotmux_lua::plugin::Layers;
 use neotmux_lua::{KeyOutcome, LuaSubsystem};
 
 mod support;

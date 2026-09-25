@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use neotmux_lua::LuaSubsystem;
-use neotmux_lua::runner::JobChunk;
-use neotmux_lua::runtime::Layers;
+use neotmux_lua::host::JobChunk;
+use neotmux_lua::plugin::Layers;
 use neotmux_proto::{Epoch, Geometry, PaneId, Rect, Size, Window, WindowId};
 
 mod support;
@@ -61,7 +61,7 @@ fn built(init: &str, runner: Rc<FakeRunner>) -> (tempfile::TempDir, Built) {
     let sub = LuaSubsystem::build_with_runner(
         Layers::from_paths(vec![dir.path().to_path_buf(), shipped_layer()]),
         terminals.clone(),
-        Rc::new(neotmux_lua::clipboard::Absent),
+        Rc::new(neotmux_lua::host::Absent),
         runner,
     )
     .unwrap();

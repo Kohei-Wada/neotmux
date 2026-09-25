@@ -9,7 +9,7 @@ use std::rc::Rc;
 
 use mlua::{RegistryKey, Value};
 
-use crate::source::SourceId;
+use crate::plugin::SourceId;
 
 struct Entry {
     callback: Rc<RegistryKey>,
@@ -117,7 +117,7 @@ pub fn lines_from(value: Value) -> Result<Vec<String>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source::{SourceId, Sources};
+    use crate::plugin::{SourceId, Sources};
     use mlua::Table;
 
     fn key(lua: &mlua::Lua, body: &str) -> Rc<mlua::RegistryKey> {
@@ -126,7 +126,7 @@ mod tests {
     }
 
     fn setup() -> (mlua::Lua, Commands, SourceId, SourceId) {
-        let lua = crate::vm::new_vm().unwrap();
+        let lua = crate::plugin::new_vm().unwrap();
         let sources = Sources::new();
         let a = sources.intern("alpha");
         let b = sources.intern("beta");
@@ -205,14 +205,14 @@ mod tests {
 
     #[test]
     fn lines_from_a_map_shaped_table_is_an_error() {
-        let lua = crate::vm::new_vm().unwrap();
+        let lua = crate::plugin::new_vm().unwrap();
         let table: Table = lua.load("return { foo = 'bar' }").eval().unwrap();
         assert!(lines_from(Value::Table(table)).is_err());
     }
 
     #[test]
     fn lines_from_a_mixed_table_is_an_error() {
-        let lua = crate::vm::new_vm().unwrap();
+        let lua = crate::plugin::new_vm().unwrap();
         let table: Table = lua.load("return { 'a', extra = 1 }").eval().unwrap();
         assert!(lines_from(Value::Table(table)).is_err());
     }

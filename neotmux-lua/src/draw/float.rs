@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 
 use neotmux_proto::{Color, DrawCmd, Rect};
 
-use crate::source::SourceId;
+use crate::plugin::SourceId;
 
 /// A float's identity. Ids are never recycled, so the grant order is the id order.
 /// The field is `pub(crate)` so the sibling modules name it by number (`__id` in Task 3).
@@ -258,7 +258,7 @@ fn clip_line(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source::Sources;
+    use crate::plugin::Sources;
 
     fn sources() -> (Sources, SourceId, SourceId) {
         let sources = Sources::new();

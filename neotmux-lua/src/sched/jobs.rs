@@ -11,8 +11,8 @@ use std::rc::Rc;
 use mlua::RegistryKey;
 use neotmux_proto::SessionId;
 
-use crate::runner::{JobChunk, JobSpec, Runner, Running};
-use crate::source::SourceId;
+use crate::host::{JobChunk, JobSpec, Runner, Running};
+use crate::plugin::SourceId;
 
 /// What `job.start` answered with, and what `job:kill()` names. Minted here rather than by
 /// the host for the reason `WindowIds` gives: the call has to answer before the frame ends.

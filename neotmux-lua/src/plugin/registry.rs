@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use mlua::RegistryKey;
 
-use crate::source::SourceId;
+use crate::plugin::SourceId;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Kind {
@@ -132,7 +132,7 @@ impl Registry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source::{SourceId, Sources};
+    use crate::plugin::{SourceId, Sources};
 
     fn key(lua: &mlua::Lua, body: &str) -> std::rc::Rc<mlua::RegistryKey> {
         let f: mlua::Function = lua.load(body).eval().unwrap();
@@ -140,7 +140,7 @@ mod tests {
     }
 
     fn setup() -> (mlua::Lua, Registry, SourceId, SourceId) {
-        let lua = crate::vm::new_vm().unwrap();
+        let lua = crate::plugin::new_vm().unwrap();
         let sources = Sources::new();
         let a = sources.intern("alpha");
         let b = sources.intern("beta");

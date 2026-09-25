@@ -213,7 +213,7 @@ mod tests {
         fs::create_dir_all(&lua_dir).unwrap();
         fs::write(lua_dir.join("greet.lua"), "return { hello = 'world' }").unwrap();
 
-        let lua = crate::vm::new_vm().unwrap();
+        let lua = crate::plugin::new_vm().unwrap();
         let layers = Layers::from_paths(vec![dir.path().to_path_buf()]);
         install(&lua, &layers).unwrap();
 
@@ -231,7 +231,7 @@ mod tests {
         fs::create_dir_all(&lib_dir).unwrap();
         fs::write(lib_dir.join("clock.lua"), "return { format = '%H:%M' }").unwrap();
 
-        let lua = crate::vm::new_vm().unwrap();
+        let lua = crate::plugin::new_vm().unwrap();
         let layers = Layers::from_paths(vec![dir.path().to_path_buf()]);
         install(&lua, &layers).unwrap();
 
@@ -244,7 +244,7 @@ mod tests {
 
     #[test]
     fn no_layers_is_a_working_vm_with_no_plugins() {
-        let lua = crate::vm::new_vm().unwrap();
+        let lua = crate::plugin::new_vm().unwrap();
         let layers = Layers::from_paths(vec![]);
         install(&lua, &layers).unwrap();
         let path: String = lua.load("return package.path").eval().unwrap();

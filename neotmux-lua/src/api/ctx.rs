@@ -7,8 +7,8 @@ use neotmux_proto::{Color, DrawCmd, PaneId, Rect};
 
 use crate::api::rect;
 use crate::draw::Buffers;
-use crate::float::FloatId;
-use crate::source::SourceId;
+use crate::draw::FloatId;
+use crate::plugin::SourceId;
 
 /// Scope-bound: created fresh inside `Lua::scope` for one dispatch and dies with it.
 pub struct Ctx {
@@ -281,7 +281,7 @@ impl UserData for Ctx {
                             this.buffers.record_float(
                                 this.owner,
                                 id,
-                                crate::float::place(&cmd, rect),
+                                crate::draw::place(&cmd, rect),
                             );
                         }
                     }
@@ -329,7 +329,7 @@ impl UserData for Ctx {
                             this.buffers.record_float(
                                 this.owner,
                                 id,
-                                crate::float::place(&cmd, float),
+                                crate::draw::place(&cmd, float),
                             );
                         }
                     }
@@ -377,7 +377,7 @@ impl UserData for Ctx {
                             this.buffers.record_float(
                                 this.owner,
                                 id,
-                                crate::float::place(&cmd, float),
+                                crate::draw::place(&cmd, float),
                             );
                         }
                     }
@@ -438,7 +438,7 @@ impl UserData for Ctx {
                             this.buffers.record_float(
                                 this.owner,
                                 id,
-                                crate::float::place(&cmd, float),
+                                crate::draw::place(&cmd, float),
                             );
                         }
                     }

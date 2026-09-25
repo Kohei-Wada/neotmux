@@ -4,9 +4,9 @@ use mlua::{Function, Lua, Table, Value};
 
 use crate::api::{attribute, make_handle};
 use crate::draw::Buffers;
-use crate::ops::{Op, OpBuffer};
-use crate::registry::{Kind, KindTag, RegistrationId, Registry};
-use crate::source::Sources;
+use crate::host::{Op, OpBuffer};
+use crate::plugin::Sources;
+use crate::plugin::{Kind, KindTag, RegistrationId, Registry};
 use neotmux_proto::Level;
 
 /// Canonical order for modifier prefixes: Control, then Meta/Alt, then Shift.

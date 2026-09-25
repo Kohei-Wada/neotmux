@@ -7,9 +7,9 @@ use neotmux_proto::screen::{Lines, PaneRead, Trailing, Want};
 use neotmux_proto::{Dir, Geometry, PaneId, SplitDir};
 
 use crate::api::rect;
-use crate::ops::{Op, OpBuffer};
-use crate::paneinfo::{PaneInfos, PaneTtys};
-use crate::source::{self, Sources};
+use crate::host::{Op, OpBuffer};
+use crate::host::{PaneInfos, PaneTtys};
+use crate::plugin::{self, Sources};
 
 /// A count a caller gave in Lua, where the only wrong value is a negative one: that is a
 /// typo rather than a refusal, as a resize by a negative number of cells is.
@@ -274,7 +274,7 @@ pub(crate) fn install(
                     "unknown split direction '{dir}', expected 'horizontal' or 'vertical'"
                 ))
             })?;
-            ops.push(source::caller(lua, &sources), Op::PaneSplit { dir });
+            ops.push(plugin::caller(lua, &sources), Op::PaneSplit { dir });
             Ok(())
         })?;
         pane.set("split", split)?;
@@ -299,7 +299,7 @@ pub(crate) fn install(
                         "pane.resize takes a positive number of cells, got {cells}"
                     ))
                 })?;
-            ops.push(source::caller(lua, &sources), Op::PaneResize { dir, cells });
+            ops.push(plugin::caller(lua, &sources), Op::PaneResize { dir, cells });
             Ok(())
         })?;
         pane.set("resize", resize)?;
@@ -382,7 +382,7 @@ pub(crate) fn install(
                     "cannot parse key spec '{spec}'"
                 )));
             }
-            ops.push(source::caller(lua, &sources), Op::PaneKey { pane, spec });
+            ops.push(plugin::caller(lua, &sources), Op::PaneKey { pane, spec });
             Ok((true, Value::Nil))
         })?;
         pane.set("key", key)?;
@@ -418,7 +418,7 @@ pub(crate) fn install(
                     Value::String(lua.create_string(format!("no pane {pane}"))?),
                 ));
             }
-            ops.push(source::caller(lua, &sources), Op::PaneSend { pane, text });
+            ops.push(plugin::caller(lua, &sources), Op::PaneSend { pane, text });
             Ok((true, Value::Nil))
         })?;
         pane.set("send", send)?;
@@ -427,7 +427,7 @@ pub(crate) fn install(
     {
         let focus = lua.create_function(move |lua, pane: u32| {
             ops.push(
-                source::caller(lua, &sources),
+                plugin::caller(lua, &sources),
                 Op::PaneFocus {
                     pane: PaneId::from(pane),
                 },

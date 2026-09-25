@@ -3,8 +3,8 @@ use std::collections::BTreeMap;
 
 use neotmux_proto::{DrawCmd, Epoch, PaneId};
 
-use crate::float::FloatId;
-use crate::source::SourceId;
+use crate::draw::FloatId;
+use crate::plugin::SourceId;
 
 #[derive(Debug, Clone, Default)]
 pub struct Committed {
@@ -165,7 +165,7 @@ mod tests {
     use neotmux_proto::{Color, DrawCmd, Epoch, Size};
 
     use super::*;
-    use crate::source::Sources;
+    use crate::plugin::Sources;
 
     fn epoch(rows: u16) -> Epoch {
         Epoch::new(Size { rows, cols: 80 }, vec![], None)

@@ -8,10 +8,9 @@ use std::time::Instant;
 
 use mlua::{Function, Lua, Table, Value};
 
-use crate::ambient::Ambient;
-use crate::source;
-use crate::source::Sources;
-use crate::timers::{TimerId, Timers};
+use crate::host::Ambient;
+use crate::plugin::Sources;
+use crate::sched::timers::{TimerId, Timers};
 
 pub(crate) fn install(
     lua: &Lua,
@@ -25,7 +24,7 @@ pub(crate) fn install(
         let sources = Rc::clone(&sources);
         let ambient = Rc::clone(&ambient);
         let arm = lua.create_function(move |lua, (ms, callback): (u64, Function)| {
-            let owner = source::caller(lua, &sources);
+            let owner = crate::plugin::caller(lua, &sources);
             let key = Rc::new(lua.create_registry_value(callback)?);
             // None while an `init.lua` is running, which is where a plugin most naturally
             // arms its poll: the timer is adopted by the first session to run a frame.

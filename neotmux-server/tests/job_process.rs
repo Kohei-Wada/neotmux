@@ -3,7 +3,7 @@
 
 use std::time::{Duration, Instant};
 
-use neotmux_lua::runner::{JobChunk, JobSpec, Runner};
+use neotmux_lua::host::{JobChunk, JobSpec, Runner};
 
 #[test]
 fn a_real_process_runs_and_its_output_comes_back() {

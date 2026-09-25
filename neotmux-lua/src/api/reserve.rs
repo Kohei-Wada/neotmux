@@ -4,8 +4,8 @@ use mlua::{Function, Lua, Table, Value};
 
 use neotmux_proto::Edge;
 
-use crate::reserve::{ReservationId, Reservations, max_reserved};
-use crate::source::{self, Sources};
+use crate::draw::{ReservationId, Reservations, max_reserved};
+use crate::plugin::{self, Sources};
 
 /// What a `cells` argument has to be for either call to mean anything, whoever else is on the
 /// edge: at least one of the unit the edge is measured in, and no more than the edge's bound.
@@ -82,7 +82,7 @@ pub(crate) fn install(
             )));
         };
         check_cells("neotmux.reserve", parsed, cells)?;
-        let owner = source::caller(lua, &sources);
+        let owner = plugin::caller(lua, &sources);
         match reservations.add(owner, parsed, cells) {
             Ok(id) => Ok((
                 Value::Table(handle(lua, reservations.clone(), id, parsed)?),

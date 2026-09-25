@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 
 use neotmux_proto::{Axis, Edge, Rect, Reserved, Size};
 
-use crate::source::SourceId;
+use crate::plugin::SourceId;
 
 /// The most rows one horizontal edge can be reserved for, whoever asks. A band there is a
 /// line or two of text along an edge — a status line, a window list — and past four the
@@ -224,7 +224,7 @@ impl Reservations {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source::Sources;
+    use crate::plugin::Sources;
 
     fn sources() -> (Sources, SourceId, SourceId) {
         let sources = Sources::new();

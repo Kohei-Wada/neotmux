@@ -4,8 +4,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use neotmux_lua::ops::Op;
-use neotmux_lua::runtime::Layers;
+use neotmux_lua::host::Op;
+use neotmux_lua::plugin::Layers;
 use neotmux_lua::{KeyOutcome, LuaSubsystem};
 use neotmux_proto::{DrawCmd, Epoch, Geometry, PaneId, Rect, Size, WindowId, geom::Window};
 

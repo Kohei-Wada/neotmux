@@ -22,16 +22,16 @@ use mlua::{Function, Lua, Table, Value};
 use neotmux_proto::screen::PaneRead;
 
 use crate::LoadFailure;
-use crate::commands::Commands;
 use crate::draw::Buffers;
-use crate::float::Floats;
-use crate::ops::{Op, OpBuffer};
-use crate::overrun::Overrun;
-use crate::paneinfo::{PaneInfos, PaneTtys};
-use crate::registry::{Kind, KindTag, RegistrationId, Registry};
-use crate::reserve::Reservations;
-use crate::source::{self, SourceId, Sources};
-use crate::window::WindowIds;
+use crate::draw::Floats;
+use crate::draw::Reservations;
+use crate::host::WindowIds;
+use crate::host::{Op, OpBuffer};
+use crate::host::{PaneInfos, PaneTtys};
+use crate::plugin::Commands;
+use crate::plugin::{self, SourceId, Sources};
+use crate::plugin::{Kind, KindTag, RegistrationId, Registry};
+use crate::sched::Overrun;
 use neotmux_proto::{Geometry, Level};
 
 pub use opt::Opts;
@@ -51,9 +51,9 @@ pub(crate) struct Shared {
     pub(crate) pane_tty: Rc<RefCell<PaneTtys>>,
     pub(crate) notices: Rc<RefCell<Vec<neotmux_proto::screen::Notice>>>,
     pub(crate) panes: Rc<dyn PaneRead>,
-    pub(crate) clipboard: Rc<dyn crate::clipboard::Clipboard>,
-    pub(crate) jobs: Rc<crate::jobs::Jobs>,
-    pub(crate) timers: Rc<crate::timers::Timers>,
+    pub(crate) clipboard: Rc<dyn crate::host::Clipboard>,
+    pub(crate) jobs: Rc<crate::sched::Jobs>,
+    pub(crate) timers: Rc<crate::sched::timers::Timers>,
     pub(crate) overrun: Rc<Overrun>,
     pub(crate) reservations: Rc<Reservations>,
     pub(crate) window_ids: Rc<WindowIds>,
@@ -63,7 +63,7 @@ pub(crate) struct Shared {
     /// Which session this client is in, as the host knows it. Beside `home` in kind:
     /// a fact about the process rather than about a pane, and nothing in the Lua layer
     /// could set it.
-    pub(crate) ambient: Rc<crate::ambient::Ambient>,
+    pub(crate) ambient: Rc<crate::host::Ambient>,
 }
 
 pub(crate) fn make_handle(
@@ -135,8 +135,8 @@ struct Sweep {
     buffers: Rc<Buffers>,
     reservations: Rc<Reservations>,
     floats: Rc<Floats>,
-    jobs: Rc<crate::jobs::Jobs>,
-    timers: Rc<crate::timers::Timers>,
+    jobs: Rc<crate::sched::Jobs>,
+    timers: Rc<crate::sched::timers::Timers>,
 }
 
 impl Sweep {
@@ -188,7 +188,7 @@ fn install_require_wrapper(
         // A module that does not resolve to a file never ran, so it owns no registrations.
         // Removing "its" registrations without a resolved source would empty whichever
         // bucket the fallback names — `ANONYMOUS`, which real callbacks share.
-        let failed = source::resolve_chunk_name(lua, &modname)?
+        let failed = plugin::resolve_chunk_name(lua, &modname)?
             .map(|chunk_name| sources.intern(&chunk_name));
         if let Some(id) = failed {
             sweep.remove_all_of(id);
@@ -355,7 +355,7 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
             let sources = sources.clone();
             let ops = ops.clone();
             let clear = lua.create_function(move |lua, ()| {
-                ops.push(source::caller(lua, &sources), Op::NoticesClear);
+                ops.push(plugin::caller(lua, &sources), Op::NoticesClear);
                 Ok(())
             })?;
             notifications.set("clear", clear)?;
@@ -415,7 +415,7 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
         let sources = sources.clone();
         let ops = ops.clone();
         let quit = lua.create_function(move |lua, ()| {
-            ops.push(source::caller(lua, &sources), Op::Quit);
+            ops.push(plugin::caller(lua, &sources), Op::Quit);
             Ok(())
         })?;
         neotmux.set("quit", quit)?;
@@ -425,7 +425,7 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
         let sources = sources.clone();
         let ops = ops.clone();
         let detach = lua.create_function(move |lua, ()| {
-            ops.push(source::caller(lua, &sources), Op::Detach);
+            ops.push(plugin::caller(lua, &sources), Op::Detach);
             Ok(())
         })?;
         neotmux.set("detach", detach)?;
@@ -445,7 +445,7 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
                     )));
                 }
             };
-            ops.push(source::caller(lua, &sources), Op::Notify { level, text });
+            ops.push(plugin::caller(lua, &sources), Op::Notify { level, text });
             Ok(())
         })?;
         neotmux.set("notify", notify)?;
@@ -464,7 +464,7 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
         // Top level, not a `neotmux.plugin` namespace: the host has no plugin concept (§4.1).
         // The display name is the only handle a human has — it is what the notification
         // reported — and two layers providing the same relative path share one on purpose
-        // (`source::display_name`). So a name can match more than one source, and the first
+        // (`plugin::display_name`). So a name can match more than one source, and the first
         // interned match wins: `interned()` is in interning order, which is load order — the
         // handles that come back do not say which of them it was.
         let sources = sources.clone();

@@ -3,8 +3,8 @@ use std::rc::Rc;
 
 use neotmux_proto::{Dir, Level, PaneId, SessionId, SplitDir, WindowId};
 
-use crate::ambient::Ambient;
-use crate::source::SourceId;
+use crate::host::Ambient;
+use crate::plugin::SourceId;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Op {
@@ -135,7 +135,7 @@ impl OpBuffer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source::Sources;
+    use crate::plugin::Sources;
     use neotmux_proto::Geometry;
     use std::cell::RefCell;
 

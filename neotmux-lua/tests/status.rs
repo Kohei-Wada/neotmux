@@ -8,7 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use neotmux_lua::LuaSubsystem;
-use neotmux_lua::runtime::Layers;
+use neotmux_lua::plugin::Layers;
 use neotmux_proto::{
     Color, DrawCmd, Epoch, Geometry, PaneId, PaneInfo, Rect, Size, Window, WindowId,
 };

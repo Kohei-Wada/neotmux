@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use neotmux_lua::LuaSubsystem;
-use neotmux_lua::ops::Op;
-use neotmux_lua::runtime::Layers;
+use neotmux_lua::host::Op;
+use neotmux_lua::plugin::Layers;
 use neotmux_proto::{Epoch, Geometry, PaneId, Rect, SessionId, Size};
 
 mod support;

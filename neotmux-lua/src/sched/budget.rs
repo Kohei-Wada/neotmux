@@ -218,7 +218,7 @@ mod tests {
 
     /// The same, keeping the options handle so a test can change the budget mid-frame.
     fn armed_with_opts(tick_budget_ms: u64) -> (Lua, Rc<Budget>, Rc<RefCell<Opts>>) {
-        let lua = crate::vm::new_vm().unwrap();
+        let lua = crate::plugin::new_vm().unwrap();
         let opts = Rc::new(RefCell::new(Opts {
             tick_budget_ms,
             ..Opts::default()

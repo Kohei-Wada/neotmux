@@ -11,7 +11,7 @@
 
 use std::collections::BTreeMap;
 
-use neotmux_lua::ops::Op;
+use neotmux_lua::host::Op;
 use neotmux_lua::{KeyOutcome, LuaSubsystem, WriteVerdict};
 use neotmux_proto::wire::{SessionOp, Step, Tick, Tock};
 use neotmux_proto::{Key, Level, PaneId, PaneTty, SessionId};
@@ -355,8 +355,8 @@ mod tests {
     use std::rc::Rc;
 
     use neotmux_lua::LuaSubsystem;
-    use neotmux_lua::runner::{JobChunk, JobSpec, Runner, Running};
-    use neotmux_lua::runtime::Layers;
+    use neotmux_lua::host::{JobChunk, JobSpec, Runner, Running};
+    use neotmux_lua::plugin::Layers;
     use neotmux_proto::geom::Window;
     use neotmux_proto::{Epoch, Geometry, PaneId, Rect, SessionId, Size, WindowId};
     use neotmux_pty::terminals::PaneTerminals;
@@ -403,7 +403,7 @@ mod tests {
         let lua = LuaSubsystem::build_with_runner(
             Layers::from_paths(vec![dir.path().to_path_buf()]),
             Rc::new(PaneTerminals::new()),
-            Rc::new(neotmux_lua::clipboard::Absent),
+            Rc::new(neotmux_lua::host::Absent),
             Rc::new(Fake),
         )
         .expect("lua");

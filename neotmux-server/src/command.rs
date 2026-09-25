@@ -393,7 +393,7 @@ mod tests {
     /// walks every name and asks that it does not.
     #[test]
     fn every_name_in_names_dispatches_to_something_other_than_unknown() {
-        let layers = neotmux_lua::runtime::Layers::default();
+        let layers = neotmux_lua::plugin::Layers::default();
         let terminals = Rc::new(PaneTerminals::new());
         let lua = neotmux_lua::LuaSubsystem::build(layers, terminals.clone()).expect("lua");
         let mut plugins = Plugins::new(lua);

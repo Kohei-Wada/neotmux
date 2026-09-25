@@ -5,8 +5,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use neotmux_lua::ops::Op;
-use neotmux_lua::runtime::Layers;
+use neotmux_lua::host::Op;
+use neotmux_lua::plugin::Layers;
 use neotmux_lua::{KeyOutcome, LuaSubsystem};
 use neotmux_proto::{Color, DrawCmd, Epoch, Event, Geometry, PaneId, Rect, Size};
 
@@ -29,14 +29,14 @@ fn pane() -> PaneId {
 /// The shipped runtime with the prefix and copy mode on and everything else off, so every
 /// draw command in a frame is copy mode's.
 fn built(extra: &str) -> (tempfile::TempDir, Built) {
-    built_named(extra, std::rc::Rc::new(neotmux_lua::clipboard::Absent))
+    built_named(extra, std::rc::Rc::new(neotmux_lua::host::Absent))
 }
 
 /// A clipboard that always accepts the write. For the tests that check what the mode says
 /// when the terminal's clipboard is there to offer to, which `Absent` can never let happen.
 struct WorkingClipboard;
 
-impl neotmux_lua::clipboard::Clipboard for WorkingClipboard {
+impl neotmux_lua::host::Clipboard for WorkingClipboard {
     fn set(&self, _text: &str) -> std::io::Result<()> {
         Ok(())
     }
@@ -44,7 +44,7 @@ impl neotmux_lua::clipboard::Clipboard for WorkingClipboard {
 
 fn built_named(
     extra: &str,
-    clipboard: std::rc::Rc<dyn neotmux_lua::clipboard::Clipboard>,
+    clipboard: std::rc::Rc<dyn neotmux_lua::host::Clipboard>,
 ) -> (tempfile::TempDir, Built) {
     let dir = tempfile::tempdir().unwrap();
     fs::write(

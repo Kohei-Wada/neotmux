@@ -12,7 +12,7 @@ use std::rc::Rc;
 
 use neotmux_proto::{Geometry, SessionId};
 
-use crate::paneinfo::{PaneInfos, PaneTtys};
+use crate::host::{PaneInfos, PaneTtys};
 
 /// What one session is holding while some other session is the one bound.
 #[derive(Default)]

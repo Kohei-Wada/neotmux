@@ -5,9 +5,9 @@ use mlua::{Lua, Table, Value};
 
 use neotmux_proto::{Geometry, WindowId};
 
-use crate::ops::{Op, OpBuffer};
-use crate::source::{self, Sources};
-use crate::window::WindowIds;
+use crate::host::WindowIds;
+use crate::host::{Op, OpBuffer};
+use crate::plugin::{self, Sources};
 
 /// `neotmux.window`, shaped like `neotmux.pane`. `list`, `panes` and `current` read this frame's
 /// geometry; `create` and `focus` are ops on the buffer (§4.6), applied after the tick, so a
@@ -82,7 +82,7 @@ pub(crate) fn install(
         let create = lua.create_function(move |lua, ()| {
             let id = ids.take();
             ops.push(
-                source::caller(lua, &sources),
+                plugin::caller(lua, &sources),
                 Op::WindowCreate { window: id },
             );
             Ok(id.get())
@@ -116,7 +116,7 @@ pub(crate) fn install(
         // to nothing means.
         let rename = lua.create_function(move |lua, (id, name): (u32, Option<String>)| {
             ops.push(
-                source::caller(lua, &sources),
+                plugin::caller(lua, &sources),
                 Op::WindowRename {
                     window: WindowId::from(id),
                     name,
@@ -130,7 +130,7 @@ pub(crate) fn install(
     {
         let focus = lua.create_function(move |lua, id: u32| {
             ops.push(
-                source::caller(lua, &sources),
+                plugin::caller(lua, &sources),
                 Op::WindowFocus {
                     window: WindowId::from(id),
                 },

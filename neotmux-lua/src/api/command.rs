@@ -3,9 +3,9 @@ use std::rc::Rc;
 use mlua::{Function, Lua, Table, Value};
 
 use crate::api::attribute;
-use crate::commands::Commands;
-use crate::ops::{Op, OpBuffer};
-use crate::source::Sources;
+use crate::host::{Op, OpBuffer};
+use crate::plugin::Commands;
+use crate::plugin::Sources;
 use neotmux_proto::Level;
 
 /// `neotmux.command`: a name a plugin registers, anything can list, and anything can call by
@@ -111,7 +111,7 @@ pub fn install(
                 None => lua.create_table()?,
             };
             match func.call::<Value>(arg_table) {
-                Ok(value) => match crate::commands::lines_from(value) {
+                Ok(value) => match crate::plugin::lines_from(value) {
                     Ok(lines) => {
                         let table = lua.create_table()?;
                         for (at, line) in lines.into_iter().enumerate() {

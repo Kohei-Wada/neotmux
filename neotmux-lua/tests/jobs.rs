@@ -8,9 +8,9 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use neotmux_lua::LuaSubsystem;
-use neotmux_lua::ops::Op;
-use neotmux_lua::runner::{JobChunk, Runner};
-use neotmux_lua::runtime::Layers;
+use neotmux_lua::host::Op;
+use neotmux_lua::host::{JobChunk, Runner};
+use neotmux_lua::plugin::Layers;
 use neotmux_proto::{Epoch, Geometry, PaneId, Rect, SessionId, Size};
 
 mod support;
@@ -45,7 +45,7 @@ fn built(extra: &str, runner: Rc<FakeRunner>) -> (tempfile::TempDir, Built) {
     let sub = LuaSubsystem::build_with_runner(
         Layers::from_paths(vec![dir.path().to_path_buf(), shipped_layer()]),
         terminals.clone(),
-        Rc::new(neotmux_lua::clipboard::Absent),
+        Rc::new(neotmux_lua::host::Absent),
         runner,
     )
     .unwrap();
@@ -638,7 +638,7 @@ fn a_require_that_fails_takes_its_sources_jobs_with_it() {
     let sub = LuaSubsystem::build_with_runner(
         Layers::from_paths(vec![dir.path().to_path_buf(), shipped_layer()]),
         terminals.clone(),
-        Rc::new(neotmux_lua::clipboard::Absent),
+        Rc::new(neotmux_lua::host::Absent),
         Rc::clone(&runner) as Rc<dyn Runner>,
     )
     .unwrap();
@@ -886,7 +886,7 @@ fn a_failed_load_ends_its_jobs_without_calling_back_into_the_chunk() {
     let sub = LuaSubsystem::build_with_runner(
         Layers::from_paths(vec![dir.path().to_path_buf(), shipped_layer()]),
         terminals.clone(),
-        Rc::new(neotmux_lua::clipboard::Absent),
+        Rc::new(neotmux_lua::host::Absent),
         Rc::clone(&runner) as Rc<dyn Runner>,
     )
     .unwrap();

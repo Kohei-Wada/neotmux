@@ -3,7 +3,7 @@
 use std::fs;
 
 use neotmux_lua::LuaSubsystem;
-use neotmux_lua::runtime::Layers;
+use neotmux_lua::plugin::Layers;
 use neotmux_proto::{Epoch, Geometry, PaneId, Rect, SessionId, Size};
 
 mod support;
@@ -44,7 +44,7 @@ fn logged(sub: &LuaSubsystem, session: Option<SessionId>) -> Vec<String> {
     sub.drain_ops(session)
         .into_iter()
         .filter_map(|(_, op)| match op {
-            neotmux_lua::ops::Op::Log { text, .. } => Some(text),
+            neotmux_lua::host::Op::Log { text, .. } => Some(text),
             _ => None,
         })
         .collect()

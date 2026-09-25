@@ -3,8 +3,8 @@
 use std::fs;
 
 use neotmux_lua::LuaSubsystem;
-use neotmux_lua::ops::Op;
-use neotmux_lua::runtime::Layers;
+use neotmux_lua::host::Op;
+use neotmux_lua::plugin::Layers;
 
 mod support;
 
@@ -49,7 +49,7 @@ fn a_write_reaches_the_clipboard_the_host_gave() {
     use std::rc::Rc;
 
     struct Recording(RefCell<Vec<String>>);
-    impl neotmux_lua::clipboard::Clipboard for Recording {
+    impl neotmux_lua::host::Clipboard for Recording {
         fn set(&self, text: &str) -> std::io::Result<()> {
             self.0.borrow_mut().push(text.to_string());
             Ok(())

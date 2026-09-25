@@ -5,9 +5,9 @@ use std::time::Duration;
 
 use mlua::RegistryKey;
 
-use crate::budget::Outcome;
-use crate::registry::{Kind, KindTag, RegistrationId, Registry};
-use crate::source::SourceId;
+use crate::plugin::SourceId;
+use crate::plugin::{Kind, KindTag, RegistrationId, Registry};
+use crate::sched::Outcome;
 
 /// What repeated overruns cost a source, and how that is undone. Measuring a tick is
 /// `crate::budget`; this only counts and acts.

@@ -4,12 +4,11 @@ use std::rc::Rc;
 
 use mlua::{Function, Lua, Table, Value};
 
-use crate::ambient::Ambient;
 use crate::api::opt::Opts;
-use crate::jobs::{Callbacks, JobId, Jobs};
-use crate::runner::JobSpec;
-use crate::source;
-use crate::source::Sources;
+use crate::host::Ambient;
+use crate::host::JobSpec;
+use crate::plugin::Sources;
+use crate::sched::{Callbacks, JobId, Jobs};
 
 pub(crate) fn install(
     lua: &Lua,
@@ -67,7 +66,7 @@ pub(crate) fn install(
             on_stderr: keep("on_stderr")?,
             on_exit: keep("on_exit")?,
         };
-        let owner = source::caller(lua, &sources);
+        let owner = crate::plugin::caller(lua, &sources);
         let concurrency = opts.borrow().job_concurrency;
         match jobs.start(spec, owner, session, buffered, callbacks, concurrency) {
             Ok(id) => Ok((Value::Table(handle(lua, Rc::clone(&jobs), id)?), Value::Nil)),

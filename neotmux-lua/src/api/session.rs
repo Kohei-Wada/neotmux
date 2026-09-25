@@ -2,9 +2,9 @@ use std::rc::Rc;
 
 use mlua::{Lua, Table};
 
-use crate::ambient::Ambient;
-use crate::ops::{Op, OpBuffer};
-use crate::source::{self, Sources};
+use crate::host::Ambient;
+use crate::host::{Op, OpBuffer};
+use crate::plugin::{self, Sources};
 
 /// `neotmux.session`: which sessions there are, which one the work in hand is for, and a way
 /// to read one that is not.
@@ -60,7 +60,7 @@ pub(crate) fn install(
         let sources = sources.clone();
         let ops = ops.clone();
         let call = lua.create_function(move |lua, name: String| {
-            ops.push(source::caller(lua, &sources), make(name));
+            ops.push(plugin::caller(lua, &sources), make(name));
             Ok(())
         })?;
         session.set(word, call)?;
@@ -71,7 +71,7 @@ pub(crate) fn install(
         let ops = ops.clone();
         let rename = lua.create_function(move |lua, (from, to): (String, String)| {
             ops.push(
-                source::caller(lua, &sources),
+                plugin::caller(lua, &sources),
                 Op::SessionRename { from, to },
             );
             Ok(())

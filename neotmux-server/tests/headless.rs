@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use neotmux_lua::KeyOutcome;
 use neotmux_lua::LuaSubsystem;
-use neotmux_lua::runtime::Layers;
+use neotmux_lua::plugin::Layers;
 use neotmux_proto::keys::{Key, KeyCode};
 use neotmux_proto::screen::Frame;
 use neotmux_proto::wire::End;

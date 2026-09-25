@@ -4,8 +4,8 @@
 
 use std::fs;
 
-use neotmux_lua::ops::Op;
-use neotmux_lua::runtime::Layers;
+use neotmux_lua::host::Op;
+use neotmux_lua::plugin::Layers;
 use neotmux_lua::{CommandOutcome, LuaSubsystem};
 
 mod support;

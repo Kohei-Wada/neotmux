@@ -4,8 +4,8 @@ use mlua::{Function, Lua, Table, Value};
 
 use neotmux_proto::Rect;
 
-use crate::float::{FloatId, Floats};
-use crate::source::{self, Sources};
+use crate::draw::{FloatId, Floats};
+use crate::plugin::{self, Sources};
 
 /// A field read as a whole Lua integer, or the message a bad one gets: `min` is the
 /// smallest legal value, `0` for a corner and `1` for a dimension (spec §3, §7) —
@@ -189,7 +189,7 @@ pub(crate) fn install(
             return Ok((Value::Nil, Value::String(lua.create_string(&message)?)));
         }
 
-        let owner = source::caller(lua, &sources);
+        let owner = plugin::caller(lua, &sources);
         let id = floats.add(owner, Rect::new(x, y, w, h));
         Ok((Value::Table(handle(lua, floats.clone(), id)?), Value::Nil))
     })

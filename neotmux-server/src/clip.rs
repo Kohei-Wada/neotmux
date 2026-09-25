@@ -28,7 +28,7 @@ impl Clip {
     }
 }
 
-impl neotmux_lua::clipboard::Clipboard for Clip {
+impl neotmux_lua::host::Clipboard for Clip {
     fn set(&self, text: &str) -> std::io::Result<()> {
         if self.attached.get() == 0 {
             return Err(std::io::Error::other(
@@ -43,7 +43,7 @@ impl neotmux_lua::clipboard::Clipboard for Clip {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use neotmux_lua::clipboard::Clipboard as _;
+    use neotmux_lua::host::Clipboard as _;
 
     #[test]
     fn a_yank_with_a_client_attached_is_queued_once_and_taken_once() {

@@ -12,9 +12,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use neotmux_lua::clipboard::Clipboard;
-use neotmux_lua::ops::Op;
-use neotmux_lua::runtime::Layers;
+use neotmux_lua::host::Clipboard;
+use neotmux_lua::host::Op;
+use neotmux_lua::plugin::Layers;
 use neotmux_lua::{KeyOutcome, LuaSubsystem};
 use neotmux_proto::{DrawCmd, Epoch, Geometry, PaneId, Rect, Size};
 
@@ -787,7 +787,7 @@ fn c_b_f_labels_the_screen_and_copies_what_is_picked() {
 fn hint_send_types_the_target_into_the_focused_pane() {
     let (_dir, sub) = built_plugin(
         &run_on("X", "hint-send"),
-        Rc::new(neotmux_lua::clipboard::Absent),
+        Rc::new(neotmux_lua::host::Absent),
     );
     feed(&sub, b"see http://example.com now");
 
@@ -821,7 +821,7 @@ fn hint_send_types_the_target_into_the_focused_pane() {
 fn hint_open_writes_the_opener_quoted_and_does_not_press_enter() {
     let (_dir, sub) = built_plugin(
         &run_on("X", "hint-open"),
-        Rc::new(neotmux_lua::clipboard::Absent),
+        Rc::new(neotmux_lua::host::Absent),
     );
     feed(&sub, b"see http://x/;`id` now");
 
@@ -855,7 +855,7 @@ fn the_commands_are_registered_for_the_palette() {
              neotmux.log.info(cmd.name .. ': ' .. tostring(cmd.desc))\n\
            end\n\
          end)\n",
-        Rc::new(neotmux_lua::clipboard::Absent),
+        Rc::new(neotmux_lua::host::Absent),
     );
     sub.dispatch_tick(support::one());
     let said = logged(&sub);

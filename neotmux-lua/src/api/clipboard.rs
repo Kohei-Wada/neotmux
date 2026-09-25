@@ -24,7 +24,7 @@ use std::rc::Rc;
 
 use mlua::{Lua, Table};
 
-use crate::clipboard::Clipboard;
+use crate::host::Clipboard;
 
 pub(crate) fn install(lua: &Lua, clipboard: Rc<dyn Clipboard>) -> mlua::Result<Table> {
     let table = lua.create_table()?;

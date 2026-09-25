@@ -38,7 +38,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
-use neotmux_lua::runtime::Layers;
+use neotmux_lua::plugin::Layers;
 use neotmux_lua::{KeyOutcome, LuaSubsystem};
 use neotmux_proto::wire;
 use neotmux_proto::wire::{Attach, Done, End, ToClient, ToServer};
