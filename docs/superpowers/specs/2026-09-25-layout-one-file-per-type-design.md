@@ -100,3 +100,12 @@ warnings.
   `Wakeup`) and `waker.rs`; `parse/query.rs` is `queries.rs` (`Queries`); `screen/state.rs` is
   `term_state.rs`; `terminals.rs` is `pane_terminals.rs`, flattened (`neotmux_pty::PaneTerminals`).
   `scrollback`, `evictions`, `lines` and `wrap` stay named modules under rule 6.
+- **neotmux-server** (2026-09-25): `server.rs` (1194 lines) is split under rule 7 into
+  `server.rs` (`run` and the frame loop), `sessions.rs` (every session, and starting, renaming,
+  switching and ending them) and `doorstep.rs` (a new connection saying what it wants). `session.rs`
+  gives `PaneRow`, `Setup`, `Pass` and `Apply` a file each; `plugins.rs` gives out `ServerOp` and
+  `Answer`; `shells.rs` gives out `Drained`; `notify.rs`, `paneinfo.rs` and `runner.rs` are
+  `notifications.rs`, `pane_info_cache.rs` and `processes.rs`. Files whose module was private
+  (`clip`, `shells`, `notifications`, `pane_info_cache`, and the three pieces of `server.rs`) are
+  flattened with `pub(crate) use`, so nothing the crate exports changed. `command` and `input` stay
+  named modules under rule 6.

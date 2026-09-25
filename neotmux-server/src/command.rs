@@ -14,9 +14,9 @@ use neotmux_proto::{PaneId, Size, Want};
 use neotmux_pty::PaneTerminals;
 use neotmux_pty::child::Waker;
 
-use crate::plugins::Plugins;
+use crate::Plugins;
 
-use crate::session::Session;
+use crate::Session;
 
 use crate::{
     Attached, RenameFailure, Sessions, StartFailure, rename_session, start_session, switch_clients,

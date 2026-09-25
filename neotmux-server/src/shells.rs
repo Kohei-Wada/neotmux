@@ -1,11 +1,11 @@
-use std::collections::BTreeMap;
-use std::rc::Rc;
-
+use crate::Drained;
 use anyhow::Context as _;
 use neotmux_proto::{GridSnapshot, LineMode, PaneId, Rect as PRect, Size};
 use neotmux_pty::PaneTerminals;
 use neotmux_pty::child::Waker;
 use neotmux_pty::child::{CommandBuilder, PtyEvent, PtyHandle};
+use std::collections::BTreeMap;
+use std::rc::Rc;
 
 const SCROLLBACK: usize = 10_000;
 
@@ -34,14 +34,6 @@ pub struct Shells {
     /// frame asks once whether they are done. Without it a session that opens and closes
     /// panes accumulates one zombie per closed pane until it exits.
     reaping: Vec<PtyHandle>,
-}
-
-/// What one pass over every pane's output found.
-pub struct Drained {
-    /// Some pane produced output, so the screen needs redrawing.
-    pub output: bool,
-    /// The panes whose child reached EOF and are to be closed, in pane order.
-    pub closed: Vec<PaneId>,
 }
 
 impl Shells {

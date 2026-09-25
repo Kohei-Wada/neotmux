@@ -9,35 +9,17 @@
 //! that names a terminal. The session is on the other side of it, and it is the next function
 //! call rather than a socket.
 
-use std::collections::BTreeMap;
-
+use crate::Answer;
+use crate::Notifications;
+use crate::ServerOp;
+use crate::input::{encode_key, key_spec};
 use neotmux_lua::host::Op;
 use neotmux_lua::{KeyOutcome, LuaSubsystem, WriteVerdict};
 use neotmux_proto::wire::{SessionOp, Step, Tick, Tock};
 use neotmux_proto::{Key, Level, PaneId, PaneTty, SessionId};
-use std::time::Instant;
-
-use crate::input::{encode_key, key_spec};
-use crate::notify::Notifications;
 use neotmux_sys::logging;
-
-/// What a plugin asked of the *server* rather than of a session. The set of sessions is not
-/// something a session can change, so these do not travel in a tock.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ServerOp {
-    Create { name: String },
-    Switch { name: String },
-    Kill { name: String },
-    Rename { from: String, to: String },
-}
-
-/// One frame's worth of answer from the plugins: what the session has to apply, what the
-/// *server* has to apply, and which panes this frame shows at a place in their own history.
-pub struct Answer {
-    pub tock: Tock,
-    pub server: Vec<(String, ServerOp)>,
-    pub views: BTreeMap<PaneId, usize>,
-}
+use std::collections::BTreeMap;
+use std::time::Instant;
 
 /// The Lua subsystem and the notification surface that goes with it, driven a frame at a
 /// time.

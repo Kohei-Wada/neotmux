@@ -1,41 +1,48 @@
-use std::collections::BTreeMap;
+use crate::Attached;
+use crate::Clip;
+use crate::Pass;
+use crate::RenameFailure;
+use crate::Sessions;
+use crate::StartFailure;
+use crate::doorstep::Ask;
+use crate::doorstep::Pending;
+use crate::doorstep::await_client;
+use crate::doorstep::door;
+use crate::sessions::end_session;
+use crate::sessions::rename_session;
+use crate::sessions::start_session;
+use crate::sessions::switch_clients;
+use crate::{Plugins, ServerOp};
+use anyhow::Context as _;
+use neotmux_lua::plugin::Layers;
+use neotmux_lua::{KeyOutcome, LuaSubsystem};
+use neotmux_proto::wire;
+use neotmux_proto::wire::{Done, End, ToClient, ToServer};
+use neotmux_proto::{Level, SessionId};
+use neotmux_pty::PaneTerminals;
+use neotmux_pty::child::{Waker, Wakeup, wakeup};
+use neotmux_sys::Link;
+use neotmux_sys::ShutdownSignal;
+use neotmux_sys::logging;
+use neotmux_sys::sock::{self, Lock, Paths};
 use std::os::fd::AsFd as _;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use anyhow::Context as _;
-use neotmux_lua::plugin::Layers;
-use neotmux_lua::{KeyOutcome, LuaSubsystem};
-use neotmux_proto::wire;
-use neotmux_proto::wire::{Attach, Done, End, ToClient, ToServer};
-use neotmux_proto::{Level, SessionId, Size};
-
-use neotmux_layout::PaneIds;
-use neotmux_pty::PaneTerminals;
-use neotmux_pty::child::{Waker, Wakeup, wakeup};
-
-use crate::clip::Clip;
-use crate::plugins::{Plugins, ServerOp};
-use crate::session::{Pass, Session, Setup};
-use neotmux_sys::Link;
-use neotmux_sys::ShutdownSignal;
-use neotmux_sys::logging;
-use neotmux_sys::sock::{self, Lock, Paths};
-
 /// The frame's cadence, and so the closest together two frames can be. The same number
 /// the one-process loop used, for the same reason: it is a property of the loop rather
 /// than of whatever the wait happens to do.
-const FRAME: Duration = Duration::from_millis(16);
+pub(crate) const FRAME: Duration = Duration::from_millis(16);
 
 /// How long a server with no session waits for the client that started it. It is the
 /// client's own patience: past that, nobody is coming and there is nothing to serve.
-const STARTUP: Duration = Duration::from_secs(10);
+pub(crate) const STARTUP: Duration = Duration::from_secs(10);
 
 /// How long a connection has to say what it is. The same patience the greeting had when the
 /// greeting was the whole of it, now covering the attach behind it too — and now spent at the
 /// door rather than inside a frame.
-const DOORSTEP: Duration = Duration::from_secs(5);
+pub(crate) const DOORSTEP: Duration = Duration::from_secs(5);
 
 /// The one short wait the door is allowed, and only for a connection that has just greeted.
 ///
@@ -47,77 +54,7 @@ const DOORSTEP: Duration = Duration::from_secs(5);
 /// Spent once per connection: a peer that greets and then stalls costs this much once, and a
 /// peer that says nothing at all never costs even that, because the wait is not reached until
 /// something has been heard.
-const GRACE: Duration = Duration::from_millis(10);
-
-/// One client the frame reaches, and everything the server has to remember about it. Which
-/// is very little: the picture is the session's, one Lua layer's, so every client attached
-/// is shown the same one and there is nothing per client to compare it against.
-pub(crate) struct Attached {
-    link: Link,
-    /// The session this client is looking at. It moves between them without its connection
-    /// being touched, which is what `session.switch` is.
-    session: SessionId,
-    /// How big its terminal is, so a session it switches to can be refitted to it — the same
-    /// `window-size latest` rule an attach follows.
-    size: Size,
-    /// The client has gone, in this frame. Recorded rather than dropped, because the frame's
-    /// slot is still a slot the wait is waiting over, and dropping it out from under a wait
-    /// is what this flag prevents.
-    gone: bool,
-}
-
-/// Every session this server holds, and the ids still to come.
-///
-/// One entry today — the map is the shape the rest of them go in, and everything that used to
-/// say "the session" says "this one" through it.
-#[derive(Default)]
-pub(crate) struct Sessions {
-    live: BTreeMap<SessionId, Held>,
-    next: u32,
-    /// Handed to every session this server makes. A pane's terminal state is looked up by id
-    /// out of one table for the whole server, so two sessions numbering their panes apart
-    /// would have them sharing a shell — and ending one would close the other's.
-    panes: PaneIds,
-}
-
-/// One session and the name it answers to.
-pub(crate) struct Held {
-    pub(crate) name: String,
-    pub(crate) session: Session,
-}
-
-impl Sessions {
-    /// The id a new session takes. Never recycled, so an id names one session for the whole
-    /// life of the server.
-    pub(crate) fn mint(&mut self) -> SessionId {
-        self.next += 1;
-        SessionId::from(self.next)
-    }
-
-    pub(crate) fn id_of(&self, name: &str) -> Option<SessionId> {
-        self.live
-            .iter()
-            .find(|(_, held)| held.name == name)
-            .map(|(id, _)| *id)
-    }
-
-    /// Every session's name, in name order, which is the order `ls` prints them in.
-    pub(crate) fn names(&self) -> Vec<String> {
-        let mut names: Vec<String> = self.live.values().map(|held| held.name.clone()).collect();
-        names.sort();
-        names
-    }
-
-    /// Every session's id. Pane ids are the server's, not a session's, so finding one pane
-    /// means walking every session rather than asking the one a command was addressed to.
-    pub(crate) fn ids(&self) -> Vec<SessionId> {
-        self.live.keys().copied().collect()
-    }
-
-    pub(crate) fn get_mut(&mut self, id: SessionId) -> Option<&mut Session> {
-        self.live.get_mut(&id).map(|held| &mut held.session)
-    }
-}
+pub(crate) const GRACE: Duration = Duration::from_millis(10);
 
 /// The server, as `--server` runs it: the lock that says this process is the one, the
 /// socket it binds, `serve` for as long as there is a session, and the taking of both
@@ -156,13 +93,13 @@ pub fn run() -> anyhow::Result<()> {
 /// socket its clients arrive on, the pipe its panes nudge it with, the handle the panes are
 /// given to do the nudging, and the signal that ends all of it. One value because every one
 /// of them is wanted wherever any of them is.
-struct Serving<'a> {
-    listener: &'a UnixListener,
+pub(crate) struct Serving<'a> {
+    pub(crate) listener: &'a UnixListener,
     wakeup: &'a Wakeup,
-    waker: &'a Waker,
-    shutdown: &'a ShutdownSignal,
+    pub(crate) waker: &'a Waker,
+    pub(crate) shutdown: &'a ShutdownSignal,
     /// The panes' terminal state, made before the session so the Lua layer can read it.
-    terminals: &'a Rc<PaneTerminals>,
+    pub(crate) terminals: &'a Rc<PaneTerminals>,
 }
 
 fn serve(listener: &UnixListener, shutdown: &ShutdownSignal) -> anyhow::Result<()> {
@@ -191,7 +128,7 @@ fn serve(listener: &UnixListener, shutdown: &ShutdownSignal) -> anyhow::Result<(
     let layers = Layers::resolve(&|key| std::env::var_os(key), exe_dir.as_deref());
     // The waker the panes' reader threads already hold: a job's pipes are drained by threads
     // of its own and nudge the same wakeup, so nothing here is added to the poll set.
-    let runner = Rc::new(crate::runner::Processes::new(waker.clone()));
+    let runner = Rc::new(crate::Processes::new(waker.clone()));
     let lua = LuaSubsystem::build_with_runner(layers, terminals.clone(), clip.clone(), runner)?;
     let mut plugins = Plugins::new(lua);
     for failure in plugins.lua().run_init() {
@@ -290,281 +227,14 @@ fn nothing_to_serve(serving: &Serving<'_>, plugins: &Plugins) -> anyhow::Result<
     Ok(())
 }
 
-/// Waiting for the client a server with no session was started for.
-///
-/// A server that never got one is not a session worth keeping, and that is the whole of what
-/// is waited for here. A session whose client has left is not waiting for anything: it goes
-/// on running frames — the panes drained, the plugins ticked — because that is what detach
-/// means now that the plugins are here.
-///
-/// `true` is the session going on; `false` is the server being over, and the loop does not
-/// run again.
-fn await_client(
-    clients: &mut Vec<Attached>,
-    pending: &mut Vec<Pending>,
-    plugins: &mut Plugins,
-    sessions: &mut Sessions,
-    serving: &Serving<'_>,
-    born: Instant,
-) -> anyhow::Result<bool> {
-    if serving.shutdown.raised().is_some() {
-        return Ok(false);
-    }
-    if !sessions.live.is_empty() {
-        return Ok(true);
-    }
-    if Instant::now() >= born + STARTUP {
-        return Ok(false);
-    }
-    // The door, looked at every pass rather than only on a ready listener: a connection taken
-    // in on an earlier pass is still half-way through its handshake, and a poll answers for
-    // the listener, not for it. Nothing here waits.
-    door(pending, clients, plugins, sessions, serving)?;
-    if sessions.live.is_empty() {
-        let until = (born + STARTUP).min(Instant::now() + FRAME);
-        neotmux_sys::tty::wait_on(std::os::fd::AsFd::as_fd(serving.listener), None, until)
-            .context("wait for a client")?;
-    }
-    Ok(true)
-}
-
 /// A client waiting on the socket, if there is one. The listener is non-blocking, so this
 /// can be asked at any point of a frame without risking one.
-fn taken(listener: &UnixListener) -> anyhow::Result<Option<UnixStream>> {
+pub(crate) fn taken(listener: &UnixListener) -> anyhow::Result<Option<UnixStream>> {
     match listener.accept() {
         Ok((stream, _)) => Ok(Some(stream)),
         Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => Ok(None),
         Err(err) => Err(err).context("accept a client"),
     }
-}
-
-/// A connection that has arrived and not yet said what it is.
-///
-/// It is not a client, and no frame ever waits on it: the door is looked at once a frame and
-/// what is found there is read only as far as it has already spoken. A peer that connects and
-/// then goes quiet sits here until its patience runs out, holding nothing but its own place —
-/// the rule the old `attached` kept, now kept without the frame paying for it.
-struct Pending {
-    link: Link,
-    give_up: Instant,
-    /// Whether this connection has had its one short wait yet. See [`GRACE`].
-    graced: bool,
-}
-
-/// What one look at a connection at the door found.
-enum Doorstep {
-    /// Nothing yet, or not all of it: it stays at the door.
-    Waiting,
-    /// It said what it is.
-    Attaching(Attach),
-    /// It is not a client at all: it asked a question about the sessions, and the answer is
-    /// the whole of what it wanted.
-    Asking(Ask),
-    /// It is over: hung up, out of patience, or something that was not an attach — the one
-    /// path that still says no to a connection, for the reason the old `attached` gave.
-    Gone,
-}
-
-/// What a connection that is not a client wanted.
-enum Ask {
-    List,
-    Kill {
-        session: String,
-    },
-    Command {
-        session: Option<String>,
-        name: String,
-        args: Vec<String>,
-    },
-}
-
-/// One look at one connection at the door, which never waits.
-///
-/// Every read here happens where a poll has just said there is something to read, and only as
-/// far as that — which is the whole of C1: a handshake run inline is a handshake every other
-/// client's shell is waiting on. Within one look it goes as far as the connection has already
-/// spoken, so the ordinary client, whose hello and attach are written one after the other, is
-/// adopted by the same door look that took it in, the way the inline handshake always did —
-/// and a frame the door is inside of is not one a connection can be a step behind.
-///
-/// The steps are capped because the door is inside a frame: a peer trickling bytes that are
-/// not yet a message is one the next look carries on with, not one this frame keeps reading.
-fn doorstep(pending: &mut Pending) -> Doorstep {
-    /// How many times one look goes round before leaving the rest to the next one. Two is the
-    /// ordinary client — its hello, then its attach; the rest is room for a peer whose writes
-    /// landed in more pieces than it made them in.
-    const STEPS: usize = 8;
-
-    for _ in 0..STEPS {
-        // Nothing here waits, with the one exception [`GRACE`] is: a connection that has just
-        // greeted is a connection whose attach is already on the wire.
-        let until = if pending.link.is_greeted() && !pending.graced {
-            pending.graced = true;
-            Instant::now() + GRACE
-        } else {
-            Instant::now()
-        };
-        let ready = match neotmux_sys::tty::wait_any(&[pending.link.as_fd()], until) {
-            Ok(neotmux_sys::tty::Any::Ready(_)) => true,
-            Ok(neotmux_sys::tty::Any::Idle) => false,
-            Ok(neotmux_sys::tty::Any::HangUp(_)) => return Doorstep::Gone,
-            Err(err) => {
-                logging::log(
-                    Level::Warn,
-                    "neotmux-server",
-                    &format!("a connection at the door could not be waited on: {err}"),
-                );
-                return Doorstep::Gone;
-            }
-        };
-        if !ready {
-            break;
-        }
-        if !pending.link.is_greeted() {
-            match pending.link.greeted() {
-                Ok(_) => continue,
-                // A client built against another protocol, or one that hung up mid-handshake.
-                // Its own end says so; this one goes back to what it was doing.
-                Err(err) => {
-                    logging::log(
-                        Level::Warn,
-                        "neotmux-server",
-                        &format!("a client could not be greeted: {err}"),
-                    );
-                    return Doorstep::Gone;
-                }
-            }
-        }
-        match pending.link.fill() {
-            Ok(true) => {}
-            Ok(false) => return Doorstep::Gone,
-            Err(err) => {
-                logging::log(
-                    Level::Warn,
-                    "neotmux-server",
-                    &format!("a client's first message could not be read: {err}"),
-                );
-                return Doorstep::Gone;
-            }
-        }
-        let message = match pending.link.take() {
-            Ok(Some(message)) => message,
-            Ok(None) => continue,
-            Err(err) => {
-                logging::log(
-                    Level::Warn,
-                    "neotmux-server",
-                    &format!("a client's first message could not be read: {err}"),
-                );
-                return Doorstep::Gone;
-            }
-        };
-        return match wire::decode_to_server(&message) {
-            // The same law the command line enforces. A peer that did not come through the
-            // command line is not exempt from it: the name is a key in a map and a word in a
-            // list, and both of those are the CLI's business too.
-            Ok(ToServer::Attach(attach)) => {
-                match neotmux_sys::sock::validate_session_name(&attach.session) {
-                    Ok(()) => Doorstep::Attaching(attach),
-                    Err(why) => {
-                        logging::log(Level::Warn, "neotmux-server", &why);
-                        Doorstep::Gone
-                    }
-                }
-            }
-            Ok(ToServer::List) => Doorstep::Asking(Ask::List),
-            Ok(ToServer::Kill { session }) => Doorstep::Asking(Ask::Kill { session }),
-            Ok(ToServer::Command {
-                session,
-                name,
-                args,
-            }) => Doorstep::Asking(Ask::Command {
-                session,
-                name,
-                args,
-            }),
-            Ok(other) => {
-                logging::log(
-                    Level::Warn,
-                    "neotmux-server",
-                    &format!("a client's first message was {other:?} rather than an attach"),
-                );
-                Doorstep::Gone
-            }
-            Err(err) => {
-                logging::log(
-                    Level::Warn,
-                    "neotmux-server",
-                    &format!("a client's first message could not be decoded: {err}"),
-                );
-                Doorstep::Gone
-            }
-        };
-    }
-
-    if Instant::now() >= pending.give_up {
-        logging::log(
-            Level::Warn,
-            "neotmux-server",
-            "a connection said nothing for long enough to be nobody",
-        );
-        return Doorstep::Gone;
-    }
-    Doorstep::Waiting
-}
-
-/// Everything at the door, looked at once and never listened to: whatever has arrived on the
-/// listener is taken and put there, everything already there is stepped, and whichever of them
-/// has said what it is becomes a client — a session adopting it, or, where there is no session
-/// yet, becoming one.
-///
-/// `true` is somebody having been adopted.
-fn door(
-    pending: &mut Vec<Pending>,
-    clients: &mut Vec<Attached>,
-    plugins: &mut Plugins,
-    sessions: &mut Sessions,
-    serving: &Serving<'_>,
-) -> anyhow::Result<bool> {
-    while let Some(stream) = taken(serving.listener)? {
-        match Link::greet(stream) {
-            Ok(link) => pending.push(Pending {
-                link,
-                give_up: Instant::now() + DOORSTEP,
-                graced: false,
-            }),
-            Err(err) => logging::log(
-                Level::Warn,
-                "neotmux-server",
-                &format!("a client could not be greeted: {err}"),
-            ),
-        }
-    }
-
-    let mut adopted = false;
-    let mut waiting: Vec<Pending> = Vec::new();
-    for mut one in std::mem::take(pending) {
-        match doorstep(&mut one) {
-            Doorstep::Waiting => waiting.push(one),
-            Doorstep::Gone => {}
-            Doorstep::Asking(ask) => {
-                answer(&mut one.link, ask, plugins, sessions, clients, serving)
-            }
-            Doorstep::Attaching(attach) => {
-                clients.push(admit(
-                    one.link,
-                    &attach,
-                    plugins,
-                    sessions,
-                    serving.terminals,
-                    serving.waker,
-                )?);
-                adopted = true;
-            }
-        }
-    }
-    *pending = waiting;
-    Ok(adopted)
 }
 
 /// What a plugin asked of the set of sessions, applied once every session has had its frame.
@@ -640,142 +310,9 @@ fn apply_server_ops(
     }
 }
 
-/// Why [`start_session`] refused. A plugin's log line and a command's `Ran::failed` have
-/// never shared a sentence, so the reason is handed back distinguished rather than already
-/// formatted, and each caller says it its own way.
-pub(crate) enum StartFailure {
-    Invalid(String),
-    Taken,
-    Failed(anyhow::Error),
-}
-
-/// A session started with no client looking at it: a plugin's `session.create`, or the `new`
-/// host command. The name must be a word nobody else is already using, and past that it is
-/// the same session an attach would have made.
-pub(crate) fn start_session(
-    name: &str,
-    size: Size,
-    plugins: &Plugins,
-    sessions: &mut Sessions,
-    terminals: &Rc<PaneTerminals>,
-    waker: &Waker,
-) -> Result<(), StartFailure> {
-    if let Err(why) = neotmux_sys::sock::validate_session_name(name) {
-        return Err(StartFailure::Invalid(why));
-    }
-    if sessions.id_of(name).is_some() {
-        return Err(StartFailure::Taken);
-    }
-    let made = Session::new(
-        &setup_for(plugins, size),
-        waker.clone(),
-        terminals.clone(),
-        sessions.panes.clone(),
-    );
-    match made {
-        Ok(session) => {
-            let id = sessions.mint();
-            sessions.live.insert(
-                id,
-                Held {
-                    name: name.to_string(),
-                    session,
-                },
-            );
-            plugins.lua().name_session(id, name);
-            Ok(())
-        }
-        Err(err) => Err(StartFailure::Failed(err)),
-    }
-}
-
-/// Why [`rename_session`] refused. See [`StartFailure`] for why this is not already a
-/// sentence.
-pub(crate) enum RenameFailure {
-    Invalid(String),
-    Taken,
-    Missing,
-}
-
-/// A session's name changes: a plugin's `session.rename`, or the `rename` host command. The
-/// new name must be a word, and one nobody else is already using.
-pub(crate) fn rename_session(
-    from: &str,
-    to: &str,
-    plugins: &Plugins,
-    sessions: &mut Sessions,
-) -> Result<(), RenameFailure> {
-    if let Err(why) = neotmux_sys::sock::validate_session_name(to) {
-        return Err(RenameFailure::Invalid(why));
-    }
-    let Some(id) = sessions.id_of(from) else {
-        return Err(RenameFailure::Missing);
-    };
-    if sessions.id_of(to).is_some() {
-        return Err(RenameFailure::Taken);
-    }
-    if let Some(held) = sessions.live.get_mut(&id) {
-        held.name = to.to_string();
-    }
-    // The Lua layer keeps its own copy, for `session.current()` and for the list a picker
-    // draws.
-    plugins.lua().name_session(id, to);
-    Ok(())
-}
-
-/// Clients moved to the session named `to`: every one of them where `of` is `None`, or only
-/// those looking at `of`'s session where it names one. A plugin's `session.switch` moves the
-/// client that asked, so it passes its own session as `of`; the `switch` host command moves
-/// whoever is attached to this server, which is what "bring me to that session" means from
-/// outside, so it passes `None`.
-///
-/// Returns how many clients moved. The move itself cannot fail — a client's `session` field is
-/// just data — but refitting `to` to whoever just arrived can, the same as an attach's can, so
-/// that failure is handed back rather than logged here: a plugin's log line and a command's
-/// `Ran::failed` have never shared a sentence, the same reason [`StartFailure`] and
-/// [`RenameFailure`] are not already formatted, and each caller says it its own way.
-pub(crate) fn switch_clients(
-    to: SessionId,
-    of: Option<SessionId>,
-    clients: &mut [Attached],
-    sessions: &mut Sessions,
-    plugins: &Plugins,
-) -> anyhow::Result<usize> {
-    let mut moved = 0usize;
-    let mut last_size = None;
-    for client in clients
-        .iter_mut()
-        .filter(|client| of.is_none_or(|from| client.session == from))
-    {
-        client.session = to;
-        last_size = Some(client.size);
-        moved += 1;
-    }
-    // Refitted to whoever just arrived and dirty by construction, so the next frame is one
-    // they are shown — the same thing an attach does, for the same reason.
-    if let Some(size) = last_size
-        && let Some(session) = sessions.get_mut(to)
-    {
-        session.adopt(&setup_for(plugins, size))?;
-    }
-    Ok(moved)
-}
-
-/// What a session is started or refitted with, out of the Lua layer and a size.
-pub(crate) fn setup_for(plugins: &Plugins, size: Size) -> Setup {
-    let lua = plugins.lua();
-    Setup {
-        size,
-        first_window: lua.reserve_window_id(),
-        reserved: lua.reserved(),
-        gutter: lua.opt().pane_gutter,
-        wants_pane_output: lua.has_subscriber("pane_output"),
-    }
-}
-
 /// A connection that asked rather than attached, answered and let go. It is not a client, so
 /// it never enters `clients` and never sees a frame.
-fn answer(
+pub(crate) fn answer(
     link: &mut Link,
     ask: Ask,
     plugins: &mut Plugins,
@@ -817,87 +354,6 @@ fn answer(
             }));
         }
     }
-}
-
-/// A session ends: its clients are told, its shells go with it — `Shells::drop` closes every
-/// child — and the Lua layer forgets what it was holding for it.
-fn end_session(
-    id: SessionId,
-    plugins: &mut Plugins,
-    sessions: &mut Sessions,
-    clients: &mut Vec<Attached>,
-) {
-    for client in clients.iter_mut().filter(|client| client.session == id) {
-        let _ = client
-            .link
-            .send(&wire::encode_to_client(&ToClient::Done(&Done {
-                steps: Vec::new(),
-                frame: None,
-                end: Some(End::Quit),
-            })));
-        client.gone = true;
-    }
-    clients.retain(|client| !client.gone);
-    // The Lua layer first: a job's `on_exit` runs in here, and a plugin that asks what its
-    // panes are showing has to be answered by the session it is being told about rather than
-    // by the hole where it was.
-    plugins.lua().forget_session(id);
-    // What those `on_exit` callbacks raised is filed under a session that has just had its
-    // last frame, so no frame will ever come and take it: drained here, or never.
-    plugins.drain_teardown_ops(id);
-    sessions.live.remove(&id);
-}
-
-/// The client a session adopts, out of the attach it sent — and, where there is no session,
-/// the session it is the first of.
-fn admit(
-    link: Link,
-    attach: &Attach,
-    plugins: &Plugins,
-    sessions: &mut Sessions,
-    terminals: &Rc<PaneTerminals>,
-    waker: &Waker,
-) -> anyhow::Result<Attached> {
-    // The four the attach used to carry, asked of the Lua layer that knows them.
-    let lua = plugins.lua();
-    let setup = Setup {
-        size: attach.size,
-        first_window: lua.reserve_window_id(),
-        reserved: lua.reserved(),
-        gutter: lua.opt().pane_gutter,
-        wants_pane_output: lua.has_subscriber("pane_output"),
-    };
-    let session = match sessions.id_of(&attach.session) {
-        Some(id) => {
-            if let Some(session) = sessions.get_mut(id) {
-                session.adopt(&setup)?;
-            }
-            id
-        }
-        None => {
-            let id = sessions.mint();
-            sessions.live.insert(
-                id,
-                Held {
-                    name: attach.session.clone(),
-                    session: Session::new(
-                        &setup,
-                        waker.clone(),
-                        terminals.clone(),
-                        sessions.panes.clone(),
-                    )?,
-                },
-            );
-            plugins.lua().name_session(id, &attach.session);
-            id
-        }
-    };
-    Ok(Attached {
-        link,
-        session,
-        size: attach.size,
-        gone: false,
-    })
 }
 
 /// The one wait the frame is built over: the clients still being waited on, in the order

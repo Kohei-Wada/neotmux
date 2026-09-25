@@ -13,23 +13,51 @@
 //! difference being the one the other is not in. Which clients get to look at a session
 //! is as far as this file goes; that a session sits waiting at all is the rest of it.
 //!
-//! This is the half's front door and the rest of it hangs below: [`session`] and `shells`
-//! are the panes and the children behind them, [`plugins`] and `notify` the Lua layer and
-//! what it raises, [`runner`] a job in a real process, `clip` a yank with nowhere of its
-//! own to go, [`input`] the bytes a key is typed as, [`command`] what the host answers
-//! without the Lua layer, and `paneinfo` what `/proc` last said about a pane's child.
+//! This is the half's front door and the rest of it hangs below: a [`Session`] and its `Shells`
+//! are the panes and the children behind them, [`Plugins`] and `Notifications` the Lua layer and
+//! what it raises, [`Processes`] a job in a real process, `Clip` a yank with nowhere of its own
+//! to go, [`input`] the bytes a key is typed as, [`command`] what the host answers without the
+//! Lua layer, and `PaneInfoCache` what `/proc` last said about a pane's child. `sessions.rs` holds
+//! every session and moves clients between them, and `doorstep.rs` is where a new connection
+//! waits to say what it wants.
 //!
 //! [`run`] is the door: `--server` enters here, and the loop in `server.rs` is what it enters.
 
-pub(crate) mod clip;
 pub mod command;
 pub mod input;
-pub(crate) mod notify;
-pub(crate) mod paneinfo;
-pub mod plugins;
-pub mod runner;
-mod server;
-pub mod session;
-pub(crate) mod shells;
 
+mod answer;
+mod apply;
+mod clip;
+mod doorstep;
+mod drained;
+mod notifications;
+mod pane_info_cache;
+mod pane_row;
+mod pass;
+mod plugins;
+mod processes;
+mod server;
+mod server_op;
+mod session;
+mod sessions;
+mod setup;
+mod shells;
+
+pub use answer::*;
+pub use apply::*;
+pub use pane_row::*;
+pub use pass::*;
+pub use plugins::*;
+pub use processes::*;
 pub use server::*;
+pub use server_op::*;
+pub use session::*;
+pub use setup::*;
+
+pub(crate) use clip::*;
+pub(crate) use drained::*;
+pub(crate) use notifications::*;
+pub(crate) use pane_info_cache::*;
+pub(crate) use sessions::*;
+pub(crate) use shells::*;

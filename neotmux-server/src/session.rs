@@ -1,10 +1,15 @@
-use std::collections::BTreeMap;
-use std::path::PathBuf;
-use std::rc::Rc;
-use std::time::Instant;
-
+use crate::Apply;
+use crate::PaneInfoCache;
+use crate::PaneRow;
+use crate::Pass;
+use crate::Setup;
+use crate::Shells;
+use crate::input::encode_key;
 use anyhow::Context as _;
+use neotmux_layout::{PaneIds, Shown, Surface, Windows};
 use neotmux_proto::clamp_to_min_grid;
+use neotmux_proto::keys::Key;
+use neotmux_proto::screen::{Frame, PaneFrame};
 use neotmux_proto::wire::{End, SessionOp, Step, Tick, Tock};
 use neotmux_proto::{
     DrawCmd, Event, Geometry, Level, PaneId, PaneInfo, PaneTty, Rect as PRect, Reserved, Size,
@@ -13,15 +18,12 @@ use neotmux_proto::{
 use neotmux_pty::PaneTerminals;
 use neotmux_pty::child::PtyHandle;
 use neotmux_pty::child::Waker;
-
-use crate::input::encode_key;
-use crate::paneinfo::PaneInfoCache;
-use crate::shells::Shells;
-use neotmux_layout::{PaneIds, Shown, Surface, Windows};
-use neotmux_proto::keys::Key;
-use neotmux_proto::screen::{Frame, PaneFrame};
 use neotmux_sys::logging;
 use neotmux_sys::procinfo;
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+use std::rc::Rc;
+use std::time::Instant;
 
 const MAX_CHUNKS_PER_FRAME: usize = 32;
 
@@ -71,34 +73,12 @@ pub struct Session {
     terminals: Rc<PaneTerminals>,
 }
 
-/// One pane, as a command that lists them says it. The size is not here: it is the
-/// terminal's, which is the whole server's rather than one session's.
-pub struct PaneRow {
-    pub pane: PaneId,
-    pub window: WindowId,
-    pub command: Option<String>,
-    pub cwd: Option<String>,
-}
-
 /// What draining the panes found: `Eof` means the last pane is gone and the session ends
 /// after one final frame.
 #[derive(PartialEq, Eq)]
 enum Drained {
     More,
     Eof,
-}
-
-/// What a session is started with, or refitted to.
-///
-/// The size is the attaching client's, because the terminal is. The other four are the Lua
-/// layer's — the window id counter, the bands the plugins reserved, the gutter between panes
-/// and whether anything is watching pane output — and this file has no way to reach it.
-pub struct Setup {
-    pub size: Size,
-    pub first_window: WindowId,
-    pub reserved: Reserved,
-    pub gutter: u16,
-    pub wants_pane_output: bool,
 }
 
 impl Session {
@@ -837,27 +817,6 @@ impl Session {
     }
 }
 
-/// What one pass of the session produced.
-pub struct Pass<'a> {
-    /// What applying the tick's reply did to the session, in order. It is answered in the
-    /// same breath as the frame rather than held for the next tick: a key handler must see
-    /// the session as it is, and between the reply and this it is not.
-    pub steps: Vec<Step>,
-    /// The frame to show, if this pass changed anything.
-    pub frame: Option<Frame<'a>>,
-    /// Why the session is over, if it is.
-    pub end: Option<End>,
-}
-
-/// What one tock did to a session, without the picture it is shown in.
-pub struct Apply {
-    /// What applying the tock's ops did to the session, in order, for the reason `Pass`
-    /// already gives it.
-    pub steps: Vec<Step>,
-    /// Why the session is over, if it is: a `Quit` a client's op raised, or an `Eof` the
-    /// last of its shells just went.
-    pub end: Option<End>,
-}
 /// A pane with no rect is a bug in the layout, not a 0x0 pane: spawning a PTY at the default
 /// size would turn it into a terminal nothing can draw on, which is far harder to find.
 fn pane_size(rect: Option<PRect>, pane: PaneId) -> anyhow::Result<Size> {
