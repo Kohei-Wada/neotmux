@@ -296,10 +296,10 @@ local function wanted()
   local shown = math.max(#state.items, state.opts.empty and 1 or 0)
   local rows = math.min(shown, state.opts.rows) + 3
   -- A width of one or less is a share of the pane area rather than a column count, so a list
-  -- can ask to be most of the screen without knowing how wide the screen is. Before the first
-  -- tick there is no area to take a share of — a list opened by the very first key of a
-  -- session — so the share is taken against the width a terminal has when nobody has said
-  -- otherwise, and the next tick fits it to the real one.
+  -- can ask to be most of the screen without knowing how wide the screen is. Where no pane has
+  -- a rect yet — nothing has been laid out — there is no area to take a share of, so the share
+  -- is taken against the width a terminal has when nobody has said otherwise, and the next tick
+  -- fits it to the real one.
   local room = area and area.w
   local want = state.opts.width
   if want <= 1 then
@@ -322,6 +322,26 @@ end
 -- field has always been.
 local function input_first()
   return state.opts.place == "top"
+end
+
+-- The rect every pane together covers, read through `rect_of`, or nil when no pane has one. The
+-- tick reads it through `ctx:pane_rect`; `open` reads the same geometry through
+-- `neotmux.pane.rect`, because the tick that would otherwise tell it is armed by that open, and a
+-- list placed before the area is known is drawn in the corner for a frame.
+local function pane_area(rect_of)
+  local left, top, right, bottom
+  for _, pane in ipairs(neotmux.pane.list()) do
+    local r = rect_of(pane)
+    if r then
+      left = math.min(left or r.x, r.x)
+      top = math.min(top or r.y, r.y)
+      right = math.max(right or (r.x + r.w), r.x + r.w)
+      bottom = math.max(bottom or (r.y + r.h), r.y + r.h)
+    end
+  end
+  if left then
+    return { x = left, y = top, w = right - left, h = bottom - top }
+  end
 end
 
 local registered = false
@@ -397,19 +417,9 @@ local function arm()
   end)
 
   neotmux.on_tick(function(ctx)
-    local left, top, right, bottom
-    for _, pane in ipairs(neotmux.pane.list()) do
-      local r = ctx:pane_rect(pane)
-      if r then
-        left = math.min(left or r.x, r.x)
-        top = math.min(top or r.y, r.y)
-        right = math.max(right or (r.x + r.w), r.x + r.w)
-        bottom = math.max(bottom or (r.y + r.h), r.y + r.h)
-      end
-    end
-    if left then
-      area = { x = left, y = top, w = right - left, h = bottom - top }
-    end
+    area = pane_area(function(pane)
+      return ctx:pane_rect(pane)
+    end) or area
 
     if state == nil or win == nil then
       return
@@ -592,6 +602,7 @@ function M.open(opts)
     fail("items", err)
     return nil
   end
+  area = pane_area(neotmux.pane.rect) or area
   local float = neotmux.float(wanted())
   if not float then
     state = nil

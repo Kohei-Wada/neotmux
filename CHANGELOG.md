@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### The first list opened no longer flashes in the corner
+
+The first `neotmux.list` a session opened — the palette, the session picker — was created at the
+pane area's top left and moved to its place a frame later, because the only thing that knew the
+pane area was the list's own tick, and that tick is armed by the first open. `open` now reads the
+area itself, through `neotmux.pane.rect`, before it creates the float.
+
 ### The Lua is checked too
 
 The shipped runtime, the examples and the test plugins are formatted by `stylua` (`.stylua.toml`)

@@ -996,3 +996,35 @@ fn an_ask_field_deletes_by_character_and_clears_by_line() {
         texts(&frame(&sub))
     );
 }
+
+/// The very first list a session opens is where it will be drawn, not where it lands after a
+/// frame. Before the fix it was created at the pane area's origin — the list's own tick, the
+/// only thing that knew the area, is armed by that same open — and moved to its place one frame
+/// later, which on screen is the palette flashing in the top left corner.
+#[test]
+fn the_first_list_opened_is_created_where_it_belongs() {
+    let (_dir, sub) = built(
+        "neotmux.on_key(function(key)
+           if key == 'o' then
+             require('neotmux.list').open({
+               width = 20, rows = 4,
+               items = function() return { 'alpha', 'beta' } end,
+               row = function(item) return { { text = item } } end,
+               done = function() end,
+             })
+             return true
+           end
+           return false
+         end)",
+    );
+    sub.dispatch_key(support::one(), "o");
+    let floats = sub.floats();
+    let rects: Vec<Rect> = floats
+        .owners_topmost_first()
+        .into_iter()
+        .flat_map(|owner| floats.by_owner(owner).into_values())
+        .collect();
+    assert_eq!(rects.len(), 1, "{rects:?}");
+    let centred_x = (SIZE.cols - 20) / 2;
+    assert_eq!(rects[0].x, centred_x, "created at {:?}", rects[0]);
+}
