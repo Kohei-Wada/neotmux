@@ -339,12 +339,14 @@ impl Plugins {
     }
 
     /// Runs a reload the server carried out of the frame that asked for it, once every other
-    /// op of that frame was already applied. Every failure the reload raised is logged at
-    /// warn, and whatever the reloaded layers raised while loading is refused: a load acts on
-    /// no session, so nothing it asked for has anywhere to land.
+    /// op of that frame was already applied. Every failure the reload raised is logged and
+    /// notified at warn, and whatever the reloaded layers raised while loading is refused: a
+    /// load acts on no session, so nothing it asked for has anywhere to land.
     pub fn reload(&mut self, session: Option<SessionId>) {
         for failure in self.lua.reload(session) {
             logging::log(Level::Warn, &failure.source, &failure.message);
+            self.notifications
+                .push(Level::Warn, &failure.source, &failure.message);
         }
         let (ops, server) = self.drain_ops(None, &BTreeMap::new());
         let why = "the config was reloading, and a load acts on no session";
@@ -535,5 +537,14 @@ mod tests {
             server.iter().any(|(_, op)| matches!(op, ServerOp::Reload)),
             "{server:?}"
         );
+    }
+
+    #[test]
+    fn a_reload_that_fails_to_load_says_so_on_the_notification_surface() {
+        let (dir, mut plugins) = built("");
+        std::fs::write(dir.path().join("init.lua"), "error('broken')").expect("write layer file");
+        plugins.reload(None);
+        let said = plugins.notifications().since(0);
+        assert!(said.iter().any(|l| l.contains("broken")), "{said:?}");
     }
 }
