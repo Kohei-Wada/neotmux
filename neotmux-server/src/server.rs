@@ -421,6 +421,11 @@ fn frame(
 
         // The whole of what used to be four messages: the session says what happened, the Lua
         // layer answers, the session applies that, and the picture comes of it.
+        let looking = clients
+            .iter()
+            .filter(|client| !client.gone && client.session == id)
+            .count();
+        plugins.lua().publish_attached(id, looking);
         let tick = live.tick()?;
         let answer = plugins.respond(id, tick);
         asked.extend(answer.server.into_iter().map(|(tag, op)| (id, tag, op)));

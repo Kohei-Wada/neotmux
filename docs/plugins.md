@@ -881,7 +881,11 @@ neotmux.session.create(name)       -- a new session, at the size of the one that
 neotmux.session.switch(name)       -- move to it
 neotmux.session.kill(name)         -- end it, and every shell in it
 neotmux.session.rename(from, to)   -- give it another name
+neotmux.session.attached(name)     -- how many clients are looking at it this frame; 0 for none
 ```
+
+Every session ticks whether or not anybody is attached to it, so `attached` is how a plugin tells
+a screen somebody is reading from one that is only being kept up to date.
 
 `with` is the interesting one, and it is how the shipped sidebar says what each session is
 running:

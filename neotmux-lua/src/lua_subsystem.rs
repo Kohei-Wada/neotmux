@@ -968,6 +968,11 @@ impl LuaSubsystem {
         self.ambient.name(session, name);
     }
 
+    /// How many clients are attached to `session` this frame, for `neotmux.session.attached`.
+    pub fn publish_attached(&self, session: SessionId, clients: usize) {
+        self.ambient.set_attached(session, clients);
+    }
+
     pub fn registry(&self) -> &Registry {
         &self.registry
     }

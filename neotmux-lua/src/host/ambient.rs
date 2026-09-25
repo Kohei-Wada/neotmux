@@ -30,6 +30,8 @@ pub struct Ambient {
     parked: RefCell<BTreeMap<SessionId, Parked>>,
     /// What each session is called. Set once, by the host, when it makes one.
     names: RefCell<BTreeMap<SessionId, String>>,
+    /// How many clients the host last said were looking at each session.
+    attached: RefCell<BTreeMap<SessionId, usize>>,
 }
 
 impl Ambient {
@@ -45,6 +47,7 @@ impl Ambient {
             current: Cell::new(None),
             parked: RefCell::new(BTreeMap::new()),
             names: RefCell::new(BTreeMap::new()),
+            attached: RefCell::new(BTreeMap::new()),
         }
     }
 
@@ -86,6 +89,18 @@ impl Ambient {
     pub fn forget(&self, session: SessionId) {
         self.parked.borrow_mut().remove(&session);
         self.names.borrow_mut().remove(&session);
+        self.attached.borrow_mut().remove(&session);
+    }
+
+    pub fn set_attached(&self, session: SessionId, clients: usize) {
+        self.attached.borrow_mut().insert(session, clients);
+    }
+
+    /// Zero for a session the host has said nothing about, which is a session nobody is at.
+    pub fn attached_to(&self, name: &str) -> usize {
+        self.id_of(name)
+            .and_then(|id| self.attached.borrow().get(&id).copied())
+            .unwrap_or(0)
     }
 
     /// Makes `session` the one the live cells belong to, until the guard is dropped.

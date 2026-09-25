@@ -145,3 +145,63 @@ fn with_puts_the_caller_back_even_when_the_call_raises() {
         vec!["back=work".to_string()]
     );
 }
+
+/// An op raised inside `with` is that session's, not the caller's: the server applies each
+/// session's ops on that session's own tick, so this is what lets a plugin focus a pane in a
+/// session it is not running for — how a picker of every agent goes to the one you chose.
+#[test]
+fn an_op_raised_inside_with_belongs_to_that_session() {
+    let (_dir, sub) = built(
+        "neotmux.on_tick(function()\n\
+         \x20 if neotmux.session.current() ~= 'work' then return end\n\
+         \x20 neotmux.session.with('home', function() neotmux.pane.focus(2) end)\n\
+         end)",
+    );
+    let work = support::one();
+    let home = SessionId::from(2);
+    make(&sub, work, "work", 1);
+    make(&sub, home, "home", 3);
+
+    sub.dispatch_tick(work);
+
+    let focuses = |ops: Vec<(neotmux_lua::plugin::SourceId, neotmux_lua::host::Op)>| {
+        ops.into_iter()
+            .filter(|(_, op)| matches!(op, neotmux_lua::host::Op::PaneFocus { .. }))
+            .count()
+    };
+    assert_eq!(
+        focuses(sub.drain_ops(Some(work))),
+        0,
+        "the focus went to the caller"
+    );
+    assert_eq!(
+        focuses(sub.drain_ops(Some(home))),
+        1,
+        "the focus did not reach home"
+    );
+}
+
+/// How many clients are looking at a session, as the host last said. A session nobody is
+/// attached to still ticks, so this is the only way a plugin can tell a screen somebody is
+/// reading from one that is only being kept up to date.
+#[test]
+fn attached_says_how_many_clients_a_session_has() {
+    let (_dir, sub) = built(
+        "neotmux.on_tick(function()\n\
+         \x20 neotmux.log.info('work=' .. neotmux.session.attached('work') .. ' home=' ..\n\
+         \x20   neotmux.session.attached('home') .. ' gone=' .. neotmux.session.attached('gone'))\n\
+         end)",
+    );
+    let work = support::one();
+    let home = SessionId::from(2);
+    make(&sub, work, "work", 1);
+    make(&sub, home, "home", 1);
+    sub.publish_attached(work, 2);
+
+    sub.dispatch_tick(work);
+
+    assert_eq!(
+        logged(&sub, Some(work)),
+        vec!["work=2 home=0 gone=0".to_string()]
+    );
+}

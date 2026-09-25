@@ -49,6 +49,13 @@ pub(crate) fn install(
         session.set("with", with)?;
     }
 
+    {
+        let ambient = ambient.clone();
+        let attached =
+            lua.create_function(move |_lua, name: String| Ok(ambient.attached_to(&name)))?;
+        session.set("attached", attached)?;
+    }
+
     // The three that change the set of sessions. Ops like every other, applied after the
     // tick (§4.6), so a callback never sees its own request take effect synchronously — a
     // `create` followed by a `list` in the same tick does not name the new one.
