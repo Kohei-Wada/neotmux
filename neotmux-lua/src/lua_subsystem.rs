@@ -250,12 +250,15 @@ impl LuaSubsystem {
         std::mem::take(&mut *self.load_failures.borrow_mut())
     }
 
-    /// The config, run again in this VM: `unload`, every module the layers loaded forgotten,
-    /// every layer's `init.lua` run as at start, and every group nobody named taken back.
+    /// The config, run again in this VM: `unload`, every group emptied, the opts and overrun
+    /// strikes back to a start's, every module the layers loaded forgotten, every layer's
+    /// `init.lua` run again, and every group nobody named forgotten.
     /// Never called from inside Lua — the host calls it between frames.
     pub fn reload(&self, session: Option<SessionId>) -> Vec<LoadFailure> {
         self.dispatch_unload(session);
-        self.groups.begin_reload();
+        self.sweep().empty(self.groups.begin_reload());
+        *self.opts.borrow_mut() = Opts::default();
+        self.overrun.forget_strikes();
         match self
             .lua
             .globals()
@@ -271,8 +274,7 @@ impl LuaSubsystem {
             }
             Err(err) => self.report(crate::plugin::ANONYMOUS, &err),
         }
-        // A parked tick has left the registry, so no group can take it back; kept, a later
-        // `resubscribe` would restore the old code's callback beside the new.
+        // A parked tick is in no group; kept, `resubscribe` would restore the old code's.
         for (id, _) in self.sources.interned() {
             self.overrun.forget_parked(id);
         }

@@ -4,9 +4,9 @@
 use std::fs;
 use std::path::Path;
 
-use neotmux_lua::LuaSubsystem;
 use neotmux_lua::host::Op;
 use neotmux_lua::plugin::{KindTag, Layers};
+use neotmux_lua::{CommandOutcome, LuaSubsystem};
 use neotmux_proto::{Epoch, Geometry, PaneId, Rect, Size};
 
 mod support;
@@ -160,11 +160,15 @@ fn a_group_named_from_a_callback_is_swept_by_a_reload_that_does_not_name_it() {
 fn neotmux_reload_raises_the_op_and_does_not_reload_where_it_runs() {
     let (_dir, sub) = built(&[(
         "init.lua",
-        "neotmux.keymap.set('C-r', function() neotmux.reload() return true end)",
+        "neotmux.on_event('unload', function() neotmux.log.info('unloading') end)
+         neotmux.keymap.set('C-r', function() neotmux.reload() return true end)",
     )]);
+    logged(&sub);
     sub.dispatch_key(support::one(), "C-r");
     let ops = sub.drain_ops(Some(support::one()));
     assert!(ops.iter().any(|(_, op)| *op == Op::Reload), "{ops:?}");
+    let said = logged(&sub);
+    assert!(!said.iter().any(|l| l == "unloading"), "{said:?}");
 }
 
 /// A tick the budget parked has left the registry, so no group can see it; without the
@@ -222,14 +226,111 @@ fn shipped_with_everything_on() -> (tempfile::TempDir, LuaSubsystem) {
 fn a_reload_of_the_shipped_runtime_leaves_what_a_start_leaves() {
     let (_dir, sub) = shipped_with_everything_on();
     let started = sub.census();
+    let bands = sub.reservation_owners();
     assert!(sub.reload(None).is_empty());
     assert_eq!(sub.census(), started);
+    assert_eq!(sub.reservation_owners(), bands);
     assert!(sub.reload(None).is_empty());
     assert_eq!(sub.census(), started, "a second reload drifted");
+    assert_eq!(
+        sub.reservation_owners(),
+        bands,
+        "a second reload reordered the bands"
+    );
 }
 
 #[test]
 fn config_reload_is_a_command() {
     let (_dir, sub) = shipped_with_everything_on();
     assert!(sub.commands().iter().any(|c| c.name == "config-reload"));
+}
+
+const CLAIMANT: &str = "local g = neotmux.group('plugin.claimant')
+                        g.keymap.set('C-a', function() neotmux.notify('info', 'plugin') return true end)
+                        g.command.add('hello', function() return { 'plugin' } end)";
+
+const OVERRIDE: &str =
+    "neotmux.keymap.set('C-a', function() neotmux.notify('info', 'user') return true end)
+                        neotmux.command.add('hello', function() return { 'user' } end)";
+
+fn two_layers(user: &str) -> (tempfile::TempDir, tempfile::TempDir, LuaSubsystem) {
+    let config = tempfile::tempdir().unwrap();
+    let later = tempfile::tempdir().unwrap();
+    write(config.path(), "init.lua", user);
+    write(later.path(), "init.lua", CLAIMANT);
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![
+            config.path().to_path_buf(),
+            later.path().to_path_buf(),
+        ]),
+        support::panes(),
+    )
+    .unwrap();
+    sub.run_init();
+    (config, later, sub)
+}
+
+fn who_answers(sub: &LuaSubsystem) -> (Vec<String>, CommandOutcome) {
+    sub.drain_ops(Some(support::one()));
+    sub.dispatch_key(support::one(), "C-a");
+    (notified(sub), sub.run_command(support::one(), "hello", &[]))
+}
+
+/// The config claims a name a later layer's group held: a start gives it to the config, and so
+/// must a reload, which means the later group lets go before the config runs again.
+#[test]
+fn a_name_the_config_now_claims_is_the_configs_after_a_reload_as_at_a_start() {
+    let (_c, _l, fresh) = two_layers(OVERRIDE);
+    let started = who_answers(&fresh);
+    assert_eq!(
+        started,
+        (
+            vec!["user".to_string()],
+            CommandOutcome::Ran(vec!["user".to_string()])
+        )
+    );
+
+    let (config, _later, sub) = two_layers("");
+    write(config.path(), "init.lua", OVERRIDE);
+    sub.reload(None);
+    assert_eq!(who_answers(&sub), started);
+}
+
+#[test]
+fn an_opt_the_config_stops_setting_is_back_at_its_default_after_a_reload() {
+    let (dir, sub) = built(&[("init.lua", "neotmux.opt.pane_gutter = 2")]);
+    assert_eq!(sub.opt().pane_gutter, 2);
+    write(dir.path(), "init.lua", "");
+    assert!(sub.reload(None).is_empty());
+    assert_eq!(sub.opt().pane_gutter, 0);
+}
+
+/// One strike before the reload and one after is two for a source that kept its count, and
+/// with a limit of two that parks it; a start would have counted one.
+#[test]
+fn a_reload_wipes_the_overrun_strikes() {
+    let (_dir, sub) = built(&[
+        (
+            "init.lua",
+            "neotmux.opt.tick_budget_ms = 5 neotmux.opt.tick_overrun_limit = 2 \
+             require('plugin.spinner')",
+        ),
+        (
+            "lua/plugin/spinner.lua",
+            "neotmux.group('plugin.spinner').on_tick(function() while true do end end)",
+        ),
+    ]);
+    frame(&sub);
+    assert_eq!(
+        sub.registry().snapshot(KindTag::Tick).len(),
+        1,
+        "one strike"
+    );
+    assert!(sub.reload(None).is_empty());
+    frame(&sub);
+    assert_eq!(
+        sub.registry().snapshot(KindTag::Tick).len(),
+        1,
+        "the strike from before the reload still counted"
+    );
 }

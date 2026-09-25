@@ -59,6 +59,11 @@ impl Overrun {
         self.consecutive.borrow_mut().remove(&source);
     }
 
+    /// Every source's count back to none, as at start.
+    pub fn forget_strikes(&self) {
+        self.consecutive.borrow_mut().clear();
+    }
+
     /// Removes the source's tick subscriptions, keeping their callbacks for `restore`. What a
     /// source with no tick left owes the draw layer is the caller's to settle: this is policy
     /// over the registry and nothing else.

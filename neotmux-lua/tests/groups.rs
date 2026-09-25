@@ -127,7 +127,8 @@ fn a_name_that_is_not_a_non_empty_string_raises() {
         &[(
             "init.lua",
             "assert(not pcall(neotmux.group, ''))
-             assert(not pcall(neotmux.group, {}))",
+             assert(not pcall(neotmux.group, {}))
+             assert(pcall(neotmux.group, 'ok'))",
         )],
         Rc::new(neotmux_lua::host::NoRunner),
     );

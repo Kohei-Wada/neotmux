@@ -46,12 +46,18 @@ impl Groups {
         }
     }
 
-    pub fn begin_reload(&self) {
+    /// Everything every group holds, which the caller takes back: the config runs again with
+    /// no name held, as at start, so an earlier layer can claim what a later one's group had.
+    pub fn begin_reload(&self) -> Vec<Held> {
         *self.named.borrow_mut() = Some(BTreeSet::new());
+        std::mem::take(&mut *self.held.borrow_mut())
+            .into_values()
+            .flatten()
+            .collect()
     }
 
-    /// Everything held by a group nobody named during the reload. Those groups are
-    /// forgotten: the plugin that named them is not loaded any more.
+    /// The groups nobody named during the reload are forgotten: the plugin that named them is
+    /// not loaded any more. What one holds can only have come from a handle the old code kept.
     pub fn end_reload(&self) -> Vec<Held> {
         let named = self.named.borrow_mut().take().unwrap_or_default();
         let mut by_name = self.by_name.borrow_mut();
