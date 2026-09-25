@@ -101,6 +101,7 @@ Every event that fires, and the fields it carries:
 | `pane_opened` | `pane` | a split created it |
 | `pane_closed` | `pane` | its child exited and the pane is gone |
 | `focus_changed` | `pane` | focus moved to that pane |
+| `unload` | (none) | the config is about to be reloaded; see Reloading |
 
 There are no others. Subscribe to a name nothing sends and nothing happens, silently.
 

@@ -36,6 +36,7 @@ struct Inner {
 
 pub struct Sources {
     inner: RefCell<Inner>,
+    modules: RefCell<Vec<String>>,
 }
 
 impl Default for Sources {
@@ -50,7 +51,21 @@ impl Sources {
             inner: RefCell::new(Inner {
                 sources: vec!["anonymous".to_string()],
             }),
+            modules: RefCell::new(Vec::new()),
         }
+    }
+
+    /// Notes a module name the layer searcher resolved, in load order, once each — what
+    /// `unload` (Task 4) clears from `package.loaded` before the config runs again.
+    pub fn note_module(&self, name: &str) {
+        let mut modules = self.modules.borrow_mut();
+        if !modules.iter().any(|known| known == name) {
+            modules.push(name.to_string());
+        }
+    }
+
+    pub fn modules(&self) -> Vec<String> {
+        self.modules.borrow().clone()
     }
 
     /// Interns a raw chunk source (typically `@<path>`). Idempotent: the same source string,
@@ -171,6 +186,7 @@ pub fn install_loader(lua: &Lua, sources: Rc<Sources>) -> mlua::Result<()> {
         // Interning at load time, not at first use, is what the draw ordering guarantee rests
         // on: ids are allocated in load order.
         sources.intern(&chunk_name);
+        sources.note_module(&modname);
         Ok(Value::Function(chunk))
     })?;
 

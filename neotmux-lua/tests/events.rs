@@ -139,6 +139,25 @@ fn a_subscriber_mutating_the_payload_does_not_affect_the_next_subscriber() {
     assert!(text.contains("saw hello pane=1"), "{text}");
 }
 
+/// `unload` has no fields and reaches every subscriber once.
+#[test]
+fn unload_reaches_every_subscriber_with_an_empty_table() {
+    let (_d, sub) = built(&[
+        ("init.lua", "require('plugin.watcher')"),
+        (
+            "lua/plugin/watcher.lua",
+            "neotmux.on_event('unload', function(e) neotmux.log.info('a ' .. tostring(next(e))) end)\n\
+             neotmux.on_event('unload', function() neotmux.log.info('b') end)\n\
+             return {}",
+        ),
+    ]);
+    assert!(sub.run_init().is_empty());
+    sub.dispatch_unload(Some(support::one()));
+    let text = format!("{:?}", sub.drain_ops(Some(support::one())));
+    assert!(text.contains("a nil"), "{text}");
+    assert!(text.contains("b"), "{text}");
+}
+
 #[test]
 fn subscribers_run_in_registration_order() {
     let (_d, sub) = built(&[

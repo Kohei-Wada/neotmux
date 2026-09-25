@@ -910,6 +910,42 @@ impl LuaSubsystem {
         });
     }
 
+    /// The one event the host raises for itself rather than for a pane: the config is about to
+    /// run again. Bound to the session that asked, if it is still there.
+    pub fn dispatch_unload(&self, session: Option<SessionId>) {
+        let _bound = session.map(|session| self.ambient.bind(session));
+        let subscribers: Vec<_> = self
+            .registry
+            .snapshot(KindTag::Event)
+            .into_iter()
+            .filter(
+                |id| matches!(self.registry.kind(*id), Some(Kind::Event(name)) if name == "unload"),
+            )
+            .collect();
+        if subscribers.is_empty() {
+            return;
+        }
+        self.measured(|| {
+            for id in subscribers {
+                let (Some(callback), Some(owner)) =
+                    (self.registry.callback(id), self.registry.owner(id))
+                else {
+                    continue;
+                };
+                let Ok(func) = self.lua.registry_value::<Function>(&callback) else {
+                    continue;
+                };
+                let called = self
+                    .lua
+                    .create_table()
+                    .and_then(|fields| func.call::<()>(fields));
+                if let Err(err) = called {
+                    self.report(owner, &err);
+                }
+            }
+        });
+    }
+
     /// Whether anything is subscribed to an event. The host asks about `pane_output` before
     /// it copies a pane's bytes across a socket for nobody.
     pub fn has_subscriber(&self, event: &str) -> bool {
