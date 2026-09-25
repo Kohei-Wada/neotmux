@@ -14,6 +14,7 @@ use mlua::RegistryKey;
 use neotmux_proto::SessionId;
 
 use crate::plugin::SourceId;
+use crate::sched::{CountsOverruns, SessionSlot, Strikes, SweepFlag, Sweeping};
 
 /// The shortest interval that means anything: the frame. Asking for less is asking for every
 /// frame, which is what this clamps it to.
@@ -27,8 +28,7 @@ pub struct TimerId(pub u64);
 
 struct Timer {
     owner: SourceId,
-    /// None only between a load-time arm and the first frame, which adopts it.
-    session: Option<SessionId>,
+    session: SessionSlot,
     interval: Duration,
     /// False for a one-shot, which fires once and is then spent.
     repeating: bool,
@@ -39,9 +39,7 @@ struct Timer {
     /// rest of that pass is answered by the same entry. Marked by `called`, never by `due`:
     /// between the two a stop can still cancel the call, and it has to be able to say so.
     spent: bool,
-    /// Budget overruns in a row by this timer's callback. Per timer rather than per source,
-    /// because what is stopped for them is the timer and not its owner's other work.
-    overruns: u32,
+    overruns: Strikes,
 }
 
 /// One timer this frame owes a call, and who to report a raising callback against.
@@ -55,21 +53,14 @@ pub struct Due {
 pub struct Timers {
     next: Cell<u64>,
     armed: RefCell<BTreeMap<TimerId, Timer>>,
-    /// True while a session is being swept, which is the one stretch of a frame where an
-    /// `arm` must be refused: see [`Timers::sweeping`].
-    sweeping: Cell<bool>,
+    sweeping: SweepFlag,
 }
 
 impl Timers {
-    /// Says that a session is being swept, for as long as the guard lives. A timer armed
-    /// from inside one of that sweep's `on_exit` callbacks would take the dying session as
-    /// its own — the ambient session is still bound — and then never be fired, never be
-    /// swept and never be adopted, holding its callback for the life of the server, so
-    /// `arm` refuses while this is on. The same guard [`crate::sched::Jobs::sweeping`] is,
-    /// and for the same reason.
+    /// Says that a session is being swept, for as long as the guard lives; `arm` refuses
+    /// while it does, for the reason [`SweepFlag`] gives.
     pub fn sweeping(&self) -> Sweeping<'_> {
-        self.sweeping.set(true);
-        Sweeping(self)
+        self.sweeping.raise()
     }
 
     /// Arms one, due `ms` from `now`, or says why not — one line, no punctuation at the end,
@@ -85,7 +76,7 @@ impl Timers {
         callback: Rc<RegistryKey>,
         now: Instant,
     ) -> Result<TimerId, String> {
-        if self.sweeping.get() {
+        if self.sweeping.is_raised() {
             return Err("the session is ending".to_string());
         }
         let interval = Duration::from_millis(ms).max(FRAME);
@@ -95,13 +86,13 @@ impl Timers {
             id,
             Timer {
                 owner,
-                session,
+                session: SessionSlot::new(session),
                 interval,
                 repeating,
                 due_at: now + interval,
                 callback,
                 spent: false,
-                overruns: 0,
+                overruns: Strikes::default(),
             },
         );
         Ok(id)
@@ -136,30 +127,6 @@ impl Timers {
         }
     }
 
-    /// Counts one overrunning call against a timer, and disarms it once it has run over
-    /// `limit` times in a row. True only for the call that disarmed it, so the caller says so
-    /// once. A stopped timer does not come back: the plugin arms a new one or it does not.
-    pub fn overran(&self, id: TimerId, limit: u32) -> bool {
-        let mut armed = self.armed.borrow_mut();
-        let Some(timer) = armed.get_mut(&id) else {
-            return false;
-        };
-        timer.overruns += 1;
-        if timer.overruns < limit {
-            return false;
-        }
-        armed.remove(&id);
-        true
-    }
-
-    /// A call that stayed inside its budget wipes its own timer's slate, the way a tick inside
-    /// its budget wipes its source's.
-    pub fn forgive(&self, id: TimerId) {
-        if let Some(timer) = self.armed.borrow_mut().get_mut(&id) {
-            timer.overruns = 0;
-        }
-    }
-
     /// Disarms every timer of a source that is going away: the callback belongs to a chunk
     /// that is not there any more.
     pub fn remove_all_of(&self, owner: SourceId) {
@@ -174,7 +141,7 @@ impl Timers {
     pub fn remove_all_for(&self, session: SessionId) {
         self.armed
             .borrow_mut()
-            .retain(|_, timer| timer.session != Some(session));
+            .retain(|_, timer| !timer.session.is(session));
     }
 
     /// The timers of `session` that are due at `now`, and the bookkeeping that goes with
@@ -189,12 +156,8 @@ impl Timers {
         // already gone, removed by the stop itself.
         armed.retain(|_, timer| !timer.spent);
         for (id, timer) in armed.iter_mut() {
-            // A timer armed before any session existed is adopted by the first frame to
-            // come looking, and belongs to that session from then on.
-            match timer.session {
-                Some(owner) if owner != session => continue,
-                Some(_) => {}
-                None => timer.session = Some(session),
+            if !timer.session.claim(session) {
+                continue;
             }
             if now < timer.due_at {
                 continue;
@@ -212,13 +175,29 @@ impl Timers {
     }
 }
 
-/// Held for the length of a session sweep. A guard rather than a flag the caller clears,
-/// because a callback that raises must not leave `arm` refusing for the rest of the run.
-pub struct Sweeping<'a>(&'a Timers);
+impl CountsOverruns for Timers {
+    type Id = TimerId;
+    const WHAT: &'static str = "timer";
+    const ENDED: &'static str = "stopped";
 
-impl Drop for Sweeping<'_> {
-    fn drop(&mut self) {
-        self.0.sweeping.set(false);
+    fn forgive(&self, id: TimerId) {
+        if let Some(timer) = self.armed.borrow_mut().get_mut(&id) {
+            timer.overruns.forgive();
+        }
+    }
+
+    /// Disarms the timer once it has run over `limit` times in a row. A stopped timer does not
+    /// come back: the plugin arms a new one or it does not.
+    fn overran(&self, id: TimerId, limit: u32) -> bool {
+        let mut armed = self.armed.borrow_mut();
+        let Some(timer) = armed.get_mut(&id) else {
+            return false;
+        };
+        if !timer.overruns.strike(limit) {
+            return false;
+        }
+        armed.remove(&id);
+        true
     }
 }
 

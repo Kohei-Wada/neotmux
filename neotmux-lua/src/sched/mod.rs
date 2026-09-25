@@ -1,16 +1,26 @@
 mod budget;
 mod callbacks;
+mod counts_overruns;
 mod delivery;
 mod job_id;
 mod jobs;
 mod outcome;
 mod overrun;
+mod session_slot;
+mod strikes;
+mod sweep_flag;
+mod sweeping;
 pub mod timers;
 
 pub use budget::*;
 pub use callbacks::*;
+pub use counts_overruns::*;
 pub use delivery::*;
 pub use job_id::*;
 pub use jobs::*;
 pub use outcome::*;
 pub use overrun::*;
+pub use session_slot::*;
+pub use strikes::*;
+pub use sweep_flag::*;
+pub use sweeping::*;

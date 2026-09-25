@@ -4,21 +4,22 @@
 //! a test can pin down: who owns a job, which session's frame its callbacks belong in, what
 //! has been collected, and what is said when it ends.
 
-use crate::host::{JobChunk, JobSpec, Runner, Running};
-use crate::plugin::SourceId;
-use crate::sched::Callbacks;
-use crate::sched::Delivery;
-use crate::sched::JobId;
-use neotmux_proto::SessionId;
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
+use neotmux_proto::SessionId;
+
+use crate::host::{JobChunk, JobSpec, Runner, Running};
+use crate::plugin::SourceId;
+use crate::sched::{
+    Callbacks, CountsOverruns, Delivery, JobId, SessionSlot, Strikes, SweepFlag, Sweeping,
+};
+
 struct Job {
     id: JobId,
     owner: SourceId,
-    /// None only between a load-time `start` and the first frame, which adopts it.
-    session: Option<SessionId>,
+    session: SessionSlot,
     buffered: bool,
     running: Box<dyn Running>,
     callbacks: Callbacks,
@@ -32,9 +33,7 @@ struct Job {
     /// next `deliver`, so that every path — exited, failed, killed, over its limit — ends the
     /// job in one place and therefore exactly once.
     ending: Option<(Option<i32>, Option<String>)>,
-    /// Budget overruns in a row by this job's callbacks. Per job rather than per source,
-    /// because what is killed for them is the job and not its owner's other work.
-    overruns: u32,
+    overruns: Strikes,
 }
 
 impl Job {
@@ -141,9 +140,7 @@ pub struct Jobs {
     runner: Rc<dyn Runner>,
     next: Cell<u64>,
     live: RefCell<BTreeMap<JobId, Job>>,
-    /// True while a session's endings are being delivered, which is the one stretch of a
-    /// frame where a `start` must be refused: see [`Jobs::sweeping`].
-    sweeping: Cell<bool>,
+    sweeping: SweepFlag,
 }
 
 impl Jobs {
@@ -152,17 +149,14 @@ impl Jobs {
             runner,
             next: Cell::new(1),
             live: RefCell::new(BTreeMap::new()),
-            sweeping: Cell::new(false),
+            sweeping: SweepFlag::default(),
         }
     }
 
-    /// Says that a session's jobs are being ended, for as long as the guard lives. A job
-    /// started from inside one of those `on_exit` callbacks would take the dying session as
-    /// its own — the ambient session is still bound — and then be swept by nobody, leaving
-    /// the child running with nothing left to reap it, so `start` refuses while this is on.
+    /// Says that a session's jobs are being ended, for as long as the guard lives; `start`
+    /// refuses while it does, for the reason [`SweepFlag`] gives.
     pub fn sweeping(&self) -> Sweeping<'_> {
-        self.sweeping.set(true);
-        Sweeping(self)
+        self.sweeping.raise()
     }
 
     /// Starts one, or says why not. The message is for a plugin to read: one line, no
@@ -176,7 +170,7 @@ impl Jobs {
         callbacks: Callbacks,
         concurrency: usize,
     ) -> Result<JobId, String> {
-        if self.sweeping.get() {
+        if self.sweeping.is_raised() {
             return Err("the session is ending".to_string());
         }
         let running_for_owner = self
@@ -199,7 +193,7 @@ impl Jobs {
             Job {
                 id,
                 owner,
-                session,
+                session: SessionSlot::new(session),
                 buffered,
                 running,
                 callbacks,
@@ -208,7 +202,7 @@ impl Jobs {
                 held_stdout: Vec::new(),
                 held_stderr: Vec::new(),
                 ending: None,
-                overruns: 0,
+                overruns: Strikes::default(),
             },
         );
         Ok(id)
@@ -225,34 +219,6 @@ impl Jobs {
                 true
             }
             _ => false,
-        }
-    }
-
-    /// Counts one overrunning callback against a job, and ends the job once it has run over
-    /// `limit` times in a row. True only for the delivery that ended it, so the caller says so
-    /// once. The ending is the same `ending` marker every other ending uses, so `on_exit` is
-    /// still owed exactly one call — with no code, and `budget` as the reason.
-    pub fn overran(&self, id: JobId, limit: u32) -> bool {
-        let mut live = self.live.borrow_mut();
-        let Some(job) = live.get_mut(&id) else {
-            return false;
-        };
-        if job.ending.is_some() {
-            return false;
-        }
-        job.overruns += 1;
-        if job.overruns < limit {
-            return false;
-        }
-        job.ending = Some((None, Some(ended_by(job.running.kill(), "budget"))));
-        true
-    }
-
-    /// A callback that stayed inside its budget wipes its own job's slate, the way a tick
-    /// inside its budget wipes its source's.
-    pub fn forgive(&self, id: JobId) {
-        if let Some(job) = self.live.borrow_mut().get_mut(&id) {
-            job.overruns = 0;
         }
     }
 
@@ -273,7 +239,7 @@ impl Jobs {
     /// to be adopted belongs to no session yet and is left alone.
     pub fn end_session(&self, session: SessionId) -> Vec<Delivery> {
         let mut out = Vec::new();
-        for mut job in self.take_matching(|job| job.session == Some(session)) {
+        for mut job in self.take_matching(|job| job.session.is(session)) {
             let killed = job.running.kill();
             // Before the ending, as `deliver` does it: a session going away is no reason for
             // the plugin to lose the last thing the job said.
@@ -319,12 +285,8 @@ impl Jobs {
         let mut out = Vec::new();
         let mut finished = Vec::new();
         for (id, job) in self.live.borrow_mut().iter_mut() {
-            // A job started before any session existed is adopted by the first frame to come
-            // looking, and belongs to that session from then on.
-            match job.session {
-                Some(owner) if owner != session => continue,
-                Some(_) => {}
-                None => job.session = Some(session),
+            if !job.session.claim(session) {
+                continue;
             }
             // A job marked as over is never polled again: what it has said is already what it
             // will be reported as having said.
@@ -395,12 +357,29 @@ impl Jobs {
     }
 }
 
-/// Held for the length of a session sweep. A guard rather than a flag the caller clears,
-/// because a callback that raises must not leave `start` refusing for the rest of the run.
-pub struct Sweeping<'a>(&'a Jobs);
+impl CountsOverruns for Jobs {
+    type Id = JobId;
+    const WHAT: &'static str = "job";
+    const ENDED: &'static str = "killed";
 
-impl Drop for Sweeping<'_> {
-    fn drop(&mut self) {
-        self.0.sweeping.set(false);
+    fn forgive(&self, id: JobId) {
+        if let Some(job) = self.live.borrow_mut().get_mut(&id) {
+            job.overruns.forgive();
+        }
+    }
+
+    /// Ends the job once it has run over `limit` times in a row. The ending is the same
+    /// `ending` marker every other ending uses, so `on_exit` is still owed exactly one call —
+    /// with no code, and `budget` as the reason.
+    fn overran(&self, id: JobId, limit: u32) -> bool {
+        let mut live = self.live.borrow_mut();
+        let Some(job) = live.get_mut(&id) else {
+            return false;
+        };
+        if job.ending.is_some() || !job.overruns.strike(limit) {
+            return false;
+        }
+        job.ending = Some((None, Some(ended_by(job.running.kill(), "budget"))));
+        true
     }
 }

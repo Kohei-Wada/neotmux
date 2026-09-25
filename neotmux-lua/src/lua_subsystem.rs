@@ -21,7 +21,7 @@ use crate::plugin::{SourceId, Sources};
 use crate::sched::Overrun;
 use crate::sched::timers::Timers;
 use crate::sched::{Budget, Outcome};
-use crate::sched::{Delivery, Jobs};
+use crate::sched::{CountsOverruns, Delivery, Jobs};
 use mlua::chunk::ChunkMode;
 use mlua::{Function, Lua, Value};
 use neotmux_proto::screen::Notice;
@@ -319,24 +319,16 @@ impl LuaSubsystem {
         if deliveries.is_empty() {
             return;
         }
-        let _bound = self.ambient.bind(session);
-        self.arm_budget();
         let overrun_limit = self.opts.borrow().tick_overrun_limit;
-        for delivery in deliveries {
-            let (job, owner) = (delivery.job(), delivery.owner());
-            match self.measured_callback(owner, || self.run_delivery(delivery)) {
-                None => self.jobs.forgive(job),
-                Some(false) => {}
-                // An `Exit` names a job that is already out of the map, so this counts for
+        self.budgeted(session, || {
+            for delivery in deliveries {
+                let (job, owner) = (delivery.job(), delivery.owner());
+                let measured = self.measured_callback(owner, || self.run_delivery(delivery));
+                // An `Exit` names a job that is already out of the map, so an overrun counts for
                 // nothing there — which is right: there is no next call to spare.
-                Some(true) => {
-                    if self.jobs.overran(job, overrun_limit) {
-                        self.notify_stopped(owner, "job", overrun_limit, "killed");
-                    }
-                }
+                self.judge(&*self.jobs, job, owner, measured, overrun_limit);
             }
-        }
-        self.budget.disarm(&self.lua);
+        });
     }
 
     /// The timers this session owes a call at `now`, before the tick that will draw what they
@@ -347,41 +339,64 @@ impl LuaSubsystem {
         if due.is_empty() {
             return;
         }
-        let _bound = self.ambient.bind(session);
-        self.arm_budget();
         let overrun_limit = self.opts.borrow().tick_overrun_limit;
-        for timer in due {
-            // The whole due list was taken before any of it ran, so a callback that stopped a
-            // later timer — or itself — has to be honoured here. Marking it called only after
-            // the call is what lets that stop answer that it cancelled something.
-            if self.timers.is_stopped(timer.id) {
-                continue;
-            }
-            let overran = self.measured_callback(timer.owner, || {
-                self.run_callback(timer.owner, &timer.callback, ())
-            });
-            self.timers.called(timer.id);
-            match overran {
-                None => self.timers.forgive(timer.id),
-                Some(false) => {}
-                Some(true) => {
-                    if self.timers.overran(timer.id, overrun_limit) {
-                        self.notify_stopped(timer.owner, "timer", overrun_limit, "stopped");
-                    }
+        self.budgeted(session, || {
+            for timer in due {
+                // The whole due list was taken before any of it ran, so a callback that stopped
+                // a later timer — or itself — has to be honoured here. Marking it called only
+                // after the call is what lets that stop answer that it cancelled something.
+                if self.timers.is_stopped(timer.id) {
+                    continue;
                 }
+                let measured = self.measured_callback(timer.owner, || {
+                    self.run_callback(timer.owner, &timer.callback, ())
+                });
+                self.timers.called(timer.id);
+                self.judge(
+                    &*self.timers,
+                    timer.id,
+                    timer.owner,
+                    measured,
+                    overrun_limit,
+                );
             }
-        }
-        self.budget.disarm(&self.lua);
+        });
     }
 
-    /// Arms the hook for a batch of job or timer callbacks. Once for the batch, never per
-    /// callback: `Budget::arm` costs the interpreter a hook for as long as it is on.
-    fn arm_budget(&self) {
+    /// Runs a batch of job or timer callbacks with `session` bound and the hook armed. Armed
+    /// once for the batch, never per callback: `Budget::arm` costs the interpreter a hook for
+    /// as long as it is on.
+    fn budgeted(&self, session: SessionId, batch: impl FnOnce()) {
+        let _bound = self.ambient.bind(session);
         if let Err(err) = Budget::arm(&self.lua, &self.budget) {
             self.report_text(
                 crate::plugin::ANONYMOUS,
                 format!("the budget is off: {err}"),
             );
+        }
+        batch();
+        self.budget.disarm(&self.lua);
+    }
+
+    /// What a measured job or timer callback costs the thing it belongs to: forgiven inside its
+    /// budget, nothing for a soft overrun, and a strike for a hard one — the last of which
+    /// takes it away and says so. `limit` is the caller's, read once for the batch.
+    fn judge<S: CountsOverruns>(
+        &self,
+        sched: &S,
+        id: S::Id,
+        owner: SourceId,
+        measured: Option<bool>,
+        limit: u32,
+    ) {
+        match measured {
+            None => sched.forgive(id),
+            Some(false) => {}
+            Some(true) => {
+                if sched.overran(id, limit) {
+                    self.notify_stopped(owner, S::WHAT, limit, S::ENDED);
+                }
+            }
         }
     }
 
@@ -950,18 +965,17 @@ impl LuaSubsystem {
         // is on its way out — the point is the plugin's own bookkeeping, not the screen.
         let endings = self.jobs.end_session(session);
         if !endings.is_empty() {
-            let _bound = self.ambient.bind(session);
             let _sweeping = self.jobs.sweeping();
             // And the timers', for the same reason a `start` is refused here: a timer armed
             // from one of these callbacks would be bound to a session with no frame left to
             // fire it, so nothing would ever call it and nothing would ever drop it.
             let _arming = self.timers.sweeping();
-            self.arm_budget();
-            for delivery in endings {
-                let owner = delivery.owner();
-                self.measured_callback(owner, || self.run_delivery(delivery));
-            }
-            self.budget.disarm(&self.lua);
+            self.budgeted(session, || {
+                for delivery in endings {
+                    let owner = delivery.owner();
+                    self.measured_callback(owner, || self.run_delivery(delivery));
+                }
+            });
         }
         // A timer is a promise to call again, not a thing owed an ending, so it is dropped
         // where a job is reported.
