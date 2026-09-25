@@ -166,9 +166,14 @@ fn frame_in(sub: &Built, surface: Size, sessions: &[Sess], current: u32) -> Vec<
             .collect();
         sub.publish_pane_info(id, info);
     }
-    // What the server does every frame before the tick: hand each session what its jobs said.
+    // What the server does every frame: hand each session what its jobs said, and tick every
+    // session whether or not anybody is attached — the one being looked at last, so the frame
+    // read back is its.
     for s in sessions {
         sub.dispatch_jobs(SessionId::from(s.id));
+    }
+    for s in sessions.iter().filter(|s| s.id != current) {
+        sub.dispatch_tick(SessionId::from(s.id));
     }
     sub.dispatch_tick(SessionId::from(current));
     band(sub, surface)
@@ -774,4 +779,145 @@ fn a_space_in_a_git_repository_shows_its_branch_and_how_far_it_is_from_upstream(
         ["rev-list", "--left-right", "--count", "@{upstream}...HEAD"]
     );
     line_with(&lines, "trunk \u{2191}2 \u{2193}1");
+}
+
+/// With the palette on and the sidebar off (the defaults), `C-b g` still knows an agent finished
+/// unwatched: `done` is recorded by `neotmux.seen`'s own tick, not by whoever draws it.
+const PALETTE_ONLY: &str = "local defaults = require('neotmux.defaults')\n\
+    defaults.sidebar = false\n\
+    defaults.palette = true\n\
+    neotmux.on_key(function(key)\n\
+      if key == 'G' then require('plugin.palette').open('#') return true end\n\
+      return false\n\
+    end)\n";
+
+#[test]
+fn an_agent_that_finished_unwatched_is_done_in_the_palette_with_no_sidebar() {
+    let (_dir, sub) = built_herdr(&format!("{AGENTS}{PALETTE_ONLY}"));
+    let s = [
+        Sess::new(1, "work", vec![vec![101]]),
+        Sess::new(2, "home", vec![vec![201]]).agents(&[201]),
+    ];
+    open(&sub, &s);
+    show(&sub, 201, "BUSY");
+    frame(&sub, &s, 1);
+    show(&sub, 201, "DONE");
+    frame(&sub, &s, 1);
+    support::keys(&sub, &["G"]);
+    let lines = frame(&sub, &s, 1);
+    line_with(&lines, "home fake done");
+}
+
+/// And one you watched finish is not done, whatever the palette last saw when it was open.
+#[test]
+fn an_agent_watched_as_it_finished_is_not_done_in_the_palette() {
+    let (_dir, sub) = built_herdr(&format!("{AGENTS}{PALETTE_ONLY}"));
+    let s = [
+        Sess::new(1, "work", vec![vec![101]]).agents(&[101]),
+        Sess::new(2, "home", vec![vec![201]]),
+    ];
+    open(&sub, &s);
+    show(&sub, 101, "BUSY");
+    frame(&sub, &s, 1);
+    support::keys(&sub, &["G"]);
+    frame(&sub, &s, 1);
+    support::keys(&sub, &["Esc"]);
+    show(&sub, 101, "DONE");
+    frame(&sub, &s, 1);
+    // Over to home, and the palette opened from there: work is nobody's screen any more.
+    frame(&sub, &s, 2);
+    assert_eq!(
+        sub.dispatch_key(SessionId::from(2), "G"),
+        neotmux_lua::KeyOutcome::Consumed
+    );
+    let lines = frame(&sub, &s, 2);
+    line_with(&lines, "work fake idle");
+}
+
+/// A session is the most urgent of all its panes, not only the window it is showing.
+#[test]
+fn a_space_counts_the_agents_in_its_hidden_windows() {
+    let (_dir, sub) = built_herdr(&format!("{AGENTS}{LETTERS}"));
+    let s = [Sess::new(1, "work", vec![vec![101], vec![102]]).agents(&[102])];
+    open(&sub, &s);
+    show(&sub, 102, "ASK");
+    let lines = settled(&sub, &s, 1);
+    line_with(&lines, " B work");
+}
+
+/// `C-b` while the cursor is up leaves it, so the prefix key that follows is the prefix's and
+/// the one after that is the pane's again.
+#[test]
+fn the_prefix_key_leaves_navigate() {
+    let (_dir, sub) = built_herdr("require('neotmux.defaults').prefix = true\n");
+    let s = [
+        Sess::new(1, "alpha", vec![vec![101]]),
+        Sess::new(2, "bravo", vec![vec![201]]),
+    ];
+    open(&sub, &s);
+    settled(&sub, &s, 1);
+    support::keys(&sub, &["C-b", "w"]);
+    frame(&sub, &s, 1);
+    assert_eq!(
+        sub.dispatch_key(support::one(), "j"),
+        neotmux_lua::KeyOutcome::Consumed,
+        "navigate did not take j"
+    );
+    support::keys(&sub, &["C-b"]);
+    frame(&sub, &s, 1);
+    support::keys(&sub, &["c"]);
+    assert_eq!(
+        sub.dispatch_key(support::one(), "j"),
+        neotmux_lua::KeyOutcome::Fallthrough,
+        "the cursor was still up after the prefix"
+    );
+}
+
+/// Ten directories are more than the job limit lets be asked at once; every one of them still
+/// gets its branch, a few at a time, rather than the same ones failing every round.
+#[test]
+fn every_space_gets_its_branch_however_many_there_are() {
+    use neotmux_lua::host::JobChunk;
+    let runner = support::FakeRunner::new();
+    for _ in 0..40 {
+        runner.will_say(vec![vec![
+            JobChunk::Stdout(b"trunk\n".to_vec()),
+            JobChunk::Exited(0),
+        ]]);
+    }
+    let (_dir, sub) = built_herdr_running("require('plugin.sidebar').widths.max = 40\n", runner);
+    let names = ["s0", "s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8", "s9"];
+    let s: Vec<Sess> = names
+        .iter()
+        .enumerate()
+        .map(|(n, name)| {
+            let id = n as u32 + 1;
+            let mut it = Sess::new(id, name, vec![vec![id * 100 + 1]]);
+            it.cwd = Some(format!("/src/{name}"));
+            it
+        })
+        .collect();
+    open(&sub, &s);
+    let big = Size { rows: 40, cols: 80 };
+    let mut lines = Vec::new();
+    for _ in 0..30 {
+        lines = frame_in(&sub, big, &s, 1);
+    }
+    let branches = lines.iter().filter(|l| l.trim() == "trunk").count();
+    assert_eq!(branches, 10, "{lines:#?}");
+}
+
+/// The state is part of what `#` matches, so typing one narrows to the agents in it.
+#[test]
+fn typing_a_state_in_the_agents_palette_narrows_to_it() {
+    let (_dir, sub) = built_herdr(&format!("{AGENTS}{PALETTE_ONLY}"));
+    let s = [Sess::new(1, "work", vec![vec![101, 102]]).agents(&[101, 102])];
+    open(&sub, &s);
+    show(&sub, 101, "BUSY");
+    show(&sub, 102, "ASK");
+    frame(&sub, &s, 1);
+    support::keys(&sub, &["G", "b", "l", "o", "c", "k"]);
+    let lines = frame(&sub, &s, 1);
+    line_with(&lines, "blocked");
+    assert!(!lines.iter().any(|l| l.contains("working")), "{lines:#?}");
 }

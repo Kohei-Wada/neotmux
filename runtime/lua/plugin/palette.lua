@@ -14,6 +14,8 @@
 -- file), and any other plugin that calls `neotmux.command.add` gets a palette entry for free,
 -- without this file knowing it exists.
 local list = require("neotmux.list")
+-- Required for its tick: `#` shows `done`, and done is only known to what watched it happen.
+require("neotmux.seen")
 
 local M = {}
 
@@ -190,9 +192,10 @@ M.providers = {
       local out = {}
       for _, it in ipairs(require("plugin.sidebar.agents").collect()) do
         local window = it.windows > 1 and (":" .. (it.window_name or it.window)) or ""
+        -- The state is in the name, not a description beside it, so it is matched: typing
+        -- `blocked` or `done` narrows to the agents in it.
         out[#out + 1] = {
-          name = it.session .. window .. " " .. it.agent,
-          desc = it.state,
+          name = it.session .. window .. " " .. it.agent .. " " .. it.state,
           source = "agent",
           agent = it,
         }

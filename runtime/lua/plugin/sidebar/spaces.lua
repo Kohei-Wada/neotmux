@@ -24,6 +24,12 @@ M.row_gap = 0
 -- How often a directory's branch is asked again, in milliseconds.
 M.refresh = 5000
 
+-- How many directories one build may start asking about. A plugin may only have so many jobs
+-- running at once, and a round that asked every directory together would fail the same ones
+-- every time; a few at a time, the rest wait for the next build.
+M.asks_per_build = 2
+local budget = 0
+
 -- The sidebar, set by `build` for the tokens.
 local sidebar
 
@@ -69,10 +75,15 @@ local git = {}
 local function ask(cwd)
   local known = git[cwd]
   local now = neotmux.now()
-  if known and (known.busy or now - known.at < M.refresh) then
+  if known and (known.busy or (known.at and now - known.at < M.refresh)) then
     return known
   end
+  if budget <= 0 then
+    return known
+  end
+  budget = budget - 1
   known = known or {}
+  local asked_before = known.at
   known.busy, known.at = true, now
   git[cwd] = known
   local started = neotmux.job.start({ "git", "-C", cwd, "rev-parse", "--abbrev-ref", "HEAD" }, {
@@ -104,7 +115,9 @@ local function ask(cwd)
     end,
   })
   if not started then
-    known.busy = false
+    -- Not stamped: a start the job limit refused is asked again as soon as there is room,
+    -- rather than a whole refresh later.
+    known.busy, known.at = false, asked_before
   end
   return known
 end
@@ -113,12 +126,21 @@ end
 M.cursor = nil
 
 local function entries()
+  budget = M.asks_per_build
   local out = {}
   local here = neotmux.session.current()
   for _, name in ipairs(neotmux.session.list()) do
     local it = { name = name, here = name == here }
     neotmux.session.with(name, function()
-      it.state = rollup(neotmux.pane.list())
+      -- Every window's panes, not `pane.list()`'s, which is the window on screen: an agent
+      -- waiting in a window you are not showing is still that session waiting.
+      local panes = {}
+      for _, window in ipairs(neotmux.window.list()) do
+        for _, pane in ipairs(neotmux.window.panes(window) or {}) do
+          panes[#panes + 1] = pane
+        end
+      end
+      it.state = rollup(panes)
       local focus = neotmux.pane.current()
       local info = focus and neotmux.pane.info(focus)
       if info and info.cwd then
@@ -183,7 +205,13 @@ end
 
 function M.navigate()
   local names = neotmux.session.list()
-  if #names == 0 then
+  local bar = package.loaded["plugin.sidebar"]
+  local shown = false
+  for _, section in ipairs(bar and bar.sections or {}) do
+    shown = shown or section == M
+  end
+  -- A cursor over a section that is not drawn would swallow keys you cannot see it take.
+  if #names == 0 or not shown then
     return
   end
   local here = neotmux.session.current()
@@ -193,8 +221,7 @@ function M.navigate()
       M.cursor = at
     end
   end
-  local bar = package.loaded["plugin.sidebar"]
-  if bar and not bar.open then
+  if not bar.open then
     bar.open, bar.navigating_unfolded = true, true
   end
   if not mode then
@@ -203,6 +230,15 @@ function M.navigate()
 end
 
 local MOVES = { j = 1, Down = 1, k = -1, Up = -1 }
+
+-- `C-b` while the cursor is up leaves it. The prefix sees the key first — it was loaded first —
+-- and raises its mode, so this looks for that rather than for the key, which also follows a
+-- prefix rebound to something else. What comes after the prefix key is then the prefix's.
+neotmux.on_tick(function()
+  if M.cursor and modes.current() == "prefix" then
+    leave()
+  end
+end)
 
 neotmux.on_key(function(key)
   if not M.cursor then
@@ -213,13 +249,15 @@ neotmux.on_key(function(key)
     leave()
     return true
   end
+  -- A session that ended while the cursor was up can leave it past the end.
+  M.cursor = math.min(M.cursor, count)
   if MOVES[key] then
     M.cursor = (M.cursor - 1 + MOVES[key]) % count + 1
   elseif key == "Enter" then
     go(M.cursor)
   elseif key:match("^[1-9]$") then
     go(tonumber(key))
-  elseif key == "Esc" or key == "C-b" then
+  elseif key == "Esc" then
     leave()
   end
   -- Everything else is swallowed while the cursor is up, the way a list swallows it: a key

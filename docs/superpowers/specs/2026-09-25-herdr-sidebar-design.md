@@ -1,7 +1,7 @@
 # neotmux — a sidebar that does what herdr's does
 
 Date: 2026-09-25
-Status: proposed
+Status: accepted (implemented 2026-09-25; see §9)
 Scope: the sidebar's default sections, a `done` state, palette providers, and the keys that move
 between sessions and agents — so a herdr user finds what they used and nothing to relearn.
 
@@ -191,3 +191,22 @@ else is built on it.
 - End to end (`neotmux/tests/fixtures.rs`): `C-b w` then `j` and Enter switches session; `C-b g`
   then Enter focuses the chosen agent's pane.
 - By eye: a real screen with several sessions and a real `claude`, captured and read.
+
+## 9. What changed on the way
+
+- **`neotmux.session.attached(name)`** was added to the host. §3's "looked at" needs to know
+  whether anybody is at a session, and every session ticks whether or not they are; Lua had no
+  way to ask. The server publishes each session's client count before its tick.
+- **`seen` records on its own tick.** §3's `seen.look()` became an `on_tick` inside
+  `neotmux.seen` that walks the ticking session's panes; `seen.of` only reads. Recording from
+  whoever drew a pane missed every `done` with the sidebar off and mistook a reader's stale look
+  for a transition (review, 2026-09-25). `plugin.palette` requires it for the tick.
+- **`git_status` is two tokens, `ahead` and `behind`**, because a token answers one colour and
+  herdr's are green and red.
+- **Going to an agent is `agents.focus(it)`**, a function the palette's `#` provider calls, not
+  an `agent-focus` command: it takes an agent, which a command's string arguments cannot carry.
+- **Git is asked a few directories a build** (`spaces.asks_per_build`, 2), and a start the job
+  limit refused is not stamped, so ten sessions in ten directories all get their branch.
+- **`C-b` leaves navigate** by the prefix's mode being raised, seen on the next tick: the prefix
+  takes the key before the sidebar can.
+

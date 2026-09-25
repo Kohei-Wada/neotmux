@@ -106,7 +106,7 @@ end
 -- caller needs to go there: `pane_id`, `window_id` and `session`.
 function M.collect()
   local now = M.clock()
-  local found, kept, alive = {}, {}, {}
+  local found, kept = {}, {}
   local here = neotmux.session.current()
   for session_at, name in ipairs(neotmux.session.list()) do
     neotmux.session.with(name, function()
@@ -114,7 +114,6 @@ function M.collect()
       local windows = neotmux.window.list()
       for window_at, window in ipairs(windows) do
         for pane_at, pane in ipairs(neotmux.window.panes(window) or {}) do
-          alive[pane] = true
           -- `state.of` first: it is what asks the detector, and `agent` reads what it found.
           local now_state = seen.of(pane, state.of(pane))
           local agent = detect.agent(pane)
@@ -148,7 +147,6 @@ function M.collect()
     end)
   end
   since = kept
-  seen.keep(alive)
   table.sort(found, before)
   return found
 end
