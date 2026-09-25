@@ -94,10 +94,9 @@ pub struct Neotmux {
     parser: Arc<Mutex<vt100::Parser>>,
     byte_rx: mpsc::Receiver<usize>,
     // Declared before `_dir_keep` so it drops first: fields drop in declaration order, and
-    // ending the session needs the isolation dir to still be there. Held for that lifetime
-    // only — nothing reads it back.
+    // ending the session needs the isolation dir to still be there.
     _end_session: session::EndsSession,
-    _isolation: PathBuf,
+    isolation: PathBuf,
     // Owns the isolation dir when this harness made it (`spawn`); `None` when a test lent us
     // one it keeps alive (`start_named_on`). Declared after `_end_session` so the dir is only
     // released once the session behind it is already ended.
@@ -249,7 +248,7 @@ impl Neotmux {
             parser,
             byte_rx,
             _end_session: session::EndsSession::new(isolation),
-            _isolation: isolation.to_owned(),
+            isolation: isolation.to_owned(),
             _dir_keep: keep,
         };
         nt.wait_until_raw();
@@ -301,6 +300,12 @@ impl Neotmux {
             .unwrap()
             .screen_mut()
             .set_size(rows, cols);
+    }
+
+    /// The client's `$XDG_RUNTIME_DIR`, which is where the CLI has to be pointed to reach the
+    /// session this client is attached to.
+    pub fn isolation(&self) -> &Path {
+        &self.isolation
     }
 
     pub fn send(&mut self, s: &str) {

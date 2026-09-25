@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### The config reloads without losing the panes
+
+`config-reload`, from the palette or anything that runs a command, runs every layer's
+`init.lua` again in the running server: the panes, the shells and their scrollback stay, and the
+plugins are new. `neotmux.reload()` is the function under it, for a key of your own. It is safe
+because a plugin registers through `neotmux.group(name)`, which is Neovim's augroup: every
+`on_tick`, key, band, float, job and timer made through the group is taken back when the group is
+named again, and a group the reload did not name is emptied, so a deleted `require` line is a
+plugin gone. The `unload` event fires once before, for what no group can see — copy mode and the
+hints thaw the panes they froze on it. A source setting a key or adding a command it already
+holds now replaces its own instead of being refused, and `neotmux.command.remove(name)` takes a
+command away. Every shipped plugin and example registers through a group.
+
 ### The sidebar is herdr's
 
 The shipped sidebar is herdr's, so moving over is nothing to relearn. On top, `spaces`: every

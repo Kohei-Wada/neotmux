@@ -91,6 +91,7 @@ Each of these returns a handle with one method, `handle:remove()`, which is idem
 | `neotmux.keymap.set(spec, fn)` | for that one key; return `true` to consume it |
 | `neotmux.reserve(edge, cells)` | nothing runs; it takes a band of the surface (below) |
 | `neotmux.command.add(name, fn, { desc = })` | when `neotmux.command.run(name)` names it; answers `true`, or `nil` plus a message — not a handle, and `neotmux.command.remove(name)` takes one away (below) |
+| `neotmux.group(name)` | nothing runs; answers a table of the calls above that files what they register under `name`, emptied first (see [Reloading](#reloading)) |
 
 Every event that fires, and the fields it carries:
 
@@ -133,8 +134,8 @@ neotmux.command.list()          --> { { name =, desc =, source = }, ... }, in na
 local ok, why = neotmux.command.run('scratch', { 'arg' })
 ```
 
-`add` answers `true`, or `nil, message` when the name is already held — the first registration
-wins, so a config layer's own `init.lua` (which runs first) can claim a name before the shipped
+`add` answers `true`, or `nil, message` when another source already holds the name — the first
+registration wins, so a config layer's own `init.lua` (which runs first) can claim a name before the shipped
 plugin that would otherwise take it does. `run` takes the name and an array of strings, and
 answers `ok, err, lines`: `false` and a message on a name nobody registered, on a handler that
 raised, or on a handler whose return was not one of the three shapes below; `true`, `nil` and
@@ -154,9 +155,10 @@ each of its verbs this way and its key table calls them by name.
 
 `list()`'s `source` names the chunk the handler was *defined* in, not the one whose `add` call
 registered it — a factory that hands out functions to other plugins attributes each one to
-itself, wherever it is registered from. And a command is permanent: there is no `remove`, so
-one whose plugin was later parked by the tick budget still runs when the palette, or a key,
-calls it.
+itself, wherever it is registered from. A command stays until something takes it away —
+`neotmux.command.remove(name)`, which answers whether there was one of that name to remove, or
+the group it was added through being emptied — so one whose plugin was later parked by the tick
+budget still runs when the palette, or a key, calls it.
 
 ### Drawing
 
@@ -344,12 +346,13 @@ rest of the plugin layer, the topmost float first.** A plugin that holds several
 once, at the position of its topmost one; the rest is the keyboard you already have, and a
 float declines a key the way every other callback does — returns nothing, and the key goes on.
 
-**A float dies with its owner, not with the frame.** An `unload` — or the unsubscription an
-over-budget plugin earns — takes the float with it, the same fate the owner's bands keep; a
-resize does not touch it, the rect stays where it was and only its clipping moves; and a detach
-is the owner going, so its floats go with the client, and a re-attach re-runs `init.lua` with
-them gone until the plugin that held one asks for it again. The panes, the shells, the session
-survive it all, because the float was never any of those.
+**A float dies with its owner, not with the frame.** A failed load, the group it was made
+through being emptied, or the unsubscription an over-budget plugin earns takes the float with
+it, the same fate the owner's bands keep; a resize does not touch it, the rect stays where it
+was and only its clipping moves; and a detach is not the owner going, because the owner runs in
+the server, so the float is still there for the client that attaches next. `init.lua` runs
+once, when the server starts, and again on `config-reload`; a re-attach runs nothing. The
+panes, the shells, the session survive it all, because the float was never any of those.
 
 `neotmux.float` answers `nil` plus a message when the rect is not a rect — a missing key, a
 non-integer, a negative `x` or `y`, or a zero size — and records nothing, so a failed grant
@@ -1102,9 +1105,9 @@ neotmux.home                       -- `$HOME` as the host read it, or nil; read-
 A plugin that wants to behave differently by session branches on it; there is no per-session `init.lua`.
 
 A detach ends the client's conversation, not the session: the panes, the shells and each
-pane's scrollback are the server's, and stay. Every plugin's own state is the client's, and
-does not — the copy register, a raised mode, a fold, and the reservations, which the plugin
-re-makes at load. Re-attaching is a plugin restart, in those words.
+pane's scrollback are the server's, and stay, and so do the plugins, which run in the server
+too. `init.lua` runs once, when the server starts, and again on `config-reload`; a re-attach
+runs nothing.
 
 **Two clients in one session.** The copy mode one has is not the one the other has,
 because the copy mode is the client's and not the session's; the key that one types
@@ -2191,17 +2194,77 @@ with it — the panes tile the surface again.
 
 ## Reloading
 
-There is no reload function. There are two lines of Lua:
+`config-reload` runs your config again in the running server, and the panes, the shells and
+their scrollback stay where they are. It is a command like any other, so you reach it from the
+palette (`C-b :`), from a key, or from a plugin with `neotmux.command.run('config-reload')`.
+The command is a line of Lua over `neotmux.reload()`, registered by the shipped `init.lua`
+itself rather than by a plugin, so turning every shipped plugin off does not take it away; and
+`neotmux.reload()` is there for you to bind to a key of your own either way.
+
+`neotmux.reload()` does not reload anything where you call it, because it is running inside the
+code it would be replacing. It asks, and the server carries it out once, at the end of the frame
+— after every session's jobs, timers, ticks and keys for that frame. First the
+[`unload`](#registering) event fires, once, with the session that asked as the session you are
+in. Then every group is marked as not yet named, and every module a layer's `lua/` directory
+supplied is forgotten from `package.loaded`, so the next `require` runs the file again; the
+standard library and the host's own tables are left alone. Then every layer's `init.lua` runs
+again, earliest layer first, exactly as at start: a `require` that fails is logged and swept,
+and the rest of your config still loads. Then every group nobody named this time is emptied, so
+a plugin whose `require` line you deleted is gone. The next frame is drawn from what is
+registered now. Nothing else runs in between — a key you type during a reload is read after
+it.
+
+What makes a plugin safe to run twice is a **group**, the way an augroup is in Neovim:
 
 ```lua
-package.loaded['plugin.clock'] = nil
-require('plugin.clock')
+local g = neotmux.group('plugin.clock')
+g.reserve('bottom', 1)
+g.on_tick(function(ctx)
+  local band = ctx:reserved()
+  if band then ctx:text(nil, band.x, band.y, os.date('%H:%M')) end
+end)
 ```
 
-Note what this does *not* do: your old registrations are still there. (The exception is a tick
-the budget is still holding for you: registering a tick again drops it. A tick you already got
-back with `resubscribe` is live, not held, so that one does not go.) Keep the handles and
-remove them first if re-running the chunk would register twice.
+`neotmux.group(name)` answers the group of that name, emptied of whatever it held. Its fields
+are the registering calls you already know — `on_tick`, `on_event`, `on_key`, `on_write`,
+`float`, `reserve`, `keymap.set`, `command.add`, `job.start`, `timer.every`, `timer.after` —
+with the same arguments and the same answers, and what you register through them is filed
+under the group as well as under your chunk. So when the reload runs your file again and your
+first line names the group again, the old tick, the old band and the old key go, and the new
+ones take their place. Emptying takes back each thing the way you would: a handle is removed, a
+key unbound, a command unregistered, a timer stopped, and a job killed *without* its
+`on_exit`, because that callback is the old code's.
+
+Name the group after your module, `'plugin.clock'`. Names are one namespace across every
+plugin, so two plugins that pick the same one share a group and either one's run empties both.
+A group you first name from inside a callback rather than at load is emptied by the next reload
+unless something names it again, which is right: the module that would arm it is new and has
+not.
+
+What you register with `neotmux.*` outside a group is there twice after a reload: a second
+tick, a second event handler, a second job, beside the first, with nothing left to remove the
+old one. Two calls are the exception, and not because of groups. A source that sets a key or
+adds a command it already holds replaces its own, so those do not double. And a source holds
+one band, so the second `neotmux.reserve` answers `nil` and the old band stays.
+
+`unload` is for what no group can see. A group knows what you registered, not what you did: a
+pane you froze with `neotmux.pane.freeze` stays frozen after the code that meant to unfreeze it
+is gone, unless you unfreeze it on the way out.
+
+```lua
+g.on_event('unload', function()
+  for pane in pairs(frozen) do neotmux.pane.unfreeze(pane) end
+end)
+```
+
+Registered through your group, the `unload` handler is itself replaced on the next run rather
+than stacked. The shipped copy mode and hints do exactly this.
+
+The VM and its globals are the same ones after a reload; your module's locals are not, because
+your module ran again. A fold, a cursor, a query typed into a list — whatever you kept in a
+local starts again. What the host can answer — the panes, the windows, what a pane is running —
+ask for again. `neotmux.defaults` is a module too, so set `require('neotmux.defaults').sidebar
+= true` in your `init.lua`, reload, and the sidebar loads.
 
 ## Three that work
 
