@@ -53,9 +53,10 @@ The first directory that has a file wins, so a layer earlier in the list shadows
 `~/.config/neotmux/lua/plugin/hello.lua`:
 
 ```lua
-local band = neotmux.reserve('bottom', 1)
+local g = neotmux.group('plugin.hello')
 
-neotmux.on_tick(function(ctx)
+g.reserve('bottom', 1)
+g.on_tick(function(ctx)
   local row = ctx:reserved()
   if row then
     ctx:text(nil, row.x, row.y, 'hello', { fg = '#00ff88' })
@@ -70,7 +71,9 @@ require('plugin.hello')
 ```
 
 Start neotmux and `hello` is along the bottom of the screen, on a row the panes no longer
-have. Delete the `require` line and it is not. That is the whole lifecycle.
+have. Delete the `require` line and it is not. That is the whole lifecycle. The group on the
+first line is what lets the file run again when you [reload](#reloading) without leaving the
+old band and tick behind.
 
 ## The API
 
@@ -716,7 +719,7 @@ the wrong pane.
 ### Guarding a write
 
 ```lua
-neotmux.on_write(function(write)
+neotmux.group('plugin.no_rm').on_write(function(write)
   -- write.pane, write.text, write.from ('tool' | 'plugin')
   if write.text:find('rm%s+%-rf') then
     return false, 'rm -rf is blocked'
@@ -1064,7 +1067,7 @@ working, on the [state convention](#the-state-convention)'s guess.
 local state = require('neotmux.state')
 local was = {}
 
-neotmux.timer.every(500, function()
+neotmux.group('plugin.done_sound').timer.every(500, function()
   for _, pane in ipairs(neotmux.pane.list()) do
     local now = state.of(pane)
     if now and was[pane] and was[pane] == 'working' and now ~= 'working' then
@@ -2205,12 +2208,15 @@ itself rather than by a plugin, so turning every shipped plugin off does not tak
 code it would be replacing. It asks, and the server carries it out once, at the end of the frame
 — after every session's jobs, timers, ticks and keys for that frame. First the
 [`unload`](#registering) event fires, once, with the session that asked as the session you are
-in. Then every group is marked as not yet named, and every module a layer's `lua/` directory
-supplied is forgotten from `package.loaded`, so the next `require` runs the file again; the
-standard library and the host's own tables are left alone. Then every layer's `init.lua` runs
-again, earliest layer first, exactly as at start: a `require` that fails is logged and swept,
-and the rest of your config still loads. Then every group nobody named this time is emptied, so
-a plugin whose `require` line you deleted is gone. The next frame is drawn from what is
+in. Then every group is emptied, so no name a plugin holds through one is held when your config
+runs again and an earlier layer can claim it as it would at start. Every `neotmux.opt` goes back
+to its default, and every source's count of overruns back to none; a tick the budget parked is
+forgotten, so `neotmux.resubscribe` answers `nil` for it after a reload. Every module a layer's
+`lua/` directory supplied is forgotten from `package.loaded`, so the next `require` runs the
+file again; the standard library and the host's own tables are left alone. Then every layer's
+`init.lua` runs again, earliest layer first: a `require` that fails is logged, notified and
+swept, and the rest of your config still loads. Then every group nobody named this time is
+forgotten, so a plugin whose `require` line you deleted is gone. The next frame is drawn from what is
 registered now. Nothing else runs in between — a key you type during a reload is read after
 it.
 

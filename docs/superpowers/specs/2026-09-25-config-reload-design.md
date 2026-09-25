@@ -105,8 +105,10 @@ re-run rather than stacked.
 
 ## 3. The reload
 
-`config-reload` is a command like any other, reachable from the palette and from `neotmux` on
-the command line. The command itself is Lua: `neotmux.reload()` asks for the reload, and the
+`config-reload` is a command like any other, reachable from the palette, a key, or
+`neotmux.command.run`. It is not reachable from `neotmux` on the command line: the CLI runs only
+the host's own commands, by design, and a host `reload` command is a possible follow-up. The
+command itself is Lua: `neotmux.reload()` asks for the reload, and the
 shipped runtime registers `config-reload` over it, in a group of its own. A config that turns
 the shipped plugins off still has `neotmux.reload()` to bind.
 
@@ -117,16 +119,22 @@ ticks and key dispatch for that frame, before the next one begins — in this or
 
 1. **`unload`.** Dispatched once, not per session, with the session that asked bound as the
    ambient session. Measured under the tick budget like every other callback.
-2. **Mark.** Every group is marked as not yet named in this reload.
-3. **Forget the modules.** Every entry of `package.loaded` that the layer searcher loaded —
+2. **Empty every group.** Everything every group holds is taken back, and every group is
+   marked as not yet named in this reload. The config then runs with no name held through a
+   group, as at start, so an earlier layer can claim a key or a command a later layer's group
+   held.
+3. **Back to a start's settings.** Every `neotmux.opt` is reset to its default and every
+   source's overrun count to none, and every tick the budget parked is forgotten: it is in no
+   group, and kept, a later `resubscribe` would bring the old code's callback back.
+4. **Forget the modules.** Every entry of `package.loaded` that the layer searcher loaded —
    the modules found under a layer's `lua/` — is cleared. The standard library and the host's
    own tables are not.
-4. **Run every layer's `init.lua` again**, earliest layer first, under the same load convention
-   as at start: a `require` in the init chain that fails is swept and logged, and the rest of
-   the config still loads.
-5. **Sweep the unnamed.** Every group still marked is emptied. A plugin whose `require` line
+5. **Run every layer's `init.lua` again**, earliest layer first, under the same load convention
+   as at start: a `require` in the init chain that fails is swept, logged and notified, and the
+   rest of the config still loads.
+6. **Forget the unnamed.** Every group still marked is forgotten. A plugin whose `require` line
    was deleted never named its group this time, so it is gone.
-6. **Draw.** The next frame is composed from the new registrations.
+7. **Draw.** The next frame is composed from the new registrations.
 
 The VM, and its globals, are the same ones. A module's locals are new, because the module
 ran again: detect's holds, the palette's query, copy mode's cursor, whether the sidebar was
@@ -137,7 +145,7 @@ is simply asked for again.
 reload, and the sidebar loads.
 
 **Bands keep their order.** A band's place on its edge is the order it was reserved in. On a
-reload every group is emptied and re-filled in load order, one after another, so the bands
+reload every group is emptied before the config runs and re-filled in load order, so the bands
 come back in the order they went.
 
 **Nothing else runs during a reload.** The server is one thread and the reload is one pass of
