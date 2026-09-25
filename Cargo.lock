@@ -753,6 +753,7 @@ name = "neotmux"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64",
  "neotmux-layout",
  "neotmux-lua",
  "neotmux-proto",
@@ -795,7 +796,6 @@ name = "neotmux-pty"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "base64",
  "libc",
  "neotmux-proto",
  "portable-pty",

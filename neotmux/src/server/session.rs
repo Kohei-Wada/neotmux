@@ -4,13 +4,13 @@ use std::rc::Rc;
 use std::time::Instant;
 
 use anyhow::Context as _;
+use neotmux_proto::clamp_to_min_grid;
 use neotmux_proto::msg::{End, SessionOp, Step, Tick, Tock};
 use neotmux_proto::{
     DrawCmd, Event, Geometry, Level, PaneId, PaneInfo, PaneTty, Rect as PRect, Reserved, Size,
     Window as LuaWindow, WindowId,
 };
 use neotmux_pty::pty::PtyHandle;
-use neotmux_pty::state::clamp_to_min_grid;
 use neotmux_pty::terminals::PaneTerminals;
 use neotmux_pty::wakeup::Waker;
 
@@ -115,7 +115,7 @@ impl Session {
             size: clamp_to_min_grid(setup.size),
             reserved: setup.reserved,
             gutter: setup.gutter,
-            minimum: neotmux_pty::state::MIN_GRID,
+            minimum: neotmux_proto::MIN_GRID,
         };
         let (windows, first) = Windows::new(setup.first_window, surface, pane_ids);
         let mut shells = Shells::new(waker, terminals.clone());
@@ -870,8 +870,9 @@ fn pane_size(rect: Option<PRect>, pane: PaneId) -> anyhow::Result<Size> {
 
 #[cfg(test)]
 mod tests {
+    use neotmux_proto::MIN_GRID;
     use neotmux_pty::pty::CommandBuilder;
-    use neotmux_pty::state::{MIN_GRID, TermState};
+    use neotmux_pty::state::TermState;
     use neotmux_pty::wakeup::wakeup;
 
     use super::*;
@@ -918,7 +919,7 @@ mod tests {
             size,
             reserved: Reserved::default(),
             gutter: 0,
-            minimum: neotmux_pty::state::MIN_GRID,
+            minimum: neotmux_proto::MIN_GRID,
         };
         let (windows, first) = Windows::new(WindowId::from(1), surface, PaneIds::new());
         assert_eq!(

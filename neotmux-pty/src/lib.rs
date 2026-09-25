@@ -1,7 +1,6 @@
 pub mod evictions;
 mod hvp;
 pub mod lines;
-pub mod osc52;
 pub mod pty;
 pub mod query;
 pub mod scrollback;

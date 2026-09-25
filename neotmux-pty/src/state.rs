@@ -1,5 +1,5 @@
 use neotmux_proto::read::{Extent, Trailing};
-use neotmux_proto::{Color, GridSnapshot, Size};
+use neotmux_proto::{Color, GridSnapshot, Size, clamp_to_min_grid};
 
 pub struct TermState {
     parser: vt100::Parser<Titles>,
@@ -48,19 +48,6 @@ fn color_from_vt100(c: vt100::Color) -> Color {
         vt100::Color::Default => Color::Default,
         vt100::Color::Idx(i) => Color::Idx(i),
         vt100::Color::Rgb(r, g, b) => Color::Rgb(r, g, b),
-    }
-}
-
-/// The smallest grid `vt100` survives arbitrary output on. Measured against vt100 0.16.2:
-/// one row underflows in `grid::col_wrap` the first time a line wraps, and one column
-/// underflows in `screen::write_grapheme` the first time a wide character is written.
-pub const MIN_GRID: Size = Size { rows: 2, cols: 2 };
-
-/// The one place a size is clamped before it reaches `vt100` or the PTY.
-pub fn clamp_to_min_grid(size: Size) -> Size {
-    Size {
-        rows: size.rows.max(MIN_GRID.rows),
-        cols: size.cols.max(MIN_GRID.cols),
     }
 }
 
@@ -273,6 +260,7 @@ impl TermState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use neotmux_proto::MIN_GRID;
 
     fn snap(state: &TermState) -> GridSnapshot {
         let mut out = GridSnapshot::default();

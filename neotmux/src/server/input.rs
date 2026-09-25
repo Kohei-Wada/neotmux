@@ -370,53 +370,6 @@ mod tests {
         assert_eq!(key_spec(&dot), ".");
     }
 
-    /// Every key form the decoder produces has to survive the trip back to the bytes a
-    /// terminal would have sent, because that is the trip a keystroke makes into a pane.
-    #[test]
-    fn decoding_bytes_and_encoding_them_again_is_the_identity() {
-        for bytes in [
-            &b"a"[..],
-            "あ".as_bytes(),
-            &[0x02],
-            b"\r",
-            b"\t",
-            &[0x7f],
-            &[0x1b],
-            b"\x1ba",
-            b"\x1b[A",
-            b"\x1b[B",
-            b"\x1b[C",
-            b"\x1b[D",
-            b"\x1b[H",
-            b"\x1b[F",
-            b"\x1b[Z",
-            b"\x1b[2~",
-            b"\x1b[3~",
-            b"\x1b[5~",
-            b"\x1b[6~",
-            b"\x1b[15~",
-            b"\x1b[24~",
-            b"\x1bOP",
-            b"\x1bOS",
-            b"\x1b[1;5D",
-            b"\x1b[1;3A",
-            b"\x1b[1;2A",
-            b"\x1b[1;8A",
-            b"\x1b[5;5~",
-            b"\x1b[24;3~",
-            b"\x1b[1;5P",
-        ] {
-            let keys = crate::client::decode::Decoder::default().feed(bytes);
-            assert_eq!(keys.len(), 1, "{bytes:?} did not decode to one key");
-            assert_eq!(
-                encode_key(keys[0], false).as_deref(),
-                Some(bytes),
-                "{bytes:?} did not survive the round trip as {:?}",
-                keys[0]
-            );
-        }
-    }
-
     /// For the pane, neotmux is the terminal, so the pane's own DECCKM decides the form. vim,
     /// less and readline's application mode all set it, and all four cursor keys — Home and
     /// End with them — move to `ESC O x` when they do.

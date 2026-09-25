@@ -8,13 +8,14 @@
 //! a server for, and paints the frame that comes back with `draw` and `overlay`. It holds
 //! no session state — what it shows is what it was last sent.
 
-pub(crate) mod decode;
+pub mod decode;
 pub(crate) mod draw;
 pub(crate) mod overlay;
 pub(crate) mod start;
 
 mod ask;
 mod attach;
+mod osc52;
 
 pub use ask::{command, kill, ls};
 pub use attach::attach;
@@ -24,10 +25,10 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
+use neotmux_proto::clamp_to_min_grid;
 use neotmux_proto::msg::{Attach, OwnedDone, ToServer};
 use neotmux_proto::wire;
 use neotmux_proto::{OwnedToClient, Size};
-use neotmux_pty::state::clamp_to_min_grid;
 use ratatui::DefaultTerminal;
 
 use crate::client::decode::Decoder;
@@ -243,9 +244,7 @@ pub(crate) fn run(
 fn yank(text: &str) {
     use std::io::Write as _;
     let mut out = std::io::stdout().lock();
-    let _ = out
-        .write_all(&neotmux_pty::osc52::set(text))
-        .and_then(|()| out.flush());
+    let _ = out.write_all(&osc52::set(text)).and_then(|()| out.flush());
 }
 
 fn send(link: &Rc<RefCell<Link>>, msg: &ToServer) -> anyhow::Result<()> {

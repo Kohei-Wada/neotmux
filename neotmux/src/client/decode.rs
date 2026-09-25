@@ -421,22 +421,6 @@ mod tests {
         assert_eq!(decode(b"\x1b[5ua"), vec![Key::plain(KeyCode::Char('a'))]);
     }
 
-    /// The `u`-form is a real key, alongside every other form it can arrive as — the
-    /// round-trip holds: decode then encode comes back to the bytes a terminal would send
-    /// for that key.
-    #[test]
-    fn a_csi_u_key_round_trips_to_its_conventional_bytes() {
-        use crate::server::input::encode_key;
-        assert_eq!(
-            encode_key(one(b"\x1b[27u"), false).as_deref(),
-            Some(&[0x1b][..])
-        );
-        assert_eq!(
-            encode_key(one(b"\x1b[97u"), false).as_deref(),
-            Some(b"a".as_slice())
-        );
-    }
-
     #[test]
     fn escape_then_a_character_in_one_batch_is_alt() {
         assert_eq!(one(b"\x1ba"), Key::new(KeyCode::Char('a'), Modifiers::ALT));

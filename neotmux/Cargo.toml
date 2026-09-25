@@ -17,6 +17,7 @@ neotmux-layout.workspace = true
 neotmux-lua.workspace = true
 neotmux-pty.workspace = true
 anyhow.workspace = true
+base64.workspace = true
 nix.workspace = true
 ratatui.workspace = true
 signal-hook.workspace = true

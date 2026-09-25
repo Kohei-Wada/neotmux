@@ -20,7 +20,7 @@ pub use event::Event;
 pub use frame::{Frame, Notice, OwnedFrame, OwnedPaneFrame, PaneFrame};
 pub use geom::{Dir, Size, SplitDir};
 pub use geometry::{Geometry, Window};
-pub use grid::{Color, GridSnapshot, SnapCell};
+pub use grid::{Color, GridSnapshot, MIN_GRID, SnapCell, clamp_to_min_grid};
 pub use ids::{PaneId, SessionId, WindowId};
 pub use keys::{Key, KeyCode, Modifiers};
 pub use level::Level;
