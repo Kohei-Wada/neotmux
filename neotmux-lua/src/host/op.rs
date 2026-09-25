@@ -3,6 +3,9 @@ use neotmux_proto::{Dir, Level, PaneId, SplitDir, WindowId};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Op {
     Quit,
+    /// Run the config again: the host does it after the frame, never inside the callback that
+    /// asked, since that callback is running in the VM being reloaded.
+    Reload,
     Detach,
     Notify {
         level: Level,

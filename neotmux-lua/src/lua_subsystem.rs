@@ -25,7 +25,7 @@ use crate::sched::timers::Timers;
 use crate::sched::{Budget, Outcome};
 use crate::sched::{CountsOverruns, Delivery, Jobs};
 use mlua::chunk::ChunkMode;
-use mlua::{Function, Lua, Value};
+use mlua::{Function, Lua, Table, Value};
 use neotmux_proto::screen::Notice;
 use neotmux_proto::screen::PaneRead;
 use neotmux_proto::{
@@ -63,7 +63,6 @@ pub struct LuaSubsystem {
     floats: Rc<Floats>,
     jobs: Rc<Jobs>,
     timers: Rc<Timers>,
-    #[expect(dead_code, reason = "config-reload is its first reader")]
     groups: Rc<Groups>,
 }
 
@@ -249,6 +248,49 @@ impl LuaSubsystem {
         self.budget.disarm(&self.lua);
         self.loading.set(false);
         std::mem::take(&mut *self.load_failures.borrow_mut())
+    }
+
+    /// The config, run again in this VM: `unload`, every module the layers loaded forgotten,
+    /// every layer's `init.lua` run as at start, and every group nobody named taken back.
+    /// Never called from inside Lua — the host calls it between frames.
+    pub fn reload(&self, session: Option<SessionId>) -> Vec<LoadFailure> {
+        self.dispatch_unload(session);
+        self.groups.begin_reload();
+        match self
+            .lua
+            .globals()
+            .get::<Table>("package")
+            .and_then(|p| p.get::<Table>("loaded"))
+        {
+            Ok(loaded) => {
+                for name in self.sources.modules() {
+                    if let Err(err) = loaded.set(name, Value::Nil) {
+                        self.report(crate::plugin::ANONYMOUS, &err);
+                    }
+                }
+            }
+            Err(err) => self.report(crate::plugin::ANONYMOUS, &err),
+        }
+        // A parked tick has left the registry, so no group can take it back; kept, a later
+        // `resubscribe` would restore the old code's callback beside the new.
+        for (id, _) in self.sources.interned() {
+            self.overrun.forget_parked(id);
+        }
+        let failures = self.run_init();
+        self.sweep().empty(self.groups.end_reload());
+        failures
+    }
+
+    fn sweep(&self) -> api::Sweep {
+        api::Sweep {
+            registry: self.registry.clone(),
+            buffers: self.buffers.clone(),
+            reservations: self.reservations.clone(),
+            floats: self.floats.clone(),
+            jobs: self.jobs.clone(),
+            timers: self.timers.clone(),
+            commands: self.commands.clone(),
+        }
     }
 
     /// One place a raised Lua error becomes an attributed error op. M1b needs to tell an

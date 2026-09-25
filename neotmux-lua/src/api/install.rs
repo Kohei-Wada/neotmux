@@ -433,6 +433,16 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
     {
         let sources = sources.clone();
         let ops = ops.clone();
+        let reload = lua.create_function(move |lua, ()| {
+            ops.push(plugin::caller(lua, &sources), Op::Reload);
+            Ok(())
+        })?;
+        neotmux.set("reload", reload)?;
+    }
+
+    {
+        let sources = sources.clone();
+        let ops = ops.clone();
         let detach = lua.create_function(move |lua, ()| {
             ops.push(plugin::caller(lua, &sources), Op::Detach);
             Ok(())
