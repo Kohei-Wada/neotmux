@@ -131,7 +131,7 @@ fn clip_text(x: u16, y: u16, text: &str, fg: Color, bg: Color, float: &Rect) -> 
     let mut acc: u16 = 0;
     let mut out = String::new();
     for ch in text.chars() {
-        let width = neotmux_proto::width::of_char(ch) as u16;
+        let width = neotmux_proto::screen::of_char(ch) as u16;
         if width == 0 {
             out.push(ch);
             continue;

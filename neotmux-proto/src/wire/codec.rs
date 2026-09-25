@@ -15,9 +15,9 @@ use std::fmt;
 
 use std::collections::BTreeMap;
 
-use crate::frame::{Frame, OwnedFrame, OwnedPaneFrame, PaneFrame};
 use crate::keys::{Key, KeyCode, Modifiers};
-use crate::msg::{Attach, End, OwnedToClient, SessionOp, Step, Tick, ToClient, ToServer, Tock};
+use crate::screen::{Frame, OwnedFrame, OwnedPaneFrame, PaneFrame};
+use crate::wire::{Attach, End, OwnedToClient, SessionOp, Step, Tick, ToClient, ToServer, Tock};
 use crate::{
     Color, Dir, DrawCmd, Edge, Epoch, Event, Geometry, GridSnapshot, LineMode, PROTOCOL_VERSION,
     PaneId, PaneInfo, PaneRects, PaneTty, Rect, Reserved, Size, SnapCell, SplitDir, Window,
@@ -1043,7 +1043,7 @@ impl Writer {
         self.bool(v.wants_pane_output);
     }
 
-    fn done(&mut self, v: &crate::msg::Done<'_>) {
+    fn done(&mut self, v: &crate::wire::Done<'_>) {
         self.len(v.steps.len());
         for step in &v.steps {
             self.step(step);
@@ -1332,7 +1332,7 @@ impl Reader<'_> {
         })
     }
 
-    fn done(&mut self) -> Result<crate::msg::OwnedDone, WireError> {
+    fn done(&mut self) -> Result<crate::wire::OwnedDone, WireError> {
         let mut steps = Vec::new();
         for _ in 0..self.len()? {
             steps.push(self.step()?);
@@ -1352,7 +1352,7 @@ impl Reader<'_> {
         } else {
             None
         };
-        Ok(crate::msg::OwnedDone { steps, frame, end })
+        Ok(crate::wire::OwnedDone { steps, frame, end })
     }
 
     fn frame(&mut self) -> Result<OwnedFrame, WireError> {
@@ -1988,7 +1988,7 @@ mod tests {
             }),
         ];
         let borrowed = frame.frame();
-        let done = crate::msg::Done {
+        let done = crate::wire::Done {
             steps: steps.clone(),
             frame: Some(&borrowed),
             end: Some(End::Quit),
@@ -1996,7 +1996,7 @@ mod tests {
         let bytes = encode_to_client(&ToClient::Done(&done));
         assert_eq!(
             decode_to_client(&bytes),
-            Ok(OwnedToClient::Done(crate::msg::OwnedDone {
+            Ok(OwnedToClient::Done(crate::wire::OwnedDone {
                 steps,
                 frame: Some(frame),
                 end: Some(End::Quit),
@@ -2004,7 +2004,7 @@ mod tests {
         );
 
         for end in [None, Some(End::Quit), Some(End::Eof), Some(End::Detach)] {
-            let done = crate::msg::Done {
+            let done = crate::wire::Done {
                 steps: Vec::new(),
                 frame: None,
                 end,
@@ -2012,7 +2012,7 @@ mod tests {
             let bytes = encode_to_client(&ToClient::Done(&done));
             assert_eq!(
                 decode_to_client(&bytes),
-                Ok(OwnedToClient::Done(crate::msg::OwnedDone {
+                Ok(OwnedToClient::Done(crate::wire::OwnedDone {
                     steps: Vec::new(),
                     frame: None,
                     end,

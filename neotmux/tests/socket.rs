@@ -459,8 +459,8 @@ fn greet_and_send_message(socket: &Path, payload: &[u8]) {
 /// A valid `Attach`, small enough that nothing about it is the point of whatever test sends
 /// it. Its size, and nothing else: everything else a session is started with is the server's
 /// own Lua layer's to say.
-fn an_attach() -> neotmux_proto::msg::Attach {
-    neotmux_proto::msg::Attach {
+fn an_attach() -> neotmux_proto::wire::Attach {
+    neotmux_proto::wire::Attach {
         size: neotmux_proto::Size { rows: 24, cols: 80 },
         session: neotmux_sys::sock::DEFAULT_SESSION.to_string(),
     }
@@ -488,17 +488,17 @@ fn raw_client(runtime: &TestRuntime) -> UnixStream {
 }
 
 /// The greet and the attach only, for the tests that drive what comes after themselves.
-fn raw_attach(attach: neotmux_proto::msg::Attach, runtime: &TestRuntime) -> UnixStream {
+fn raw_attach(attach: neotmux_proto::wire::Attach, runtime: &TestRuntime) -> UnixStream {
     let mut stream = greeted(&socket_in(runtime.path()));
     send_message(
         &mut stream,
-        &neotmux_proto::wire::encode_to_server(&neotmux_proto::msg::ToServer::Attach(attach)),
+        &neotmux_proto::wire::encode_to_server(&neotmux_proto::wire::ToServer::Attach(attach)),
     );
     stream
 }
 
 /// The next frame on this link, whatever else the server says on the way to it.
-fn next_done(stream: &mut UnixStream) -> neotmux_proto::msg::OwnedDone {
+fn next_done(stream: &mut UnixStream) -> neotmux_proto::wire::OwnedDone {
     loop {
         match read_message(stream) {
             OwnedToClient::Done(done) => return done,

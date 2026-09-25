@@ -736,7 +736,7 @@ fn built_plugin(extra: &str, clipboard: Rc<dyn Clipboard>) -> (tempfile::TempDir
         Epoch::new(SIZE, vec![pane()], Some(pane())),
         Geometry {
             area: Rect::new(0, 0, SIZE.cols, SIZE.rows),
-            windows: vec![neotmux_proto::geometry::Window {
+            windows: vec![neotmux_proto::geom::Window {
                 id: neotmux_proto::WindowId::from(1),
                 panes: vec![pane()],
                 name: None,

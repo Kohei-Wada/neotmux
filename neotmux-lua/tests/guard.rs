@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use neotmux_lua::runtime::Layers;
 use neotmux_lua::{KeyOutcome, LuaSubsystem};
 use neotmux_proto::{
-    Epoch, Geometry, LineMode, PaneId, PaneTty, Rect, Size, WindowId, geometry::Window,
+    Epoch, Geometry, LineMode, PaneId, PaneTty, Rect, Size, WindowId, geom::Window,
 };
 use std::collections::BTreeMap;
 

@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
-use neotmux_proto::read::{Extent, Lines, PaneRead, Want};
+use neotmux_proto::screen::{Extent, Lines, PaneRead, Want};
 use neotmux_proto::{GridSnapshot, PaneId, PaneTty, Size};
 
 use crate::query::Queries;

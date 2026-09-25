@@ -40,8 +40,8 @@ use std::time::{Duration, Instant};
 use anyhow::Context as _;
 use neotmux_lua::runtime::Layers;
 use neotmux_lua::{KeyOutcome, LuaSubsystem};
-use neotmux_proto::msg::{Attach, Done, End, ToClient, ToServer};
 use neotmux_proto::wire;
+use neotmux_proto::wire::{Attach, Done, End, ToClient, ToServer};
 use neotmux_proto::{Level, SessionId, Size};
 
 use neotmux_layout::windows::PaneIds;

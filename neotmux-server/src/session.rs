@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use anyhow::Context as _;
 use neotmux_proto::clamp_to_min_grid;
-use neotmux_proto::msg::{End, SessionOp, Step, Tick, Tock};
+use neotmux_proto::wire::{End, SessionOp, Step, Tick, Tock};
 use neotmux_proto::{
     DrawCmd, Event, Geometry, Level, PaneId, PaneInfo, PaneTty, Rect as PRect, Reserved, Size,
     Window as LuaWindow, WindowId,
@@ -18,8 +18,8 @@ use crate::input::encode_key;
 use crate::paneinfo::PaneInfoCache;
 use crate::shells::Shells;
 use neotmux_layout::windows::{PaneIds, Shown, Surface, Windows};
-use neotmux_proto::frame::{Frame, PaneFrame};
 use neotmux_proto::keys::Key;
+use neotmux_proto::screen::{Frame, PaneFrame};
 use neotmux_sys::logging;
 use neotmux_sys::procinfo;
 

@@ -17,7 +17,7 @@ use neotmux_sys::sock;
 /// Runs a host command and prints what it said. Lines on stdout where it worked, the one
 /// sentence on stderr where it did not, and the exit status says which.
 pub fn command(name: &str, args: &[String], session: Option<&str>) -> anyhow::Result<()> {
-    let msg = neotmux_proto::msg::ToServer::Command {
+    let msg = neotmux_proto::wire::ToServer::Command {
         session: session.map(str::to_string),
         name: name.to_string(),
         args: args.to_vec(),
@@ -48,7 +48,7 @@ pub fn command(name: &str, args: &[String], session: Option<&str>) -> anyhow::Re
 /// says a server should be started rather than reported absent, which is right for `new` and
 /// wrong for everything else that asks.
 fn ask(
-    msg: &neotmux_proto::msg::ToServer,
+    msg: &neotmux_proto::wire::ToServer,
     start_if_needed: bool,
 ) -> anyhow::Result<Option<neotmux_proto::OwnedToClient>> {
     let link = if start_if_needed {
@@ -91,7 +91,7 @@ fn server_pid() -> Option<i32> {
 /// because a session was one and there was no protocol to ask through. There is now.
 pub fn kill(name: &str) -> anyhow::Result<()> {
     let asked = ask(
-        &neotmux_proto::msg::ToServer::Kill {
+        &neotmux_proto::wire::ToServer::Kill {
             session: name.to_string(),
         },
         false,
@@ -114,7 +114,7 @@ pub fn kill(name: &str) -> anyhow::Result<()> {
 /// a connect probe per file, because the sessions were processes; they are one server's now,
 /// and it is asked.
 pub fn ls() -> anyhow::Result<()> {
-    let names = match ask(&neotmux_proto::msg::ToServer::List, false)? {
+    let names = match ask(&neotmux_proto::wire::ToServer::List, false)? {
         Some(neotmux_proto::OwnedToClient::Sessions(names)) => names,
         Some(other) => anyhow::bail!("the neotmux server answered {other:?}"),
         None => Vec::new(),

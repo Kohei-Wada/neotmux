@@ -15,7 +15,7 @@
 //! up — a pane holds a fixed number of lines, and once it holds that many each new line drops
 //! the oldest and every number shifts down by one.
 
-use neotmux_proto::read::Trailing;
+use neotmux_proto::screen::Trailing;
 
 /// How many lines the pane holds above its visible screen.
 ///

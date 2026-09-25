@@ -10,9 +10,9 @@ use std::time::{Duration, Instant};
 use neotmux_lua::KeyOutcome;
 use neotmux_lua::LuaSubsystem;
 use neotmux_lua::runtime::Layers;
-use neotmux_proto::frame::Frame;
 use neotmux_proto::keys::{Key, KeyCode};
-use neotmux_proto::msg::End;
+use neotmux_proto::screen::Frame;
+use neotmux_proto::wire::End;
 use neotmux_proto::{DrawCmd, Reserved, SessionId, Size, WindowId};
 use neotmux_pty::wakeup::{Wakeup, wakeup};
 use neotmux_server::plugins::Plugins;
@@ -361,7 +361,7 @@ fn two_applies_are_two_stops_on_the_way_to_two_frames() {
     // A tock with no ops is a clean apply — see the application assertions below — and
     // there is no field on the apply for the picture, which is what the split is, the
     // picture not being the apply's to know about.
-    let tock = neotmux_proto::msg::Tock {
+    let tock = neotmux_proto::wire::Tock {
         ops: Vec::new(),
         overlay: Vec::new(),
         reserved: neotmux_proto::Reserved::default(),

@@ -2,7 +2,7 @@
 //!
 //! The Lua layer has no terminal. It runs beside one — M3 puts it in the client — but the
 //! handle, and the escape sequence that goes down it, are the host's, the same way a pane's
-//! text is the host's and reaches Lua through [`neotmux_proto::read::PaneRead`]. A contract
+//! text is the host's and reaches Lua through [`neotmux_proto::screen::PaneRead`]. A contract
 //! rather than a write is what keeps this crate from knowing either.
 //!
 //! Declared here rather than in `neotmux-proto`, because the only implementor is the client

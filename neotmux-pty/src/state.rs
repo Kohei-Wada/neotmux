@@ -1,4 +1,4 @@
-use neotmux_proto::read::{Extent, Trailing};
+use neotmux_proto::screen::{Extent, Trailing};
 use neotmux_proto::{Color, GridSnapshot, Size, clamp_to_min_grid};
 
 pub struct TermState {

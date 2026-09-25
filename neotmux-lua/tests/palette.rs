@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use neotmux_lua::ops::Op;
 use neotmux_lua::runtime::Layers;
 use neotmux_lua::{KeyOutcome, LuaSubsystem};
-use neotmux_proto::{DrawCmd, Epoch, Geometry, PaneId, Rect, Size, WindowId, geometry::Window};
+use neotmux_proto::{DrawCmd, Epoch, Geometry, PaneId, Rect, Size, WindowId, geom::Window};
 
 mod support;
 

@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use mlua::{Lua, Table, Value};
 
-use neotmux_proto::read::{Lines, PaneRead, Trailing, Want};
+use neotmux_proto::screen::{Lines, PaneRead, Trailing, Want};
 use neotmux_proto::{Dir, Geometry, PaneId, SplitDir};
 
 use crate::api::rect;

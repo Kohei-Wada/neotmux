@@ -26,8 +26,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
 use neotmux_proto::clamp_to_min_grid;
-use neotmux_proto::msg::{Attach, OwnedDone, ToServer};
 use neotmux_proto::wire;
+use neotmux_proto::wire::{Attach, OwnedDone, ToServer};
 use neotmux_proto::{OwnedToClient, Size};
 use ratatui::DefaultTerminal;
 

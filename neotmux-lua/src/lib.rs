@@ -27,8 +27,8 @@ use std::time::{Duration, Instant};
 use mlua::chunk::ChunkMode;
 use mlua::{Function, Lua, Value};
 
-use neotmux_proto::frame::Notice;
-use neotmux_proto::read::PaneRead;
+use neotmux_proto::screen::Notice;
+use neotmux_proto::screen::PaneRead;
 use neotmux_proto::{
     DrawCmd, Epoch, Event, Geometry, Level, PaneId, PaneInfo, PaneTty, Reserved, SessionId, Size,
     WindowId,

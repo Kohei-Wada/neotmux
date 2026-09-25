@@ -1,4 +1,4 @@
-use neotmux_proto::read::Trailing;
+use neotmux_proto::screen::Trailing;
 
 /// One row of a terminal as plain text, and the rules a plugin matching a pattern against it
 /// can rely on.
@@ -158,7 +158,7 @@ mod tests {
     fn a_padded_row_is_the_panes_width_in_columns() {
         let line = padded(1, 6, "\u{3042}b".as_bytes()).remove(0);
         assert_eq!(line, "\u{3042}b   ");
-        assert_eq!(neotmux_proto::width::of_str(&line), 6);
+        assert_eq!(neotmux_proto::screen::of_str(&line), 6);
     }
 
     /// Output that scrolled off the top is gone from the visible screen; reaching it is
@@ -181,7 +181,7 @@ mod tests {
     fn what_this_measures_is_where_the_grid_leaves_the_cursor() {
         for text in ["hello", "\u{3042}\u{3044}", "a\u{3042}b", "e\u{0301}x", ""] {
             assert_eq!(
-                neotmux_proto::width::of_str(text),
+                neotmux_proto::screen::of_str(text),
                 grid_width(text),
                 "measuring {text:?}"
             );

@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use neotmux_proto::Level;
 
-use neotmux_proto::frame::Notice;
+use neotmux_proto::screen::Notice;
 use neotmux_sys::logging;
 
 const TTL: Duration = Duration::from_secs(4);

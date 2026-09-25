@@ -10,7 +10,7 @@ use neotmux_lua::ops::Op;
 use neotmux_lua::runtime::Layers;
 use neotmux_lua::{KeyOutcome, LuaSubsystem};
 use neotmux_proto::{
-    DrawCmd, Epoch, Geometry, PaneId, PaneInfo, Rect, SessionId, Size, WindowId, geometry::Window,
+    DrawCmd, Epoch, Geometry, PaneId, PaneInfo, Rect, SessionId, Size, WindowId, geom::Window,
 };
 
 mod support;

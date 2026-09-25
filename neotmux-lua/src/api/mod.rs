@@ -19,7 +19,7 @@ use std::rc::Rc;
 
 use mlua::{Function, Lua, Table, Value};
 
-use neotmux_proto::read::PaneRead;
+use neotmux_proto::screen::PaneRead;
 
 use crate::LoadFailure;
 use crate::commands::Commands;
@@ -49,7 +49,7 @@ pub(crate) struct Shared {
     pub(crate) geometry: Rc<RefCell<Geometry>>,
     pub(crate) pane_info: Rc<RefCell<PaneInfos>>,
     pub(crate) pane_tty: Rc<RefCell<PaneTtys>>,
-    pub(crate) notices: Rc<RefCell<Vec<neotmux_proto::frame::Notice>>>,
+    pub(crate) notices: Rc<RefCell<Vec<neotmux_proto::screen::Notice>>>,
     pub(crate) panes: Rc<dyn PaneRead>,
     pub(crate) clipboard: Rc<dyn crate::clipboard::Clipboard>,
     pub(crate) jobs: Rc<crate::jobs::Jobs>,
@@ -406,7 +406,7 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
         // one entry at the column it starts in, and everything that takes a column — a
         // tint, a rect, a draw — counts cells. `#line` counts neither.
         let width = lua.create_function(move |_, text: String| {
-            Ok(neotmux_proto::width::of_str(&text) as i64)
+            Ok(neotmux_proto::screen::of_str(&text) as i64)
         })?;
         neotmux.set("width", width)?;
     }
