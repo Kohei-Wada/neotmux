@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Killing a job can no longer signal somebody else's processes
+
+A job's waiting thread reaped the child and only then cleared the pid a kill would signal, so a
+kill landing between the two sent SIGKILL to the process group of whatever the system had handed
+that pid to next — the job's whole group, since jobs run in their own. It now waits for the exit
+with `waitid(WNOWAIT)`, which leaves the child a zombie still holding its pid, clears the pid
+while it is, and reaps after.
+
 ### The first list opened no longer flashes in the corner
 
 The first `neotmux.list` a session opened — the palette, the session picker — was created at the

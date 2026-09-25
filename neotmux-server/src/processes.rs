@@ -34,6 +34,12 @@ impl Processes {
 
 impl Runner for Processes {
     fn start(&self, spec: &JobSpec) -> io::Result<Box<dyn Running>> {
+        Ok(Box::new(self.spawn(spec)?))
+    }
+}
+
+impl Processes {
+    fn spawn(&self, spec: &JobSpec) -> io::Result<Process> {
         let (program, args) = spec
             .cmd
             .split_first()
@@ -98,11 +104,29 @@ impl Runner for Processes {
                 for reader in readers {
                     let _ = reader.join();
                 }
-                let chunk = match child.wait() {
+                // The pid stops being the job's the moment the child is reaped, so `live` is
+                // cleared while the child is still a zombie holding it: a kill that has the
+                // lock first signals a group the job still owns, and one that comes after
+                // finds nothing to signal. Reaping first and clearing after left a window in
+                // which a kill reached whatever the system gave the pid to next (#40).
+                let clear = || *reaped.lock().unwrap_or_else(PoisonError::into_inner) = None;
+                let waited = match exited(group) {
+                    Ok(()) => {
+                        clear();
+                        child.wait()
+                    }
+                    // `waitid` has nothing to fail on for a child of ours that has not been
+                    // reaped; if it does, the job is still ended, in the old order.
+                    Err(_) => {
+                        let waited = child.wait();
+                        clear();
+                        waited
+                    }
+                };
+                let chunk = match waited {
                     Ok(status) => JobChunk::Exited(code(&status)),
                     Err(err) => JobChunk::Failed(format!("could not wait for the job: {err}")),
                 };
-                *reaped.lock().unwrap_or_else(PoisonError::into_inner) = None;
                 let _ = tx.send(chunk);
                 waker.wake();
             });
@@ -114,7 +138,27 @@ impl Runner for Processes {
             return Err(err);
         }
 
-        Ok(Box::new(Process { chunks, live }))
+        Ok(Process { chunks, live })
+    }
+}
+
+/// Blocks until the child has exited, without reaping it: `WNOWAIT` leaves it a zombie, and a
+/// zombie keeps its pid, so nothing else can be handed that pid until the child is waited for.
+fn exited(pid: Pid) -> io::Result<()> {
+    use nix::libc;
+    loop {
+        // Safety: `info` is a plain C struct the call fills in, and it outlives the call.
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        let flags = libc::WEXITED | libc::WNOWAIT;
+        let waited =
+            unsafe { libc::waitid(libc::P_PID, pid.as_raw() as libc::id_t, &mut info, flags) };
+        if waited == 0 {
+            return Ok(());
+        }
+        let err = io::Error::last_os_error();
+        if err.kind() != io::ErrorKind::Interrupted {
+            return Err(err);
+        }
     }
 }
 
@@ -181,8 +225,9 @@ fn code(status: &std::process::ExitStatus) -> i32 {
 /// A job that has started: what its threads have said, and the pid to signal while it lives.
 struct Process {
     chunks: Receiver<JobChunk>,
-    /// The job's process group — the child's own pid — or `None` once the waiting thread has
-    /// reaped it, so a kill after the fact does not signal whatever the system handed out next.
+    /// The job's process group — the child's own pid — or `None` once the child has exited,
+    /// cleared before the waiting thread reaps it, so a kill after the fact does not signal
+    /// whatever the system hands that pid to next.
     live: Arc<Mutex<Option<Pid>>>,
 }
 
@@ -213,5 +258,37 @@ impl Running for Process {
 impl Drop for Process {
     fn drop(&mut self) {
         self.kill();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+
+    /// A kill in progress holds `live`. While it does, the job's pid must still be the job's: a
+    /// child already reaped hands its pid back to the system, and the group signal the kill is
+    /// about to send would reach whatever was given that pid next (#40).
+    #[test]
+    fn a_job_is_not_reaped_while_its_pid_is_still_live() {
+        let (_wakeup, waker) = neotmux_pty::child::wakeup().expect("wakeup");
+        let job = Processes::new(waker)
+            .spawn(&JobSpec {
+                cmd: vec!["sleep".into(), "0.2".into()],
+                cwd: None,
+                env: Vec::new(),
+            })
+            .expect("spawn");
+        let held = job.live.lock().unwrap_or_else(PoisonError::into_inner);
+        let pid = held.expect("live while it runs");
+        // Long past the child's exit: a waiter that reaps without the lock has done so by now.
+        thread::sleep(Duration::from_millis(800));
+        assert!(
+            kill(pid, None).is_ok(),
+            "the job was reaped while its pid was still live, so a kill now signals whatever \
+             process the system hands that pid to next"
+        );
+        drop(held);
     }
 }
