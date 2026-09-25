@@ -257,8 +257,11 @@ end
 local function draw_row(ctx, x, y, width, runs)
   if runs.fill then
     ctx:rect(nil, x, y, width, 1, { bg = runs.fill })
+    -- Over the band's own colour too, which `row` gives every run it builds.
     for _, run in ipairs(runs) do
-      run.bg = run.bg or runs.fill
+      if run.bg == nil or run.bg == M.colors.bar then
+        run.bg = runs.fill
+      end
     end
   end
   segments.draw(ctx, x, y, width, runs)

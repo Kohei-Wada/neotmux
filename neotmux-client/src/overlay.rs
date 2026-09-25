@@ -101,8 +101,8 @@ fn draw_text(
             break;
         }
         draw_char(buf, area, bound, (cx, y), ch, colors);
-        if bold && let Some(cell) = cell_at(buf, area, bound, (cx, y)) {
-            cell.modifier.insert(ratatui::style::Modifier::BOLD);
+        if let Some(cell) = cell_at(buf, area, bound, (cx, y)) {
+            cell.modifier.set(ratatui::style::Modifier::BOLD, bold);
         }
         // ratatui reads a wide glyph as owning the cells after it, which have to be empty.
         for tail in 1..width {
@@ -648,6 +648,31 @@ mod tests {
         let buf = render((4, 1), |frame, area| apply(frame, area, &cmds, &panes));
         assert!(
             buf[(0, 0)]
+                .modifier
+                .contains(ratatui::style::Modifier::BOLD),
+            "{:?}",
+            buf[(0, 0)]
+        );
+    }
+
+    /// A plain text over a bold one is plain: a palette drawn over the sidebar's bold names must
+    /// not come out bold where they were.
+    #[test]
+    fn a_plain_command_over_a_bold_one_is_not_bold() {
+        let text = |bold| DrawCmd::Text {
+            pane: None,
+            x: 0,
+            y: 0,
+            text: "B".to_string(),
+            fg: Color::Default,
+            bg: Color::Default,
+            bold,
+        };
+        let cmds = vec![text(true), text(false)];
+        let panes = PaneRects::new();
+        let buf = render((4, 1), |frame, area| apply(frame, area, &cmds, &panes));
+        assert!(
+            !buf[(0, 0)]
                 .modifier
                 .contains(ratatui::style::Modifier::BOLD),
             "{:?}",

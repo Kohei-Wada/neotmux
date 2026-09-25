@@ -1398,8 +1398,8 @@ mauve. Git is asked as a job — the sandbox has no `io` — at most every
 
 **`C-b w`** is herdr's navigate: a cursor over the spaces, starting on the session you are in.
 `j`/`k` move it, Enter goes to the session under it, `1`-`9` go straight to that one, Esc
-leaves. The sidebar unfolds while it is up if it was folded, and the bottom row says
-`NAVIGATE` and what the keys do, as herdr's does.
+leaves. The sidebar unfolds while it is up if it was folded, and the panes' bottom row says
+`NAVIGATE` and what the keys do, over whatever is there, as herdr's does.
 
 **`agents`**, under it, is every pane a ruleset in `neotmux.detect.agents` answered for, in every
 session — where it is on the first row, what it is on the second:
@@ -1431,6 +1431,8 @@ in — is still shipped as `plugin.sidebar.sessions`, and is one assignment away
 local sidebar = require('plugin.sidebar')
 sidebar.sections = { require('plugin.sidebar.sessions'), require('plugin.sidebar.agents') }
 sidebar.split = nil   -- shared out by what each has, so the tree has the rows no agent is using
+sidebar.widths = { min = 27, max = 36, closed = 1 }   -- as wide as its names, folded to its icons
+require('plugin.sidebar.agents').always = false      -- no header while there are no agents
 ```
 
 Its rows are tables too:

@@ -1063,3 +1063,22 @@ fn navigate_says_so_along_the_bottom_and_paints_the_cursor() {
     let lines = settled(&sub, &s, 1);
     assert!(!lines.iter().any(|l| l.contains("NAVIGATE")), "{lines:#?}");
 }
+
+/// A band colour of your own does not hide the rows you are at: the fill is what they are drawn
+/// on, whatever the band is.
+#[test]
+fn a_band_colour_of_your_own_still_shows_the_rows_you_are_at() {
+    let (_dir, sub) = built_herdr("require('plugin.sidebar').colors.bar = '#181825'\n");
+    let s = [Sess::new(1, "work", vec![vec![101]])];
+    open(&sub, &s);
+    settled(&sub, &s, 1);
+    let bg = sub
+        .frame_output()
+        .into_iter()
+        .find_map(|cmd| match cmd {
+            DrawCmd::Text { text, bg, .. } if text == "work" => Some(bg),
+            _ => None,
+        })
+        .expect("work is drawn");
+    assert_eq!(bg, HERE);
+}
