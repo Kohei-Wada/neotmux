@@ -1058,7 +1058,8 @@ fn navigate_says_so_along_the_bottom_and_paints_the_cursor() {
     support::keys(&sub, &["W", "j"]);
     let lines = settled(&sub, &s, 1);
     line_with(&lines, "NAVIGATE");
-    assert_eq!(fill_on(&sub, 3), Some(CURSOR), "{lines:#?}");
+    let bravo = line_with(&lines, " bravo") as u16;
+    assert_eq!(fill_on(&sub, bravo), Some(CURSOR), "{lines:#?}");
     support::keys(&sub, &["Esc"]);
     let lines = settled(&sub, &s, 1);
     assert!(!lines.iter().any(|l| l.contains("NAVIGATE")), "{lines:#?}");
@@ -1081,4 +1082,55 @@ fn a_band_colour_of_your_own_still_shows_the_rows_you_are_at() {
         })
         .expect("work is drawn");
     assert_eq!(bg, HERE);
+}
+
+/// The session you are in is opened out under its space: its windows and panes, as the tree
+/// draws them, so where you are inside it is on screen too. The others stay one entry each.
+#[test]
+fn the_space_you_are_in_shows_its_windows_and_panes() {
+    let (_dir, sub) = built_herdr("");
+    let s = [
+        Sess::new(1, "work", vec![vec![101, 102], vec![103]]),
+        Sess::new(2, "home", vec![vec![201]]),
+    ];
+    open(&sub, &s);
+    let tall = Size { rows: 30, cols: 80 };
+    frame_in(&sub, tall, &s, 1);
+    let lines = frame_in(&sub, tall, &s, 1);
+    let work = line_with(&lines, " work");
+    let rule = line_with(&lines, "\u{2500}\u{2500}\u{2500}");
+    for pane in ["1.1 cat", "1.2 cat", "2.1 cat"] {
+        let at = line_with(&lines, pane);
+        assert!(work < at && at < rule, "{pane}: {lines:#?}");
+    }
+    assert_eq!(
+        lines.iter().filter(|l| l.contains(" cat")).count(),
+        3,
+        "only the session you are in is opened out: {lines:#?}"
+    );
+}
+
+#[test]
+fn the_tree_under_the_space_you_are_in_can_be_turned_off() {
+    let (_dir, sub) = built_herdr("require('plugin.sidebar.spaces').tree = false\n");
+    let s = [Sess::new(1, "work", vec![vec![101, 102]])];
+    open(&sub, &s);
+    let lines = settled(&sub, &s, 1);
+    assert!(!lines.iter().any(|l| l.contains("1.1")), "{lines:#?}");
+}
+
+/// A session with more windows than the top half holds keeps every space's name before any of
+/// its panes, and the pane you are in among the panes it keeps.
+#[test]
+fn a_tree_too_tall_for_the_half_keeps_the_names_and_the_pane_you_are_in() {
+    let (_dir, sub) = built_herdr("");
+    let windows: Vec<Vec<u32>> = (0..8).map(|w| vec![101 + w]).collect();
+    let mut work = Sess::new(1, "work", windows);
+    work.focus = 108;
+    let s = [work, Sess::new(2, "home", vec![vec![201]])];
+    open(&sub, &s);
+    let lines = settled(&sub, &s, 1);
+    line_with(&lines, " home");
+    line_with(&lines, " work");
+    line_with(&lines, "8.1 cat");
 }

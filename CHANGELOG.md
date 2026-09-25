@@ -27,6 +27,12 @@ and a plugin adds its own to `require('plugin.palette').providers`. `agent-next`
 as `plugin.sidebar.sessions`, one assignment away, and requiring `plugin.sidebar` from your own
 `init.lua` no longer loses `C-b b`.
 
+### The space you are in shows its windows and panes
+
+Under the session you are in, `spaces` draws its windows and panes as the tree does, so where
+you are inside it is on screen as well as which session it is. `spaces.tree = false` leaves them
+out; when they do not fit, every space keeps its name first.
+
 ### What you type straight after a switch goes to the session you switched to
 
 A key a plugin took and acted on — `session.switch`, `pane.focus`, `pane.send` — is carried out

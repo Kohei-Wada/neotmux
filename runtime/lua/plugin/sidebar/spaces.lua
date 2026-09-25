@@ -13,6 +13,7 @@
 -- `plugin.sidebar.sessions`, and goes back with one assignment to `require('plugin.sidebar')
 -- .sections`.
 local detect = require("neotmux.detect")
+local sessions = require("plugin.sidebar.sessions")
 local seen = require("neotmux.seen")
 local state = require("neotmux.state")
 local modes = require("neotmux.mode")
@@ -21,6 +22,10 @@ local M = { title = "spaces" }
 
 M.rows = { { "state_icon", "name" }, { "branch", "ahead", "behind" } }
 M.row_gap = 0
+
+-- The windows and panes of the session you are in, under its space, drawn as
+-- `plugin.sidebar.sessions` draws them — its `markers`, `tree` and `tokens` apply here too.
+M.tree = true
 
 -- How often a directory's branch is asked again, in milliseconds.
 M.refresh = 5000
@@ -158,30 +163,54 @@ local function entries()
   return out
 end
 
+-- Shaped as `plugin.sidebar.sessions` shapes its model, each space's own rows and the tree hung
+-- under the one you are in, so that section's fit cuts this one the same way.
 function M.build(given)
   sidebar = given
-  local rows, anchor = {}, 1
+  local rows, anchor, spaces = {}, 1, {}
+  local tree = { rows = {} }
   for at, it in ipairs(entries()) do
     local selected = M.cursor == at
     local fill = selected and sidebar.colors.selection or it.here and sidebar.colors.here or nil
-    if it.here and not M.cursor then
-      anchor = #rows + 1
-    elseif selected then
+    if (it.here and not M.cursor) or selected then
       anchor = #rows + 1
     end
+    local own = {}
     for line, names in ipairs(M.rows) do
       local runs = sidebar.row(M.tokens, names, it)
       if #runs > 0 then
         table.insert(runs, 1, { text = line == 1 and " " or "   " })
         runs.fill = fill
+        own[#own + 1] = runs
         rows[#rows + 1] = runs
+      end
+    end
+    spaces[#spaces + 1] = { rows = own, here = it.here }
+    if it.here and M.tree then
+      local base = #rows
+      tree.anchor = sessions.subtree(sidebar, tree.rows)
+      for _, runs in ipairs(tree.rows) do
+        table.insert(runs, 1, { text = "   " })
+        rows[#rows + 1] = runs
+      end
+      if tree.anchor and not M.cursor then
+        anchor = base + tree.anchor
       end
     end
     for _ = 1, M.row_gap or 0 do
       rows[#rows + 1] = { { text = "", bg = sidebar.colors.bar } }
     end
   end
-  return { rows = rows, anchor = anchor }
+  return { rows = rows, anchor = anchor, entries = spaces, tree = tree }
+end
+
+-- With a tree, every space's name before any of its panes, as the tree section cuts; without
+-- one, a window around the anchor.
+function M.fit(model, height, given)
+  if #model.tree.rows == 0 then
+    return given.scroll(model, height)
+  end
+  return sessions.fit(model, height, given)
 end
 
 -- Folded: `1 ●`, a session a row, numbered as `1`-`9` in navigate go to them.

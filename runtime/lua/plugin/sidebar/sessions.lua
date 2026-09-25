@@ -174,7 +174,9 @@ end
 
 -- The windows and panes of the session that is open, into `out`. Answers the row worth keeping
 -- on screen: the pane you are in, or failing that the window, or nil when there is neither.
-local function subtree(sidebar, out)
+-- `plugin.sidebar.spaces` hangs the same rows under the space you are in.
+function M.subtree(sidebar, out)
+  colors = sidebar.colors
   local anchor
   local current_window = neotmux.window.current()
   local focused = neotmux.pane.current()
@@ -234,7 +236,7 @@ function M.build(sidebar)
     -- Under the one you are in, because that is where its windows are. The others are named
     -- and no more: what is inside a session you are not in is what the picker is for.
     if it.here then
-      tree.anchor = subtree(sidebar, tree.rows)
+      tree.anchor = M.subtree(sidebar, tree.rows)
       if tree.anchor then
         anchor = #rows + tree.anchor
       end

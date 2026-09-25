@@ -1393,7 +1393,11 @@ across above the second, and the bottom row's corner is `«`, what `C-b b` does.
 pane's directory is on and how far that is from its upstream (`↑` ahead in green, `↓` behind in
 red). A session's state is its most urgent agent's, in herdr's order: blocked, done, working,
 idle; with no agent it is `·`. The session you are in is bold on a painted row, its branch in
-mauve. Git is asked as a job — the sandbox has no `io` — at most every
+mauve, and under it are its windows and panes, drawn as the tree draws them (▸ the window being
+shown, • the pane you are in; `plugin.sidebar.sessions`' `markers`, `tree` and `tokens` apply).
+`require('plugin.sidebar.spaces').tree = false` leaves them out. When they do not fit, every
+space keeps its name before any pane does, and the pane you are in is one of the ones kept.
+Git is asked as a job — the sandbox has no `io` — at most every
 `require('plugin.sidebar.spaces').refresh` ms (5000) per directory.
 
 **`C-b w`** is herdr's navigate: a cursor over the spaces, starting on the session you are in.
