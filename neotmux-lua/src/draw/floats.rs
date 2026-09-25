@@ -97,8 +97,14 @@ impl Floats {
 pub fn place(cmd: &DrawCmd, float: &Rect) -> Vec<DrawCmd> {
     match cmd {
         DrawCmd::Text {
-            x, y, text, fg, bg, ..
-        } => clip_text(*x, *y, text, *fg, *bg, float),
+            x,
+            y,
+            text,
+            fg,
+            bg,
+            bold,
+            ..
+        } => clip_text(*x, *y, text, (*fg, *bg, *bold), float),
         DrawCmd::Rect { rect, fg, bg, .. } => clip_rect(rect, *fg, *bg, float),
         DrawCmd::Tint { rect, fg, bg, .. } => clip_tint(rect, *fg, *bg, float),
         DrawCmd::Line {
@@ -117,7 +123,14 @@ pub fn place(cmd: &DrawCmd, float: &Rect) -> Vec<DrawCmd> {
 /// `neotmux_proto::screen::width::of_char`: a zero-width (combining) char rides the previous cell rather than
 /// being measured, and a wide char that would straddle the cap drops as a whole rather than
 /// being half-drawn.
-fn clip_text(x: u16, y: u16, text: &str, fg: Color, bg: Color, float: &Rect) -> Vec<DrawCmd> {
+fn clip_text(
+    x: u16,
+    y: u16,
+    text: &str,
+    style: (Color, Color, bool),
+    float: &Rect,
+) -> Vec<DrawCmd> {
+    let (fg, bg, bold) = style;
     if x >= float.w || y >= float.h {
         return Vec::new();
     }
@@ -146,6 +159,7 @@ fn clip_text(x: u16, y: u16, text: &str, fg: Color, bg: Color, float: &Rect) -> 
         text: out,
         fg,
         bg,
+        bold,
     }]
 }
 
@@ -231,6 +245,7 @@ fn clip_line(
                 text: glyph.to_string(),
                 fg,
                 bg: Color::Default,
+                bold: false,
             });
         }
         if x == x1 && y == y1 {
@@ -387,6 +402,7 @@ mod tests {
             text: text.to_string(),
             fg: Color::Default,
             bg: Color::Default,
+            bold: false,
         }
     }
 
@@ -402,6 +418,7 @@ mod tests {
                 text: "hi".to_string(),
                 fg: Color::Default,
                 bg: Color::Default,
+                bold: false,
             }]
         );
     }
@@ -419,6 +436,7 @@ mod tests {
                 text: "hell".to_string(),
                 fg: Color::Default,
                 bg: Color::Default,
+                bold: false,
             }]
         );
     }
@@ -437,6 +455,7 @@ mod tests {
                 text: "A".to_string(),
                 fg: Color::Default,
                 bg: Color::Default,
+                bold: false,
             }]
         );
     }
@@ -555,6 +574,7 @@ mod tests {
                     text: "#".to_string(),
                     fg: Color::Default,
                     bg: Color::Default,
+                    bold: false,
                 },
                 DrawCmd::Text {
                     pane: None,
@@ -563,6 +583,7 @@ mod tests {
                     text: "#".to_string(),
                     fg: Color::Default,
                     bg: Color::Default,
+                    bold: false,
                 },
                 DrawCmd::Text {
                     pane: None,
@@ -571,6 +592,7 @@ mod tests {
                     text: "#".to_string(),
                     fg: Color::Default,
                     bg: Color::Default,
+                    bold: false,
                 },
             ],
             "only the steps that stayed inside the float remain"

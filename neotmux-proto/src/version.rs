@@ -19,4 +19,6 @@
 /// - 12: `Read` and `Reading` left the wire. The Lua layer runs in the server, so the pane
 ///   read it used to ask across the socket is a function call and nothing sent either
 ///   message. A renderer needed neither: no renderer ever spoke them.
-pub const PROTOCOL_VERSION: u32 = 12;
+/// - 13: `DrawCmd::Text` carries `bold`, a byte after its colours. A renderer needed it: it is
+///   an attribute the renderer draws.
+pub const PROTOCOL_VERSION: u32 = 13;

@@ -172,6 +172,7 @@ mod tests {
             text: s.to_string(),
             fg: Color::Default,
             bg: Color::Default,
+            bold: false,
         }
     }
 

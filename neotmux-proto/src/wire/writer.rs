@@ -153,6 +153,7 @@ impl Writer {
                 text,
                 fg,
                 bg,
+                bold,
             } => {
                 self.u8(CMD_TEXT);
                 self.opt_pane(*pane);
@@ -161,6 +162,7 @@ impl Writer {
                 self.str(text);
                 self.color(*fg);
                 self.color(*bg);
+                self.u8(u8::from(*bold));
             }
             DrawCmd::Rect { pane, rect, fg, bg } => {
                 self.u8(CMD_RECT);

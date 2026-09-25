@@ -11,6 +11,9 @@ pub enum DrawCmd {
         text: String,
         fg: Color,
         bg: Color,
+        /// Drawn in the terminal's bold weight. What a sidebar heading or a name is set in, and
+        /// the one attribute the plugins ask for; underline and the rest can join it.
+        bold: bool,
     },
     Rect {
         pane: Option<PaneId>,

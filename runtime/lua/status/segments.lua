@@ -41,7 +41,7 @@ function M.draw(ctx, x, y, limit, runs)
       text = clip(text, room)
     end
     if text ~= "" then
-      ctx:text(nil, at, y, text, { fg = run.fg, bg = run.bg })
+      ctx:text(nil, at, y, text, { fg = run.fg, bg = run.bg, bold = run.bold })
       at = at + M.columns(text)
     end
   end

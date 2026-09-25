@@ -240,6 +240,10 @@ impl UserData for Ctx {
         methods.add_method(
             "text",
             |_, this, (target, x, y, text, colours): (Value, u16, u16, String, Option<Table>)| {
+                let bold = match &colours {
+                    Some(table) => table.get::<Option<bool>>("bold")?.unwrap_or(false),
+                    None => false,
+                };
                 let (fg, bg) = parse_colours(colours)?;
                 match resolve(&target)? {
                     Target::Surface => {
@@ -252,6 +256,7 @@ impl UserData for Ctx {
                                 text,
                                 fg,
                                 bg,
+                                bold,
                             },
                         );
                     }
@@ -265,6 +270,7 @@ impl UserData for Ctx {
                                 text,
                                 fg,
                                 bg,
+                                bold,
                             },
                         );
                     }
@@ -276,6 +282,7 @@ impl UserData for Ctx {
                             text,
                             fg,
                             bg,
+                            bold,
                         };
                         if let Some(rect) = this.floats.get(&id) {
                             this.buffers.record_float(

@@ -86,6 +86,7 @@ fn draw_text(
     pos: (u16, u16),
     text: &str,
     colors: Colors,
+    bold: bool,
 ) {
     let (x, y) = pos;
     let mut cx = x;
@@ -100,6 +101,9 @@ fn draw_text(
             break;
         }
         draw_char(buf, area, bound, (cx, y), ch, colors);
+        if bold && let Some(cell) = cell_at(buf, area, bound, (cx, y)) {
+            cell.modifier.insert(ratatui::style::Modifier::BOLD);
+        }
         // ratatui reads a wide glyph as owning the cells after it, which have to be empty.
         for tail in 1..width {
             if let Some(cell) = cell_at(buf, area, bound, (cx + tail, y)) {
@@ -187,6 +191,7 @@ pub fn apply(frame: &mut Frame, area: Rect, cmds: &[DrawCmd], panes: &PaneRects)
                 text,
                 fg,
                 bg,
+                bold,
             } => {
                 let Some(bound) = bounds(panes, area, *pane) else {
                     continue;
@@ -198,6 +203,7 @@ pub fn apply(frame: &mut Frame, area: Rect, cmds: &[DrawCmd], panes: &PaneRects)
                     (*x, *y),
                     text,
                     Colors { fg: *fg, bg: *bg },
+                    *bold,
                 );
             }
             DrawCmd::Rect { pane, rect, fg, bg } => {
@@ -257,6 +263,7 @@ mod tests {
             text: "OVERLAY".to_string(),
             fg: Color::Default,
             bg: Color::Default,
+            bold: false,
         }];
         let panes = PaneRects::new();
         let buf = render((10, 3), |frame, area| apply(frame, area, &cmds, &panes));
@@ -274,6 +281,7 @@ mod tests {
             text: "X".to_string(),
             fg: Color::Default,
             bg: Color::Default,
+            bold: false,
         }];
         let mut panes = PaneRects::new();
         panes.insert(pane, PRect::new(2, 1, 5, 2));
@@ -291,6 +299,7 @@ mod tests {
             text: "X".to_string(),
             fg: Color::Default,
             bg: Color::Default,
+            bold: false,
         }];
         let panes = PaneRects::new();
         let buf = render((10, 4), |frame, area| apply(frame, area, &cmds, &panes));
@@ -307,6 +316,7 @@ mod tests {
             text: "HELLO".to_string(),
             fg: Color::Default,
             bg: Color::Default,
+            bold: false,
         }];
         let mut panes = PaneRects::new();
         panes.insert(pane, PRect::new(0, 0, 3, 1));
@@ -327,6 +337,7 @@ mod tests {
             text: "\u{5e45}X".to_string(),
             fg: Color::Default,
             bg: Color::Default,
+            bold: false,
         }];
         let panes = PaneRects::new();
         let buf = render((10, 2), |frame, area| apply(frame, area, &cmds, &panes));
@@ -351,6 +362,7 @@ mod tests {
             text: "A\u{5e45}".to_string(),
             fg: Color::Default,
             bg: Color::Default,
+            bold: false,
         }];
         let mut panes = PaneRects::new();
         panes.insert(pane, PRect::new(0, 0, 2, 1));
@@ -498,6 +510,7 @@ mod tests {
                 text: "abc".to_string(),
                 fg: Color::Idx(1),
                 bg: Color::Idx(2),
+                bold: false,
             },
             tint(
                 PRect::new(0, 0, 3, 1),
@@ -526,6 +539,7 @@ mod tests {
                 text: "x".to_string(),
                 fg: Color::Idx(3),
                 bg: Color::Idx(5),
+                bold: false,
             },
             tint(PRect::new(0, 0, 1, 1), None, Some(Color::Idx(6))),
         ];
@@ -574,6 +588,7 @@ mod tests {
                 text: "q".to_string(),
                 fg: Color::Idx(1),
                 bg: Color::Idx(2),
+                bold: false,
             },
             tint(PRect::new(0, 0, 1, 1), None, None),
         ];
@@ -616,5 +631,27 @@ mod tests {
         let panes = PaneRects::new();
         let buf = render((10, 5), |frame, area| apply(frame, area, &cmds, &panes));
         assert_eq!(buf[(2, 2)].bg, RColor::Reset);
+    }
+
+    #[test]
+    fn a_bold_command_draws_bold() {
+        let cmds = vec![DrawCmd::Text {
+            pane: None,
+            x: 0,
+            y: 0,
+            text: "B".to_string(),
+            fg: Color::Default,
+            bg: Color::Default,
+            bold: true,
+        }];
+        let panes = PaneRects::new();
+        let buf = render((4, 1), |frame, area| apply(frame, area, &cmds, &panes));
+        assert!(
+            buf[(0, 0)]
+                .modifier
+                .contains(ratatui::style::Modifier::BOLD),
+            "{:?}",
+            buf[(0, 0)]
+        );
     }
 }

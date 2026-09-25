@@ -317,6 +317,7 @@ mod tests {
                 text: "日本語 and ascii".to_owned(),
                 fg,
                 bg: COLORS[(n + 1) % COLORS.len()],
+                bold: false,
             });
             cmds.push(DrawCmd::Rect {
                 pane,
@@ -567,6 +568,7 @@ mod tests {
                     text: self.text(),
                     fg: self.color(),
                     bg: self.color(),
+                    bold: false,
                 },
                 1 => DrawCmd::Rect {
                     pane: self.opt_pane(),
@@ -848,6 +850,7 @@ mod tests {
                 text: "painted".to_string(),
                 fg: Color::Idx(3),
                 bg: Color::Default,
+                bold: false,
             }],
             reserved: Reserved::horizontal(1, 0),
             gutter: 2,
@@ -997,5 +1000,21 @@ mod tests {
                 let _ = decode_to_client(&bytes);
             }
         }
+    }
+
+    /// Bold is part of what a text command is, and crosses the wire with it.
+    #[test]
+    fn a_bold_text_command_round_trips() {
+        let mut frame = frame_of(vec![]);
+        frame.overlay = vec![DrawCmd::Text {
+            pane: None,
+            x: 1,
+            y: 2,
+            text: "bold".to_string(),
+            fg: Color::Default,
+            bg: Color::Default,
+            bold: true,
+        }];
+        round_trip(&frame);
     }
 }

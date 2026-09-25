@@ -197,6 +197,7 @@ impl<'a> Reader<'a> {
                 text: self.string()?,
                 fg: self.color()?,
                 bg: self.color()?,
+                bold: self.u8()? != 0,
             }),
             CMD_RECT => Ok(DrawCmd::Rect {
                 pane: self.opt_pane()?,

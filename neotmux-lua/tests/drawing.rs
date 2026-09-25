@@ -1012,6 +1012,7 @@ fn a_draw_into_a_float_is_offset_and_clipped_per_verb() {
                 text: "abcdefg".to_string(),
                 fg: Color::Default,
                 bg: Color::Default,
+                bold: false,
             },
             DrawCmd::Rect {
                 pane: None,
@@ -1062,6 +1063,7 @@ fn a_float_off_the_surface_edge_still_arrives_whole() {
             text: "hi".to_string(),
             fg: Color::Default,
             bg: Color::Default,
+            bold: false,
         }],
         "only the float-local clip runs host-side; the command arrives whole even though \
          (98, 20) falls outside the 80x24 surface -- clipping to the surface is the \
@@ -1305,5 +1307,33 @@ fn ctx_float_rect_refuses_a_pane_or_nil_target() {
         vec!["nil:false".to_string(), "pane:false".to_string()],
         "float_rect answers only for a float handle; neither nil nor a pane number should \
          be accepted"
+    );
+}
+
+/// `bold = true` in a text's options is carried on the command, for the renderer to draw.
+#[test]
+fn a_text_can_be_bold() {
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.painter')"),
+        (
+            "lua/plugin/painter.lua",
+            "neotmux.on_tick(function(ctx)\n\
+               ctx:text(nil, 0, 0, 'b', { bold = true })\n\
+               ctx:text(nil, 0, 1, 'p')\n\
+             end) return {}",
+        ),
+    ]);
+    frame(&sub, 24);
+    let bold: Vec<(String, bool)> = sub
+        .frame_output()
+        .into_iter()
+        .filter_map(|cmd| match cmd {
+            DrawCmd::Text { text, bold, .. } => Some((text, bold)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        bold,
+        vec![("b".to_string(), true), ("p".to_string(), false)]
     );
 }

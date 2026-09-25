@@ -178,7 +178,8 @@ end)
 ```
 
 Colours are a palette index `0..255` or a `"#rrggbb"` string. Omit the table and you get the
-terminal's defaults.
+terminal's defaults. `ctx:text` also takes `bold = true`, drawn in the terminal's bold
+weight; a run handed to `status.segments.draw` carries it the same way.
 
 `ctx:line`'s glyph is one character: it fills one cell per step, so anything longer raises
 rather than being truncated.
