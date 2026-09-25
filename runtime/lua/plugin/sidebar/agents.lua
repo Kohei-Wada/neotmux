@@ -153,6 +153,42 @@ function M.collect()
   return found
 end
 
+-- Goes to an agent `collect()` handed out: shows the window it is in and focuses it, in its own
+-- session — an op raised inside `session.with` is that session's — and then moves there.
+function M.focus(it)
+  neotmux.session.with(it.session, function()
+    neotmux.window.focus(it.window_id)
+    neotmux.pane.focus(it.pane_id)
+  end)
+  if it.session ~= neotmux.session.current() then
+    neotmux.session.switch(it.session)
+  end
+end
+
+-- The agent after (or before) the one you are in, in `M.sort` order, wrapping; the first when
+-- you are in none. herdr's `next_agent` / `previous_agent`, and like them bound to nothing.
+local function step(by)
+  local all = M.collect()
+  if #all == 0 then
+    return
+  end
+  local at
+  for index, it in ipairs(all) do
+    if it.focused then
+      at = index
+    end
+  end
+  local next_at = at and ((at - 1 + by) % #all + 1) or 1
+  M.focus(all[next_at])
+end
+
+neotmux.command.add("agent-next", function()
+  step(1)
+end, { desc = "go to the next agent" })
+neotmux.command.add("agent-prev", function()
+  step(-1)
+end, { desc = "go to the previous agent" })
+
 function M.build(given)
   sidebar = given
   local rows, anchor = {}, nil

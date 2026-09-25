@@ -267,10 +267,18 @@ function M.next_session()
 end
 
 -- The prefix is the standard plugin and this one is optional, so this is the direction the
--- knowledge goes in: bound only if the prefix is already loaded, which it is by the time the
--- sidebar loads unless it was turned off.
-if package.loaded["plugin.prefix"] then
-  require("plugin.prefix").commands["b"] = M.toggle
+-- knowledge goes in. The defaults table and not only `package.loaded`: an `init.lua` that
+-- requires this file to change it runs before the shipped layer's, so the prefix is not loaded
+-- yet, and a plain probe would leave `C-b b` unbound — `plugin.palette` binds `:` this way for
+-- the same reason.
+local function prefix()
+  if package.loaded["plugin.prefix"] or require("neotmux.defaults").prefix then
+    return require("plugin.prefix")
+  end
+end
+
+if prefix() then
+  prefix().commands["b"] = M.toggle
 end
 
 neotmux.on_tick(function(ctx)
@@ -348,8 +356,8 @@ M.sections = {
 
 -- `C-b w`, herdr's navigate: a cursor over the spaces. Bound here rather than in the section, for
 -- the reason `b` is: the prefix is the standard plugin and this one is optional.
-if package.loaded["plugin.prefix"] then
-  require("plugin.prefix").commands["w"] = M.sections[1].navigate
+if prefix() then
+  prefix().commands["w"] = require("plugin.sidebar.spaces").navigate
 end
 
 return M

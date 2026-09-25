@@ -1348,13 +1348,13 @@ neotmux ships fourteen plugins in the runtime layer an install puts on the searc
 | `hints` | `C-b f` labels every url, path, hash (7–64 hex characters, taken whole) and ip on screen and copies the one you pick; `hint-send` and `hint-open` are the same pick, typed rather than copied |
 | `notify` | draws each notification in a frame of its own, stacked up from the bottom-right |
 | `sessions` | the session picker on `C-b s`: every session and what it is running, `Enter` to go, `c` to make one, `r` to rename one, `d` to end one |
-| `palette` | the command palette on `C-b :`: every registered command, fuzzy-filtered as you type, `Enter` to run the one under the cursor |
+| `palette` | the command palette on `C-b :`: every registered command, fuzzy-filtered as you type, `Enter` to run the one under the cursor; `@` for the sessions, `#` for the agents, and `C-b g` opens it on `#` |
 | `borders` | a rule along every boundary between two panes |
 | `chime` | plays a sound when a pane you are not looking at starts waiting for you, or stops working — see [The chime](#the-chime) below |
 | `sync` | relays every key to every pane of the window — tmux's `synchronize-panes`, turned on and off with `:sync-panes` or `C-b S`; the plugin loads by default, the relaying starts off |
 | `guard` | holds back the Enter that would run a line `neotmux.guard`'s rules name, until you press it again — **off by default** |
 | `watch` | notifies you when a pane looks like it is waiting for you, on `neotmux.state`'s guess — **off by default** |
-| `sidebar` | a tree of every session, and the windows and panes of the one you are in, down a reserved left band, folded by `C-b b` — **off by default** |
+| `sidebar` | herdr's sidebar down a reserved left band: every session with its state and git branch, and every agent in every session; `C-b w` moves a cursor over the sessions, `C-b b` folds it — **off by default** |
 | `footer` | whichever mode is raised through `neotmux.mode`, on one reserved bottom row — **off by default** |
 
 None of them is a host feature — all fourteen are ordinary files making ordinary API calls, and
@@ -1379,44 +1379,60 @@ With the sidebar on, `C-b b` folds it — the sidebar adds that one itself, sinc
 optional plugin and the prefix is the standard one. `C-b f` is `plugin.hints`'s own addition
 the same way — see [The hints convention](#the-hints-convention) below.
 
-The sidebar is a stack of sections, and the shipped one is a tree: every session with what it is
-running, and under the one you are in, its windows and their panes. Its width is taken from what
-there is to show, between `require('plugin.sidebar').widths.min` (27) and `.max` (36). What is on
-which row of the tree is a table rather than a shape baked into the file — each level draws one
-entry as a list of rows, and each row is a list of tokens:
+The sidebar is herdr's (herdrdev/herdr), section for section, so a herdr user finds what they
+had. A herdr **space** is a neotmux session and a herdr **tab** a window. Its width is taken
+from what there is to show, between `require('plugin.sidebar').widths.min` (27) and `.max` (36),
+and its last column is a rule, `│`, where the panes start.
+
+**`spaces`**, on top, is every session: its state and name, then the git branch its focused
+pane's directory is on and how far that is from its upstream (`↑` ahead in green, `↓` behind in
+red). A session's state is its most urgent pane's, in herdr's order: blocked, done, working,
+idle. Git is asked as a job — the sandbox has no `io` — at most every
+`require('plugin.sidebar.spaces').refresh` ms (5000) per directory.
+
+**`C-b w`** is herdr's navigate: a cursor over the spaces, starting on the session you are in.
+`j`/`k` move it, Enter goes to the session under it, `1`-`9` go straight to that one, Esc
+leaves. The sidebar unfolds while it is up if it was folded.
+
+**`agents`**, under it, is every pane a ruleset in `neotmux.detect.agents` answered for, in every
+session — where it is on the first row, what it is on the second:
+
+    ● work 2
+      claude
+
+`require('plugin.sidebar.agents').sort` is `'grouped'` (session, window, pane — the default) or
+`'priority'` (blocked, done, working, idle), and the header says which. `rows` and `tokens`
+take `state_icon`, `state_text`, `session`, `window`, `agent`, `command`, `location` and `age`;
+`agent` is the ruleset that answered, where `command` is what the pane reports — for an agent
+started through a wrapper, the wrapper. With no agents it takes no room; with many it takes at
+most half the band (`share = 0.5`).
+
+**States and colours** are herdr's: working yellow, blocked red, done teal, idle green, each a
+`●` except idle's `○` (`require('plugin.sidebar').icons` and `.colors`; herdr's `symbols` are
+`{ working = '◐', blocked = '×', done = '✓', idle = '○' }`). **Done** is an agent that went idle
+where nobody was looking — not in the current window of a session a client is attached to —
+and stays done until somebody looks. It is `neotmux.seen`'s, not `neotmux.state`'s, so the chime
+and the watcher do not see it.
+
+The tree the sidebar used to be — every session, and the windows and panes of the one you are
+in — is still shipped as `plugin.sidebar.sessions`, and is one assignment away:
+
+```lua
+local sidebar = require('plugin.sidebar')
+sidebar.sections = { require('plugin.sidebar.sessions'), require('plugin.sidebar.agents') }
+```
+
+Its rows are tables too:
 
 ```lua
 local sessions = require('plugin.sidebar.sessions')
 sessions.sessions.rows = { { 'state_icon', 'name' }, { 'command', 'panes' } }
 sessions.panes.rows = { { 'marker', 'tree', 'number', 'command' } }
 sessions.tree.on = false          -- indent without the lines
-sessions.tokens.sessions.age = function(it) ... end   -- a token of your own
 ```
 
-so moving what is where, or dropping what you do not care about, is an assignment rather than a
-fork of the file. The first column is left to the markers on purpose: it is the whole of the
-band when the sidebar is folded, and a fold showing a run of `│` says nothing about where you
-are.
-
 When the tree does not fit, it gives up the windows and panes of the session you are in before
-it gives up any session's name, and says `… n more` where it cut them. With more sessions than
-rows it keeps one row each and scrolls them around the one you are in, with `↑ n` and `↓ n` for
-the ones out of sight.
-
-Under the tree is every agent in every session — every pane a ruleset in
-`neotmux.detect.agents` answered for — blocked first, then working, then idle, with how long each
-has been in the state it is in:
-
-    ◉ work:2.1 claude  3m
-
-It is `require('plugin.sidebar.agents')`, with `rows` and `tokens` shaped like the tree's
-(`state_icon`, `location`, `agent`, `command`, `age`). `agent` is the ruleset that answered and
-is what the row shows; `command` is what the pane reports, which for an agent started through a
-wrapper is the wrapper. The age is always three columns, so a count rolling over does not widen
-the band. With no agents it takes no room at all; with many
-it takes at most half the band (`share = 0.5`) and the tree keeps the rest. An age starts when
-the sidebar first sees the state, so one that was already going when neotmux started reads as at
-least that long.
+it gives up any session's name, and says `… n more` where it cut them.
 
 A section is a table, and `require('plugin.sidebar').sections` is the list of them, top to
 bottom:
@@ -1424,6 +1440,7 @@ bottom:
 ```lua
 table.insert(require('plugin.sidebar').sections, {
   title = 'mine',     -- a header above it; nil for none
+  aside = 'right',    -- optional: text, or a function, on the header's right
   share = 0.3,        -- the most of the band it takes when there is not room for everybody
   build = function(sidebar) return { rows = { { { text = 'hello' } } }, anchor = 1 } end,
   fit = function(model, height, sidebar) ... end,   -- optional: cut the rows to a height
@@ -1678,6 +1695,26 @@ require('plugin.sidebar.sessions').markers =
 them. A marker is one cell: one that measured two columns would push every name on its row
 across by one.
 
+### Adding to the palette
+
+The palette's items come from `require('plugin.palette').providers`, and the query's first
+character picks which: `@` is the sessions (Enter goes there), `#` the agents (Enter focuses the
+agent's pane, in whatever session it is in), and anything else the commands. `C-b g` is the
+palette opened on `#`, herdr's goto. A provider of your own:
+
+```lua
+table.insert(require('plugin.palette').providers, 1, {
+  prefix = '%', name = 'fruit',
+  items = function() return { { name = 'apple', desc = 'red' }, { name = 'pear' } } end,
+  run = function(item) neotmux.notify('info', 'ate ' .. item.name) end,
+})
+```
+
+An item is `{ name =, desc =, source = }` and whatever `run` needs; every provider is ranked by
+the same fuzzy match on `name`. A provider whose `items` raises is left out of that query and
+named once. `agent-next` and `agent-prev` step through the agents in the sidebar's order, and are
+commands bound to nothing, as herdr's are.
+
 ### Showing a pane's own history
 
 ```lua
@@ -1786,7 +1823,8 @@ Give `input = true` and the list becomes one you type into rather than move thro
 letter: the input line comes up, every printable key joins a query, and the cursor moves on
 `C-j`/`C-k` instead of the plain `j`/`k` an `input`-less list uses, because a query still needs
 `j` and `k` to be characters it can hold — which is also why `q` is a cancel only when `input`
-is off. `handle:query()` reads what has been typed. An input line — a query or an `ask` — takes the
+is off. `handle:query()` reads what has been typed, and `query = '#'` starts it with that
+already there — how `C-b g` opens the palette on its agents. An input line — a query or an `ask` — takes the
 editing keys a line of text takes anywhere: `BS` and `C-h` take the last character back, and
 `C-u` clears the line. Give `filter` a predicate —
 `function(item, query) return ... end` — alongside it and `items` is narrowed by whatever the

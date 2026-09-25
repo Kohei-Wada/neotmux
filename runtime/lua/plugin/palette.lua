@@ -76,7 +76,8 @@ local function ranked(items, query)
     if first then
       -- A copy, not the registry's own table: `lit` belongs to this query and nothing else
       -- should find it there on the next one.
-      local shown = { name = item.name, desc = item.desc, source = item.source, lit = where }
+      local shown =
+        { name = item.name, desc = item.desc, source = item.source, lit = where, item = item }
       hits[#hits + 1] = { item = shown, first = first, spread = spread }
     end
   end
@@ -143,12 +144,113 @@ local function row(item, _chosen, width)
   return runs
 end
 
-function M.open()
+-- Where the items come from. The query's first character picks one — `@` the sessions, `#` the
+-- agents — and the one with no prefix takes everything else, the commands. A plugin adds its own:
+--
+--   table.insert(require('plugin.palette').providers, 1, {
+--     prefix = '%', name = 'fruit',
+--     items = function() return { { name = 'apple', desc = 'red' } } end,
+--     run = function(item) ... end,
+--   })
+--
+-- An item is `{ name =, desc =, source = }` and anything else `run` needs; every provider is
+-- ranked by the same fuzzy match on `name`.
+local function run_command(item)
+  local ok, why, lines = neotmux.command.run(item.name)
+  if not ok then
+    neotmux.notify("error", why)
+  elseif lines then
+    for _, line in ipairs(lines) do
+      neotmux.notify("info", line)
+    end
+  end
+end
+
+M.providers = {
+  {
+    prefix = "@",
+    name = "sessions",
+    items = function()
+      local out = {}
+      for _, name in ipairs(neotmux.session.list()) do
+        out[#out + 1] = { name = name, source = "session" }
+      end
+      return out
+    end,
+    run = function(item)
+      if item.name ~= neotmux.session.current() then
+        neotmux.session.switch(item.name)
+      end
+    end,
+  },
+  {
+    prefix = "#",
+    name = "agents",
+    items = function()
+      local out = {}
+      for _, it in ipairs(require("plugin.sidebar.agents").collect()) do
+        local window = it.windows > 1 and (":" .. (it.window_name or it.window)) or ""
+        out[#out + 1] = {
+          name = it.session .. window .. " " .. it.agent,
+          desc = it.state,
+          source = "agent",
+          agent = it,
+        }
+      end
+      return out
+    end,
+    run = function(item)
+      require("plugin.sidebar.agents").focus(item.agent)
+    end,
+  },
+  {
+    prefix = "",
+    name = "commands",
+    items = function()
+      return neotmux.command.list()
+    end,
+    run = run_command,
+  },
+}
+
+-- A provider that raises is left out of that query and named once, for the reason a sidebar
+-- section is: it will raise again on every keystroke after this one.
+local complained = setmetatable({}, { __mode = "k" })
+
+local function pick(query)
+  local fallback
+  for _, provider in ipairs(M.providers) do
+    local prefix = provider.prefix or ""
+    if prefix == "" then
+      fallback = fallback or provider
+    elseif query:sub(1, #prefix) == prefix then
+      return provider, query:sub(#prefix + 1)
+    end
+  end
+  return fallback, query
+end
+
+local function items_of(provider)
+  local ok, items = pcall(provider.items)
+  if ok and type(items) == "table" then
+    return items
+  end
+  if not complained[provider] then
+    complained[provider] = true
+    local why = ok and "items did not answer a list" or tostring(items)
+    neotmux.notify("error", "plugin.palette: provider '" .. tostring(provider.name) .. "': " .. why)
+  end
+  return {}
+end
+
+-- `prefix` is typed in already: `open('#')` is the agents, which is what `C-b g` is.
+function M.open(prefix)
   -- Assigned once `list.open` has returned a handle, and read by `items` on every later
   -- refresh: the same upvalue trick `plugin.sessions` uses for state that only exists once
   -- the list is up. `list.open` calls `items` once on the way in, before `handle` exists,
   -- which `and` guards against.
   local handle
+  local chosen
 
   handle = list.open({
     mode = "palette",
@@ -156,20 +258,27 @@ function M.open()
     rows = M.rows,
     place = "top",
     input = true,
-    empty = "no command matches",
+    query = prefix,
+    empty = "nothing matches",
     items = function()
-      local query = handle and handle:query() or ""
-      return ranked(neotmux.command.list(), query)
+      local provider, rest = pick(handle and handle:query() or prefix or "")
+      chosen = provider
+      if provider == nil then
+        return {}
+      end
+      return ranked(items_of(provider), rest)
     end,
     row = row,
     done = function(item, done_handle)
-      local ok, why, lines = neotmux.command.run(item.name)
       done_handle:close()
-      if not ok then
-        neotmux.notify("error", why)
-      elseif lines then
-        for _, line in ipairs(lines) do
-          neotmux.notify("info", line)
+      local provider = chosen
+      if provider and provider.run then
+        local ok, err = pcall(provider.run, item.item or item)
+        if not ok then
+          neotmux.notify(
+            "error",
+            "plugin.palette: provider '" .. tostring(provider.name) .. "': " .. tostring(err)
+          )
         end
       end
     end,
@@ -184,6 +293,10 @@ end
 if package.loaded["plugin.prefix"] or require("neotmux.defaults").prefix then
   require("plugin.prefix").commands[":"] = function()
     M.open()
+  end
+  -- herdr's goto: every agent, and Enter goes to it.
+  require("plugin.prefix").commands["g"] = function()
+    M.open("#")
   end
 end
 

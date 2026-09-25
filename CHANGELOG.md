@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### The sidebar is herdr's
+
+The shipped sidebar is herdr's, so moving over is nothing to relearn. On top, `spaces`: every
+session with its state and name, then the git branch of the directory its focused pane is in and
+how far that is ahead of (`↑`) and behind (`↓`) its upstream. Under it, `agents` in herdr's rows
+— where on the first, which agent on the second — in session order, or by urgency with
+`agents.sort = 'priority'`. herdr's colours and icons, and its **done**: an agent that went idle
+where nobody was looking stays done until somebody looks, which needed
+`neotmux.session.attached(name)`, how many clients are at a session, since every session ticks.
+`C-b w` is herdr's navigate, a cursor over the spaces with Enter to go and `1`-`9` to jump, and
+`C-b g` herdr's goto: the palette on its agents, Enter to focus one in whatever session it is.
+
+The palette takes providers: `@` lists the sessions, `#` the agents, anything else the commands,
+and a plugin adds its own to `require('plugin.palette').providers`. `agent-next` and
+`agent-prev` step through the agents, bound to nothing. The tree the sidebar was is still shipped
+as `plugin.sidebar.sessions`, one assignment away, and requiring `plugin.sidebar` from your own
+`init.lua` no longer loses `C-b b`.
+
 ### Killing a job can no longer signal somebody else's processes
 
 A job's waiting thread reaped the child and only then cleared the pid a kill would signal, so a

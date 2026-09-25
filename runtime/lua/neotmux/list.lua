@@ -35,8 +35,9 @@
 --
 -- `input = true` turns the line on: every printable key joins a query,
 -- `C-j`/`C-k` move the cursor instead of the plain `j`/`k`, and `handle:query()` reads what
--- has been typed. `filter` is a separate, optional predicate — `function(item, query) return
--- ... end` — that narrows `items()` by that query. A list can take `input` with no `filter`
+-- has been typed; `query` is what it starts with, typed in already. `filter` is a separate,
+-- optional predicate — `function(item, query) return ... end` — that narrows `items()` by that
+-- query. A list can take `input` with no `filter`
 -- (the query is there to read; nothing narrows because of it — see `plugin.palette`, which
 -- ranks inside `items` itself against `handle:query()`) or `filter` with no `input`, which then
 -- does nothing on its own: there is no query for it to be handed.
@@ -580,7 +581,7 @@ function M.open(opts)
     items = {},
     first = 1,
     input = nil,
-    query = opts.input and "" or nil,
+    query = opts.input and (opts.query or "") or nil,
     opts = {
       title = opts.title,
       width = opts.width or 40,

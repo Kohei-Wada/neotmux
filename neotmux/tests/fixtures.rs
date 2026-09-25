@@ -2305,6 +2305,12 @@ fn is_a_state_icon(cell: &str) -> bool {
 }
 const CURRENT_WINDOW_MARKER: &str = "\u{25b8}";
 
+/// The tree of the session you are in, which these tests are about: herdr's spaces are the
+/// shipped default now, and the tree is still shipped, one assignment away.
+const TREE_SIDEBAR: &str = "require('neotmux.defaults').sidebar = true\n\
+    require('plugin.sidebar').sections =\n\
+      { require('plugin.sidebar.sessions'), require('plugin.sidebar.agents') }";
+
 /// The sidebar's rows are two columns — a label on the left and what the thing is running
 /// against the right edge — so what names a pane is one row holding both, not one string.
 fn sidebar_row_naming(nt: &mut Neotmux, label: &str, command: &str, timeout: Duration) {
@@ -2329,7 +2335,7 @@ fn sidebar_row_naming(nt: &mut Neotmux, label: &str, command: &str, timeout: Dur
 /// exactly the columns it took.
 #[test]
 fn the_shipped_sidebar_lists_the_session_and_narrows_the_panes() {
-    let init = harness::runtime(&[("init.lua", "require('neotmux.defaults').sidebar = true")]);
+    let init = harness::runtime(&[("init.lua", TREE_SIDEBAR)]);
     let mut nt = Neotmux::start_layered(&[init.path(), &shipped_layer()], "cat");
 
     nt.wait_for_status("cat", PATIENCE);
@@ -2369,7 +2375,7 @@ const SIDEBAR_RAIL_COLS: u16 = 1;
 /// column the pane owns, so where it lands says how wide the band is.
 #[test]
 fn the_shipped_sidebar_folds_to_a_rail_and_back() {
-    let init = harness::runtime(&[("init.lua", "require('neotmux.defaults').sidebar = true")]);
+    let init = harness::runtime(&[("init.lua", TREE_SIDEBAR)]);
     let mut nt = Neotmux::start_layered(&[init.path(), &shipped_layer()], "cat");
 
     nt.wait_for_status("cat", PATIENCE);
@@ -2408,7 +2414,7 @@ fn the_shipped_sidebar_folds_to_a_rail_and_back() {
 /// about somebody else's session.
 #[test]
 fn the_shipped_sidebar_keeps_the_pane_you_are_in_on_screen() {
-    let init = harness::runtime(&[("init.lua", "require('neotmux.defaults').sidebar = true")]);
+    let init = harness::runtime(&[("init.lua", TREE_SIDEBAR)]);
     // Short on purpose: five windows do not fit in what is left of ten rows.
     let mut nt = Neotmux::start_sized(&[init.path(), &shipped_layer()], "cat", 10, 80);
     nt.wait_for_cell(PANE_TOP, 0, IDLE_SESSION_ICON, PATIENCE);
@@ -2428,6 +2434,23 @@ fn the_shipped_sidebar_keeps_the_pane_you_are_in_on_screen() {
             .any(|line| line.starts_with(CURRENT_WINDOW_MARKER)),
         "the window being shown scrolled off the bottom of the sidebar:\n{screen}"
     );
+}
+
+/// The shipped sidebar is herdr's: a `spaces` section heading every session, the one you are in
+/// among them, and `C-b w`'s cursor over them, which Enter leaves the way it found them when
+/// the session under it is the one you are in.
+#[test]
+fn the_shipped_sidebar_is_herdrs_spaces() {
+    let init = harness::runtime(&[("init.lua", "require('neotmux.defaults').sidebar = true")]);
+    let mut nt = Neotmux::start_layered(&[init.path(), &shipped_layer()], "cat");
+    nt.wait_for_status("cat", PATIENCE);
+    nt.wait_for_screen("\u{2500} spaces \u{2500}", PATIENCE);
+    nt.wait_for_screen(" default", PATIENCE);
+
+    nt.send("\x02w"); // C-b w
+    nt.send("\r"); // Enter: the session you are in, so nowhere to go
+    nt.send("Y");
+    nt.wait_for_cell(PANE_TOP, SIDEBAR_COLS, "Y", PATIENCE);
 }
 
 /// Off unless the user says otherwise, like the watcher: what the watcher spends is an

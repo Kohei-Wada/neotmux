@@ -276,3 +276,126 @@ fn a_tied_score_falls_back_to_name_order() {
     let order = names(&texts(&frame(&sub)), &["bee", "cee"]);
     assert_eq!(order, vec!["bee", "cee"]);
 }
+
+/// A second session beside the one the tests drive, named so the palette's `@` has two to show.
+fn with_home(sub: &Built) {
+    sub.name_session(support::one(), "work");
+    let home = neotmux_proto::SessionId::from(2);
+    sub.name_session(home, "home");
+    let pane = PaneId::from(2);
+    sub.begin_frame(
+        home,
+        Epoch::new(SIZE, vec![pane], Some(pane)),
+        Geometry {
+            area: Rect::new(0, 0, SIZE.cols, SIZE.rows),
+            panes: vec![(pane, Rect::new(0, 0, SIZE.cols, SIZE.rows))],
+            focus: Some(pane),
+            windows: vec![Window {
+                id: WindowId::from(2),
+                panes: vec![pane],
+                name: None,
+            }],
+            window: Some(WindowId::from(2)),
+        },
+    );
+}
+
+fn switches(sub: &Built) -> Vec<String> {
+    sub.drain_ops(Some(support::one()))
+        .into_iter()
+        .filter_map(|(_, op)| match op {
+            neotmux_lua::host::Op::SessionSwitch { name } => Some(name),
+            _ => None,
+        })
+        .collect()
+}
+
+/// `@` is the sessions: every one there is, and Enter goes to the one under the cursor.
+#[test]
+fn an_at_sign_lists_the_sessions_and_enter_goes_to_one() {
+    let (_dir, sub) = built("");
+    with_home(&sub);
+    open(&sub);
+    keys(&sub, &["@", "h"]);
+    let rows = texts(&frame(&sub));
+    assert!(rows.iter().any(|row| row.starts_with("home")), "{rows:#?}");
+    assert!(!rows.iter().any(|row| row.starts_with("work")), "{rows:#?}");
+    keys(&sub, &["Enter"]);
+    assert_eq!(switches(&sub), vec!["home".to_string()]);
+}
+
+/// Without a prefix it is still the commands, as it always was.
+#[test]
+fn no_prefix_is_still_the_commands() {
+    let (_dir, sub) = built("neotmux.command.add('zebra', function() end)");
+    with_home(&sub);
+    open(&sub);
+    keys(&sub, &["z", "e"]);
+    let rows = texts(&frame(&sub));
+    assert!(rows.iter().any(|row| row.starts_with("zebra")), "{rows:#?}");
+    assert!(!rows.iter().any(|row| row.starts_with("home")), "{rows:#?}");
+}
+
+/// `C-b g` opens it on `#`, the agents — herdr's goto: every agent, and Enter focuses its pane.
+#[test]
+fn c_b_g_opens_on_the_agents_and_enter_focuses_the_agents_pane() {
+    let (_dir, sub) = built(
+        "require('neotmux.detect').agents = { fake = {\n\
+           { id = 'busy', state = 'working', priority = 1,\n\
+             match = function(v) return v.lines[#v.lines] == 'BUSY' end },\n\
+         } }",
+    );
+    sub.name_session(support::one(), "work");
+    sub.terminals().open(pane(), SIZE, 0);
+    sub.terminals().feed(pane(), b"BUSY");
+    assert_eq!(
+        sub.dispatch_key(support::one(), "C-b"),
+        KeyOutcome::Consumed
+    );
+    assert_eq!(sub.dispatch_key(support::one(), "g"), KeyOutcome::Consumed);
+    let rows = texts(&frame(&sub));
+    assert!(
+        rows.iter()
+            .any(|row| row.contains("work") && row.contains("fake")),
+        "{rows:#?}"
+    );
+    keys(&sub, &["Enter"]);
+    let focused: Vec<PaneId> = sub
+        .drain_ops(Some(support::one()))
+        .into_iter()
+        .filter_map(|(_, op)| match op {
+            neotmux_lua::host::Op::PaneFocus { pane } => Some(pane),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(focused, vec![pane()]);
+}
+
+/// A provider of a plugin's own, and one that raises: the second is left out and said once.
+#[test]
+fn a_provider_can_be_added_and_one_that_raises_is_left_out() {
+    let (_dir, sub) = built(
+        "local palette = require('plugin.palette')\n\
+         table.insert(palette.providers, 1, { prefix = '%', name = 'fruit',\n\
+           items = function() return { { name = 'apple' }, { name = 'pear' } } end,\n\
+           run = function(item) neotmux.log.info('ate ' .. item.name) end })\n\
+         table.insert(palette.providers, 1, { prefix = '!', name = 'broken',\n\
+           items = function() error('boom') end, run = function() end })",
+    );
+    open(&sub);
+    keys(&sub, &["%", "p"]);
+    let rows = texts(&frame(&sub));
+    assert!(rows.iter().any(|row| row.starts_with("pear")), "{rows:#?}");
+    keys(&sub, &["Enter"]);
+    assert!(logged(&sub).iter().any(|line| line == "ate pear"));
+    open(&sub);
+    keys(&sub, &["!"]);
+    frame(&sub);
+    keys(&sub, &["x"]);
+    frame(&sub);
+    let said: Vec<String> = notified(&sub)
+        .into_iter()
+        .filter(|t| t.contains("broken"))
+        .collect();
+    assert_eq!(said.len(), 1, "{said:?}");
+}
