@@ -6,12 +6,12 @@
 --
 -- The modal state is an ordinary Lua upvalue. neotmux has no idea what a prefix is.
 
-local M = { key = 'C-a' }
+local M = { key = "C-a" }
 
 local armed = false
 
 local function focus_next()
-  local ids = neotmux.pane.list()   -- layout order
+  local ids = neotmux.pane.list() -- layout order
   local current = neotmux.pane.current()
   for index, id in ipairs(ids) do
     if id == current then
@@ -22,10 +22,16 @@ local function focus_next()
 end
 
 local commands = {
-  ['%'] = function() neotmux.pane.split('vertical') end,
-  ['"'] = function() neotmux.pane.split('horizontal') end,
-  ['o'] = focus_next,
-  ['c'] = function() neotmux.notify('info', 'no pane can be closed from Lua yet') end,
+  ["%"] = function()
+    neotmux.pane.split("vertical")
+  end,
+  ['"'] = function()
+    neotmux.pane.split("horizontal")
+  end,
+  ["o"] = focus_next,
+  ["c"] = function()
+    neotmux.notify("info", "no pane can be closed from Lua yet")
+  end,
 }
 
 neotmux.on_key(function(key)

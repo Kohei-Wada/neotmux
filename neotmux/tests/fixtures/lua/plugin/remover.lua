@@ -9,6 +9,8 @@ local second = pcall(function()
   handle:remove()
 end)
 
-neotmux.log.info("remover removed twice first=" .. tostring(first) .. " second=" .. tostring(second))
+neotmux.log.info(
+  "remover removed twice first=" .. tostring(first) .. " second=" .. tostring(second)
+)
 
 return {}

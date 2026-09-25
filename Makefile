@@ -1,16 +1,27 @@
 PREFIX ?= $(HOME)/.local
 
-.PHONY: all check fmt lint test run install install-bin install-runtime
+.PHONY: all check fmt lint lua fmt-lua test run install install-bin install-runtime
 
 all: check
 
-check: fmt lint test
+check: fmt lua lint test
+
+# Every Lua file a layer can load: the shipped runtime, the examples, and the plugins the tests
+# drive. `.stylua.toml` and `.luacheckrc` at the root say how.
+LUA := runtime examples neotmux/tests/fixtures
 
 fmt:
 	cargo fmt --all --check
 
 lint:
 	cargo clippy --workspace --all-targets -- -D warnings
+
+lua:
+	stylua --check $(LUA)
+	luacheck -q $(LUA)
+
+fmt-lua:
+	stylua $(LUA)
 
 test:
 	cargo test --workspace

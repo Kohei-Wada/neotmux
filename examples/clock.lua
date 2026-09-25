@@ -11,9 +11,9 @@
 -- Reading it inside the tick rather than capturing it at load time is what makes that
 -- assignment take effect on the next frame instead of never.
 
-local M = { format = '%H:%M:%S' }
+local M = { format = "%H:%M:%S" }
 
-M.band = neotmux.reserve('bottom', 1)
+M.band = neotmux.reserve("bottom", 1)
 
 neotmux.on_tick(function(ctx)
   local band = ctx:reserved()

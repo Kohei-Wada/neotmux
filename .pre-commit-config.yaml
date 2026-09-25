@@ -1,0 +1,22 @@
+# The fast half of `make check`, run on every commit: formatting and lint. clippy and the tests are
+# CI's. Every hook uses the binary already on PATH (`language: system`), so a commit never waits
+# on a download. Install once with `pre-commit install`.
+repos:
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt
+        entry: cargo fmt --all --check
+        language: system
+        types: [rust]
+        pass_filenames: false
+      - id: stylua
+        name: stylua
+        entry: stylua --check
+        language: system
+        types: [lua]
+      - id: luacheck
+        name: luacheck
+        entry: luacheck -q
+        language: system
+        types: [lua]

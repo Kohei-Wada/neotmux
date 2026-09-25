@@ -5,6 +5,6 @@ local said = false
 neotmux.on_tick(function()
   if not said then
     said = true
-    neotmux.log.info('session_name ' .. neotmux.session_name())
+    neotmux.log.info("session_name " .. neotmux.session_name())
   end
 end)

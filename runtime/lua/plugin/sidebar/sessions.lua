@@ -9,7 +9,8 @@
 --   sessions.panes.rows = { { 'state_icon', 'number', 'command' } }
 --
 -- so moving what is on which line, or dropping a token you do not care about, is an assignment
--- rather than a fork of this file. The colours are the sidebar's, `require('plugin.sidebar').colors`.
+-- rather than a fork of this file. The colours are the sidebar's:
+-- `require('plugin.sidebar').colors`.
 local state = require("neotmux.state")
 
 local M = {}

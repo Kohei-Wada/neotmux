@@ -275,8 +275,7 @@ M.commands = {
     mode.cursor.line = mode.buffer.total - 1
   end,
   ["begin-selection"] = function(mode)
-    mode.anchor = mode.anchor == nil and { line = mode.cursor.line, col = mode.cursor.col }
-      or nil
+    mode.anchor = mode.anchor == nil and { line = mode.cursor.line, col = mode.cursor.col } or nil
   end,
   ["copy-selection"] = function(mode)
     if mode.anchor == nil then

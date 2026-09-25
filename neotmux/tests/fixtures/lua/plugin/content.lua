@@ -23,7 +23,15 @@ local function report(pane, tag)
     return
   end
   neotmux.log.info(
-    "content " .. pane .. " " .. tag .. " rev=" .. revision .. " [" .. table.concat(nonblank(lines), "|") .. "]"
+    "content "
+      .. pane
+      .. " "
+      .. tag
+      .. " rev="
+      .. revision
+      .. " ["
+      .. table.concat(nonblank(lines), "|")
+      .. "]"
   )
 end
 
@@ -39,7 +47,9 @@ end)
 neotmux.on_event("pane_closed", function(event)
   seen[event.pane] = nil
   -- The pane is gone by the time this is dispatched, so its terminal must be gone with it.
-  neotmux.log.info("content " .. event.pane .. " closed=" .. tostring(neotmux.pane.content(event.pane)))
+  neotmux.log.info(
+    "content " .. event.pane .. " closed=" .. tostring(neotmux.pane.content(event.pane))
+  )
 end)
 
 neotmux.on_tick(function()

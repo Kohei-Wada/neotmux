@@ -154,7 +154,11 @@ register("focus-left", focus_toward("left"), "focus the pane to the left")
 register("focus-down", focus_toward("down"), "focus the pane below")
 register("focus-up", focus_toward("up"), "focus the pane above")
 register("focus-right", focus_toward("right"), "focus the pane to the right")
-register("resize", begin_resize, "enter resize mode: h/j/k/l move the boundary, anything else leaves")
+register(
+  "resize",
+  begin_resize,
+  "enter resize mode: h/j/k/l move the boundary, anything else leaves"
+)
 register("window-new", new_window, "open a new window and switch to it")
 register("window-next", next_window, "switch to the next window")
 register("window-prev", prev_window, "switch to the window before this one")

@@ -30,3 +30,23 @@ jobs:
       # Linux runner with a working /dev/ptmx — not just a container filesystem.
       - run: cargo test --workspace
 
+  lua:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pinned to what the Makefile's `lua` target was written against, so a new release does not
+      # fail CI on code nobody touched.
+      - uses: JohnnyMorganz/stylua-action@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          version: 2.5.2
+          args: --check runtime examples neotmux/tests/fixtures
+
+      - name: Install luacheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y luarocks
+          sudo luarocks install luacheck 1.2.0
+
+      - run: luacheck -q runtime examples neotmux/tests/fixtures

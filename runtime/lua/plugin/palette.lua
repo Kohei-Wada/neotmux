@@ -129,7 +129,7 @@ local function name_runs(item)
   return runs
 end
 
-local function row(item, chosen, width)
+local function row(item, _chosen, width)
   local desc = item.desc and ("  " .. item.desc) or ""
   local runs = name_runs(item)
   runs[#runs + 1] = { text = desc, fg = M.colors.desc }

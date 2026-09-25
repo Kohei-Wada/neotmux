@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### The Lua is checked too
+
+The shipped runtime, the examples and the test plugins are formatted by `stylua` (`.stylua.toml`)
+and linted by `luacheck` (`.luacheckrc`), in `make check`, in a CI job of their own, and on commit
+through `.pre-commit-config.yaml` alongside `cargo fmt`. Bringing the code up to it changed no
+behaviour: the formatting, one comment and one message string rewrapped, one variable renamed
+where two meant different things (`list.lua`'s list top), one unused argument marked unused.
+
 ### The crates say what they are
 
 The crates sit at the repository root: `neotmux-proto`, `neotmux-layout` (was `neotmux-core`),

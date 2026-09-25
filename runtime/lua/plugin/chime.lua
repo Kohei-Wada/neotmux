@@ -29,7 +29,9 @@ local M = {}
 -- it rather than under `neotmux.home` — a user's own layer shadowing this file gets its own
 -- sounds with it. `require`'s loader is the only thing that knows which layer won, and
 -- `package.searchpath` is how to ask it.
-M.dir = (package.searchpath("plugin.chime", package.path) or ""):match("^(.*)/lua/plugin/chime%.lua$")
+M.dir = (package.searchpath("plugin.chime", package.path) or ""):match(
+  "^(.*)/lua/plugin/chime%.lua$"
+)
 
 -- Relative to `M.dir`; an absolute path is taken as it stands, which is how you point at a
 -- sound of your own. A state with no entry here makes no sound — `working` is every state
@@ -133,8 +135,12 @@ local function play(path, from, trouble)
     -- `M.sounds` is what says "try again".
     neotmux.notify(
       "error",
-      "plugin.chime: no player could play " .. path .. " (" .. (trouble or "no players listed") ..
-        ") — it may be the file or the audio rather than the list; set .sounds or .players to try again"
+      "plugin.chime: no player could play "
+        .. path
+        .. " ("
+        .. (trouble or "no players listed")
+        .. ") — it may be the file or the audio rather than the list; "
+        .. "set .sounds or .players to try again"
     )
     return
   end
@@ -161,7 +167,10 @@ local function play(path, from, trouble)
     -- letting one bad entry stand in front of the rest of the list.
     if not complained[spec] then
       complained[spec] = true
-      neotmux.notify("error", "plugin.chime: player " .. from .. " cannot be run (" .. why .. "); check .players")
+      neotmux.notify(
+        "error",
+        "plugin.chime: player " .. from .. " cannot be run (" .. why .. "); check .players"
+      )
     end
     play(path, from + 1, why)
   end

@@ -361,9 +361,11 @@ local claude = {
       if any_line(lower(view.lines), is_bare_prompt) then
         return false
       end
-      if not any_line(view.lines, function(line)
-        return first_ink(line) == RULE
-      end) then
+      if
+        not any_line(view.lines, function(line)
+          return first_ink(line) == RULE
+        end)
+      then
         return false
       end
       local lines = lower(view.after_rule())

@@ -433,12 +433,12 @@ local function arm()
     local inner = box.draw(ctx, win, rect, { title = state.opts.title, bg = M.colors.frame })
 
     local room = inner.h - 1
-    local top = input_first() and inner.y + 1 or inner.y
+    local first_row = input_first() and inner.y + 1 or inner.y
     state.first = window_over(#state.items, room, state.at)
     for slot = 0, math.min(#state.items, room) - 1 do
       local at = state.first + slot
       local item = state.items[at]
-      local row = top + slot
+      local row = first_row + slot
       local chosen = at == state.at
       local background = chosen and M.colors.cursor or M.colors.frame
       if chosen then
@@ -496,7 +496,13 @@ local function arm()
     -- An empty frame says nothing about why it is empty. A query that matched none of them is
     -- the only way a list with items behind it can be empty, so that is what it says.
     if #state.items == 0 and state.opts.empty then
-      ctx:text(win, inner.x, top, state.opts.empty, { fg = M.colors.hint, bg = M.colors.frame })
+      ctx:text(
+        win,
+        inner.x,
+        first_row,
+        state.opts.empty,
+        { fg = M.colors.hint, bg = M.colors.frame }
+      )
     end
   end)
 end

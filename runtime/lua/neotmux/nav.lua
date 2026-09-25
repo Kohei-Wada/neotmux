@@ -51,7 +51,11 @@ function M.toward(dir)
     local it = id ~= me and neotmux.pane.rect(id)
     if it then
       local gap, faced = facing(mine, it)
-      if gap >= 0 and faced > 0 and (not best or gap < best_gap or (gap == best_gap and faced > best_faced)) then
+      if
+        gap >= 0
+        and faced > 0
+        and (not best or gap < best_gap or (gap == best_gap and faced > best_faced))
+      then
         best, best_gap, best_faced = id, gap, faced
       end
     end

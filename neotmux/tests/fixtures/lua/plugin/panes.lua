@@ -6,7 +6,12 @@ neotmux.on_tick(function()
   if stage == 1 then
     local ids = neotmux.pane.list()
     neotmux.log.info(
-      "panes list=" .. #ids .. " first=" .. tostring(ids[1]) .. " current=" .. tostring(neotmux.pane.current())
+      "panes list="
+        .. #ids
+        .. " first="
+        .. tostring(ids[1])
+        .. " current="
+        .. tostring(neotmux.pane.current())
     )
 
     local ok, err = pcall(neotmux.pane.split, "sideways")
@@ -18,7 +23,10 @@ neotmux.on_tick(function()
     neotmux.log.info("panes list after split=" .. #neotmux.pane.list())
   elseif stage == 2 then
     neotmux.log.info(
-      "panes applied list=" .. #neotmux.pane.list() .. " current=" .. tostring(neotmux.pane.current())
+      "panes applied list="
+        .. #neotmux.pane.list()
+        .. " current="
+        .. tostring(neotmux.pane.current())
     )
   end
 end)

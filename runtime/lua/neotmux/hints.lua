@@ -338,7 +338,8 @@ local function finish_pick(hit)
   local done = state.done
   close()
   if done then
-    local ok, err = pcall(done, { pane = hit.pane, line = hit.line, col = hit.col, text = hit.text })
+    local ok, err =
+      pcall(done, { pane = hit.pane, line = hit.line, col = hit.col, text = hit.text })
     if not ok then
       fail("done", err)
     end

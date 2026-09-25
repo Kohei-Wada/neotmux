@@ -16,7 +16,7 @@ neotmux.on_tick(function(ctx)
     -- A pane too small to hold its label is skipped rather than drawn over.
     if rect and rect.w >= 4 then
       local fg = (id == current) and M.focused_fg or M.other_fg
-      ctx:text(id, 0, 0, '[' .. id .. ']', { fg = fg })
+      ctx:text(id, 0, 0, "[" .. id .. "]", { fg = fg })
     end
   end
 end)

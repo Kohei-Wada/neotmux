@@ -108,9 +108,13 @@ top, and modules under `lua/`, so `require('plugin.clock')` loads `lua/plugin/cl
 directory layout is a convention of where `init.lua` looks, not something the program enforces.
 
 ```sh
-make run     # run it from a checkout
-make check   # fmt + clippy + tests
+make run       # run it from a checkout
+make check     # cargo fmt, stylua + luacheck, clippy, tests
+make fmt-lua   # format the Lua with stylua
 ```
+
+`make check` needs `stylua` and `luacheck` on `PATH` besides the Rust toolchain. `pre-commit install`
+runs the formatting and lint half of it on every commit; clippy and the tests are left to CI.
 
 ## License
 
