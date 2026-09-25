@@ -60,7 +60,7 @@ pub fn attach(session: Option<String>) -> anyhow::Result<()> {
         super::Opened::Running(done) => *done,
     };
 
-    let shutdown = neotmux_sys::signals::ShutdownSignal::install()?;
+    let shutdown = neotmux_sys::ShutdownSignal::install()?;
     let mut terminal = ratatui::init();
     let result = super::run(&mut terminal, &shutdown, &link, first);
     // Not `ratatui::restore`: it reports a failure with `eprintln!`, which panics when the

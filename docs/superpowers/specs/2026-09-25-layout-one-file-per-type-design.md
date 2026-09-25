@@ -32,7 +32,9 @@ settles is the convention the other crates follow. No behaviour changes.
    and its items are not flattened.**
 6. **A module whose public surface is free functions stays one named `pub mod`** — callers write
    `logging::init`, `procinfo::cwd`, `scrollback::lines`, and flattening would leave `init` or
-   `lines` saying nothing. Only the public types in it, if any, move out to their own files.
+   `lines` saying nothing. A public type in it moves out to its own file only if its name says what
+   it is without the module in front (`ShutdownSignal` out of `signals`); one that reads only
+   qualified (`tty::Any`, `sock::Paths`, `tty::Ready`) stays.
 7. **Size is its own reason.** Rules 1 and 2 split by type, so one public entry point with a large
    private implementation stays one file. Where that file is past about 600 lines and its private
    part has separable concerns, the part moves to a private directory named after the item
@@ -84,3 +86,9 @@ and `neotmux_layout::windows::{PaneIds, Shown, Surface, Windows}` → `neotmux_l
 `make check` passes with the same test count as before (1249), `neotmux-layout`'s own count equal
 to its count before (64), and `cargo doc --workspace --no-deps --document-private-items` with no
 warnings.
+
+## 4. Later crates
+
+- **neotmux-sys** (2026-09-25): `link.rs` is one type and is flattened (`neotmux_sys::Link`);
+  `signals` keeps `HANGUP` and `die_of` and gives `ShutdownSignal` and `WindowChange` a file each;
+  `logging`, `procinfo`, `sock` and `tty` stay named modules under rule 6.

@@ -11,7 +11,7 @@ use std::rc::Rc;
 use anyhow::Context as _;
 
 use crate::start;
-use neotmux_sys::link::Link;
+use neotmux_sys::Link;
 use neotmux_sys::sock;
 
 /// Runs a host command and prints what it said. Lines on stdout where it worked, the one

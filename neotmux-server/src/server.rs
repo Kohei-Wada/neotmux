@@ -18,9 +18,9 @@ use neotmux_pty::terminals::PaneTerminals;
 use crate::clip::Clip;
 use crate::plugins::{Plugins, ServerOp};
 use crate::session::{Pass, Session, Setup};
-use neotmux_sys::link::Link;
+use neotmux_sys::Link;
+use neotmux_sys::ShutdownSignal;
 use neotmux_sys::logging;
-use neotmux_sys::signals::ShutdownSignal;
 use neotmux_sys::sock::{self, Lock, Paths};
 
 /// The frame's cadence, and so the closest together two frames can be. The same number

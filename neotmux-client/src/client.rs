@@ -11,10 +11,10 @@ use ratatui::DefaultTerminal;
 
 use crate::decode::Decoder;
 use neotmux_proto::keys::Key;
-use neotmux_sys::link::Link;
+use neotmux_sys::Link;
 
-use neotmux_sys::signals::{self, ShutdownSignal};
 use neotmux_sys::tty::{Ready, Terminal};
+use neotmux_sys::{ShutdownSignal, signals};
 
 /// How long one pass of the loop waits before looking up. The server sets the frame rate;
 /// this is only how often the client notices a signal or a resize with nothing else going on.
@@ -130,7 +130,7 @@ pub(crate) fn run(
     first: OwnedDone,
 ) -> anyhow::Result<Left> {
     let mut keyboard = Keyboard::open()?;
-    let winch = signals::WindowChange::install()?;
+    let winch = neotmux_sys::WindowChange::install()?;
     if let Some(frame) = &first.frame {
         crate::draw::show(terminal, &frame.frame())?;
     }

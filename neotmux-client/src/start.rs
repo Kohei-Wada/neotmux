@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
 
-use neotmux_sys::link::Link;
+use neotmux_sys::Link;
 use neotmux_sys::sock::{self, Paths};
 
 /// How long a client waits for a server it started to come up. Generous, because it is a
