@@ -44,3 +44,30 @@ impl fmt::Display for Edge {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::geom::fixtures::EDGES;
+
+    #[test]
+    fn an_edge_round_trips_through_its_spelling() {
+        for edge in EDGES {
+            assert_eq!(Edge::parse(&edge.to_string()), Some(edge));
+        }
+    }
+
+    #[test]
+    fn a_name_no_edge_has_is_not_an_edge() {
+        assert_eq!(Edge::parse("middle"), None);
+        assert_eq!(Edge::parse("Top"), None);
+    }
+
+    #[test]
+    fn a_horizontal_edge_is_rows_and_a_vertical_one_is_columns() {
+        assert_eq!(Edge::Top.axis(), Axis::Rows);
+        assert_eq!(Edge::Bottom.axis(), Axis::Rows);
+        assert_eq!(Edge::Left.axis(), Axis::Columns);
+        assert_eq!(Edge::Right.axis(), Axis::Columns);
+    }
+}

@@ -1,6 +1,7 @@
 //! The keyboard as neotmux understands it: the key forms the program binds and types into a
 //! pane, and nothing else. There is no mouse, no bracketed paste and no focus event here
 //! because nothing in neotmux asks for one.
+
 use crate::KeyCode;
 use crate::Modifiers;
 
@@ -84,39 +85,6 @@ impl Key {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    #[test]
-    fn the_modifier_parameter_round_trips() {
-        for param in 1..=8u16 {
-            assert_eq!(Modifiers::from_param(param).param(), param as u8);
-        }
-    }
-
-    #[test]
-    fn an_absent_modifier_parameter_is_no_modifiers() {
-        assert_eq!(Modifiers::from_param(0), Modifiers::NONE);
-        assert_eq!(Modifiers::from_param(1), Modifiers::NONE);
-    }
-
-    #[test]
-    fn the_parameter_bits_are_shift_alt_control() {
-        assert_eq!(Modifiers::from_param(2), Modifiers::SHIFT);
-        assert_eq!(Modifiers::from_param(3), Modifiers::ALT);
-        assert_eq!(Modifiers::from_param(5), Modifiers::CTRL);
-        assert_eq!(
-            Modifiers::from_param(8),
-            Modifiers {
-                shift: true,
-                alt: true,
-                ctrl: true
-            }
-        );
-    }
-}
-
-#[cfg(test)]
-mod spec_tests {
     use super::*;
 
     #[test]

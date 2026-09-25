@@ -30,3 +30,68 @@ impl Epoch {
         self.focus
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{PaneId, Size};
+
+    #[test]
+    fn epochs_match_when_every_field_matches() {
+        let a = Epoch::new(
+            Size { rows: 24, cols: 80 },
+            vec![PaneId::from(1)],
+            Some(PaneId::from(1)),
+        );
+        let b = Epoch::new(
+            Size { rows: 24, cols: 80 },
+            vec![PaneId::from(1)],
+            Some(PaneId::from(1)),
+        );
+        assert!(a.matches(&b));
+    }
+
+    #[test]
+    fn a_resize_breaks_the_epoch() {
+        let a = Epoch::new(Size { rows: 24, cols: 80 }, vec![], None);
+        let b = Epoch::new(Size { rows: 25, cols: 80 }, vec![], None);
+        assert!(!a.matches(&b));
+    }
+
+    #[test]
+    fn a_closed_pane_breaks_the_epoch() {
+        let a = Epoch::new(
+            Size { rows: 24, cols: 80 },
+            vec![PaneId::from(1), PaneId::from(2)],
+            None,
+        );
+        let b = Epoch::new(Size { rows: 24, cols: 80 }, vec![PaneId::from(1)], None);
+        assert!(!a.matches(&b));
+    }
+
+    #[test]
+    fn a_focus_change_breaks_the_epoch() {
+        let a = Epoch::new(
+            Size { rows: 24, cols: 80 },
+            vec![PaneId::from(1)],
+            Some(PaneId::from(1)),
+        );
+        let b = Epoch::new(Size { rows: 24, cols: 80 }, vec![PaneId::from(1)], None);
+        assert!(!a.matches(&b));
+    }
+
+    #[test]
+    fn pane_order_does_not_affect_matching() {
+        let a = Epoch::new(
+            Size { rows: 1, cols: 1 },
+            vec![PaneId::from(2), PaneId::from(1)],
+            None,
+        );
+        let b = Epoch::new(
+            Size { rows: 1, cols: 1 },
+            vec![PaneId::from(1), PaneId::from(2)],
+            None,
+        );
+        assert!(a.matches(&b));
+    }
+}

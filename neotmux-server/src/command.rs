@@ -14,13 +14,8 @@ use neotmux_proto::{PaneId, Size, Want};
 use neotmux_pty::PaneTerminals;
 use neotmux_pty::child::Waker;
 
-use crate::Plugins;
-
-use crate::Session;
-
-use crate::{
-    Attached, RenameFailure, Sessions, StartFailure, rename_session, start_session, switch_clients,
-};
+use crate::sessions::{rename_session, start_session, switch_clients};
+use crate::{Attached, Plugins, RenameFailure, Session, Sessions, StartFailure};
 
 /// What a command did.
 pub(crate) struct Ran {

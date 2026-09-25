@@ -11,25 +11,11 @@
 //! The encoding is little-endian, length-prefixed, and has no framing of its own: a message
 //! is a byte slice, and whoever owns the socket decides where one ends.
 
+use super::tags::*;
 use crate::Key;
 use crate::PROTOCOL_VERSION;
 use crate::screen::{Frame, OwnedFrame};
 use crate::wire::Reader;
-use crate::wire::TO_CLIENT_BYE;
-use crate::wire::TO_CLIENT_CLIP;
-use crate::wire::TO_CLIENT_DONE;
-use crate::wire::TO_CLIENT_KILLED;
-use crate::wire::TO_CLIENT_RAN;
-use crate::wire::TO_CLIENT_REFUSED;
-use crate::wire::TO_CLIENT_SESSIONS;
-use crate::wire::TO_CLIENT_TICK;
-use crate::wire::TO_SERVER_ATTACH;
-use crate::wire::TO_SERVER_COMMAND;
-use crate::wire::TO_SERVER_KEY;
-use crate::wire::TO_SERVER_KILL;
-use crate::wire::TO_SERVER_LIST;
-use crate::wire::TO_SERVER_RESIZE;
-use crate::wire::TO_SERVER_TOCK;
 use crate::wire::WireError;
 use crate::wire::Writer;
 use crate::wire::{Attach, OwnedToClient, ToClient, ToServer};
@@ -270,7 +256,6 @@ mod tests {
     use crate::screen::Epoch;
     use crate::screen::OwnedPaneFrame;
     use crate::screen::Rect;
-    use crate::wire::CMD_RECT;
     use crate::wire::End;
     use crate::wire::SessionOp;
     use crate::wire::Step;
@@ -541,7 +526,7 @@ mod tests {
             self.next() % n
         }
 
-        pub(crate) fn bool(&mut self) -> bool {
+        fn bool(&mut self) -> bool {
             self.next() & 1 == 1
         }
 
@@ -627,7 +612,7 @@ mod tests {
             grid
         }
 
-        pub(crate) fn frame(&mut self) -> OwnedFrame {
+        fn frame(&mut self) -> OwnedFrame {
             let mut panes = Vec::new();
             for n in 0..self.below(4) {
                 panes.push(OwnedPaneFrame {

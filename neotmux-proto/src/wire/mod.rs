@@ -11,7 +11,7 @@
 //! that call because [`Step`], which a tick carries, still rides on a [`Done`] and so is
 //! still a thing the codec has to know.
 //!
-//! Everything here is data. [`crate::wire`] turns it into bytes; who reads and writes those
+//! Everything here is data. The `encode_*` and `decode_*` functions (`codec.rs`) turn it into bytes; who reads and writes those
 //! bytes is the socket's owner's business.
 
 mod attach;
@@ -40,7 +40,6 @@ pub use owned_to_client::*;
 pub(crate) use reader::*;
 pub use session_op::*;
 pub use step::*;
-pub(crate) use tags::*;
 pub use tick::*;
 pub use to_client::*;
 pub use to_server::*;

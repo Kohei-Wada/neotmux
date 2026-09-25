@@ -25,3 +25,6 @@ pub use size::*;
 pub use snap_cell::*;
 pub use split_dir::*;
 pub use window::*;
+
+#[cfg(test)]
+mod fixtures;

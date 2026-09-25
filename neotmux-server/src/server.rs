@@ -4,7 +4,6 @@ use crate::Pass;
 use crate::RenameFailure;
 use crate::Sessions;
 use crate::StartFailure;
-use crate::doorstep::Ask;
 use crate::doorstep::Pending;
 use crate::doorstep::await_client;
 use crate::doorstep::door;
@@ -43,18 +42,6 @@ pub(crate) const STARTUP: Duration = Duration::from_secs(10);
 /// greeting was the whole of it, now covering the attach behind it too — and now spent at the
 /// door rather than inside a frame.
 pub(crate) const DOORSTEP: Duration = Duration::from_secs(5);
-
-/// The one short wait the door is allowed, and only for a connection that has just greeted.
-///
-/// The attach is a reply to this end's hello — the peer cannot have sent it before it read
-/// that — so at the moment the greeting lands the attach is on its way and a context switch
-/// behind. Waiting that much for it is what keeps a client in the round the door took it in,
-/// which is the round every one of them has been in since there was one to be in.
-///
-/// Spent once per connection: a peer that greets and then stalls costs this much once, and a
-/// peer that says nothing at all never costs even that, because the wait is not reached until
-/// something has been heard.
-pub(crate) const GRACE: Duration = Duration::from_millis(10);
 
 /// The server, as `--server` runs it: the lock that says this process is the one, the
 /// socket it binds, `serve` for as long as there is a session, and the taking of both
@@ -306,52 +293,6 @@ fn apply_server_ops(
                     &format!("session.kill('{name}') refused: no session by that name"),
                 ),
             },
-        }
-    }
-}
-
-/// A connection that asked rather than attached, answered and let go. It is not a client, so
-/// it never enters `clients` and never sees a frame.
-pub(crate) fn answer(
-    link: &mut Link,
-    ask: Ask,
-    plugins: &mut Plugins,
-    sessions: &mut Sessions,
-    clients: &mut Vec<Attached>,
-    serving: &Serving<'_>,
-) {
-    match ask {
-        Ask::List => {
-            let names = sessions.names();
-            let _ = link.send(&wire::encode_to_client(&ToClient::Sessions(&names)));
-        }
-        Ask::Kill { session } => {
-            let found = match sessions.id_of(&session) {
-                Some(id) => {
-                    end_session(id, plugins, sessions, clients);
-                    true
-                }
-                None => false,
-            };
-            let _ = link.send(&wire::encode_to_client(&ToClient::Killed(found)));
-        }
-        Ask::Command {
-            session,
-            name,
-            args,
-        } => {
-            let mut ctx = crate::command::Ctx {
-                sessions,
-                plugins,
-                terminals: serving.terminals,
-                waker: serving.waker,
-                clients,
-            };
-            let ran = crate::command::run(&name, &args, session.as_deref(), &mut ctx);
-            let _ = link.send(&wire::encode_to_client(&ToClient::Ran {
-                ok: ran.ok,
-                lines: &ran.lines,
-            }));
         }
     }
 }

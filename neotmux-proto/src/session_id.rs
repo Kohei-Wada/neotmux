@@ -25,3 +25,15 @@ impl fmt::Display for SessionId {
         write!(f, "${}", self.0)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_session_id_is_written_the_way_tmux_writes_one() {
+        let id: SessionId = 1u32.into();
+        assert_eq!(id.get(), 1);
+        assert_eq!(id.to_string(), "$1");
+    }
+}

@@ -29,3 +29,15 @@ impl fmt::Display for SplitDir {
         f.write_str(name)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_split_direction_round_trips_through_its_spelling() {
+        for dir in [SplitDir::Horizontal, SplitDir::Vertical] {
+            assert_eq!(SplitDir::parse(&dir.to_string()), Some(dir));
+        }
+    }
+}

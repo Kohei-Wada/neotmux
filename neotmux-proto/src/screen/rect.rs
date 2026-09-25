@@ -16,3 +16,24 @@ impl Rect {
         x >= self.x && y >= self.y && x < self.x + self.w && y < self.y + self.h
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_rect_knows_what_it_contains() {
+        let r = Rect::new(2, 3, 4, 2);
+        assert!(r.contains(2, 3));
+        assert!(r.contains(5, 4));
+        assert!(!r.contains(6, 4));
+        assert!(!r.contains(5, 5));
+        assert!(!r.contains(1, 3));
+    }
+
+    #[test]
+    fn a_zero_sized_rect_contains_nothing() {
+        let r = Rect::new(0, 0, 0, 0);
+        assert!(!r.contains(0, 0));
+    }
+}

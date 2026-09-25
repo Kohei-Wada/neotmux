@@ -137,3 +137,10 @@ warnings.
   (`screen::width::of_str`), undoing the flattening review had flagged. Rule 8 came from this
   crate: `reader.rs` matches on tag constants, the first automatic fix turned them into
   catch-all bindings, and the file was rebuilt from the split with `use super::tags::*;`.
+- **Review follow-up** (2026-09-25): tests that stayed in a split file's survivor were moved to
+  the file of the type they assert on (proto `grid_snapshot`, `split_dir`, `dir`, `edge`,
+  `modifiers`, `session_id`, `window_id`, `rect`, `epoch`; lua `no_runner`), with `EDGES` in a
+  `geom/` fixtures module since `edge.rs`'s and `reserved.rs`'s tests share it. `tags.rs` is back
+  in its families with a doc, and `writer.rs` and `codec.rs` import it whole as `reader.rs` does.
+  `GRACE` and `answer()` moved to `doorstep.rs`, their only caller. Rule 4 is easy to break when a
+  split keeps a file's tests with whichever item stays: check each moved test's subject.

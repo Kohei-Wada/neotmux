@@ -14,7 +14,7 @@ use neotmux_proto::Key;
 use neotmux_sys::Link;
 
 use neotmux_sys::tty::{Ready, Terminal};
-use neotmux_sys::{ShutdownSignal, signals};
+use neotmux_sys::{ShutdownSignal, WindowChange, signals};
 
 /// How long one pass of the loop waits before looking up. The server sets the frame rate;
 /// this is only how often the client notices a signal or a resize with nothing else going on.
@@ -130,7 +130,7 @@ pub(crate) fn run(
     first: OwnedDone,
 ) -> anyhow::Result<Left> {
     let mut keyboard = Keyboard::open()?;
-    let winch = neotmux_sys::WindowChange::install()?;
+    let winch = WindowChange::install()?;
     if let Some(frame) = &first.frame {
         crate::draw::show(terminal, &frame.frame())?;
     }

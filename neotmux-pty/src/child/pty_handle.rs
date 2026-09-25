@@ -1,10 +1,13 @@
-use crate::child::{PtyEvent, Waker};
-use anyhow::Context as _;
-use neotmux_proto::{LineMode, Size};
-use portable_pty::{Child, ExitStatus, MasterPty, PtySize, native_pty_system};
 use std::io::{self, Read, Write};
 use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 use std::thread;
+
+use anyhow::Context as _;
+use neotmux_proto::{LineMode, Size};
+use portable_pty::{Child, ExitStatus, MasterPty, PtySize, native_pty_system};
+
+use crate::child::{PtyEvent, Waker};
+
 // `spawn` takes one, so it is part of this crate's surface either way: re-exported so a
 // caller does not need its own dependency on portable-pty to name the type.
 pub use portable_pty::CommandBuilder;

@@ -38,3 +38,15 @@ impl fmt::Display for WindowId {
         write!(f, "@{}", self.0)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_window_id_round_trips_and_displays_with_an_at_prefix() {
+        let id = WindowId::from(2);
+        assert_eq!(id.get(), 2);
+        assert_eq!(id.to_string(), "@2");
+    }
+}
