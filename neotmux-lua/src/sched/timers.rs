@@ -135,6 +135,20 @@ impl Timers {
             .retain(|_, timer| timer.owner != owner);
     }
 
+    /// The timers still to be called: a spent one-shot lingers a frame past its call, and is
+    /// not counted.
+    pub fn len(&self) -> usize {
+        self.armed
+            .borrow()
+            .values()
+            .filter(|timer| !timer.spent)
+            .count()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     /// The same for a session that is over, spent one-shots included — a one-shot lingers a
     /// frame past its call, and a session that is gone has no frame left to linger into. A
     /// timer still waiting to be adopted belongs to no session yet and is left alone.

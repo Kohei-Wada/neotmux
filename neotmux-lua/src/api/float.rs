@@ -5,7 +5,7 @@ use mlua::{Function, Lua, Table, Value};
 use neotmux_proto::Rect;
 
 use crate::draw::{FloatId, Floats};
-use crate::plugin::{self, Sources};
+use crate::plugin::{self, Groups, Held, Sources};
 
 /// A field read as a whole Lua integer, or the message a bad one gets: `min` is the
 /// smallest legal value, `0` for a corner and `1` for a dimension (spec §3, §7) —
@@ -157,6 +157,7 @@ pub(crate) fn install(
     lua: &Lua,
     sources: Rc<Sources>,
     floats: Rc<Floats>,
+    groups: Rc<Groups>,
 ) -> mlua::Result<Function> {
     lua.create_function(move |lua, opts: Table| {
         let x = match field(&opts, "x", 0)? {
@@ -191,6 +192,7 @@ pub(crate) fn install(
 
         let owner = plugin::caller(lua, &sources);
         let id = floats.add(owner, Rect::new(x, y, w, h));
+        groups.note(Held::Float(id));
         Ok((Value::Table(handle(lua, floats.clone(), id)?), Value::Nil))
     })
 }

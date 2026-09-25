@@ -6,6 +6,7 @@ use mlua::{Function, Lua, Table, Value};
 use neotmux_proto::screen::PaneRead;
 
 use crate::LoadFailure;
+use crate::api::Sweep;
 use crate::draw::Buffers;
 use crate::draw::Floats;
 use crate::draw::Reservations;
@@ -13,7 +14,7 @@ use crate::host::WindowIds;
 use crate::host::{Op, OpBuffer};
 use crate::host::{PaneInfos, PaneTtys};
 use crate::plugin::Commands;
-use crate::plugin::{self, SourceId, Sources};
+use crate::plugin::{self, Groups, Held, SourceId, Sources};
 use crate::plugin::{Kind, KindTag, RegistrationId, Registry};
 use crate::sched::Overrun;
 use neotmux_proto::{Geometry, Level};
@@ -46,6 +47,7 @@ pub(crate) struct Shared {
     /// a fact about the process rather than about a pane, and nothing in the Lua layer
     /// could set it.
     pub(crate) ambient: Rc<crate::host::Ambient>,
+    pub(crate) groups: Rc<Groups>,
 }
 
 pub(crate) fn make_handle(
@@ -98,41 +100,18 @@ fn register(
     sources: &Rc<Sources>,
     registry: &Rc<Registry>,
     buffers: &Rc<Buffers>,
+    groups: &Groups,
     kind: Kind,
     callback: Function,
 ) -> mlua::Result<(SourceId, Table)> {
     let owner = attribute(sources, &callback);
     let key = Rc::new(lua.create_registry_value(callback)?);
     let id = registry.add(owner, kind, key);
+    groups.note(Held::Registration(id));
     Ok((
         owner,
         make_handle(lua, registry.clone(), buffers.clone(), id)?,
     ))
-}
-
-/// Everything a source that failed to load has to be taken back out of, as one value: the
-/// wrapper otherwise takes nine collaborators.
-struct Sweep {
-    registry: Rc<Registry>,
-    buffers: Rc<Buffers>,
-    reservations: Rc<Reservations>,
-    floats: Rc<Floats>,
-    jobs: Rc<crate::sched::Jobs>,
-    timers: Rc<crate::sched::timers::Timers>,
-}
-
-impl Sweep {
-    /// What a chunk that is not there registered, reserved, drew, started and armed. Jobs and
-    /// timers are killed and stopped rather than left to finish: the callbacks that would hear
-    /// how they ended belong to the chunk that is going away.
-    fn remove_all_of(&self, id: SourceId) {
-        self.registry.remove_all_of(id);
-        self.reservations.remove_all_of(id);
-        self.floats.remove_all_of(id);
-        self.jobs.remove_all_of(id);
-        self.timers.remove_all_of(id);
-        forget_if_no_longer_drawing(&self.registry, &self.buffers, id);
-    }
 }
 
 /// The load convention, not `require`, owns isolation (§4.10). `loading` is set only while
@@ -212,17 +191,35 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
         floats,
         home,
         ambient,
+        groups,
     } = shared;
+    let sweep = Sweep {
+        registry: registry.clone(),
+        buffers: buffers.clone(),
+        reservations: reservations.clone(),
+        floats: floats.clone(),
+        jobs: jobs.clone(),
+        timers: timers.clone(),
+        commands: commands.clone(),
+    };
     let neotmux = lua.create_table()?;
 
     {
         let sources = sources.clone();
         let registry = registry.clone();
         let buffers = buffers.clone();
+        let groups = groups.clone();
         let parked = overrun.clone();
         let on_tick = lua.create_function(move |lua, callback: Function| {
-            let (owner, handle) =
-                register(lua, &sources, &registry, &buffers, Kind::Tick, callback)?;
+            let (owner, handle) = register(
+                lua,
+                &sources,
+                &registry,
+                &buffers,
+                &groups,
+                Kind::Tick,
+                callback,
+            )?;
             parked.forget_parked(owner);
             Ok(handle)
         })?;
@@ -233,12 +230,14 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
         let sources = sources.clone();
         let registry = registry.clone();
         let buffers = buffers.clone();
+        let groups = groups.clone();
         let on_event = lua.create_function(move |lua, (name, callback): (String, Function)| {
             Ok(register(
                 lua,
                 &sources,
                 &registry,
                 &buffers,
+                &groups,
                 Kind::Event(name),
                 callback,
             )?
@@ -251,8 +250,18 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
         let sources = sources.clone();
         let registry = registry.clone();
         let buffers = buffers.clone();
+        let groups = groups.clone();
         let on_key = lua.create_function(move |lua, callback: Function| {
-            Ok(register(lua, &sources, &registry, &buffers, Kind::Key, callback)?.1)
+            Ok(register(
+                lua,
+                &sources,
+                &registry,
+                &buffers,
+                &groups,
+                Kind::Key,
+                callback,
+            )?
+            .1)
         })?;
         neotmux.set("on_key", on_key)?;
     }
@@ -261,11 +270,21 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
         let sources = sources.clone();
         let registry = registry.clone();
         let buffers = buffers.clone();
+        let groups = groups.clone();
         // Every write of text into a pane, before it is written. A handler answers nothing to
         // pass it and `false, why` to refuse it; `on_key` is the other half of this, for the
         // keys a person types, which are not writes.
         let on_write = lua.create_function(move |lua, callback: Function| {
-            Ok(register(lua, &sources, &registry, &buffers, Kind::Write, callback)?.1)
+            Ok(register(
+                lua,
+                &sources,
+                &registry,
+                &buffers,
+                &groups,
+                Kind::Write,
+                callback,
+            )?
+            .1)
         })?;
         neotmux.set("on_write", on_write)?;
     }
@@ -277,13 +296,20 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
             registry.clone(),
             buffers.clone(),
             ops.clone(),
+            groups.clone(),
         )?;
         let keymap = seal(lua, keymap, "neotmux.keymap")?;
         neotmux.set("keymap", keymap)?;
     }
 
     {
-        let command = super::command::install(lua, sources.clone(), commands.clone(), ops.clone())?;
+        let command = super::command::install(
+            lua,
+            sources.clone(),
+            commands.clone(),
+            ops.clone(),
+            groups.clone(),
+        )?;
         let command = seal(lua, command, "neotmux.command")?;
         neotmux.set("command", command)?;
     }
@@ -485,12 +511,13 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
     }
 
     {
-        let reserve = super::reserve::install(lua, sources.clone(), reservations.clone())?;
+        let reserve =
+            super::reserve::install(lua, sources.clone(), reservations.clone(), groups.clone())?;
         neotmux.set("reserve", reserve)?;
     }
 
     {
-        let float = super::float::install(lua, sources.clone(), floats.clone())?;
+        let float = super::float::install(lua, sources.clone(), floats.clone(), groups.clone())?;
         neotmux.set("float", float)?;
     }
 
@@ -501,33 +528,33 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
             sources.clone(),
             ambient.clone(),
             opts.clone(),
+            groups.clone(),
         )?;
         let job = seal(lua, job, "neotmux.job")?;
         neotmux.set("job", job)?;
     }
 
     {
-        let timer = super::timer::install(lua, timers.clone(), sources.clone(), ambient.clone())?;
+        let timer = super::timer::install(
+            lua,
+            timers.clone(),
+            sources.clone(),
+            ambient.clone(),
+            groups.clone(),
+        )?;
         let timer = seal(lua, timer, "neotmux.timer")?;
         neotmux.set("timer", timer)?;
+    }
+
+    {
+        let group = super::group::install(lua, &neotmux, groups.clone(), sweep.clone(), seal)?;
+        neotmux.set("group", group)?;
     }
 
     let neotmux = seal(lua, neotmux, "neotmux")?;
     lua.globals().set("neotmux", neotmux)?;
 
-    install_require_wrapper(
-        lua,
-        sources,
-        Sweep {
-            registry,
-            buffers,
-            reservations,
-            floats,
-            jobs,
-            timers,
-        },
-        load_failures,
-    )
+    install_require_wrapper(lua, sources, sweep, load_failures)
 }
 
 /// A chunk assigning `neotmux.on_tick = ...` or replacing `neotmux.log` wholesale would make
@@ -538,7 +565,7 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
 /// `__index` reads through to it and whose `__newindex` rejects every write, which fires for
 /// every key because the proxy itself is always empty. `__metatable` also refuses to let
 /// `setmetatable` swap the guard back out.
-fn seal(lua: &Lua, real: Table, name: &'static str) -> mlua::Result<Table> {
+pub(crate) fn seal(lua: &Lua, real: Table, name: &'static str) -> mlua::Result<Table> {
     let proxy = lua.create_table()?;
     let meta = lua.create_table()?;
     meta.set("__index", real.clone())?;

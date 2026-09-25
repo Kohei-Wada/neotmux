@@ -5,7 +5,7 @@ use mlua::{Function, Lua, Table, Value};
 use crate::api::{attribute, make_handle};
 use crate::draw::Buffers;
 use crate::host::{Op, OpBuffer};
-use crate::plugin::Sources;
+use crate::plugin::{Groups, Held, Sources};
 use crate::plugin::{Kind, KindTag, RegistrationId, Registry};
 use neotmux_proto::Level;
 
@@ -108,6 +108,7 @@ pub fn install(
     registry: Rc<Registry>,
     buffers: Rc<Buffers>,
     ops: Rc<OpBuffer>,
+    groups: Rc<Groups>,
 ) -> mlua::Result<Table> {
     let keymap = lua.create_table()?;
     let set = lua.create_function(move |lua, (spec, callback): (String, Function)| {
@@ -139,6 +140,7 @@ pub fn install(
 
         let key = Rc::new(lua.create_registry_value(callback)?);
         let id = registry.add(attempter, Kind::Keymap(normalised), key);
+        groups.note(Held::Registration(id));
         let handle = make_handle(lua, registry.clone(), buffers.clone(), id)?;
         Ok((Value::Table(handle), Value::Nil))
     })?;

@@ -7,7 +7,7 @@ use mlua::{Function, Lua, Table, Value};
 use crate::api::opt::Opts;
 use crate::host::Ambient;
 use crate::host::JobSpec;
-use crate::plugin::Sources;
+use crate::plugin::{Groups, Held, Sources};
 use crate::sched::{Callbacks, JobId, Jobs};
 
 pub(crate) fn install(
@@ -16,6 +16,7 @@ pub(crate) fn install(
     sources: Rc<Sources>,
     ambient: Rc<Ambient>,
     opts: Rc<std::cell::RefCell<Opts>>,
+    groups: Rc<Groups>,
 ) -> mlua::Result<Table> {
     let table = lua.create_table()?;
     let start = lua.create_function(move |lua, (cmd, options): (Table, Option<Table>)| {
@@ -69,7 +70,10 @@ pub(crate) fn install(
         let owner = crate::plugin::caller(lua, &sources);
         let concurrency = opts.borrow().job_concurrency;
         match jobs.start(spec, owner, session, buffered, callbacks, concurrency) {
-            Ok(id) => Ok((Value::Table(handle(lua, Rc::clone(&jobs), id)?), Value::Nil)),
+            Ok(id) => {
+                groups.note(Held::Job(id));
+                Ok((Value::Table(handle(lua, Rc::clone(&jobs), id)?), Value::Nil))
+            }
             Err(why) => Ok((Value::Nil, Value::String(lua.create_string(&why)?))),
         }
     })?;

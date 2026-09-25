@@ -95,6 +95,19 @@ impl Registry {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
+    /// Every registration's kind, `Debug`-printed and sorted.
+    pub fn kinds(&self) -> Vec<String> {
+        let mut kinds: Vec<String> = self
+            .inner
+            .borrow()
+            .entries
+            .values()
+            .map(|entry| format!("{:?}", entry.kind))
+            .collect();
+        kinds.sort();
+        kinds
+    }
 }
 
 #[cfg(test)]

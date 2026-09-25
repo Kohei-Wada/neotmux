@@ -231,6 +231,22 @@ impl Jobs {
         }
     }
 
+    /// Kills and drops one job with no `Exit`, for the reason `remove_all_of` gives: its group
+    /// is being emptied, and the callback that would hear the ending is the old code's.
+    pub fn remove(&self, id: JobId) {
+        for mut job in self.take_matching(|job| job.id == id) {
+            let _ = job.running.kill();
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.live.borrow().len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     /// The same for a session that is over, but with the ending each job is still owed: the
     /// chunk that wrote `on_exit` is very much alive here, and a plugin holding a lock for the
     /// length of a job has to learn that the job is over. A job whose `ending` was already set

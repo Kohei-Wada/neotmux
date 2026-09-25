@@ -9,7 +9,7 @@ use std::time::Instant;
 use mlua::{Function, Lua, Table, Value};
 
 use crate::host::Ambient;
-use crate::plugin::Sources;
+use crate::plugin::{Groups, Held, Sources};
 use crate::sched::timers::{TimerId, Timers};
 
 pub(crate) fn install(
@@ -17,12 +17,14 @@ pub(crate) fn install(
     timers: Rc<Timers>,
     sources: Rc<Sources>,
     ambient: Rc<Ambient>,
+    groups: Rc<Groups>,
 ) -> mlua::Result<Table> {
     let table = lua.create_table()?;
     for (name, repeating) in [("every", true), ("after", false)] {
         let timers = Rc::clone(&timers);
         let sources = Rc::clone(&sources);
         let ambient = Rc::clone(&ambient);
+        let groups = Rc::clone(&groups);
         let arm = lua.create_function(move |lua, (ms, callback): (u64, Function)| {
             let owner = crate::plugin::caller(lua, &sources);
             let key = Rc::new(lua.create_registry_value(callback)?);
@@ -30,10 +32,13 @@ pub(crate) fn install(
             // arms its poll: the timer is adopted by the first session to run a frame.
             let session = ambient.current();
             match timers.arm(ms, repeating, owner, session, key, Instant::now()) {
-                Ok(id) => Ok((
-                    Value::Table(handle(lua, Rc::clone(&timers), id)?),
-                    Value::Nil,
-                )),
+                Ok(id) => {
+                    groups.note(Held::Timer(id));
+                    Ok((
+                        Value::Table(handle(lua, Rc::clone(&timers), id)?),
+                        Value::Nil,
+                    ))
+                }
                 Err(why) => Ok((Value::Nil, Value::String(lua.create_string(&why)?))),
             }
         })?;

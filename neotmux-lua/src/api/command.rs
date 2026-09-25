@@ -5,7 +5,7 @@ use mlua::{Function, Lua, Table, Value};
 use crate::api::attribute;
 use crate::host::{Op, OpBuffer};
 use crate::plugin::Commands;
-use crate::plugin::Sources;
+use crate::plugin::{Groups, Held, Sources};
 use neotmux_proto::Level;
 
 /// `neotmux.command`: a name a plugin registers, anything can list, and anything can call by
@@ -22,6 +22,7 @@ pub fn install(
     sources: Rc<Sources>,
     commands: Rc<Commands>,
     ops: Rc<OpBuffer>,
+    groups: Rc<Groups>,
 ) -> mlua::Result<Table> {
     let command = lua.create_table()?;
 
@@ -42,8 +43,14 @@ pub fn install(
                 };
                 let owner = attribute(&sources, &callback);
                 let key = Rc::new(lua.create_registry_value(callback)?);
-                match commands.add(name.clone(), owner, desc, key) {
-                    Ok(()) => Ok((Value::Boolean(true), Value::Nil)),
+                match commands.add(name.clone(), owner, desc, Rc::clone(&key)) {
+                    Ok(()) => {
+                        groups.note(Held::Command {
+                            name: name.clone(),
+                            callback: key,
+                        });
+                        Ok((Value::Boolean(true), Value::Nil))
+                    }
                     Err(holder) => {
                         let holder_name = sources.name(holder).unwrap_or_default();
                         let attempter_name = sources.name(owner).unwrap_or_default();

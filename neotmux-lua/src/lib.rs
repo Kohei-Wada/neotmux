@@ -1,4 +1,5 @@
 pub mod api;
+mod census;
 mod command_info;
 mod command_outcome;
 pub mod draw;
@@ -12,6 +13,7 @@ mod write_verdict;
 
 pub use api::Opts;
 pub use api::keymap;
+pub use census::*;
 pub use command_info::*;
 pub use command_outcome::*;
 pub use key_outcome::*;

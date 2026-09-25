@@ -1,4 +1,8 @@
 mod commands;
+mod group_id;
+mod groups;
+mod held;
+mod in_group;
 mod kind;
 mod kind_tag;
 mod layers;
@@ -10,6 +14,10 @@ mod sources;
 mod vm;
 
 pub use commands::*;
+pub use group_id::*;
+pub use groups::*;
+pub use held::*;
+pub use in_group::*;
 pub use kind::*;
 pub use kind_tag::*;
 pub use layers::*;

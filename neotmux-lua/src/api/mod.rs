@@ -3,6 +3,7 @@ pub mod command;
 pub mod ctx;
 pub mod event;
 pub mod float;
+mod group;
 mod install;
 pub mod job;
 pub mod keymap;
@@ -12,8 +13,10 @@ pub mod pane;
 pub(crate) mod rect;
 pub mod reserve;
 pub mod session;
+mod sweep;
 pub mod timer;
 pub mod window;
 
 pub(crate) use install::*;
 pub use opt::Opts;
+pub(crate) use sweep::*;

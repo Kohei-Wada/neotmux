@@ -1,3 +1,4 @@
+use crate::Census;
 use crate::CommandInfo;
 use crate::CommandOutcome;
 use crate::KeyOutcome;
@@ -15,6 +16,7 @@ use crate::host::WindowIds;
 use crate::host::{Op, OpBuffer};
 use crate::host::{PaneInfos, PaneTtys};
 use crate::plugin::Commands;
+use crate::plugin::Groups;
 use crate::plugin::Layers;
 use crate::plugin::{Kind, KindTag, RegistrationId, Registry};
 use crate::plugin::{SourceId, Sources};
@@ -61,6 +63,8 @@ pub struct LuaSubsystem {
     floats: Rc<Floats>,
     jobs: Rc<Jobs>,
     timers: Rc<Timers>,
+    #[expect(dead_code, reason = "config-reload is its first reader")]
+    groups: Rc<Groups>,
 }
 
 impl LuaSubsystem {
@@ -120,6 +124,7 @@ impl LuaSubsystem {
         let jobs = Rc::new(Jobs::new(runner));
         let timers = Rc::new(Timers::default());
         let overrun = Rc::new(Overrun::new());
+        let groups = Rc::new(Groups::default());
         let budget = Budget::new(opts.clone());
         Budget::seal(&lua, &budget).map_err(|err| anyhow::anyhow!("{err:#}"))?;
 
@@ -147,6 +152,7 @@ impl LuaSubsystem {
                 floats: floats.clone(),
                 home,
                 ambient: Rc::clone(&ambient),
+                groups: groups.clone(),
             },
         )
         .map_err(|err| anyhow::anyhow!("{err:#}"))?;
@@ -174,6 +180,7 @@ impl LuaSubsystem {
             floats,
             jobs,
             timers,
+            groups,
         })
     }
 
@@ -1093,5 +1100,22 @@ impl LuaSubsystem {
 
     pub fn opt(&self) -> Opts {
         self.opts.borrow().clone()
+    }
+
+    /// What the host is holding for the Lua layer, counted — what a reload is checked against.
+    pub fn census(&self) -> Census {
+        Census {
+            registrations: self.registry.kinds(),
+            commands: self.commands.list().into_iter().map(|c| c.name).collect(),
+            reserved: self.reservations.totals(),
+            floats: self.floats.count(),
+            jobs: self.jobs.len(),
+            timers: self.timers.len(),
+        }
+    }
+
+    /// Who holds each band, in reservation order.
+    pub fn reservation_owners(&self) -> Vec<SourceId> {
+        self.reservations.owners()
     }
 }
