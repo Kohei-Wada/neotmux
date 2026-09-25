@@ -76,6 +76,11 @@ pub fn pane() -> PaneId {
 /// ticked a pane into `blocked` would spawn a player and `cargo test` would make a noise at
 /// whoever ran it; `chime.rs` builds its own runtime and turns it on there.
 pub fn built(extra: &str) -> (tempfile::TempDir, Built) {
+    built_running(extra, Rc::new(neotmux_lua::host::NoRunner))
+}
+
+/// [`built`], with `runner` answering every `neotmux.job.start` instead of nothing.
+pub fn built_running(extra: &str, runner: Rc<dyn Runner>) -> (tempfile::TempDir, Built) {
     let dir = tempfile::tempdir().unwrap();
     fs::write(
         dir.path().join("init.lua"),
@@ -91,9 +96,11 @@ pub fn built(extra: &str) -> (tempfile::TempDir, Built) {
     )
     .unwrap();
     let terminals = panes();
-    let sub = LuaSubsystem::build(
+    let sub = LuaSubsystem::build_with_runner(
         Layers::from_paths(vec![dir.path().to_path_buf(), shipped_layer()]),
         terminals.clone(),
+        Rc::new(neotmux_lua::host::Absent),
+        runner,
     )
     .unwrap();
     assert!(sub.run_init().is_empty());

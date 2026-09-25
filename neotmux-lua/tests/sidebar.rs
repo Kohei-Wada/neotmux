@@ -23,6 +23,8 @@ struct Sess {
     focus: u32,
     /// Panes that report `agent` as their command; every other pane reports `cat`.
     agents: Vec<u32>,
+    /// The directory every pane of the session reports, or none.
+    cwd: Option<String>,
 }
 
 impl Sess {
@@ -34,6 +36,7 @@ impl Sess {
             windows,
             focus,
             agents: Vec::new(),
+            cwd: None,
         }
     }
 
@@ -76,14 +79,25 @@ fn built_herdr(extra: &str) -> (tempfile::TempDir, Built) {
     built_as("", extra)
 }
 
-fn built_as(layout: &str, extra: &str) -> (tempfile::TempDir, Built) {
-    support::built(&format!(
+fn built_herdr_running(
+    extra: &str,
+    runner: std::rc::Rc<support::FakeRunner>,
+) -> (tempfile::TempDir, Built) {
+    support::built_running(&preamble("", extra), runner)
+}
+
+fn preamble(layout: &str, extra: &str) -> String {
+    format!(
         "require('neotmux.defaults').sidebar = true\n\
          require('neotmux.detect').agents = {{}}\n\
          neotmux.opt.tick_budget_ms = 0\n\
          {layout}\
          {extra}"
-    ))
+    )
+}
+
+fn built_as(layout: &str, extra: &str) -> (tempfile::TempDir, Built) {
+    support::built(&preamble(layout, extra))
 }
 
 fn open(sub: &Built, sessions: &[Sess]) {
@@ -145,12 +159,16 @@ fn frame_in(sub: &Built, surface: Size, sessions: &[Sess], current: u32) -> Vec<
                     PaneId::from(*p),
                     PaneInfo {
                         command: Some(command.to_string()),
-                        cwd: None,
+                        cwd: s.cwd.clone(),
                     },
                 )
             })
             .collect();
         sub.publish_pane_info(id, info);
+    }
+    // What the server does every frame before the tick: hand each session what its jobs said.
+    for s in sessions {
+        sub.dispatch_jobs(SessionId::from(s.id));
     }
     sub.dispatch_tick(SessionId::from(current));
     band(sub, surface)
@@ -188,7 +206,10 @@ fn band(sub: &Built, surface: Size) -> Vec<String> {
         .map(|row| {
             let line = row.into_iter().collect::<String>();
             let line = line.trim_end();
-            line.strip_suffix('\u{2502}').unwrap_or(line).trim_end().to_string()
+            line.strip_suffix('\u{2502}')
+                .unwrap_or(line)
+                .trim_end()
+                .to_string()
         })
         .collect()
 }
@@ -607,4 +628,150 @@ fn an_agent_row_names_the_ruleset_not_the_wrapper() {
     show(&sub, 101, "BUSY");
     let lines = settled(&sub, &s, 1);
     line_with(&lines, "work:1.1 fake");
+}
+
+/// Icons that name their state, so a line says which one it is drawn in.
+const LETTERS: &str = "require('plugin.sidebar').icons = { working = 'W', blocked = 'B', done = 'D', idle = 'I' }\n\
+    require('plugin.sidebar.spaces').rows = { { 'state_icon', 'name' } }\n";
+
+/// The shipped sidebar is herdr's: a `spaces` header over every session, each drawn as the most
+/// urgent of its panes, and the agents under them in herdr's rows — where on the first line,
+/// what on the second — in session order, with the order named in the header.
+#[test]
+fn the_shipped_sidebar_is_herdrs_spaces_over_its_agents() {
+    let (_dir, sub) = built_herdr(&format!("{AGENTS}{LETTERS}"));
+    let s = [
+        Sess::new(1, "work", vec![vec![101]]).agents(&[101]),
+        Sess::new(2, "home", vec![vec![201], vec![202]]).agents(&[201, 202]),
+    ];
+    open(&sub, &s);
+    show(&sub, 101, "BUSY");
+    show(&sub, 201, "ASK");
+    show(&sub, 202, "BUSY");
+    let lines = settled(&sub, &s, 1);
+    let spaces = line_with(&lines, "\u{2500} spaces \u{2500}");
+    let home = line_with(&lines, " B home");
+    let work = line_with(&lines, " W work");
+    let agents = line_with(&lines, "\u{2500} agents \u{2500}");
+    assert!(spaces < home && home < work && work < agents, "{lines:#?}");
+    assert!(lines[agents].ends_with("grouped"), "{lines:#?}");
+    // Grouped: home's two before work's one, and home names its windows because it has two.
+    let first = line_with(&lines, "B home 1");
+    let second = line_with(&lines, "W home 2");
+    let third = agents + line_with(&lines[agents..], "W work");
+    assert!(
+        agents < first && first < second && second < third,
+        "{lines:#?}"
+    );
+    assert_eq!(lines[first + 1].trim(), "fake", "{lines:#?}");
+}
+
+/// herdr's `done`: an agent that finishes where nobody is looking is done until it is looked at,
+/// and one that finishes on screen is only idle.
+#[test]
+fn an_agent_that_finishes_unwatched_is_done_until_it_is_looked_at() {
+    let (_dir, sub) = built_herdr(&format!("{AGENTS}{LETTERS}"));
+    let s = [
+        Sess::new(1, "work", vec![vec![101]]).agents(&[101]),
+        Sess::new(2, "home", vec![vec![201]]).agents(&[201]),
+    ];
+    open(&sub, &s);
+    show(&sub, 101, "BUSY");
+    show(&sub, 201, "BUSY");
+    settled(&sub, &s, 1);
+    show(&sub, 101, "DONE");
+    show(&sub, 201, "DONE");
+    let lines = settled(&sub, &s, 1);
+    line_with(&lines, "I work");
+    line_with(&lines, "D home");
+    // Going there is looking at it.
+    let lines = settled(&sub, &s, 2);
+    line_with(&lines, "I home");
+    let lines = settled(&sub, &s, 1);
+    line_with(&lines, "I home");
+}
+
+/// `C-b w`'s navigate: the cursor starts on the session you are in, `j` moves it, Enter goes to
+/// the session under it and nothing else does.
+#[test]
+fn navigate_moves_a_cursor_over_the_spaces_and_enter_goes_there() {
+    let (_dir, sub) = built_herdr(
+        "neotmux.on_key(function(key)\n\
+           if key == 'W' then require('plugin.sidebar.spaces').navigate() return true end\n\
+           return false\n\
+         end)\n",
+    );
+    let s = [
+        Sess::new(1, "alpha", vec![vec![101]]),
+        Sess::new(2, "bravo", vec![vec![201]]),
+        Sess::new(3, "charlie", vec![vec![301]]),
+    ];
+    open(&sub, &s);
+    settled(&sub, &s, 1);
+    support::keys(&sub, &["W", "j", "j"]);
+    let switches = |sub: &Built| -> Vec<String> {
+        sub.drain_ops(Some(support::one()))
+            .into_iter()
+            .filter_map(|(_, op)| match op {
+                neotmux_lua::host::Op::SessionSwitch { name } => Some(name),
+                _ => None,
+            })
+            .collect()
+    };
+    assert!(switches(&sub).is_empty(), "moving the cursor switched");
+    support::keys(&sub, &["Enter"]);
+    assert_eq!(switches(&sub), vec!["charlie".to_string()]);
+    // And the cursor is gone: a `j` now is the pane's again.
+    assert_eq!(
+        sub.dispatch_key(support::one(), "j"),
+        neotmux_lua::KeyOutcome::Fallthrough
+    );
+}
+
+/// The second row of a space is its git branch and how far that is from its upstream, asked of
+/// git in the directory its focused pane is in: `rev-parse` for the name, then `rev-list` for
+/// behind and ahead, in that order.
+#[test]
+fn a_space_in_a_git_repository_shows_its_branch_and_how_far_it_is_from_upstream() {
+    use neotmux_lua::host::JobChunk;
+    let runner = support::FakeRunner::new();
+    runner.will_say(vec![vec![
+        JobChunk::Stdout(b"trunk\n".to_vec()),
+        JobChunk::Exited(0),
+    ]]);
+    runner.will_say(vec![vec![
+        JobChunk::Stdout(b"1\t2\n".to_vec()),
+        JobChunk::Exited(0),
+    ]]);
+    let (_dir, sub) = built_herdr_running("", runner.clone());
+    let mut work = Sess::new(1, "work", vec![vec![101]]);
+    work.cwd = Some("/src/work".to_string());
+    let s = [work];
+    open(&sub, &s);
+    let mut lines = Vec::new();
+    for _ in 0..6 {
+        lines = frame(&sub, &s, 1);
+    }
+    let started: Vec<Vec<String>> = runner
+        .started
+        .borrow()
+        .iter()
+        .map(|job| job.cmd.clone())
+        .collect();
+    assert_eq!(
+        started[0],
+        [
+            "git",
+            "-C",
+            "/src/work",
+            "rev-parse",
+            "--abbrev-ref",
+            "HEAD"
+        ]
+    );
+    assert_eq!(
+        started[1][3..],
+        ["rev-list", "--left-right", "--count", "@{upstream}...HEAD"]
+    );
+    line_with(&lines, "trunk \u{2191}2 \u{2193}1");
 }
