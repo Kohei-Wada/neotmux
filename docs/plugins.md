@@ -982,8 +982,9 @@ neotmux.job.start({ 'tail', '-F', '/var/log/syslog' }, {
 **`on_exit(code, stdout, stderr, err)` runs exactly once**, whatever ended the job. `code` is
 the exit status — 128 plus the signal for a program a signal ended — or `nil` when the job did
 not get to exit on its own; `err` is `nil` for an ordinary exit, one of four words for a job
-the host ended (`killed` for your own `job:kill()`, `session ended`, `output limit`, `budget`),
-and otherwise a one-line reason the host could not do better than quote, such as a pipe that
+the host ended (`killed` for your own `job:kill()`, `session ended`, `output limit`, `budget`)
+— followed by `, but the kill failed: ` and why, when the system would not let the program be
+killed and it may still be running — and otherwise a one-line reason the host could not do better than quote, such as a pipe that
 broke while it was being read. Whichever it is, it reaches you once.
 
 Two things are not told, and both are the same reason — there is nobody left to tell. A job

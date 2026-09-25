@@ -12,6 +12,7 @@ use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::{self, JoinHandle};
 
+use nix::errno::Errno;
 use nix::sys::signal::{Signal, kill, killpg};
 use nix::unistd::Pid;
 
@@ -133,7 +134,7 @@ impl Processes {
         if let Err(err) = waiting {
             // The child went into the closure that could not be spawned, so it is reaped by
             // pid here rather than through a `Child` nobody holds any more.
-            end_group(group);
+            let _ = end_group(group);
             let _ = nix::sys::wait::waitpid(group, None);
             return Err(err);
         }
@@ -165,16 +166,23 @@ fn exited(pid: Pid) -> io::Result<()> {
 /// Ends a job that will never be handed over: the group first, then the child itself, and
 /// then the wait that keeps it from becoming a zombie nobody is left to reap.
 fn abandon(mut child: std::process::Child, group: Pid) {
-    end_group(group);
+    let _ = end_group(group);
     let _ = child.wait();
 }
 
 /// SIGKILL to the whole group and to the child by name. The group is what reaches whatever
 /// the program started; the child by name is what reaches it in the moment between the fork
-/// and the `setpgid` the group is made by, where the group does not exist yet.
-fn end_group(group: Pid) {
-    let _ = killpg(group, Signal::SIGKILL);
-    let _ = kill(group, Signal::SIGKILL);
+/// and the `setpgid` the group is made by, where the group does not exist yet. `ESRCH` is
+/// either of them finding nobody, which is the job already over; anything else is a kill that
+/// did not happen.
+fn end_group(group: Pid) -> io::Result<()> {
+    for sent in [killpg(group, Signal::SIGKILL), kill(group, Signal::SIGKILL)] {
+        match sent {
+            Ok(()) | Err(Errno::ESRCH) => {}
+            Err(err) => return Err(err.into()),
+        }
+    }
+    Ok(())
 }
 
 /// One pipe's reader. Every chunk is followed by a nudge, because a channel is not something
@@ -240,15 +248,16 @@ impl Running for Process {
         out
     }
 
-    fn kill(&mut self) {
+    fn kill(&mut self) -> io::Result<()> {
         let live = self.live.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(group) = *live {
-            // SIGKILL rather than a hangup and a wait: the caller is inside a frame, and the
-            // only thing it can afford is the signal itself. The group is cleared by the
-            // thread that reaps the child, so a second kill — or one after the job already
-            // ended — signals nothing.
-            end_group(group);
-        }
+        let Some(group) = *live else {
+            return Ok(());
+        };
+        // SIGKILL rather than a hangup and a wait: the caller is inside a frame, and the
+        // only thing it can afford is the signal itself. The group is cleared by the
+        // thread that reaps the child, so a second kill — or one after the job already
+        // ended — signals nothing.
+        end_group(group)
     }
 }
 
@@ -257,7 +266,7 @@ impl Running for Process {
 /// hangs its panes up there.
 impl Drop for Process {
     fn drop(&mut self) {
-        self.kill();
+        let _ = self.kill();
     }
 }
 

@@ -8,6 +8,7 @@ pub trait Running {
     fn poll(&mut self) -> Vec<JobChunk>;
 
     /// Ends it now, without waiting. Idempotent — the caller may already have seen
-    /// [`JobChunk::Exited`].
-    fn kill(&mut self);
+    /// [`JobChunk::Exited`], so one that has already exited is `Ok` — an error is a program
+    /// that may still be running.
+    fn kill(&mut self) -> std::io::Result<()>;
 }

@@ -322,6 +322,44 @@ fn killing_a_job_still_calls_on_exit_once() {
     );
 }
 
+/// A kill the system refused is not reported as a kill: the program may still be running, and
+/// `err = killed` would tell the plugin it is not (#41).
+#[test]
+fn a_kill_that_failed_does_not_say_killed() {
+    let runner = FakeRunner::new();
+    runner.cannot_kill("operation not permitted");
+    let (_dir, sub) = built(
+        "local job\n\
+         neotmux.on_key(function(key)\n\
+           if key == 'J' then\n\
+             job = neotmux.job.start({ 'sleep' }, {\n\
+               on_exit = function(code, out, errout, err)\n\
+                 neotmux.log.info('exit err=' .. tostring(err))\n\
+               end,\n\
+             })\n\
+             return true\n\
+           end\n\
+           if key == 'K' then\n\
+             job:kill()\n\
+             return true\n\
+           end\n\
+           return false\n\
+         end)\n",
+        Rc::clone(&runner),
+    );
+
+    keys(&sub, &["J"]);
+    frame(&sub);
+    sub.dispatch_key(support::one(), "K");
+    frame(&sub);
+    let said = logged(&sub);
+    assert!(
+        said.iter()
+            .any(|line| line == "exit err=killed, but the kill failed: operation not permitted"),
+        "{said:?}"
+    );
+}
+
 /// A job that says more than it is allowed to is killed, and says why.
 #[test]
 fn a_job_that_overruns_the_output_limit_is_killed_and_says_so() {

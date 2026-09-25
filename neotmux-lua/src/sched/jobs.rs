@@ -98,6 +98,15 @@ impl Job {
     }
 }
 
+/// The `err` a job the host ended is given: why it was ended, unless the kill itself failed, in
+/// which case the program may be running on and saying `killed` would be a lie.
+fn ended_by(killed: std::io::Result<()>, why: &str) -> String {
+    match killed {
+        Ok(()) => why.to_string(),
+        Err(err) => format!("{why}, but the kill failed: {err}"),
+    }
+}
+
 /// How much of a held buffer is not yet a line: everything after the last break, or all of it
 /// if there has been no break at all.
 fn fragment(held: &[u8]) -> usize {
@@ -212,8 +221,7 @@ impl Jobs {
         let mut live = self.live.borrow_mut();
         match live.get_mut(&id) {
             Some(job) if job.ending.is_none() => {
-                job.running.kill();
-                job.ending = Some((None, Some("killed".to_string())));
+                job.ending = Some((None, Some(ended_by(job.running.kill(), "killed"))));
                 true
             }
             _ => false,
@@ -236,8 +244,7 @@ impl Jobs {
         if job.overruns < limit {
             return false;
         }
-        job.running.kill();
-        job.ending = Some((None, Some("budget".to_string())));
+        job.ending = Some((None, Some(ended_by(job.running.kill(), "budget"))));
         true
     }
 
@@ -254,7 +261,7 @@ impl Jobs {
     /// calling into it is worse than not calling.
     pub fn remove_all_of(&self, owner: SourceId) {
         for mut job in self.take_matching(|job| job.owner == owner) {
-            job.running.kill();
+            let _ = job.running.kill();
         }
     }
 
@@ -267,7 +274,7 @@ impl Jobs {
     pub fn end_session(&self, session: SessionId) -> Vec<Delivery> {
         let mut out = Vec::new();
         for mut job in self.take_matching(|job| job.session == Some(session)) {
-            job.running.kill();
+            let killed = job.running.kill();
             // Before the ending, as `deliver` does it: a session going away is no reason for
             // the plugin to lose the last thing the job said.
             if !job.buffered {
@@ -276,7 +283,7 @@ impl Jobs {
             let (code, err) = job
                 .ending
                 .take()
-                .unwrap_or((None, Some("session ended".to_string())));
+                .unwrap_or_else(|| (None, Some(ended_by(killed, "session ended"))));
             let text = |bytes: Vec<u8>| String::from_utf8_lossy(&bytes).into_owned();
             out.push(Delivery::Exit {
                 job: job.id,
@@ -348,8 +355,8 @@ impl Jobs {
                         }
                     }
                     if job.bytes_held() > limit {
-                        job.running.kill();
-                        job.ending = Some((None, Some("output limit".to_string())));
+                        let killed = job.running.kill();
+                        job.ending = Some((None, Some(ended_by(killed, "output limit"))));
                         break;
                     }
                 }

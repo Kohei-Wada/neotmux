@@ -371,7 +371,9 @@ mod tests {
             Vec::new()
         }
 
-        fn kill(&mut self) {}
+        fn kill(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
     }
 
     struct Fake;

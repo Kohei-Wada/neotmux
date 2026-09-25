@@ -57,7 +57,7 @@ fn killing_a_job_ends_the_children_it_started() {
     // Long enough for the shell to have started the pipeline, so the kill has grandchildren
     // to reach rather than arriving before there were any.
     std::thread::sleep(Duration::from_millis(200));
-    running.kill();
+    running.kill().expect("the kill was refused");
 
     let deadline = Instant::now() + Duration::from_secs(5);
     let mut ended = false;

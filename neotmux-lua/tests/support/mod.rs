@@ -184,6 +184,7 @@ pub struct Script(pub Vec<Vec<JobChunk>>);
 pub struct FakeRunning {
     script: std::vec::IntoIter<Vec<JobChunk>>,
     killed: Rc<RefCell<bool>>,
+    unkillable: Option<String>,
 }
 
 impl Running for FakeRunning {
@@ -191,8 +192,12 @@ impl Running for FakeRunning {
         self.script.next().unwrap_or_default()
     }
 
-    fn kill(&mut self) {
+    fn kill(&mut self) -> std::io::Result<()> {
+        if let Some(why) = &self.unkillable {
+            return Err(std::io::Error::other(why.clone()));
+        }
         *self.killed.borrow_mut() = true;
+        Ok(())
     }
 }
 
@@ -205,6 +210,7 @@ pub struct FakeRunner {
     pub killed: Rc<RefCell<bool>>,
     refuse: RefCell<Option<String>>,
     refused: RefCell<HashSet<String>>,
+    unkillable: RefCell<Option<String>>,
 }
 
 impl FakeRunner {
@@ -215,6 +221,7 @@ impl FakeRunner {
             killed: Rc::new(RefCell::new(false)),
             refuse: RefCell::new(None),
             refused: RefCell::new(HashSet::new()),
+            unkillable: RefCell::new(None),
         })
     }
 
@@ -225,6 +232,12 @@ impl FakeRunner {
     /// That program is not on this machine: `start` fails for it and for nothing else.
     pub fn refuse_program(&self, name: &str) {
         self.refused.borrow_mut().insert(name.to_string());
+    }
+
+    /// Every job started from here on refuses to be killed, the way a program that is no
+    /// longer this user's does.
+    pub fn cannot_kill(&self, why: &str) {
+        *self.unkillable.borrow_mut() = Some(why.to_string());
     }
 
     /// Nothing on this machine starts.
@@ -248,6 +261,7 @@ impl Runner for FakeRunner {
         Ok(Box::new(FakeRunning {
             script: script.0.into_iter(),
             killed: Rc::clone(&self.killed),
+            unkillable: self.unkillable.borrow().clone(),
         }))
     }
 }
