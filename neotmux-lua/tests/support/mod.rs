@@ -59,7 +59,7 @@ pub fn one() -> neotmux_proto::SessionId {
 pub const SIZE: Size = Size { rows: 16, cols: 40 };
 
 pub fn shipped_layer() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime")
 }
 
 /// The one pane `detect.rs` and `state.rs` both drive.

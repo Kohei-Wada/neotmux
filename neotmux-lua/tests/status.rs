@@ -55,7 +55,7 @@ const fn rgb(s: &str) -> Color {
 }
 
 fn shipped_layer() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime")
 }
 
 /// The shipped layer, behind a user layer holding only the `init.lua` a user would write.

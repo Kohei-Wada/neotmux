@@ -27,7 +27,7 @@ use support::Built;
 const SIZE: Size = Size { rows: 16, cols: 40 };
 
 fn shipped_layer() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime")
 }
 
 fn pane() -> PaneId {

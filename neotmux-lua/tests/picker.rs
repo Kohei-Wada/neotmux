@@ -20,7 +20,7 @@ use support::Built;
 const SIZE: Size = Size { rows: 10, cols: 40 };
 
 fn shipped_layer() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime")
 }
 
 /// A layer of the test's own in front of the shipped one, so `plugin.sessions` is the real

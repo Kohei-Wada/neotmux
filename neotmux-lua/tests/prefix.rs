@@ -12,7 +12,7 @@ use neotmux_lua::runtime::Layers;
 mod support;
 
 fn shipped_layer() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime")
 }
 
 fn built(init: &str) -> (tempfile::TempDir, LuaSubsystem) {

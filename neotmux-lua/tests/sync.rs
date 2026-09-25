@@ -15,7 +15,7 @@ mod support;
 const SIZE: Size = Size { rows: 24, cols: 80 };
 
 fn shipped_layer() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime")
 }
 
 /// Two panes in one window, with the shipped layer behind the test's own.

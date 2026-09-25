@@ -196,7 +196,7 @@ fn a_malformed_resize_raises_and_queues_nothing() {
 /// The runtime layer neotmux ships, read straight out of the source tree: the shipped prefix
 /// is the plugin under test here, not a fixture standing in for it.
 fn shipped_layer() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime")
 }
 
 fn with_prefix() -> (tempfile::TempDir, LuaSubsystem) {

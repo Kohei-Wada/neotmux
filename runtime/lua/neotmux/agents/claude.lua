@@ -15,7 +15,7 @@
 -- sight, and nobody here has a screen of either to check a rule against — a rule written from a
 -- pattern alone is one that only ever matches the fixture written from the same pattern.
 --
--- Four of the fixtures in `crates/neotmux-lua/tests/detect.rs` are screens captured off a real
+-- Four of the fixtures in `neotmux-lua/tests/detect.rs` are screens captured off a real
 -- Claude Code (v2.1.281) and kept in this plan's `captures/`; the rest are written from the
 -- manifest's patterns, and say what these rules mean rather than what Claude draws.
 --

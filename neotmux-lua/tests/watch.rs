@@ -17,7 +17,7 @@ const SIZE: Size = Size { rows: 4, cols: 40 };
 const PROMPT: &[u8] = b"Do you want to proceed? [y/N]";
 
 fn shipped_layer() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime")
 }
 
 /// The shipped runtime with the watcher on and the others off, so the only ops a tick can

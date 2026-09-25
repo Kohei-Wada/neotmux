@@ -21,7 +21,7 @@ fn pane() -> PaneId {
 }
 
 fn shipped_layer() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime")
 }
 
 /// The shipped layer with every plugin off, so a frame holds nothing but the test's own

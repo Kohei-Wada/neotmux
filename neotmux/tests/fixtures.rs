@@ -930,7 +930,7 @@ fn a_user_config_can_switch_off_the_shipped_prefix() {
 /// The runtime layer neotmux ships: the one an install puts on the default search path,
 /// read here straight out of the source tree.
 fn shipped_layer() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime")
 }
 
 fn copy_tree(from: &Path, to: &Path) {
@@ -1333,7 +1333,7 @@ fn deleting_the_shipped_plugins_leaves_a_working_multiplexer() {
 /// Builds the install layout in a temp prefix: the Makefile puts the shipped runtime layer
 /// in place, and the already-built test binary stands in for the copy `cargo install` makes.
 fn install_into(prefix: &Path) {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     let status = std::process::Command::new("make")
         .current_dir(&root)
         .arg("install-runtime")

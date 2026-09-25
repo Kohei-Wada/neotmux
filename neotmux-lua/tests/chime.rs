@@ -51,7 +51,7 @@ const TWO_PANES: &str = "local defaults = require('neotmux.defaults')\n\
      neotmux.opt.tick_budget_ms = 0\n";
 
 fn shipped_layer() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime")
 }
 
 fn built(init: &str, runner: Rc<FakeRunner>) -> (tempfile::TempDir, Built) {

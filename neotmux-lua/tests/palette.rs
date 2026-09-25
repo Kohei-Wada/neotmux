@@ -22,7 +22,7 @@ fn pane() -> PaneId {
 }
 
 fn shipped_layer() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime")
 }
 
 /// Three commands of the test's own, registered ahead of the real `plugin.prefix` and

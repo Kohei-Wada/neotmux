@@ -46,6 +46,6 @@ Apache-2.0 only:
 
 The three words a pane's state is spelled in — working, blocked, idle — are herdr's too.
 
-The Cargo `license` field on the crates in crates/ stays "MIT OR Apache-2.0": no crate
+The Cargo `license` field on every crate stays "MIT OR Apache-2.0": no crate
 carries or packages any of the files above. runtime/ is installed beside the binary
 (see the Makefile's install-runtime target), not compiled into or published with one.

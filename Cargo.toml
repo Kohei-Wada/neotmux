@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/neotmux-proto", "crates/neotmux-core", "crates/neotmux-term", "crates/neotmux-lua", "crates/neotmux"]
+members = ["neotmux", "neotmux-*"]
 resolver = "3"
 
 [workspace.package]
@@ -17,10 +17,10 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/Kohei-Wada/neotmux"
 
 [workspace.dependencies]
-neotmux-proto = { path = "crates/neotmux-proto", version = "0.1.0" }
-neotmux-core = { path = "crates/neotmux-core", version = "0.1.0" }
-neotmux-lua = { path = "crates/neotmux-lua", version = "0.1.0" }
-neotmux-term = { path = "crates/neotmux-term", version = "0.1.0" }
+neotmux-proto = { path = "neotmux-proto", version = "0.1.0" }
+neotmux-core = { path = "neotmux-core", version = "0.1.0" }
+neotmux-lua = { path = "neotmux-lua", version = "0.1.0" }
+neotmux-term = { path = "neotmux-term", version = "0.1.0" }
 anyhow = "1"
 base64 = "0.22"
 mlua = { version = "0.12", features = ["lua54", "vendored"] }

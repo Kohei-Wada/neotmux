@@ -26,7 +26,7 @@ fn built(files: &[(&str, &str)]) -> (tempfile::TempDir, LuaSubsystem) {
 }
 
 fn shipped_layer() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime")
 }
 
 /// The shipped runtime on the path behind the config, so `require('neotmux.guard')` resolves

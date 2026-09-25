@@ -19,7 +19,7 @@ const SIZE: Size = Size { rows: 6, cols: 20 };
 const SELECTION: Color = Color::Rgb(0x45, 0x47, 0x5a);
 
 fn shipped_layer() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime")
 }
 
 fn pane() -> PaneId {

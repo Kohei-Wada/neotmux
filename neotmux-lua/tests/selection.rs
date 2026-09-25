@@ -16,7 +16,7 @@ use neotmux_lua::runtime::Layers;
 mod support;
 
 fn shipped_layer() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime")
 }
 
 /// `body` runs on every tick, with `sel` bound to the module and `w` to the measurement it

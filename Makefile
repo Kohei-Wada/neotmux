@@ -24,7 +24,7 @@ run:
 install: install-bin install-runtime
 
 install-bin:
-	cargo install --path crates/neotmux --root $(PREFIX)
+	cargo install --path neotmux --root $(PREFIX)
 
 # `runtime/lua` goes over wholesale rather than file by file: enumerating it once shipped a
 # layer whose `init.lua` required a module the install had never copied, and every start of

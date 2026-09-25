@@ -20,7 +20,7 @@ fn pane() -> PaneId {
 }
 
 fn shipped_layer() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime")
 }
 
 /// A layer of the test's own in front of the shipped one, so `neotmux.list` is the real file.

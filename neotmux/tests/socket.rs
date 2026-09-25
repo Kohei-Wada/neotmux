@@ -45,7 +45,7 @@ fn socket_in(runtime: &Path) -> PathBuf {
 /// The runtime layer neotmux ships: the one an install puts on the default search path,
 /// read here straight out of the source tree.
 fn shipped_layer() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime")
 }
 
 /// A runtime layer of a test's own, written to a fresh temp dir.
