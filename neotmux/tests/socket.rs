@@ -222,12 +222,16 @@ impl Drop for Client {
 ///
 /// Watched rather than connected to: a connect is a client, and a client that connects and
 /// says nothing is one the server has to wait out before it can greet the real one.
+/// Until a server answers on `socket`. Answering, not existing: a socket file a dead server
+/// left behind exists from the start, and a test that took it for a live one went on to type
+/// into a client that had not yet put its terminal in raw mode — where the pty's own echo, not
+/// the server, printed what it typed back, and the check that followed found nothing listening.
 fn wait_for_socket(socket: &Path) {
     let deadline = Instant::now() + PATIENCE;
-    while !socket.exists() {
+    while UnixStream::connect(socket).is_err() {
         assert!(
             Instant::now() < deadline,
-            "nothing ever bound {}",
+            "nothing ever answered on {}",
             socket.display()
         );
         std::thread::sleep(Duration::from_millis(10));

@@ -28,6 +28,8 @@ fd = sys.stdin.fileno()
 old = termios.tcgetattr(fd)
 tty.setraw(fd)
 out = sys.stdout
+out.write("ready ")
+out.flush()
 try:
     while True:
         b = os.read(fd, 1)
@@ -51,9 +53,11 @@ finally:
     Neotmux::start_with_shell(dir, shell.to_str().unwrap())
 }
 
-/// Let the probe child reach its raw read loop before we type.
+/// Until the probe is in raw mode and reading. Waited for rather than slept for: `tty.setraw`
+/// flushes whatever input is pending when it runs, so a key typed before it — after a fixed
+/// sleep a slow machine had not finished — is thrown away, and the probe prints nothing.
 fn settle(nt: &mut Neotmux) {
-    nt.settle(Duration::from_millis(300));
+    nt.wait_for_screen("ready", Duration::from_secs(10));
 }
 
 /// A bare Escape (0x1b) — the key the user calls ctl-[ — must reach the pane's program as a
