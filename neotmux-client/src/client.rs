@@ -9,7 +9,7 @@ use neotmux_proto::wire::{Attach, OwnedDone, ToServer};
 use neotmux_proto::{OwnedToClient, Size};
 use ratatui::DefaultTerminal;
 
-use crate::decode::Decoder;
+use crate::decoder::Decoder;
 use neotmux_proto::keys::Key;
 use neotmux_sys::Link;
 

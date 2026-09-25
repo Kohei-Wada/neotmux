@@ -92,3 +92,6 @@ warnings.
 - **neotmux-sys** (2026-09-25): `link.rs` is one type and is flattened (`neotmux_sys::Link`);
   `signals` keeps `HANGUP` and `die_of` and gives `ShutdownSignal` and `WindowChange` a file each;
   `logging`, `procinfo`, `sock` and `tty` stay named modules under rule 6.
+- **neotmux-client** (2026-09-25): its one public type, `Decoder`, has `decoder.rs` (was
+  `decode.rs`) and is flattened (`neotmux_client::Decoder`); `ask`, `attach`, `draw`, `overlay`,
+  `start`, `osc52` and `client` are modules of functions whose types are private, and stay.

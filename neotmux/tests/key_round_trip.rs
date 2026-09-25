@@ -2,7 +2,7 @@
 //! server, comes back as the bytes it started as. The one test that needs both halves, so it lives
 //! in the crate that has both.
 
-use neotmux_client::decode::Decoder;
+use neotmux_client::Decoder;
 use neotmux_proto::keys::Key;
 use neotmux_server::input::encode_key;
 

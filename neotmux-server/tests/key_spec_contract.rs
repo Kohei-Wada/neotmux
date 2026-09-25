@@ -92,7 +92,7 @@ fn the_name_a_plugin_types_for_a_key_is_the_key_the_host_reports() {
         ("enter".into(), KeyCode::Enter),
         ("tab".into(), KeyCode::Tab),
         // shift-tab, whose intended binding name the host itself calls `BackTab`
-        // (see `decode.rs`, where `ESC [ Z` becomes a plain `BackTab`): the point of this
+        // (see `neotmux-client`'s `decoder.rs`, where `ESC [ Z` becomes a plain `BackTab`): the point of this
         // test is that a person who writes `backtab` binds the very key it reports.
         ("backtab".into(), KeyCode::BackTab),
         ("backspace".into(), KeyCode::Backspace),
