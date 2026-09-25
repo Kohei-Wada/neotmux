@@ -1,77 +1,29 @@
-//! The pane tree, and the one function that turns it into rectangles.
-//!
-//! A leaf is a pane. An internal node is a split with an orientation, exactly two children
-//! and the fraction of its rect going to the first child. Geometry lives in [`assign`] and
-//! nowhere else in this module, so that a Lua layout callback can later stand in for that
-//! one function instead of replacing the tree.
+//! The pane tree. A leaf is a pane. An internal node is a split with an orientation, exactly two
+//! children and the fraction of its rect going to the first child. Where each pane lands is not
+//! decided here: that is [`assign()`], and nothing else.
 
 use neotmux_proto::{Dir, PaneId, Rect, Size, SplitDir};
-use std::error::Error;
-use std::fmt;
 
-/// Why a split did not happen. The tree is unchanged in both cases.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SplitRefused {
-    /// The target pane is not in this tree.
-    UnknownPane,
-    /// One of the two children would be smaller than the caller's minimum.
-    TooSmall,
-}
-
-impl fmt::Display for SplitRefused {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let reason = match self {
-            Self::UnknownPane => "no such pane",
-            Self::TooSmall => "the panes would be too small",
-        };
-        f.write_str(reason)
-    }
-}
-
-impl Error for SplitRefused {}
-
-/// Why a resize did not happen. The tree is unchanged in every case.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ResizeRefused {
-    /// The target pane is not in this tree.
-    UnknownPane,
-    /// Nothing is on that side of the pane, so there is no boundary to move.
-    NoNeighbour,
-    /// One of the two sides would be smaller than the caller's minimum.
-    TooSmall,
-}
-
-impl fmt::Display for ResizeRefused {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let reason = match self {
-            Self::UnknownPane => "no such pane",
-            Self::NoNeighbour => "no neighbour that way",
-            Self::TooSmall => "the panes would be too small",
-        };
-        f.write_str(reason)
-    }
-}
-
-impl Error for ResizeRefused {}
+use crate::{ResizeRefused, SplitRefused, assign, divide, head, usable};
 
 #[derive(Debug, Clone)]
-enum Node {
+pub(crate) enum Node {
     Leaf(PaneId),
     Split(Box<Split>),
 }
 
 #[derive(Debug, Clone)]
-struct Split {
-    dir: SplitDir,
-    fraction: f32,
-    first: Node,
-    second: Node,
+pub(crate) struct Split {
+    pub(crate) dir: SplitDir,
+    pub(crate) fraction: f32,
+    pub(crate) first: Node,
+    pub(crate) second: Node,
 }
 
 /// A binary split tree over [`PaneId`]s. It owns no PTYs and knows no terminal.
 #[derive(Debug, Clone)]
 pub struct Tree {
-    root: Option<Node>,
+    pub(crate) root: Option<Node>,
 }
 
 impl Tree {
@@ -95,7 +47,7 @@ impl Tree {
     /// `min` is the caller's smallest usable pane; the tree has no opinion on what that is,
     /// because it is a property of whatever renders a pane, not of layout.
     ///
-    /// `gutter` is the same one [`assign`] takes: the split it is about to make spends that
+    /// `gutter` is the same one [`assign()`] takes: the split it is about to make spends that
     /// many cells, so the refusal has to be decided on the rects the gutter leaves.
     pub fn split(
         &mut self,
@@ -130,7 +82,7 @@ impl Tree {
     /// on the right side of it. A nested pane can have several matching splits above it, and
     /// the nearest is the one whose boundary is against the pane itself.
     ///
-    /// `surface`, `min` and `gutter` are [`assign`]'s, for the same reason [`split`] takes
+    /// `surface`, `min` and `gutter` are [`assign()`]'s, for the same reason [`split`] takes
     /// them: what the caller asked for is cells, and only the assignment knows what a
     /// fraction is worth in cells.
     ///
@@ -202,75 +154,6 @@ impl Tree {
         let (rest, focus) = prune(root, pane);
         self.root = rest;
         focus
-    }
-}
-
-/// The one place a rect is cut up. Total at every size: the output rects lie inside
-/// `surface`, never overlap, and together with the gutters between them cover all of it,
-/// with rounding going to the first child.
-///
-/// `gutter` is how many cells to leave between the two children of every split. It is a
-/// layout parameter and nothing more: this module has no idea why a caller wants a gap, only
-/// that no pane's rect may include one.
-pub fn assign(tree: &Tree, surface: Rect, gutter: u16) -> Vec<(PaneId, Rect)> {
-    let mut out = Vec::new();
-    let Some(root) = tree.root.as_ref() else {
-        return out;
-    };
-    let mut stack = vec![(root, surface)];
-    while let Some((node, rect)) = stack.pop() {
-        match node {
-            Node::Leaf(id) => out.push((*id, rect)),
-            Node::Split(split) => {
-                let (first, second) = divide(split, rect, gutter);
-                stack.push((&split.second, second));
-                stack.push((&split.first, first));
-            }
-        }
-    }
-    out
-}
-
-/// How many cells of `rect` the two children of a split have between them. The gap comes off
-/// the top, so what is divided is only what the children may have: a rect too small to hold
-/// the gutter spends all of it and leaves the children empty, rather than pushing them off
-/// the surface.
-fn usable(dir: SplitDir, rect: Rect, gutter: u16) -> u16 {
-    let along = match dir {
-        SplitDir::Vertical => rect.w,
-        SplitDir::Horizontal => rect.h,
-    };
-    along - gutter.min(along)
-}
-
-/// What the fraction is worth in cells, with rounding going to the first child. A resize
-/// reads its current boundary back through this, so the cells it hands out are the cells
-/// [`assign`] will lay down.
-fn head(usable: u16, fraction: f32) -> u16 {
-    (f32::from(usable) * fraction)
-        .round()
-        .clamp(0.0, f32::from(usable)) as u16
-}
-
-/// One split's share of one rect. [`assign`] is the walk; this is the cut, and nothing else
-/// in the tree computes a boundary.
-fn divide(split: &Split, rect: Rect, gutter: u16) -> (Rect, Rect) {
-    let usable = usable(split.dir, rect, gutter);
-    let gap = match split.dir {
-        SplitDir::Vertical => rect.w,
-        SplitDir::Horizontal => rect.h,
-    } - usable;
-    let head = head(usable, split.fraction);
-    let tail = usable - head;
-    match split.dir {
-        SplitDir::Vertical => (
-            Rect::new(rect.x, rect.y, head, rect.h),
-            Rect::new(rect.x + head + gap, rect.y, tail, rect.h),
-        ),
-        SplitDir::Horizontal => (
-            Rect::new(rect.x, rect.y, rect.w, head),
-            Rect::new(rect.x, rect.y + head + gap, rect.w, tail),
-        ),
     }
 }
 
@@ -404,123 +287,7 @@ fn rejoin(dir: SplitDir, fraction: f32, first: Node, second: Node) -> Option<Nod
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    const MIN: Size = Size { rows: 2, cols: 2 };
-
-    fn pane(id: u32) -> PaneId {
-        PaneId::from(id)
-    }
-
-    #[test]
-    fn a_lone_pane_fills_the_surface() {
-        let tree = Tree::new(pane(1));
-        assert_eq!(
-            assign(&tree, Rect::new(0, 0, 80, 24), 0),
-            vec![(pane(1), Rect::new(0, 0, 80, 24))]
-        );
-    }
-
-    #[test]
-    fn a_vertical_split_halves_the_width() {
-        let mut tree = Tree::new(pane(1));
-        let surface = Rect::new(0, 0, 80, 24);
-        tree.split(pane(1), SplitDir::Vertical, pane(2), surface, MIN, 0)
-            .expect("80x24 is big enough");
-        assert_eq!(
-            assign(&tree, surface, 0),
-            vec![
-                (pane(1), Rect::new(0, 0, 40, 24)),
-                (pane(2), Rect::new(40, 0, 40, 24)),
-            ]
-        );
-    }
-
-    #[test]
-    fn a_horizontal_split_halves_the_height() {
-        let mut tree = Tree::new(pane(1));
-        let surface = Rect::new(0, 0, 80, 24);
-        tree.split(pane(1), SplitDir::Horizontal, pane(2), surface, MIN, 0)
-            .expect("80x24 is big enough");
-        assert_eq!(
-            assign(&tree, surface, 0),
-            vec![
-                (pane(1), Rect::new(0, 0, 80, 12)),
-                (pane(2), Rect::new(0, 12, 80, 12)),
-            ]
-        );
-    }
-
-    #[test]
-    fn an_odd_size_gives_the_extra_cell_to_the_first_child() {
-        let mut tree = Tree::new(pane(1));
-        let surface = Rect::new(0, 0, 81, 25);
-        tree.split(pane(1), SplitDir::Vertical, pane(2), surface, MIN, 0)
-            .expect("81x25 is big enough");
-        assert_eq!(
-            assign(&tree, surface, 0),
-            vec![
-                (pane(1), Rect::new(0, 0, 41, 25)),
-                (pane(2), Rect::new(41, 0, 40, 25)),
-            ]
-        );
-
-        let mut tree = Tree::new(pane(1));
-        tree.split(pane(1), SplitDir::Horizontal, pane(2), surface, MIN, 0)
-            .expect("81x25 is big enough");
-        assert_eq!(
-            assign(&tree, surface, 0),
-            vec![
-                (pane(1), Rect::new(0, 0, 81, 13)),
-                (pane(2), Rect::new(0, 13, 81, 12)),
-            ]
-        );
-    }
-
-    #[test]
-    fn a_gutter_goes_between_the_children_and_into_neither() {
-        let mut tree = Tree::new(pane(1));
-        let surface = Rect::new(0, 0, 80, 24);
-        tree.split(pane(1), SplitDir::Vertical, pane(2), surface, MIN, 1)
-            .expect("80x24 is big enough");
-        assert_eq!(
-            assign(&tree, surface, 1),
-            vec![
-                (pane(1), Rect::new(0, 0, 40, 24)),
-                (pane(2), Rect::new(41, 0, 39, 24)),
-            ],
-            "column 40 belongs to neither pane"
-        );
-
-        let mut tree = Tree::new(pane(1));
-        tree.split(pane(1), SplitDir::Horizontal, pane(2), surface, MIN, 1)
-            .expect("80x24 is big enough");
-        assert_eq!(
-            assign(&tree, surface, 1),
-            vec![
-                (pane(1), Rect::new(0, 0, 80, 12)),
-                (pane(2), Rect::new(0, 13, 80, 11)),
-            ],
-            "row 12 belongs to neither pane"
-        );
-    }
-
-    #[test]
-    fn every_split_spends_its_own_gutter() {
-        let mut tree = Tree::new(pane(1));
-        let surface = Rect::new(0, 0, 80, 24);
-        tree.split(pane(1), SplitDir::Vertical, pane(2), surface, MIN, 1)
-            .expect("fits");
-        tree.split(pane(2), SplitDir::Vertical, pane(3), surface, MIN, 1)
-            .expect("fits");
-        assert_eq!(
-            assign(&tree, surface, 1),
-            vec![
-                (pane(1), Rect::new(0, 0, 40, 24)),
-                (pane(2), Rect::new(41, 0, 19, 24)),
-                (pane(3), Rect::new(61, 0, 19, 24)),
-            ]
-        );
-    }
+    use crate::fixtures::*;
 
     #[test]
     fn a_split_the_gutter_leaves_no_room_for_is_refused() {
@@ -544,32 +311,6 @@ mod tests {
             "without the gutter four columns would have been enough"
         );
         assert_eq!(tree.panes(), vec![pane(1)]);
-    }
-
-    #[test]
-    fn a_split_keeps_the_surfaces_origin() {
-        let mut tree = Tree::new(pane(1));
-        let surface = Rect::new(3, 1, 10, 6);
-        tree.split(pane(1), SplitDir::Vertical, pane(2), surface, MIN, 0)
-            .expect("fits");
-        assert_eq!(
-            assign(&tree, surface, 0),
-            vec![
-                (pane(1), Rect::new(3, 1, 5, 6)),
-                (pane(2), Rect::new(8, 1, 5, 6)),
-            ]
-        );
-    }
-
-    #[test]
-    fn panes_come_out_left_to_right_top_to_bottom() {
-        let mut tree = Tree::new(pane(1));
-        let surface = Rect::new(0, 0, 80, 24);
-        tree.split(pane(1), SplitDir::Vertical, pane(2), surface, MIN, 0)
-            .expect("fits");
-        tree.split(pane(2), SplitDir::Horizontal, pane(3), surface, MIN, 0)
-            .expect("fits");
-        assert_eq!(tree.panes(), vec![pane(1), pane(2), pane(3)]);
     }
 
     #[test]
@@ -631,244 +372,6 @@ mod tests {
             Err(SplitRefused::UnknownPane)
         );
         assert_eq!(tree.panes(), vec![pane(1)]);
-    }
-
-    /// A fixed set of shapes: each entry splits the pane at that index of `panes()`.
-    const SHAPES: [&[(usize, SplitDir)]; 6] = [
-        &[],
-        &[(0, SplitDir::Vertical)],
-        &[(0, SplitDir::Horizontal)],
-        &[(0, SplitDir::Vertical), (1, SplitDir::Horizontal)],
-        &[
-            (0, SplitDir::Horizontal),
-            (0, SplitDir::Vertical),
-            (2, SplitDir::Vertical),
-        ],
-        &[
-            (0, SplitDir::Vertical),
-            (0, SplitDir::Horizontal),
-            (1, SplitDir::Vertical),
-            (3, SplitDir::Horizontal),
-            (0, SplitDir::Vertical),
-        ],
-    ];
-
-    const SIZES: [(u16, u16); 12] = [
-        (1, 1),
-        (2, 2),
-        (3, 2),
-        (2, 3),
-        (5, 7),
-        (7, 5),
-        (9, 9),
-        (80, 24),
-        (81, 25),
-        (13, 60),
-        (199, 59),
-        (200, 60),
-    ];
-
-    fn shape(steps: &[(usize, SplitDir)]) -> Tree {
-        // Built on a surface no split can be refused on, so the shapes stay independent of
-        // the sizes the property then checks. It has to survive the deepest shape either the
-        // table or the generator produces, which is seven splits down one side.
-        let roomy = Rect::new(0, 0, 256, 256);
-        let one_cell = Size { rows: 1, cols: 1 };
-        let mut tree = Tree::new(pane(1));
-        for (n, (at, dir)) in steps.iter().enumerate() {
-            let target = tree.panes()[*at];
-            let new = pane(n as u32 + 2);
-            tree.split(target, *dir, new, roomy, one_cell, 0)
-                .expect("the roomy surface fits every shape");
-        }
-        tree
-    }
-
-    /// The property itself, in one place. A gutter means the rects no longer tile `surface`,
-    /// so what is asserted at every size and every gutter is:
-    ///
-    /// - one rect per pane, and none of them outside the surface;
-    /// - no two rects overlap;
-    /// - any two non-empty rects are at least `gutter` cells apart, which is the clause that
-    ///   says no rect took a gutter cell for itself;
-    /// - every cell of the surface is covered, once the rects are grown by `gutter` along the
-    ///   right and bottom edges the gutter is reserved on — that is, the rects and the gutters
-    ///   together, and nothing else, cover the surface.
-    ///
-    /// At `gutter == 0` the growth is the identity and the separation clause is vacuous, so
-    /// the four reduce to exactly the old "the rects tile the surface exactly".
-    fn assert_tiles(tree: &Tree, surface: Rect, gutter: u16, case: &str) {
-        let (w, h) = (surface.w, surface.h);
-        let rects = assign(tree, surface, gutter);
-        assert_eq!(
-            rects.len(),
-            tree.panes().len(),
-            "{case}: every pane gets a rect at {w}x{h} gutter {gutter}"
-        );
-
-        let mut covered = vec![false; usize::from(w) * usize::from(h)];
-        for (id, r) in &rects {
-            assert!(
-                r.x + r.w <= surface.x + surface.w && r.y + r.h <= surface.y + surface.h,
-                "{case}: {id} at {r:?} leaves the {w}x{h} surface"
-            );
-            // An empty rect grows too: a split with no room left divides nothing, and the
-            // cells its children stand on are the gutter it spent them on.
-            let x1 =
-                r.x.saturating_add(r.w)
-                    .saturating_add(gutter)
-                    .min(surface.x + w);
-            let y1 =
-                r.y.saturating_add(r.h)
-                    .saturating_add(gutter)
-                    .min(surface.y + h);
-            for y in r.y..y1 {
-                for x in r.x..x1 {
-                    covered[usize::from(y - surface.y) * usize::from(w)
-                        + usize::from(x - surface.x)] = true;
-                }
-            }
-        }
-        if let Some(missed) = covered.iter().position(|seen| !seen) {
-            let (x, y) = (missed % usize::from(w), missed / usize::from(w));
-            panic!(
-                "{case}: cell ({x}, {y}) of the {w}x{h} surface is neither a pane nor a gutter \
-                 cell, gutter {gutter}: {rects:?}"
-            );
-        }
-
-        for (i, (a_id, a)) in rects.iter().enumerate() {
-            for (b_id, b) in &rects[i + 1..] {
-                let overlaps =
-                    a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
-                assert!(
-                    !overlaps,
-                    "{case}: {a_id} at {a:?} overlaps {b_id} at {b:?}"
-                );
-                if a.w == 0 || a.h == 0 || b.w == 0 || b.h == 0 {
-                    continue;
-                }
-                let apart = |a0: u16, a1: u16, b0: u16, b1: u16| {
-                    b0.saturating_sub(a1).max(a0.saturating_sub(b1))
-                };
-                let gap = apart(a.x, a.x + a.w, b.x, b.x + b.w).max(apart(
-                    a.y,
-                    a.y + a.h,
-                    b.y,
-                    b.y + b.h,
-                ));
-                assert!(
-                    gap >= gutter,
-                    "{case}: {a_id} at {a:?} and {b_id} at {b:?} are {gap} cells apart, \
-                     less than the gutter of {gutter}"
-                );
-            }
-        }
-    }
-
-    /// The gutters the property is checked at: none, one (what a divider costs), and two.
-    const GUTTERS: [u16; 3] = [0, 1, 2];
-
-    #[test]
-    fn assigned_rects_and_their_gutters_cover_the_surface_exactly() {
-        for steps in SHAPES {
-            let tree = shape(steps);
-            for (w, h) in SIZES {
-                for gutter in GUTTERS {
-                    assert_tiles(
-                        &tree,
-                        Rect::new(0, 0, w, h),
-                        gutter,
-                        &format!("table {steps:?}"),
-                    );
-                }
-            }
-        }
-    }
-
-    /// A small linear congruential generator, so "a tree of any shape and a rect of any size"
-    /// can be a few hundred actual shapes and sizes without a dependency. Deterministic from
-    /// a fixed seed: a failure reproduces exactly, and the table above stays the reproducible
-    /// core either way. Constants from Knuth's MMIX; the low bits of an LCG are the weak ones,
-    /// so only the top half is used.
-    struct Lcg(u64);
-
-    impl Lcg {
-        fn below(&mut self, n: u64) -> u64 {
-            self.0 = self
-                .0
-                .wrapping_mul(6364136223846793005)
-                .wrapping_add(1442695040888963407);
-            (self.0 >> 33) % n
-        }
-    }
-
-    const SEED: u64 = 0x5eed_0000_0000_0001;
-    const CASES: usize = 400;
-    const MAX_SPLITS: u64 = 8;
-
-    #[test]
-    fn assigned_rects_cover_a_generated_shape_at_a_generated_size_and_gutter() {
-        let mut rng = Lcg(SEED);
-        for case in 0..CASES {
-            let mut steps = Vec::new();
-            for n in 0..rng.below(MAX_SPLITS) {
-                let at = rng.below(n + 1) as usize;
-                let dir = if rng.below(2) == 0 {
-                    SplitDir::Vertical
-                } else {
-                    SplitDir::Horizontal
-                };
-                steps.push((at, dir));
-            }
-            let tree = shape(&steps);
-            let surface = Rect::new(0, 0, rng.below(300) as u16 + 1, rng.below(300) as u16 + 1);
-            let gutter = rng.below(GUTTERS.len() as u64) as u16;
-            assert_tiles(
-                &tree,
-                surface,
-                gutter,
-                &format!("seed {SEED:#x} case {case} shape {steps:?}"),
-            );
-        }
-    }
-
-    /// The generator is the point of the property, so it has to actually generate: a seed that
-    /// only ever produced one pane on one surface would pass everything above and prove
-    /// nothing.
-    #[test]
-    fn the_generator_reaches_a_range_of_shapes_sizes_and_gutters() {
-        let mut rng = Lcg(SEED);
-        let mut leaves = std::collections::BTreeSet::new();
-        let mut widths = std::collections::BTreeSet::new();
-        let mut gutters = std::collections::BTreeSet::new();
-        for _ in 0..CASES {
-            let mut count = 1u64;
-            for n in 0..rng.below(MAX_SPLITS) {
-                rng.below(n + 1);
-                rng.below(2);
-                count += 1;
-            }
-            leaves.insert(count);
-            widths.insert(rng.below(300) as u16 + 1);
-            rng.below(300);
-            gutters.insert(rng.below(GUTTERS.len() as u64) as u16);
-        }
-        assert_eq!(
-            leaves,
-            (1..=MAX_SPLITS).collect(),
-            "the generated shapes do not cover every pane count up to the limit"
-        );
-        assert!(
-            widths.len() > CASES / 2,
-            "the generated widths barely vary: {} distinct out of {CASES}",
-            widths.len()
-        );
-        assert_eq!(
-            gutters,
-            GUTTERS.into_iter().collect(),
-            "the generated gutters do not cover every gutter the table checks"
-        );
     }
 
     /// A vertical split of `surface`, then a horizontal split of its right column: pane 1 is

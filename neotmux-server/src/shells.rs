@@ -228,7 +228,7 @@ mod tests {
     use neotmux_pty::child::{Wakeup, wakeup};
 
     use super::*;
-    use neotmux_layout::panes::PaneLayout;
+    use neotmux_layout::PaneLayout;
 
     /// The wakeup is handed back rather than dropped: a `Shells` whose panes nudge an end
     /// nobody holds is not the arrangement these tests are about.

@@ -51,7 +51,7 @@ fn halves(files: &[(&str, &str)]) -> (tempfile::TempDir, Wakeup, Session, Plugin
         },
         waker,
         terminals.clone(),
-        neotmux_layout::windows::PaneIds::new(),
+        neotmux_layout::PaneIds::new(),
     )
     .expect("start a session");
     let lua = LuaSubsystem::build(

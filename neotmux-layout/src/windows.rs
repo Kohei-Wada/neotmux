@@ -1,39 +1,6 @@
-use neotmux_proto::{PaneId, Rect as PRect, Reserved, Size, WindowId};
+use neotmux_proto::{PaneId, Rect as PRect, WindowId};
 
-use crate::panes::PaneLayout;
-
-/// Everything a pane tree has to be laid out against: the whole terminal, the bands taken off
-/// its edges, and the cells left between panes. One value because every window is assigned
-/// onto the same one, and a window that was hidden while it changed has to be told all
-/// four at once.
-///
-/// `minimum` is only read when a window is created (`push`): a later `Surface` carrying a
-/// different `minimum` to `resurface`/`show`/`close_pane` does not move it, since the layout
-/// keeps the value it was constructed with.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Surface {
-    pub size: Size,
-    pub reserved: Reserved,
-    pub gutter: u16,
-    pub minimum: Size,
-}
-
-/// What closing a pane did.
-pub struct Closed {
-    pub window: WindowId,
-    /// The pane was the last of its window, so the window went with it.
-    pub window_closed: bool,
-    /// The window now being shown, when closing changed which one that is.
-    pub switched_to: Option<WindowId>,
-}
-
-/// What `show` did, which decides whether anything is announced.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Shown {
-    Switched,
-    AlreadyCurrent,
-    NoSuchWindow,
-}
+use crate::{Closed, PaneIds, PaneLayout, Shown, Surface};
 
 struct Window {
     id: WindowId,
@@ -47,27 +14,6 @@ struct Window {
 /// assigned, and is resurfaced only when it becomes current. That is what keeps a hidden
 /// window off the frame's bill — a terminal resize costs one reassignment, not one per
 /// window — and it is why `show` takes the surface rather than reading one.
-/// Pane ids, handed out and never reused.
-///
-/// Shared rather than owned, because the reason two windows must not number their panes apart
-/// is the reason two *sessions* must not either: one server holds them all, a pane's terminal
-/// state is looked up by id, and `pane.focus(id)` naming two panes is the same bug whichever
-/// two trees it is spread over.
-#[derive(Clone, Default)]
-pub struct PaneIds(std::rc::Rc<std::cell::Cell<u32>>);
-
-impl PaneIds {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn take(&self) -> PaneId {
-        let next = self.0.get() + 1;
-        self.0.set(next);
-        PaneId::from(next)
-    }
-}
-
 pub struct Windows {
     entries: Vec<Window>,
     current: usize,
@@ -263,7 +209,7 @@ impl Windows {
 
 #[cfg(test)]
 mod tests {
-    use neotmux_proto::SplitDir;
+    use neotmux_proto::{Reserved, Size, SplitDir};
 
     use super::*;
 

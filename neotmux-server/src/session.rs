@@ -17,7 +17,7 @@ use neotmux_pty::terminals::PaneTerminals;
 use crate::input::encode_key;
 use crate::paneinfo::PaneInfoCache;
 use crate::shells::Shells;
-use neotmux_layout::windows::{PaneIds, Shown, Surface, Windows};
+use neotmux_layout::{PaneIds, Shown, Surface, Windows};
 use neotmux_proto::keys::Key;
 use neotmux_proto::screen::{Frame, PaneFrame};
 use neotmux_sys::logging;
