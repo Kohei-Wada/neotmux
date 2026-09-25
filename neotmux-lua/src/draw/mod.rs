@@ -1,7 +1,13 @@
 mod buffers;
-mod float;
-mod reserve;
+mod committed;
+mod float_id;
+mod floats;
+mod reservation_id;
+mod reservations;
 
 pub use buffers::*;
-pub(crate) use float::*;
-pub use reserve::*;
+pub use committed::*;
+pub(crate) use float_id::*;
+pub(crate) use floats::*;
+pub use reservation_id::*;
+pub use reservations::*;

@@ -3,27 +3,17 @@
 //! Mirrors `registry.rs`'s shape and borrow discipline: every accessor clones what it needs
 //! out from under its `RefCell` borrow before the caller can call back into Lua with it.
 
+use crate::plugin::CommandInfo;
+use crate::plugin::SourceId;
+use mlua::{RegistryKey, Value};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
-
-use mlua::{RegistryKey, Value};
-
-use crate::plugin::SourceId;
 
 struct Entry {
     callback: Rc<RegistryKey>,
     owner: SourceId,
     desc: Option<String>,
-}
-
-/// One registered command, as `list()` reports it — the owner already resolved to nothing
-/// more than an id, because naming it is `Sources`' job, not this one's.
-#[derive(Debug, Clone)]
-pub struct CommandInfo {
-    pub name: String,
-    pub desc: Option<String>,
-    pub owner: SourceId,
 }
 
 #[derive(Default)]

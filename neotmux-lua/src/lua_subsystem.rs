@@ -1,19 +1,8 @@
-use std::cell::{Cell, RefCell};
-use std::collections::BTreeMap;
-use std::fs;
-use std::rc::Rc;
-use std::time::{Duration, Instant};
-
-use mlua::chunk::ChunkMode;
-use mlua::{Function, Lua, Value};
-
-use neotmux_proto::screen::Notice;
-use neotmux_proto::screen::PaneRead;
-use neotmux_proto::{
-    DrawCmd, Epoch, Event, Geometry, Level, PaneId, PaneInfo, PaneTty, Reserved, SessionId, Size,
-    WindowId,
-};
-
+use crate::CommandInfo;
+use crate::CommandOutcome;
+use crate::KeyOutcome;
+use crate::LoadFailure;
+use crate::WriteVerdict;
 use crate::api::ctx::Ctx;
 use crate::api::{self, Opts, keymap};
 use crate::draw::Buffers;
@@ -33,44 +22,19 @@ use crate::sched::Overrun;
 use crate::sched::timers::Timers;
 use crate::sched::{Budget, Outcome};
 use crate::sched::{Delivery, Jobs};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum KeyOutcome {
-    Consumed,
-    Fallthrough,
-}
-
-/// What the handlers said about a write. `Refused` carries the sentence the caller is told.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum WriteVerdict {
-    Pass,
-    Refused(String),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LoadFailure {
-    pub source: String,
-    pub message: String,
-}
-
-/// One registered command, named the way `commands()` hands them to a host caller: the
-/// owner already resolved to the display name `Sources` gives it, so the CLI never has to
-/// reach back into the Lua layer to say where a command came from.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CommandInfo {
-    pub name: String,
-    pub desc: Option<String>,
-    pub source: String,
-}
-
-/// What `run_command` answered. The host caller — the CLI, in the spec's next half — tells
-/// these apart to decide whether a built-in of the same name should run instead (spec §5).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CommandOutcome {
-    Ran(Vec<String>),
-    Failed(String),
-    Unknown,
-}
+use mlua::chunk::ChunkMode;
+use mlua::{Function, Lua, Value};
+use neotmux_proto::screen::Notice;
+use neotmux_proto::screen::PaneRead;
+use neotmux_proto::{
+    DrawCmd, Epoch, Event, Geometry, Level, PaneId, PaneInfo, PaneTty, Reserved, SessionId, Size,
+    WindowId,
+};
+use std::cell::{Cell, RefCell};
+use std::collections::BTreeMap;
+use std::fs;
+use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 pub struct LuaSubsystem {
     lua: Lua,

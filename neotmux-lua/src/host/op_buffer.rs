@@ -1,80 +1,10 @@
+use crate::host::Ambient;
+use crate::host::Mark;
+use crate::host::Op;
+use crate::plugin::SourceId;
+use neotmux_proto::SessionId;
 use std::cell::RefCell;
 use std::rc::Rc;
-
-use neotmux_proto::{Dir, Level, PaneId, SessionId, SplitDir, WindowId};
-
-use crate::host::Ambient;
-use crate::plugin::SourceId;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Op {
-    Quit,
-    Detach,
-    Notify {
-        level: Level,
-        text: String,
-    },
-    Log {
-        level: Level,
-        text: String,
-    },
-    PaneSplit {
-        dir: SplitDir,
-    },
-    PaneFocus {
-        pane: PaneId,
-    },
-    PaneResize {
-        dir: Dir,
-        cells: u16,
-    },
-    PaneSend {
-        pane: PaneId,
-        text: String,
-    },
-    /// A keystroke, named the way `on_key` names one. The bytes it becomes are the host's to
-    /// work out: they depend on what the pane has asked for, which is a fact about the pane
-    /// rather than about the plugin relaying the key.
-    PaneKey {
-        pane: PaneId,
-        spec: String,
-    },
-    WindowCreate {
-        window: WindowId,
-    },
-    WindowFocus {
-        window: WindowId,
-    },
-    /// A window's name, or `None` to take it away and leave it a number.
-    WindowRename {
-        window: WindowId,
-        name: Option<String>,
-    },
-    /// The set of sessions changing, which is the server's rather than a session's: these
-    /// three never reach `Session::apply`.
-    SessionCreate {
-        name: String,
-    },
-    SessionSwitch {
-        name: String,
-    },
-    SessionKill {
-        name: String,
-    },
-    SessionRename {
-        from: String,
-        to: String,
-    },
-    /// Take down every notification showing. The surface is the host's — it holds the ones
-    /// still inside their time and the transcript of every one ever raised — so clearing it
-    /// is a request like any other.
-    NoticesClear,
-}
-
-/// Where the buffer ended before a source's tick group ran, so that group's own ops can be
-/// taken back out if its frame is discarded.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Mark(usize);
 
 pub struct OpBuffer {
     ops: RefCell<Vec<(Option<SessionId>, SourceId, Op)>>,
@@ -137,6 +67,7 @@ mod tests {
     use super::*;
     use crate::plugin::Sources;
     use neotmux_proto::Geometry;
+    use neotmux_proto::{Level, PaneId, SplitDir};
     use std::cell::RefCell;
 
     /// A buffer with nothing bound: every op in these tests is raised outside a session, so

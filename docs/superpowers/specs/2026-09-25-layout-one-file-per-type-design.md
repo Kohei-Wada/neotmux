@@ -109,3 +109,14 @@ warnings.
   (`clip`, `shells`, `notifications`, `pane_info_cache`, and the three pieces of `server.rs`) are
   flattened with `pub(crate) use`, so nothing the crate exports changed. `command` and `input` stay
   named modules under rule 6.
+- **neotmux-lua** (2026-09-25): every file outside `api/` with more than one public type gives each
+  its own file inside the same directory (`draw/`: `committed`, `float_id`, `floats`,
+  `reservation_id`, `reservations`; `host/`: `absent`, `bound`, `job_chunk`, `job_spec`, `mark`,
+  `no_runner`, `op`, `op_buffer`, `running`, `window_ids`; `plugin/`: `command_info`, `kind`,
+  `kind_tag`, `layers`, `registration_id`, `source_id`, `sources`; `sched/`: `callbacks`,
+  `delivery`, `job_id`, `outcome`). `subsystem.rs` is `lua_subsystem.rs` plus `key_outcome`,
+  `write_verdict`, `load_failure`, `command_info` and `command_outcome` at the root. A type in a
+  directory is flattened into the directory, not the crate root, so its path is
+  `crate::host::JobSpec`; a private item another directory uses is imported by that path too.
+  `sched/timers` stays whole (rule 5), and `jobs.rs` keeps its `Sweeping` guard beside `Jobs` so the
+  two `Sweeping`s never meet. `api/` is one Lua namespace per file and stays (rule 6).

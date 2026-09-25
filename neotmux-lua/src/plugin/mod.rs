@@ -1,11 +1,21 @@
+mod command_info;
 mod commands;
+mod kind;
+mod kind_tag;
+mod layers;
+mod registration_id;
 mod registry;
-mod runtime;
-mod source;
+mod source_id;
+mod sources;
 mod vm;
 
+pub use command_info::*;
 pub use commands::*;
+pub use kind::*;
+pub use kind_tag::*;
+pub use layers::*;
+pub use registration_id::*;
 pub use registry::*;
-pub use runtime::*;
-pub use source::*;
+pub use source_id::*;
+pub use sources::*;
 pub use vm::*;

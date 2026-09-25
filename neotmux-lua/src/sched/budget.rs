@@ -1,29 +1,15 @@
+use crate::api::Opts;
+use crate::sched::Outcome;
+use mlua::{HookTriggers, Lua, VmState};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
-
-use mlua::{HookTriggers, Lua, VmState};
-
-use crate::api::Opts;
 
 /// How often the hook samples the clock. Throughput is flat from 1e3 to 1e6 instructions — a
 /// count hook costs a `luaG_traceexec` call per instruction whatever n is — so this is the
 /// smallest n that adds no closure cost of its own: measured worst overshoot past an 8 ms
 /// budget ~8µs, against ~30µs at 1e4 and ~15% more throughput cost at 1e2.
 const SAMPLE_EVERY_N_INSTRUCTIONS: u32 = 1_000;
-
-/// What one source's slice of one frame came to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Outcome {
-    WithinBudget,
-    /// The hook fired past the deadline and unwound the tick.
-    Interrupted,
-    /// Past the deadline, but no sample ever landed there to cut it off: one long C call
-    /// leaves almost no Lua behind it (§5.4). Attributable, not interruptible.
-    RanLong {
-        elapsed: Duration,
-    },
-}
 
 /// The globals a plugin could otherwise use to catch the budget's interrupt, replaced with
 /// wrappers that re-raise it. The originals are locals in this chunk and a plugin has no name

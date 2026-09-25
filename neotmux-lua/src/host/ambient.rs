@@ -6,13 +6,12 @@
 //! session's, this holds everybody else's, and binding a session swaps the two. The swap moves
 //! a `Vec`'s and a `BTreeMap`'s headers, so it costs the same whatever a session holds.
 
+use crate::host::Bound;
+use crate::host::{PaneInfos, PaneTtys};
+use neotmux_proto::{Geometry, SessionId};
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::rc::Rc;
-
-use neotmux_proto::{Geometry, SessionId};
-
-use crate::host::{PaneInfos, PaneTtys};
 
 /// What one session is holding while some other session is the one bound.
 #[derive(Default)]
@@ -100,7 +99,7 @@ impl Ambient {
     ///
     /// Nothing is parked under `None`: an unbound layer holds an empty geometry, which is what
     /// a config load has to read, and there is no session for it to be given back to.
-    fn swap(&self, next: Option<SessionId>) {
+    pub(crate) fn swap(&self, next: Option<SessionId>) {
         let was = self.current.replace(next);
         let mut parked = self.parked.borrow_mut();
         let mut held = Parked::default();
@@ -117,22 +116,6 @@ impl Ambient {
             std::mem::swap(&mut theirs.pane_info, &mut self.pane_info.borrow_mut());
             std::mem::swap(&mut theirs.pane_tty, &mut self.pane_tty.borrow_mut());
         }
-    }
-}
-
-/// The binding, undone when it goes out of scope — including on the way out of a dispatch that
-/// ended in an error, which is the whole reason it is a guard and not two calls.
-///
-/// It restores to what was bound before rather than to nothing, so a bind inside a bind — a
-/// plugin reading another session from inside its own tick — leaves its caller where it was.
-pub struct Bound<'a> {
-    ambient: &'a Ambient,
-    was: Option<SessionId>,
-}
-
-impl Drop for Bound<'_> {
-    fn drop(&mut self) {
-        self.ambient.swap(self.was);
     }
 }
 

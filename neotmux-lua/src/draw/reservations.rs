@@ -1,9 +1,8 @@
+use crate::draw::ReservationId;
+use crate::plugin::SourceId;
+use neotmux_proto::{Axis, Edge, Rect, Reserved, Size};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-
-use neotmux_proto::{Axis, Edge, Rect, Reserved, Size};
-
-use crate::plugin::SourceId;
 
 /// The most rows one horizontal edge can be reserved for, whoever asks. A band there is a
 /// line or two of text along an edge — a status line, a window list — and past four the
@@ -30,9 +29,6 @@ pub fn max_reserved(axis: Axis) -> u16 {
         Axis::Columns => MAX_RESERVED_COLS,
     }
 }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct ReservationId(u64);
 
 struct Entry {
     id: ReservationId,

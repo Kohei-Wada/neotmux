@@ -4,28 +4,15 @@
 //! a test can pin down: who owns a job, which session's frame its callbacks belong in, what
 //! has been collected, and what is said when it ends.
 
+use crate::host::{JobChunk, JobSpec, Runner, Running};
+use crate::plugin::SourceId;
+use crate::sched::Callbacks;
+use crate::sched::Delivery;
+use crate::sched::JobId;
+use neotmux_proto::SessionId;
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::rc::Rc;
-
-use mlua::RegistryKey;
-use neotmux_proto::SessionId;
-
-use crate::host::{JobChunk, JobSpec, Runner, Running};
-use crate::plugin::SourceId;
-
-/// What `job.start` answered with, and what `job:kill()` names. Minted here rather than by
-/// the host for the reason `WindowIds` gives: the call has to answer before the frame ends.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct JobId(pub u64);
-
-/// The callbacks a job was started with. Each is a `RegistryKey` because a Lua function
-/// cannot outlive a borrow of the `Lua` it came from.
-pub struct Callbacks {
-    pub on_stdout: Option<Rc<RegistryKey>>,
-    pub on_stderr: Option<Rc<RegistryKey>>,
-    pub on_exit: Option<Rc<RegistryKey>>,
-}
 
 struct Job {
     id: JobId,
@@ -139,41 +126,6 @@ fn split_lines(held: &mut Vec<u8>) -> Vec<String> {
     }
     held.drain(..start);
     lines
-}
-
-/// One thing the frame has to do for a job: call a callback, or end it.
-pub enum Delivery {
-    Lines {
-        job: JobId,
-        owner: SourceId,
-        callback: Rc<RegistryKey>,
-        lines: Vec<String>,
-    },
-    Exit {
-        job: JobId,
-        owner: SourceId,
-        callback: Option<Rc<RegistryKey>>,
-        code: Option<i32>,
-        stdout: Option<String>,
-        stderr: Option<String>,
-        err: Option<String>,
-    },
-}
-
-impl Delivery {
-    /// Which job this is for, so an overrunning callback is counted against it and no other.
-    pub fn job(&self) -> JobId {
-        match self {
-            Delivery::Lines { job, .. } | Delivery::Exit { job, .. } => *job,
-        }
-    }
-
-    /// Who a raising or overrunning callback is reported against.
-    pub fn owner(&self) -> SourceId {
-        match self {
-            Delivery::Lines { owner, .. } | Delivery::Exit { owner, .. } => *owner,
-        }
-    }
 }
 
 pub struct Jobs {

@@ -1,43 +1,11 @@
+use crate::plugin::Kind;
+use crate::plugin::KindTag;
+use crate::plugin::RegistrationId;
+use crate::plugin::SourceId;
+use mlua::RegistryKey;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
-
-use mlua::RegistryKey;
-
-use crate::plugin::SourceId;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Kind {
-    Tick,
-    Event(String),
-    Key,
-    Keymap(String),
-    Write,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum KindTag {
-    Tick,
-    Event,
-    Key,
-    Keymap,
-    Write,
-}
-
-impl Kind {
-    pub fn tag(&self) -> KindTag {
-        match self {
-            Kind::Tick => KindTag::Tick,
-            Kind::Event(_) => KindTag::Event,
-            Kind::Key => KindTag::Key,
-            Kind::Keymap(_) => KindTag::Keymap,
-            Kind::Write => KindTag::Write,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct RegistrationId(u64);
 
 struct Entry {
     owner: SourceId,

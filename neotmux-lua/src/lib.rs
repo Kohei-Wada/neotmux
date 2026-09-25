@@ -1,10 +1,20 @@
 pub mod api;
+mod command_info;
+mod command_outcome;
 pub mod draw;
 pub mod host;
+mod key_outcome;
+mod load_failure;
+mod lua_subsystem;
 pub mod plugin;
 pub mod sched;
-mod subsystem;
+mod write_verdict;
 
 pub use api::Opts;
 pub use api::keymap;
-pub use subsystem::*;
+pub use command_info::*;
+pub use command_outcome::*;
+pub use key_outcome::*;
+pub use load_failure::*;
+pub use lua_subsystem::*;
+pub use write_verdict::*;

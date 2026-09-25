@@ -1,26 +1,16 @@
+use crate::plugin::SourceId;
+use mlua::chunk::ChunkMode;
+use mlua::{Function, Lua, Table, Value};
 use std::cell::RefCell;
-use std::fmt;
 use std::fs;
 use std::path::PathBuf;
 use std::rc::Rc;
-
-use mlua::chunk::ChunkMode;
-use mlua::{Function, Lua, Table, Value};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct SourceId(u32);
 
 /// The identity of a call with no real chunk behind it: a native function, a `loadstring`d
 /// or otherwise anonymous chunk, or a call reached with no Lua frame below it at all.
 pub const ANONYMOUS: SourceId = SourceId(0);
 
 const RESERVED: usize = 1;
-
-impl fmt::Display for SourceId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "#{}", self.0)
-    }
-}
 
 /// Strips a chunk source down to the short, readable form used in logs: the runtime layer
 /// prefix and the `.lua` suffix are dropped, so `@/runtime/lua/plugin/clock.lua` becomes
