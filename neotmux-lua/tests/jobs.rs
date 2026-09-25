@@ -1,6 +1,6 @@
 //! `neotmux.job`: a plugin runs a program and is called back with what it said. Every test
 //! here drives a fake `Runner`, so nothing spawns and nothing waits — what a real process adds
-//! is tested once, in `neotmux/tests/job_process.rs`.
+//! is tested once, in `neotmux-server/tests/job_process.rs`.
 
 use std::fs;
 use std::path::{Path, PathBuf};

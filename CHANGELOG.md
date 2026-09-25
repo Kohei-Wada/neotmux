@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### The crates say what they are
+
+The crates sit at the repository root: `neotmux-proto`, `neotmux-layout` (was `neotmux-core`),
+`neotmux-pty` (was `neotmux-term`), `neotmux-lua`, and the old `neotmux` split into
+`neotmux-client`, `neotmux-server`, `neotmux-sys` and the binary. The client depends on proto and
+sys alone, so it cannot reach Lua, a PTY or the layout. Every `lib.rs` and `mod.rs` is a list of
+exports, and files are grouped into directories by what they are for. Nothing behaves
+differently.
+
 ### The sidebar is a stack of sections, and the second one lists your agents
 
 `plugin.sidebar` is a container now: `require('plugin.sidebar').sections` is a list of tables,

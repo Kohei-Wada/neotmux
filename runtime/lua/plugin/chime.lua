@@ -103,7 +103,7 @@ end
 local function player_failed(why)
   -- `neotmux.job.start`'s own wording for a spawn that failed. Matching the spawn positively is
   -- what keeps a refusal added later from being read as a verdict on a program nobody tried to
-  -- run. (This reads a message the host writes; `neotmux-lua/src/jobs.rs` owns it.)
+  -- run. (This reads a message the host writes; `neotmux-lua/src/sched/jobs.rs` owns it.)
   return why:find("^could not start ") ~= nil
 end
 

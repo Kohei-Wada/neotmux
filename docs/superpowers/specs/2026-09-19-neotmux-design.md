@@ -95,6 +95,11 @@ rules on — the binary owns the map from `PaneId` to its PTY handle and asks co
 rects. The row is true of everything in it except `session`, and `session` is where it is by
 design, not by drift.
 
+> Since 2026-09-25 (`2026-09-25-crate-layout-design.md`): `neotmux-core` is `neotmux-layout`,
+> `neotmux-term` is `neotmux-pty`, and the `neotmux` crate is split into `neotmux-client`,
+> `neotmux-server`, `neotmux-sys` and the binary. The crates sit at the repository root rather
+> than under `crates/`. The table above is the design as written.
+
 ### 2.1 Boundary types live in `neotmux-core::proto`, not a separate crate yet
 
 All types that cross a boundary — `SessionId` / `WindowId` / `PaneId`, geometry, grid
