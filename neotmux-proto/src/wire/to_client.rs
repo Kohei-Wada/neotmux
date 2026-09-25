@@ -1,11 +1,9 @@
 use crate::wire::Done;
-use crate::wire::Tick;
 
 /// Server to client. Borrowed, because the two big payloads — a frame's grids and a tick's
 /// geometry — are held by the session and encoding writes straight through the borrow.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ToClient<'a> {
-    Tick(&'a Tick),
     Done(&'a Done<'a>),
     /// Why this connection is not getting a session: something else already has it.
     Refused(&'a str),

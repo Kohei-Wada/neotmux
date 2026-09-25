@@ -21,4 +21,7 @@
 ///   message. A renderer needed neither: no renderer ever spoke them.
 /// - 13: `DrawCmd::Text` carries `bold`, a byte after its colours. A renderer needed it: it is
 ///   an attribute the renderer draws.
-pub const PROTOCOL_VERSION: u32 = 13;
+/// - 14: `Tick` and `Tock` left the wire, and `Done` stopped carrying steps, which went empty
+///   the day the Lua layer moved into the server. A renderer needed none of them: the client
+///   had ignored all three since.
+pub const PROTOCOL_VERSION: u32 = 14;

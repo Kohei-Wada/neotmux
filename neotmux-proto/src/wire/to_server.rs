@@ -1,6 +1,5 @@
 use crate::Size;
 use crate::wire::Attach;
-use crate::wire::Tock;
 
 /// Client to server.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -10,7 +9,6 @@ pub enum ToServer {
     Key(crate::Key),
     /// The terminal changed size. The client owns the terminal, so it owns `SIGWINCH`.
     Resize(Size),
-    Tock(Tock),
     /// Not a client at all: a connection asking what sessions there are. The answer is the
     /// whole of what it wanted, and it is let go afterwards.
     List,

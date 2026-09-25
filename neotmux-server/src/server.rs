@@ -186,7 +186,6 @@ fn nothing_to_serve(serving: &Serving<'_>, plugins: &Plugins) -> anyhow::Result<
                 };
                 let _ = link.send(&wire::encode_to_client(&ToClient::Bye(&transcript)));
                 let _ = link.send(&wire::encode_to_client(&ToClient::Done(&Done {
-                    steps: Vec::new(),
                     frame: None,
                     end: Some(End::Quit),
                 })));
@@ -431,10 +430,8 @@ fn frame(
         asked.extend(answer.server.into_iter().map(|(tag, op)| (id, tag, op)));
         let Pass { steps, frame, end } = live.advance(&answer.tock, &answer.views)?;
         let picture = (frame.is_some() || end.is_some()).then(|| {
+            // The steps are not the client's: they go to the Lua layer in this process, below.
             wire::encode_to_client(&ToClient::Done(&Done {
-                // Nothing on the client has to be caught up any more: the steps go to a Lua
-                // layer in this process, below.
-                steps: Vec::new(),
                 frame: frame.as_ref(),
                 end,
             }))
@@ -579,13 +576,12 @@ fn deliver(clients: &mut [Attached], i: usize, sessions: &mut Sessions, plugins:
                     clients[i].gone = true;
                 }
             }
-            Ok(ToServer::Tock(_))
-            | Ok(ToServer::Attach(_))
+            Ok(ToServer::Attach(_))
             | Ok(ToServer::List)
             | Ok(ToServer::Kill { .. })
             | Ok(ToServer::Command { .. }) => {
-                // A tock nobody asked for, a second attach, a question only the door
-                // answers, or a command: none of them is something the session can act on out here.
+                // A second attach, a question only the door answers, or a command: none of
+                // them is something the session can act on out here.
             }
             Err(err) => {
                 logging::log(

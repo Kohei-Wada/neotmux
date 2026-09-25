@@ -5,11 +5,11 @@
 //! knows (its size, the keys it read) and is sent the picture; the frame loop is a function
 //! call inside the server.
 //!
-//! [`Tick`] and [`Tock`] are the vocabulary of the frame as a conversation, from when the Lua
-//! layer was the client's. Nothing puts them on the wire any more — they are what a session
-//! hands its plugins and gets back, in one process — and they are here rather than beside
-//! that call because [`Step`], which a tick carries, still rides on a [`Done`] and so is
-//! still a thing the codec has to know.
+//! [`Tick`] and [`Tock`], and the [`Step`]s and [`SessionOp`]s they carry, are the vocabulary of
+//! the frame as a conversation, from when the Lua layer was the client's. None of them crosses
+//! the socket any more — they are what a session hands its plugins and gets back, in one
+//! process — and the codec knows nothing of them. They are still here only because this is
+//! where both ends of that call already import from.
 //!
 //! Everything here is data. The `encode_*` and `decode_*` functions (`codec.rs`) turn it into bytes; who reads and writes those
 //! bytes is the socket's owner's business.

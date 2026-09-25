@@ -228,7 +228,6 @@ pub(crate) fn end_session(
         let _ = client
             .link
             .send(&wire::encode_to_client(&ToClient::Done(&Done {
-                steps: Vec::new(),
                 frame: None,
                 end: Some(End::Quit),
             })));

@@ -110,10 +110,7 @@ pub(crate) fn open(
             OwnedToClient::Bye(lines) => transcript = lines,
             OwnedToClient::Clip(text) => yank(&text),
             OwnedToClient::Refused(why) => anyhow::bail!("{why}"),
-            OwnedToClient::Tick(_)
-            | OwnedToClient::Sessions(_)
-            | OwnedToClient::Killed(_)
-            | OwnedToClient::Ran { .. } => {}
+            OwnedToClient::Sessions(_) | OwnedToClient::Killed(_) | OwnedToClient::Ran { .. } => {}
         }
     }
 }
@@ -204,11 +201,9 @@ pub(crate) fn run(
                 // notification it could be told is in the log file already.
                 OwnedToClient::Bye(_) => {}
                 OwnedToClient::Refused(why) => anyhow::bail!("{why}"),
-                // The vocabulary of the frame that was a conversation, and the three answers
-                // only ever given at the door. Nothing sends any of these to a client that
-                // has attached.
-                OwnedToClient::Tick(_)
-                | OwnedToClient::Sessions(_)
+                // The three answers only ever given at the door. Nothing sends any of these to
+                // a client that has attached.
+                OwnedToClient::Sessions(_)
                 | OwnedToClient::Killed(_)
                 | OwnedToClient::Ran { .. } => {}
             }

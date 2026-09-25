@@ -84,10 +84,6 @@ pub fn encode_to_server(msg: &ToServer) -> Vec<u8> {
             w.u8(TO_SERVER_RESIZE);
             w.size(*size);
         }
-        ToServer::Tock(tock) => {
-            w.u8(TO_SERVER_TOCK);
-            w.tock(tock);
-        }
         ToServer::List => w.u8(TO_SERVER_LIST),
         ToServer::Kill { session } => {
             w.u8(TO_SERVER_KILL);
@@ -120,7 +116,6 @@ pub fn decode_to_server(bytes: &[u8]) -> Result<ToServer, WireError> {
         }),
         TO_SERVER_KEY => ToServer::Key(r.key()?),
         TO_SERVER_RESIZE => ToServer::Resize(r.size()?),
-        TO_SERVER_TOCK => ToServer::Tock(r.tock()?),
         TO_SERVER_LIST => ToServer::List,
         TO_SERVER_KILL => ToServer::Kill {
             session: r.string()?,
@@ -148,10 +143,6 @@ pub fn decode_to_server(bytes: &[u8]) -> Result<ToServer, WireError> {
 pub fn encode_to_client(msg: &ToClient<'_>) -> Vec<u8> {
     let mut w = Writer::new();
     match msg {
-        ToClient::Tick(tick) => {
-            w.u8(TO_CLIENT_TICK);
-            w.tick(tick);
-        }
         ToClient::Done(done) => {
             w.u8(TO_CLIENT_DONE);
             w.done(done);
@@ -197,7 +188,6 @@ pub fn encode_to_client(msg: &ToClient<'_>) -> Vec<u8> {
 pub fn decode_to_client(bytes: &[u8]) -> Result<OwnedToClient, WireError> {
     let mut r = Reader::new(bytes);
     let msg = match r.u8()? {
-        TO_CLIENT_TICK => OwnedToClient::Tick(r.tick()?),
         TO_CLIENT_DONE => OwnedToClient::Done(r.done()?),
         TO_CLIENT_REFUSED => OwnedToClient::Refused(r.string()?),
         TO_CLIENT_SESSIONS => {
@@ -235,33 +225,24 @@ pub fn decode_to_client(bytes: &[u8]) -> Result<OwnedToClient, WireError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Event;
+
     use crate::KeyCode;
-    use crate::LineMode;
+
     use crate::Modifiers;
     use crate::PaneId;
-    use crate::PaneInfo;
-    use crate::PaneTty;
-    use crate::WindowId;
+
     use crate::geom::Color;
-    use crate::geom::Dir;
-    use crate::geom::Geometry;
+
     use crate::geom::GridSnapshot;
     use crate::geom::PaneRects;
-    use crate::geom::Reserved;
+
     use crate::geom::Size;
-    use crate::geom::SplitDir;
-    use crate::geom::Window;
+
     use crate::screen::DrawCmd;
-    use crate::screen::Epoch;
+
     use crate::screen::OwnedPaneFrame;
     use crate::screen::Rect;
     use crate::wire::End;
-    use crate::wire::SessionOp;
-    use crate::wire::Step;
-    use crate::wire::Tick;
-    use crate::wire::Tock;
-    use std::collections::BTreeMap;
 
     const COLORS: [Color; 4] = [
         Color::Default,
@@ -668,30 +649,6 @@ mod tests {
         }
     }
 
-    fn geometry_of() -> Geometry {
-        Geometry {
-            area: Rect::new(0, 0, 80, 24),
-            panes: vec![
-                (PaneId::from(1), Rect::new(0, 0, 40, 24)),
-                (PaneId::from(2), Rect::new(40, 0, 40, 24)),
-            ],
-            focus: Some(PaneId::from(2)),
-            windows: vec![
-                Window {
-                    id: WindowId::from(1),
-                    panes: vec![PaneId::from(1), PaneId::from(2)],
-                    name: Some("編集".to_string()),
-                },
-                Window {
-                    id: WindowId::from(2),
-                    panes: vec![PaneId::from(3)],
-                    name: None,
-                },
-            ],
-            window: Some(WindowId::from(1)),
-        }
-    }
-
     fn round_trip_to_server(msg: ToServer) {
         let bytes = encode_to_server(&msg);
         assert_eq!(decode_to_server(&bytes), Ok(msg));
@@ -712,169 +669,14 @@ mod tests {
     }
 
     #[test]
-    fn a_tick_carries_its_steps_in_order() {
-        let tick = Tick {
-            steps: vec![
-                Step::Event(Event::PaneOutput {
-                    pane: PaneId::from(1),
-                    bytes: b"hello\x1b[0m".to_vec(),
-                }),
-                Step::Geometry(geometry_of()),
-                Step::Bands {
-                    surface: Size { rows: 24, cols: 80 },
-                    applied: Reserved::vertical(3, 4),
-                },
-                Step::Event(Event::WindowChanged {
-                    window: WindowId::from(2),
-                }),
-                Step::Event(Event::Resized {
-                    size: Size { rows: 1, cols: 1 },
-                }),
-            ],
-            epoch: Epoch::new(
-                Size { rows: 24, cols: 80 },
-                vec![PaneId::from(2), PaneId::from(1)],
-                Some(PaneId::from(1)),
-            ),
-            geometry: geometry_of(),
-            revisions: BTreeMap::from([(PaneId::from(1), 7), (PaneId::from(2), 0)]),
-            pane_tty: BTreeMap::from([
-                (
-                    PaneId::from(1),
-                    PaneTty {
-                        cursor: (3, 7),
-                        cursor_visible: true,
-                        alternate: false,
-                        application_cursor: true,
-                        line: Some(LineMode {
-                            canonical: true,
-                            echo: false,
-                        }),
-                    },
-                ),
-                (PaneId::from(2), PaneTty::default()),
-            ]),
-            pane_info: Some(BTreeMap::from([
-                (
-                    PaneId::from(1),
-                    PaneInfo {
-                        command: Some("vim".to_string()),
-                        cwd: None,
-                    },
-                ),
-                (PaneId::from(2), PaneInfo::default()),
-            ])),
-        };
-        let bytes = encode_to_client(&ToClient::Tick(&tick));
-        assert_eq!(decode_to_client(&bytes), Ok(OwnedToClient::Tick(tick)));
-    }
-
-    #[test]
-    fn a_tick_with_nothing_resampled_says_so() {
-        let tick = Tick {
-            steps: Vec::new(),
-            epoch: Epoch::default(),
-            geometry: Geometry::default(),
-            pane_info: None,
-            pane_tty: BTreeMap::new(),
-            revisions: BTreeMap::new(),
-        };
-        let bytes = encode_to_client(&ToClient::Tick(&tick));
-        assert_eq!(decode_to_client(&bytes), Ok(OwnedToClient::Tick(tick)));
-    }
-
-    #[test]
-    fn a_tock_round_trips_with_every_op() {
-        let tock = Tock {
-            ops: vec![
-                ("plugin/prefix".to_string(), SessionOp::Quit),
-                ("plugin/prefix".to_string(), SessionOp::Detach),
-                (
-                    "plugin/prefix".to_string(),
-                    SessionOp::PaneSplit {
-                        dir: SplitDir::Vertical,
-                    },
-                ),
-                (
-                    "init".to_string(),
-                    SessionOp::PaneFocus {
-                        pane: PaneId::from(9),
-                    },
-                ),
-                (
-                    "plugin/slime".to_string(),
-                    SessionOp::PaneSend {
-                        pane: PaneId::from(3),
-                        text: "print('日本語も')\n".to_string(),
-                    },
-                ),
-                (
-                    "init".to_string(),
-                    SessionOp::PaneResize {
-                        dir: Dir::Down,
-                        cells: 5,
-                    },
-                ),
-                (
-                    "init".to_string(),
-                    SessionOp::WindowCreate {
-                        window: WindowId::from(4),
-                    },
-                ),
-                (
-                    "init".to_string(),
-                    SessionOp::WindowFocus {
-                        window: WindowId::from(4),
-                    },
-                ),
-                (
-                    "init".to_string(),
-                    SessionOp::WindowRename {
-                        window: WindowId::from(4),
-                        name: Some("編集".to_string()),
-                    },
-                ),
-                (
-                    "init".to_string(),
-                    SessionOp::WindowRename {
-                        window: WindowId::from(4),
-                        name: None,
-                    },
-                ),
-                ("init".to_string(), SessionOp::Detach),
-            ],
-            overlay: vec![DrawCmd::Text {
-                pane: None,
-                x: 1,
-                y: 2,
-                text: "painted".to_string(),
-                fg: Color::Idx(3),
-                bg: Color::Default,
-                bold: false,
-            }],
-            reserved: Reserved::horizontal(1, 0),
-            gutter: 2,
-            wants_pane_output: true,
-        };
-        round_trip_to_server(ToServer::Tock(tock));
-    }
-
-    #[test]
     fn a_finished_frame_a_reading_and_a_refusal_round_trip() {
         let frame = frame_of(vec![OwnedPaneFrame {
             pane: PaneId::from(1),
             rect: Rect::new(0, 0, 2, 2),
             grid: grid_of(2, 2, &["a", "b", "c", "d"]),
         }]);
-        let steps = vec![
-            Step::Geometry(geometry_of()),
-            Step::Event(Event::PaneOpened {
-                pane: PaneId::from(2),
-            }),
-        ];
         let borrowed = frame.frame();
         let done = crate::wire::Done {
-            steps: steps.clone(),
             frame: Some(&borrowed),
             end: Some(End::Quit),
         };
@@ -882,23 +684,17 @@ mod tests {
         assert_eq!(
             decode_to_client(&bytes),
             Ok(OwnedToClient::Done(crate::wire::OwnedDone {
-                steps,
                 frame: Some(frame),
                 end: Some(End::Quit),
             }))
         );
 
         for end in [None, Some(End::Quit), Some(End::Eof), Some(End::Detach)] {
-            let done = crate::wire::Done {
-                steps: Vec::new(),
-                frame: None,
-                end,
-            };
+            let done = crate::wire::Done { frame: None, end };
             let bytes = encode_to_client(&ToClient::Done(&done));
             assert_eq!(
                 decode_to_client(&bytes),
                 Ok(OwnedToClient::Done(crate::wire::OwnedDone {
-                    steps: Vec::new(),
                     frame: None,
                     end,
                 }))
