@@ -207,17 +207,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn panes_come_out_left_to_right_top_to_bottom() {
-        let mut tree = Tree::new(pane(1));
-        let surface = Rect::new(0, 0, 80, 24);
-        tree.split(pane(1), SplitDir::Vertical, pane(2), surface, MIN, 0)
-            .expect("fits");
-        tree.split(pane(2), SplitDir::Horizontal, pane(3), surface, MIN, 0)
-            .expect("fits");
-        assert_eq!(tree.panes(), vec![pane(1), pane(2), pane(3)]);
-    }
-
     /// A fixed set of shapes: each entry splits the pane at that index of `panes()`.
     const SHAPES: [&[(usize, SplitDir)]; 6] = [
         &[],

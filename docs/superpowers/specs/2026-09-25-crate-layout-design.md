@@ -129,7 +129,7 @@ neotmux-pty/src/         lib.rs  terminals
                          child/   pty wakeup                                     — the child's I/O
                          screen/  state; and named: scrollback evictions lines wrap — the screen and its history
                          parse/   query hvp                                      — either side of the parser
-neotmux-layout/src/      lib.rs  layout panes windows
+neotmux-layout/src/      lib.rs  layout panes windows   (since split per type: 2026-09-25-layout-one-file-per-type-design.md)
 neotmux-proto/src/       lib.rs  version.rs (PROTOCOL_VERSION)
                          wire/    msg codec(was wire)
                          geom/    size(was geom) geometry panerects reserve grid

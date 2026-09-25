@@ -1,3 +1,11 @@
+//! Where panes sit: the pane tree ([`Tree`]), the one function that turns it into rectangles
+//! ([`assign()`]), a window's layout over a surface ([`PaneLayout`]) and the set of windows
+//! ([`Windows`]). It knows panes only by [`PaneId`](neotmux_proto::PaneId) — no PTY, no Lua.
+//!
+//! Geometry lives in [`assign()`] and nowhere else, so that a Lua layout callback can later stand
+//! in for that one function instead of replacing the tree (issue #27). For the same reason this
+//! crate never depends on `neotmux-lua`: the seam belongs to the server, which sees both.
+
 mod assign;
 mod closed;
 mod pane_ids;
