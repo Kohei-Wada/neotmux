@@ -1,6 +1,6 @@
 //! The jobs that are running, and what is owed to whoever started each one.
 //!
-//! The processes themselves are the host's (see [`crate::runner`]); what is here is the part
+//! The processes themselves are the host's (see [`crate::host::Runner`]); what is here is the part
 //! a test can pin down: who owns a job, which session's frame its callbacks belong in, what
 //! has been collected, and what is said when it ends.
 

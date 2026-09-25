@@ -60,7 +60,7 @@ struct Active {
 }
 
 /// What a tick is measured against, and nothing else: counting overruns and acting on them
-/// is `crate::overrun`.
+/// is `crate::sched::Overrun`.
 pub struct Budget {
     opts: Rc<RefCell<Opts>>,
     armed: Cell<bool>,

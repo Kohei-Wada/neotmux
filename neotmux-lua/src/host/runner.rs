@@ -16,7 +16,7 @@ pub struct JobSpec {
 }
 
 /// One thing a running job has said. Bytes, not lines: where the line breaks fall is
-/// [`crate::jobs`]'s business, and a chunk boundary is not a line boundary.
+/// [`crate::sched::Jobs`]'s business, and a chunk boundary is not a line boundary.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JobChunk {
     Stdout(Vec<u8>),

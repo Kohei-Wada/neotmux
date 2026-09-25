@@ -64,7 +64,7 @@ pub fn walk<T>(
 }
 
 /// History lines `from` up to `from + count`, oldest first, as plain text on the same terms
-/// as [`crate::lines`].
+/// as [`crate::screen::lines`].
 pub fn lines(
     screen: &mut vt100::Screen,
     from: usize,

@@ -1,4 +1,4 @@
-//! The host's half of [`neotmux_lua::runner`]: a program in a real process.
+//! The host's half of [`neotmux_lua::host::Runner`]: a program in a real process.
 //!
 //! The bytes take the path a pane's already take — a reader thread per pipe, a bounded
 //! channel, and a nudge on the one wakeup the serving loop is already waiting on. That is

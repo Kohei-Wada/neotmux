@@ -3,7 +3,7 @@
 //! `vt100` 0.16.2 keeps the flag per row and hands it out through `Screen::row_wrapped`,
 //! which reads the *visible* window — so a history row is reached the same way its text is,
 //! by moving the screen's own position in the scrollback and putting it back
-//! ([`crate::scrollback`]).
+//! ([`crate::screen::scrollback`]).
 //!
 //! What it means is the terminal's, not ours: the row was filled to its last column and the
 //! next character went on to the next row. A row the child ended with a newline is not
@@ -22,7 +22,7 @@ pub fn visible(screen: &vt100::Screen, last: Option<usize>) -> Vec<bool> {
 
 /// Whether each history row `from` up to `from + count` runs on into the next, oldest first.
 pub fn history(screen: &mut vt100::Screen, from: usize, count: usize) -> Vec<bool> {
-    crate::screen::walk(screen, from, count, |screen, row, _| {
+    crate::screen::scrollback::walk(screen, from, count, |screen, row, _| {
         screen.row_wrapped(row)
     })
 }
@@ -67,7 +67,7 @@ mod tests {
         let mut parser = parser(2, 4, 100, b"abcdef\r\n\r\nxy");
         assert_eq!(history(parser.screen_mut(), 0, 10), vec![true, false]);
         assert_eq!(
-            crate::screen::lines(parser.screen_mut(), 0, 10, Trailing::Trim),
+            crate::screen::scrollback::lines(parser.screen_mut(), 0, 10, Trailing::Trim),
             vec!["abcd", "ef"]
         );
     }

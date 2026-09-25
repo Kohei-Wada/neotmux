@@ -1,6 +1,6 @@
 //! How many lines have fallen out of the front of a pane's history.
 //!
-//! [`crate::scrollback`] numbers history lines from the oldest one the pane still holds, so
+//! [`crate::screen::scrollback`] numbers history lines from the oldest one the pane still holds, so
 //! every number shifts down by one each time the ring drops a line — and nothing in the
 //! reading path can tell that it happened. A plugin that anchored a selection to a history
 //! line needs `dropped + index` to have stayed the same number, and needs to be told when it

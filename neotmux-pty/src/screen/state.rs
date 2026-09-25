@@ -3,10 +3,10 @@ use neotmux_proto::{Color, GridSnapshot, Size, clamp_to_min_grid};
 
 pub struct TermState {
     parser: vt100::Parser<Titles>,
-    /// `ESC [ y ; x f` on the way in, which the parser does not implement. See [`crate::hvp`].
+    /// `ESC [ y ; x f` on the way in, which the parser does not implement. See [`crate::parse::Hvp`].
     hvp: crate::parse::Hvp,
     /// Lines that have fallen out of the front of the history, counted as they go: nothing
-    /// downstream can work it out afterwards. See [`crate::evictions`].
+    /// downstream can work it out afterwards. See [`crate::screen::evictions`].
     dropped: usize,
     /// The pane as it was at the moment it was frozen, or `None` while it is live. Every
     /// read goes through [`TermState::reading`], so one field decides what the pane draws
@@ -69,10 +69,10 @@ impl TermState {
 
     /// Feeds one chunk to the terminal, counting the history lines it pushed out of the
     /// front on the way through — the offset is pinned off zero so `vt100` counts the
-    /// appends, and put back before anything else can read it ([`crate::evictions`]).
+    /// appends, and put back before anything else can read it ([`crate::screen::evictions`]).
     pub fn feed(&mut self, bytes: &[u8]) {
         let screen = self.parser.screen_mut();
-        let len_before = crate::screen::len(screen);
+        let len_before = crate::screen::scrollback::len(screen);
         let resting = screen.scrollback();
         screen.set_scrollback(resting.max(1));
         let offset_before = screen.scrollback();
@@ -85,8 +85,8 @@ impl TermState {
         let screen = self.parser.screen_mut();
         let offset_after = screen.scrollback();
         screen.set_scrollback(resting);
-        let len_after = crate::screen::len(screen);
-        self.dropped += crate::screen::dropped(crate::screen::Feed {
+        let len_after = crate::screen::scrollback::len(screen);
+        self.dropped += crate::screen::evictions::dropped(crate::screen::evictions::Feed {
             len_before,
             len_after,
             offset_before,
@@ -131,7 +131,7 @@ impl TermState {
     }
 
     /// The same screen, for the reads that reach the history and therefore have to move the
-    /// screen's own position in it ([`crate::scrollback`]).
+    /// screen's own position in it ([`crate::screen::scrollback`]).
     fn reading_mut(&mut self) -> &mut vt100::Screen {
         match &mut self.frozen {
             Some(frozen) => &mut frozen.screen,
@@ -174,38 +174,38 @@ impl TermState {
         self.parser.callbacks().title.as_deref()
     }
 
-    /// What the pane is showing, as plain-text lines (`crate::lines`). `last` bounds the work
+    /// What the pane is showing, as plain-text lines (`crate::screen::lines`). `last` bounds the work
     /// to the bottom of the screen rather than trimming an answer that was built in full.
     pub fn lines(&self, last: Option<usize>, trailing: Trailing) -> Vec<String> {
         crate::screen::lines::visible(self.reading(), last, trailing)
     }
 
-    /// Whether each of those lines runs on into the next (`crate::wrap`).
+    /// Whether each of those lines runs on into the next (`crate::screen::wrap`).
     pub fn wrapped(&self, last: Option<usize>) -> Vec<bool> {
         crate::screen::wrap::visible(self.reading(), last)
     }
 
     /// How many lines the pane holds above its visible screen, and how many have fallen out
     /// of the front of it. `&mut` because reading the length goes through the screen's own
-    /// position in the scrollback — see [`crate::scrollback`].
+    /// position in the scrollback — see [`crate::screen::scrollback`].
     pub fn history_extent(&mut self) -> Extent {
         let dropped = match &self.frozen {
             Some(frozen) => frozen.dropped,
             None => self.dropped,
         };
         Extent {
-            len: crate::screen::len(self.reading_mut()) as u64,
+            len: crate::screen::scrollback::len(self.reading_mut()) as u64,
             dropped: dropped as u64,
         }
     }
 
     /// Lines from above the visible screen, oldest first, numbered as
-    /// [`crate::scrollback`] describes.
+    /// [`crate::screen::scrollback`] describes.
     pub fn history(&mut self, from: usize, count: usize, trailing: Trailing) -> Vec<String> {
-        crate::screen::lines(self.reading_mut(), from, count, trailing)
+        crate::screen::scrollback::lines(self.reading_mut(), from, count, trailing)
     }
 
-    /// Whether each of those history lines runs on into the next (`crate::wrap`).
+    /// Whether each of those history lines runs on into the next (`crate::screen::wrap`).
     pub fn history_wrapped(&mut self, from: usize, count: usize) -> Vec<bool> {
         crate::screen::wrap::history(self.reading_mut(), from, count)
     }
@@ -627,7 +627,7 @@ mod tests {
     }
 
     /// A program that positions with HVP rather than CUP — btop does — puts its text where it
-    /// meant to. The parser implements only one of the two; `crate::hvp` is the other.
+    /// meant to. The parser implements only one of the two; `crate::parse::Hvp` is the other.
     #[test]
     fn a_pane_positioned_with_hvp_lands_where_cup_would_have() {
         let mut state = TermState::new(Size { rows: 4, cols: 12 }, 0);

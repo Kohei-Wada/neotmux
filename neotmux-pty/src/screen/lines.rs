@@ -49,7 +49,7 @@ pub(crate) fn row(screen: &vt100::Screen, row: u16, cols: u16, trailing: Trailin
 ///
 /// `last` is how many rows from the bottom to take, and it bounds the work rather than the
 /// answer: the rows above it are never built. `None` is the whole screen. What is above the
-/// screen is [`crate::scrollback`]'s question, not this one.
+/// screen is [`crate::screen::scrollback`]'s question, not this one.
 pub fn visible(screen: &vt100::Screen, last: Option<usize>, trailing: Trailing) -> Vec<String> {
     let (rows, cols) = screen.size();
     (first_row(rows, last)..rows)
@@ -162,7 +162,7 @@ mod tests {
     }
 
     /// Output that scrolled off the top is gone from the visible screen; reaching it is
-    /// `crate::scrollback`'s job, not this one's.
+    /// `crate::screen::scrollback`'s job, not this one's.
     #[test]
     fn what_scrolled_off_the_top_is_not_in_the_lines() {
         let lines = lines(2, 8, b"one\r\ntwo\r\nthree\r\n", None);

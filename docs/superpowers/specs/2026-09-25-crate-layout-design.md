@@ -127,7 +127,7 @@ neotmux-lua/src/         lib.rs  subsystem.rs
                          plugin/  registry source commands runtime vm            — where plugins come from
 neotmux-pty/src/         lib.rs  terminals
                          child/   pty wakeup                                     — the child's I/O
-                         screen/  state scrollback evictions lines wrap          — the screen and its history
+                         screen/  state; and named: scrollback evictions lines wrap — the screen and its history
                          parse/   query hvp                                      — either side of the parser
 neotmux-layout/src/      lib.rs  layout panes windows
 neotmux-proto/src/       lib.rs  version.rs (PROTOCOL_VERSION)
@@ -146,6 +146,12 @@ A module that was private stays private under the directory: `mod x; pub(crate) 
 flattening never widens what a crate exports. Two files in one directory exporting the same name
 is an error only where the name is used; if one arises, that file stays a named `pub mod x;` in its
 directory rather than being flattened, and the plan's ledger records which.
+
+`neotmux-pty`'s `screen/` keeps four of its five files named (`screen::scrollback::lines`,
+`screen::evictions::Feed`, `screen::lines::visible`, `screen::wrap::visible`): they are modules of
+free functions with generic names (`lines`, `len`, `walk`, `visible`), which say what they are
+only with the file in front of them, and `lines` is both a function in one and the name of
+another.
 
 ## 4. Order of work
 

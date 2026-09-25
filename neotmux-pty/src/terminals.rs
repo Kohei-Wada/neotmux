@@ -191,7 +191,7 @@ impl PaneTerminals {
 
     /// Lines from above the pane's visible screen, oldest first, with the revision they were
     /// read at. The read moves the screen's position in the scrollback and puts it back
-    /// before returning, all inside this one borrow — see `crate::scrollback`.
+    /// before returning, all inside this one borrow — see `crate::screen::scrollback`.
     pub fn history(&self, pane: PaneId, from: usize, count: usize, want: Want) -> Option<Lines> {
         let mut panes = self.panes.borrow_mut();
         let terminal = panes.get_mut(&pane)?;

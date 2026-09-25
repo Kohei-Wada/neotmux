@@ -10,7 +10,7 @@ use crate::plugin::{Kind, KindTag, RegistrationId, Registry};
 use crate::sched::Outcome;
 
 /// What repeated overruns cost a source, and how that is undone. Measuring a tick is
-/// `crate::budget`; this only counts and acts.
+/// `crate::sched::Budget`; this only counts and acts.
 ///
 /// A parked registration keeps its callback rather than its registry entry: restoring it is
 /// then the same `Registry::add` a fresh `neotmux.on_tick` performs, so there is one code path
