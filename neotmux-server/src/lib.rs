@@ -48,13 +48,13 @@ use neotmux_layout::windows::PaneIds;
 use neotmux_pty::terminals::PaneTerminals;
 use neotmux_pty::wakeup::{Waker, Wakeup, wakeup};
 
-use crate::link::Link;
-use crate::logging;
-use crate::server::clip::Clip;
-use crate::server::plugins::{Plugins, ServerOp};
-use crate::server::session::{Pass, Session, Setup};
-use crate::signals::ShutdownSignal;
-use crate::sock::{self, Lock, Paths};
+use crate::clip::Clip;
+use crate::plugins::{Plugins, ServerOp};
+use crate::session::{Pass, Session, Setup};
+use neotmux_sys::link::Link;
+use neotmux_sys::logging;
+use neotmux_sys::signals::ShutdownSignal;
+use neotmux_sys::sock::{self, Lock, Paths};
 
 /// The frame's cadence, and so the closest together two frames can be. The same number
 /// the one-process loop used, for the same reason: it is a property of the loop rather
@@ -224,7 +224,7 @@ fn serve(listener: &UnixListener, shutdown: &ShutdownSignal) -> anyhow::Result<(
     let layers = Layers::resolve(&|key| std::env::var_os(key), exe_dir.as_deref());
     // The waker the panes' reader threads already hold: a job's pipes are drained by threads
     // of its own and nudge the same wakeup, so nothing here is added to the poll set.
-    let runner = Rc::new(crate::server::runner::Processes::new(waker.clone()));
+    let runner = Rc::new(crate::runner::Processes::new(waker.clone()));
     let lua = LuaSubsystem::build_with_runner(layers, terminals.clone(), clip.clone(), runner)?;
     let mut plugins = Plugins::new(lua);
     for failure in plugins.lua().run_init() {
@@ -304,12 +304,12 @@ fn nothing_to_serve(serving: &Serving<'_>, plugins: &Plugins) -> anyhow::Result<
                 // and a broken pipe is not what happened here.
                 let until = Instant::now() + DOORSTEP;
                 while Instant::now() < until {
-                    match crate::tty::wait_any(&[link.as_fd()], until) {
-                        Ok(crate::tty::Any::Ready(_)) => match link.fill() {
+                    match neotmux_sys::tty::wait_any(&[link.as_fd()], until) {
+                        Ok(neotmux_sys::tty::Any::Ready(_)) => match link.fill() {
                             Ok(true) => continue,
                             _ => break,
                         },
-                        Ok(crate::tty::Any::Idle) => continue,
+                        Ok(neotmux_sys::tty::Any::Idle) => continue,
                         _ => break,
                     }
                 }
@@ -355,7 +355,7 @@ fn await_client(
     door(pending, clients, plugins, sessions, serving)?;
     if sessions.live.is_empty() {
         let until = (born + STARTUP).min(Instant::now() + FRAME);
-        crate::tty::wait_on(std::os::fd::AsFd::as_fd(serving.listener), None, until)
+        neotmux_sys::tty::wait_on(std::os::fd::AsFd::as_fd(serving.listener), None, until)
             .context("wait for a client")?;
     }
     Ok(true)
@@ -437,10 +437,10 @@ fn doorstep(pending: &mut Pending) -> Doorstep {
         } else {
             Instant::now()
         };
-        let ready = match crate::tty::wait_any(&[pending.link.as_fd()], until) {
-            Ok(crate::tty::Any::Ready(_)) => true,
-            Ok(crate::tty::Any::Idle) => false,
-            Ok(crate::tty::Any::HangUp(_)) => return Doorstep::Gone,
+        let ready = match neotmux_sys::tty::wait_any(&[pending.link.as_fd()], until) {
+            Ok(neotmux_sys::tty::Any::Ready(_)) => true,
+            Ok(neotmux_sys::tty::Any::Idle) => false,
+            Ok(neotmux_sys::tty::Any::HangUp(_)) => return Doorstep::Gone,
             Err(err) => {
                 logging::log(
                     Level::Warn,
@@ -497,7 +497,7 @@ fn doorstep(pending: &mut Pending) -> Doorstep {
             // command line is not exempt from it: the name is a key in a map and a word in a
             // list, and both of those are the CLI's business too.
             Ok(ToServer::Attach(attach)) => {
-                match crate::sock::validate_session_name(&attach.session) {
+                match neotmux_sys::sock::validate_session_name(&attach.session) {
                     Ok(()) => Doorstep::Attaching(attach),
                     Err(why) => {
                         logging::log(Level::Warn, "neotmux-server", &why);
@@ -693,7 +693,7 @@ pub(crate) fn start_session(
     terminals: &Rc<PaneTerminals>,
     waker: &Waker,
 ) -> Result<(), StartFailure> {
-    if let Err(why) = crate::sock::validate_session_name(name) {
+    if let Err(why) = neotmux_sys::sock::validate_session_name(name) {
         return Err(StartFailure::Invalid(why));
     }
     if sessions.id_of(name).is_some() {
@@ -738,7 +738,7 @@ pub(crate) fn rename_session(
     plugins: &Plugins,
     sessions: &mut Sessions,
 ) -> Result<(), RenameFailure> {
-    if let Err(why) = crate::sock::validate_session_name(to) {
+    if let Err(why) = neotmux_sys::sock::validate_session_name(to) {
         return Err(RenameFailure::Invalid(why));
     }
     let Some(id) = sessions.id_of(from) else {
@@ -836,14 +836,14 @@ fn answer(
             name,
             args,
         } => {
-            let mut ctx = crate::server::command::Ctx {
+            let mut ctx = crate::command::Ctx {
                 sessions,
                 plugins,
                 terminals: serving.terminals,
                 waker: serving.waker,
                 clients,
             };
-            let ran = crate::server::command::run(&name, &args, session.as_deref(), &mut ctx);
+            let ran = crate::command::run(&name, &args, session.as_deref(), &mut ctx);
             let _ = link.send(&wire::encode_to_client(&ToClient::Ran {
                 ok: ran.ok,
                 lines: &ran.lines,
@@ -953,7 +953,7 @@ fn wait_over(
     live: &[usize],
     wakeup: &Wakeup,
     deadline: Instant,
-) -> std::io::Result<crate::tty::Any> {
+) -> std::io::Result<neotmux_sys::tty::Any> {
     const MAX_ON_STACK: usize = 32;
     let n = live.len();
     if n.saturating_add(1) <= MAX_ON_STACK {
@@ -961,14 +961,14 @@ fn wait_over(
         for (slot, &i) in fds.iter_mut().zip(live.iter()) {
             *slot = clients[i].link.as_fd();
         }
-        return crate::tty::wait_any(&fds[..n + 1], deadline);
+        return neotmux_sys::tty::wait_any(&fds[..n + 1], deadline);
     }
     let fds: Vec<std::os::fd::BorrowedFd> = live
         .iter()
         .map(|&i| clients[i].link.as_fd())
         .chain(std::iter::once(wakeup.as_fd()))
         .collect();
-    crate::tty::wait_any(&fds, deadline)
+    neotmux_sys::tty::wait_any(&fds, deadline)
 }
 
 /// Whether this client's link is still worth reading, having read whatever had arrived.
@@ -1150,7 +1150,7 @@ fn frame(
         live.extend((0..clients.len()).filter(|&i| !clients[i].gone));
         let ready = wait_over(clients, &live, serving.wakeup, frame_end)?;
         match ready {
-            crate::tty::Any::Ready(slot) => match live.get(slot).copied() {
+            neotmux_sys::tty::Any::Ready(slot) => match live.get(slot).copied() {
                 Some(i) => {
                     if still_reading(&mut clients[i]) {
                         deliver(clients, i, sessions, plugins);
@@ -1162,12 +1162,12 @@ fn frame(
                     break;
                 }
             },
-            crate::tty::Any::HangUp(slot) => {
+            neotmux_sys::tty::Any::HangUp(slot) => {
                 if let Some(&i) = live.get(slot) {
                     clients[i].gone = true;
                 }
             }
-            crate::tty::Any::Idle => {}
+            neotmux_sys::tty::Any::Idle => {}
         }
     }
     clients.retain(|client| !client.gone);

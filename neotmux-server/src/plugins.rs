@@ -17,9 +17,9 @@ use neotmux_proto::msg::{SessionOp, Step, Tick, Tock};
 use neotmux_proto::{Key, Level, PaneId, PaneTty, SessionId};
 use std::time::Instant;
 
-use crate::logging;
-use crate::server::input::{encode_key, key_spec};
-use crate::server::notify::Notifications;
+use crate::input::{encode_key, key_spec};
+use crate::notify::Notifications;
+use neotmux_sys::logging;
 
 /// What a plugin asked of the *server* rather than of a session. The set of sessions is not
 /// something a session can change, so these do not travel in a tock.

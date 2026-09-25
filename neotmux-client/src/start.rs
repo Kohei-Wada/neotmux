@@ -3,7 +3,7 @@
 //! `neotmux` with no arguments is a client. If something is listening on the session's
 //! socket it talks to that; if nothing is, it starts a copy of itself with `--server` and
 //! waits for it to come up. Which of those it is doing is decided by connecting, because
-//! that is the only question about a unix socket with no race in it — see [`crate::sock`].
+//! that is the only question about a unix socket with no race in it — see [`neotmux_sys::sock`].
 //!
 //! Nothing here is the server's: what starts one is a word in an argv, and the two are
 //! strangers until they have greeted each other over the socket.
@@ -17,8 +17,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
 
-use crate::link::Link;
-use crate::sock::{self, Paths};
+use neotmux_sys::link::Link;
+use neotmux_sys::sock::{self, Paths};
 
 /// How long a client waits for a server it started to come up. Generous, because it is a
 /// fork and an exec on a machine that may be busy, and it only ever runs out when something

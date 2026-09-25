@@ -4,7 +4,7 @@ use ratatui::layout::{Position, Rect};
 use ratatui::style::{Color, Modifier};
 use ratatui::{DefaultTerminal, Frame as TuiFrame};
 
-use crate::client::overlay;
+use crate::overlay;
 use neotmux_proto::frame::Frame;
 
 /// Puts a frame on this process's terminal. The one place a produced frame meets a screen:

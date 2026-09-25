@@ -14,11 +14,11 @@ use neotmux_proto::{PaneId, Size, Want};
 use neotmux_pty::terminals::PaneTerminals;
 use neotmux_pty::wakeup::Waker;
 
-use crate::server::plugins::Plugins;
+use crate::plugins::Plugins;
 
-use crate::server::session::Session;
+use crate::session::Session;
 
-use crate::server::{
+use crate::{
     Attached, RenameFailure, Sessions, StartFailure, rename_session, start_session, switch_clients,
 };
 
@@ -92,7 +92,7 @@ fn new(args: &[String], session: Option<&str>, ctx: &mut Ctx<'_>) -> Ran {
         .first()
         .map(String::as_str)
         .or(session)
-        .unwrap_or(crate::sock::DEFAULT_SESSION)
+        .unwrap_or(neotmux_sys::sock::DEFAULT_SESSION)
         .to_string();
     match start_session(
         &name,
@@ -145,7 +145,7 @@ fn switch(args: &[String], ctx: &mut Ctx<'_>) -> Ran {
 
 /// The session a command is addressed to, or the sentence that says there is none.
 fn addressed<'a>(session: Option<&str>, ctx: &'a mut Ctx<'_>) -> Result<&'a mut Session, Ran> {
-    let name = session.unwrap_or(crate::sock::DEFAULT_SESSION);
+    let name = session.unwrap_or(neotmux_sys::sock::DEFAULT_SESSION);
     match ctx.sessions.id_of(name) {
         Some(id) => Ok(ctx.sessions.get_mut(id).expect("a session it just named")),
         None => Err(Ran::failed(format!(

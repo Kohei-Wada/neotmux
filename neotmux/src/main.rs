@@ -1,7 +1,7 @@
 use std::env;
 use std::path::PathBuf;
 
-use neotmux::logging;
+use neotmux_sys::logging;
 
 /// What the invocation asks for, before the name. A name is not a mode.
 enum Action {
@@ -38,7 +38,7 @@ impl Cli {
     fn session_name(&self) -> &str {
         self.session
             .as_deref()
-            .unwrap_or(neotmux::sock::DEFAULT_SESSION)
+            .unwrap_or(neotmux_sys::sock::DEFAULT_SESSION)
     }
 }
 
@@ -115,7 +115,7 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Cli {
             // word after that is the command's own payload, taken verbatim. A command that
             // wrote `-t` into its text — `send %1 echo -t MARK` — must not have it read back
             // out as a session name.
-            arg if !arg.is_empty() && neotmux::server::command::NAMES.contains(&arg) => {
+            arg if !arg.is_empty() && neotmux_server::command::NAMES.contains(&arg) => {
                 let name = arg.to_string();
                 if args.peek().is_some_and(|next| next == "-t") {
                     args.next();
@@ -156,7 +156,7 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Cli {
     // way it arrived.
     if let Some(why) = session
         .as_deref()
-        .and_then(|name| neotmux::sock::validate_session_name(name).err())
+        .and_then(|name| neotmux_sys::sock::validate_session_name(name).err())
     {
         refusal = Some(why);
     }
@@ -250,14 +250,14 @@ fn main() -> anyhow::Result<()> {
     }
 
     if cli.server {
-        return neotmux::server::run();
+        return neotmux_server::run();
     }
     match cli.action {
-        Action::Ls => neotmux::client::ls(),
-        Action::Kill => neotmux::client::kill(cli.session_name()),
-        Action::Attach => neotmux::client::attach(cli.session.clone()),
+        Action::Ls => neotmux_client::ls(),
+        Action::Kill => neotmux_client::kill(cli.session_name()),
+        Action::Attach => neotmux_client::attach(cli.session.clone()),
         Action::Command { name, args } => {
-            neotmux::client::command(&name, &args, cli.session.as_deref())
+            neotmux_client::command(&name, &args, cli.session.as_deref())
         }
     }
 }

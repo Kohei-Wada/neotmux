@@ -1,0 +1,21 @@
+[package]
+name = "neotmux-client"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+repository.workspace = true
+
+[dependencies]
+neotmux-proto.workspace = true
+neotmux-sys.workspace = true
+anyhow.workspace = true
+base64.workspace = true
+libc.workspace = true
+nix.workspace = true
+ratatui.workspace = true

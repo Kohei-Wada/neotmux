@@ -10,12 +10,12 @@ use std::path::Path;
 /// way.
 pub(crate) fn end_session(runtime_dir: &Path) {
     let runtime_dir = runtime_dir.to_owned();
-    let Ok(paths) = neotmux::sock::Paths::resolve(&move |key| {
+    let Ok(paths) = neotmux_sys::sock::Paths::resolve(&move |key| {
         (key == "XDG_RUNTIME_DIR").then(|| runtime_dir.clone().into_os_string())
     }) else {
         return;
     };
-    if let Ok(neotmux::sock::Holder::Pid(pid)) = neotmux::sock::holder(&paths) {
+    if let Ok(neotmux_sys::sock::Holder::Pid(pid)) = neotmux_sys::sock::holder(&paths) {
         let _ = nix::sys::signal::kill(
             nix::unistd::Pid::from_raw(pid),
             nix::sys::signal::Signal::SIGTERM,

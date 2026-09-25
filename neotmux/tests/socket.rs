@@ -462,7 +462,7 @@ fn greet_and_send_message(socket: &Path, payload: &[u8]) {
 fn an_attach() -> neotmux_proto::msg::Attach {
     neotmux_proto::msg::Attach {
         size: neotmux_proto::Size { rows: 24, cols: 80 },
-        session: neotmux::sock::DEFAULT_SESSION.to_string(),
+        session: neotmux_sys::sock::DEFAULT_SESSION.to_string(),
     }
 }
 

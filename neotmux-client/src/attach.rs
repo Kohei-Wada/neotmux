@@ -4,9 +4,9 @@
 //! is answered before the alternate screen is entered, and the terminal is given back
 //! however the loop leaves.
 
-use crate::client::start;
-use crate::logging;
+use crate::start;
 use neotmux_proto::Level;
+use neotmux_sys::logging;
 
 /// Raw mode, taken before anything slow and given back however [`attach`] leaves — a
 /// panic included, because unwinding runs this drop.
@@ -45,7 +45,7 @@ pub fn attach(session: Option<String>) -> anyhow::Result<()> {
     let _raw = RawMode::enter();
     let name = session
         .clone()
-        .unwrap_or_else(|| crate::sock::DEFAULT_SESSION.to_string());
+        .unwrap_or_else(|| neotmux_sys::sock::DEFAULT_SESSION.to_string());
     let link = start::begin()?.finish()?;
 
     // The attach, and the session's answer, before the screen: a session that a plugin ended
@@ -60,7 +60,7 @@ pub fn attach(session: Option<String>) -> anyhow::Result<()> {
         super::Opened::Running(done) => *done,
     };
 
-    let shutdown = crate::signals::ShutdownSignal::install()?;
+    let shutdown = neotmux_sys::signals::ShutdownSignal::install()?;
     let mut terminal = ratatui::init();
     let result = super::run(&mut terminal, &shutdown, &link, first);
     // Not `ratatui::restore`: it reports a failure with `eprintln!`, which panics when the
@@ -74,7 +74,7 @@ pub fn attach(session: Option<String>) -> anyhow::Result<()> {
     }
     let left = result?;
     match left.signal {
-        Some(signal) => crate::signals::die_of(signal),
+        Some(signal) => neotmux_sys::signals::die_of(signal),
         None => Ok(()),
     }
 }

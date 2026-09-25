@@ -31,12 +31,12 @@ use neotmux_proto::wire;
 use neotmux_proto::{OwnedToClient, Size};
 use ratatui::DefaultTerminal;
 
-use crate::client::decode::Decoder;
-use crate::link::Link;
+use crate::decode::Decoder;
 use neotmux_proto::keys::Key;
+use neotmux_sys::link::Link;
 
-use crate::signals::{self, ShutdownSignal};
-use crate::tty::{Ready, Terminal};
+use neotmux_sys::signals::{self, ShutdownSignal};
+use neotmux_sys::tty::{Ready, Terminal};
 
 /// How long one pass of the loop waits before looking up. The server sets the frame rate;
 /// this is only how often the client notices a signal or a resize with nothing else going on.

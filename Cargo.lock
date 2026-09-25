@@ -753,17 +753,27 @@ name = "neotmux"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "base64",
- "neotmux-layout",
- "neotmux-lua",
+ "neotmux-client",
  "neotmux-proto",
- "neotmux-pty",
+ "neotmux-server",
+ "neotmux-sys",
  "nix 0.28.0",
  "portable-pty",
- "ratatui",
- "signal-hook",
  "tempfile",
  "vt100",
+]
+
+[[package]]
+name = "neotmux-client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "libc",
+ "neotmux-proto",
+ "neotmux-sys",
+ "nix 0.28.0",
+ "ratatui",
 ]
 
 [[package]]
@@ -800,6 +810,32 @@ dependencies = [
  "neotmux-proto",
  "portable-pty",
  "vt100",
+]
+
+[[package]]
+name = "neotmux-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "neotmux-layout",
+ "neotmux-lua",
+ "neotmux-proto",
+ "neotmux-pty",
+ "neotmux-sys",
+ "nix 0.28.0",
+ "tempfile",
+]
+
+[[package]]
+name = "neotmux-sys"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "neotmux-proto",
+ "neotmux-pty",
+ "nix 0.28.0",
+ "signal-hook",
+ "tempfile",
 ]
 
 [[package]]

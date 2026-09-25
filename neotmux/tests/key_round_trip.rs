@@ -2,9 +2,9 @@
 //! server, comes back as the bytes it started as. The one test that needs both halves, so it lives
 //! in the crate that has both.
 
-use neotmux::client::decode::Decoder;
-use neotmux::server::input::encode_key;
+use neotmux_client::decode::Decoder;
 use neotmux_proto::keys::Key;
+use neotmux_server::input::encode_key;
 
 fn one(bytes: &[u8]) -> Key {
     let keys = Decoder::default().feed(bytes);

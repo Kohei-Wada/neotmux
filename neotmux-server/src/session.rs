@@ -14,14 +14,14 @@ use neotmux_pty::pty::PtyHandle;
 use neotmux_pty::terminals::PaneTerminals;
 use neotmux_pty::wakeup::Waker;
 
-use crate::logging;
-use crate::procinfo;
-use crate::server::input::encode_key;
-use crate::server::paneinfo::PaneInfoCache;
-use crate::server::shells::Shells;
+use crate::input::encode_key;
+use crate::paneinfo::PaneInfoCache;
+use crate::shells::Shells;
 use neotmux_layout::windows::{PaneIds, Shown, Surface, Windows};
 use neotmux_proto::frame::{Frame, PaneFrame};
 use neotmux_proto::keys::Key;
+use neotmux_sys::logging;
+use neotmux_sys::procinfo;
 
 const MAX_CHUNKS_PER_FRAME: usize = 32;
 

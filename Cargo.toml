@@ -21,6 +21,9 @@ neotmux-proto = { path = "neotmux-proto", version = "0.1.0" }
 neotmux-layout = { path = "neotmux-layout", version = "0.1.0" }
 neotmux-lua = { path = "neotmux-lua", version = "0.1.0" }
 neotmux-pty = { path = "neotmux-pty", version = "0.1.0" }
+neotmux-sys = { path = "neotmux-sys", version = "0.1.0" }
+neotmux-client = { path = "neotmux-client", version = "0.1.0" }
+neotmux-server = { path = "neotmux-server", version = "0.1.0" }
 anyhow = "1"
 base64 = "0.22"
 mlua = { version = "0.12", features = ["lua54", "vendored"] }

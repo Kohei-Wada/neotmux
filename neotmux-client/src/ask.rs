@@ -2,7 +2,7 @@
 //!
 //! `ls`, `kill` and the host commands are the client too: they say a sentence over the
 //! socket, read the one answer, and put it on stdout. There is no terminal in any of it —
-//! that is [`crate::client::attach()`], the other thing a client can be asked to do.
+//! that is [`crate::attach()`], the other thing a client can be asked to do.
 
 use std::cell::RefCell;
 use std::env;
@@ -10,9 +10,9 @@ use std::rc::Rc;
 
 use anyhow::Context as _;
 
-use crate::client::start;
-use crate::link::Link;
-use crate::sock;
+use crate::start;
+use neotmux_sys::link::Link;
+use neotmux_sys::sock;
 
 /// Runs a host command and prints what it said. Lines on stdout where it worked, the one
 /// sentence on stderr where it did not, and the exit status says which.
