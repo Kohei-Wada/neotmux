@@ -14,7 +14,7 @@ use neotmux_proto::keys::{Key, KeyCode};
 use neotmux_proto::screen::Frame;
 use neotmux_proto::wire::End;
 use neotmux_proto::{DrawCmd, Reserved, SessionId, Size, WindowId};
-use neotmux_pty::wakeup::{Wakeup, wakeup};
+use neotmux_pty::child::{Wakeup, wakeup};
 use neotmux_server::plugins::Plugins;
 use neotmux_server::session::{Session, Setup};
 

@@ -4,7 +4,7 @@ use neotmux_proto::{Color, GridSnapshot, Size, clamp_to_min_grid};
 pub struct TermState {
     parser: vt100::Parser<Titles>,
     /// `ESC [ y ; x f` on the way in, which the parser does not implement. See [`crate::hvp`].
-    hvp: crate::hvp::Hvp,
+    hvp: crate::parse::Hvp,
     /// Lines that have fallen out of the front of the history, counted as they go: nothing
     /// downstream can work it out afterwards. See [`crate::evictions`].
     dropped: usize,
@@ -61,7 +61,7 @@ impl TermState {
                 scrollback,
                 Titles::default(),
             ),
-            hvp: crate::hvp::Hvp::new(),
+            hvp: crate::parse::Hvp::new(),
             dropped: 0,
             frozen: None,
         }
@@ -72,7 +72,7 @@ impl TermState {
     /// appends, and put back before anything else can read it ([`crate::evictions`]).
     pub fn feed(&mut self, bytes: &[u8]) {
         let screen = self.parser.screen_mut();
-        let len_before = crate::scrollback::len(screen);
+        let len_before = crate::screen::len(screen);
         let resting = screen.scrollback();
         screen.set_scrollback(resting.max(1));
         let offset_before = screen.scrollback();
@@ -85,8 +85,8 @@ impl TermState {
         let screen = self.parser.screen_mut();
         let offset_after = screen.scrollback();
         screen.set_scrollback(resting);
-        let len_after = crate::scrollback::len(screen);
-        self.dropped += crate::evictions::dropped(crate::evictions::Feed {
+        let len_after = crate::screen::len(screen);
+        self.dropped += crate::screen::dropped(crate::screen::Feed {
             len_before,
             len_after,
             offset_before,
@@ -177,12 +177,12 @@ impl TermState {
     /// What the pane is showing, as plain-text lines (`crate::lines`). `last` bounds the work
     /// to the bottom of the screen rather than trimming an answer that was built in full.
     pub fn lines(&self, last: Option<usize>, trailing: Trailing) -> Vec<String> {
-        crate::lines::visible(self.reading(), last, trailing)
+        crate::screen::lines::visible(self.reading(), last, trailing)
     }
 
     /// Whether each of those lines runs on into the next (`crate::wrap`).
     pub fn wrapped(&self, last: Option<usize>) -> Vec<bool> {
-        crate::wrap::visible(self.reading(), last)
+        crate::screen::wrap::visible(self.reading(), last)
     }
 
     /// How many lines the pane holds above its visible screen, and how many have fallen out
@@ -194,7 +194,7 @@ impl TermState {
             None => self.dropped,
         };
         Extent {
-            len: crate::scrollback::len(self.reading_mut()) as u64,
+            len: crate::screen::len(self.reading_mut()) as u64,
             dropped: dropped as u64,
         }
     }
@@ -202,12 +202,12 @@ impl TermState {
     /// Lines from above the visible screen, oldest first, numbered as
     /// [`crate::scrollback`] describes.
     pub fn history(&mut self, from: usize, count: usize, trailing: Trailing) -> Vec<String> {
-        crate::scrollback::lines(self.reading_mut(), from, count, trailing)
+        crate::screen::lines(self.reading_mut(), from, count, trailing)
     }
 
     /// Whether each of those history lines runs on into the next (`crate::wrap`).
     pub fn history_wrapped(&mut self, from: usize, count: usize) -> Vec<bool> {
-        crate::wrap::history(self.reading_mut(), from, count)
+        crate::screen::wrap::history(self.reading_mut(), from, count)
     }
 
     /// The grid the child is writing into, which is the size the PTY was told. A frozen

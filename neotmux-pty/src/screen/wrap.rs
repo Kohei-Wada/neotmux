@@ -12,17 +12,17 @@
 //! describe the new width.
 
 /// Whether each visible row runs on into the next, top to bottom, bounded the way
-/// [`crate::lines::visible`] is bounded.
+/// [`crate::screen::lines::visible`] is bounded.
 pub fn visible(screen: &vt100::Screen, last: Option<usize>) -> Vec<bool> {
     let (rows, _) = screen.size();
-    (crate::lines::first_row(rows, last)..rows)
+    (crate::screen::lines::first_row(rows, last)..rows)
         .map(|row| screen.row_wrapped(row))
         .collect()
 }
 
 /// Whether each history row `from` up to `from + count` runs on into the next, oldest first.
 pub fn history(screen: &mut vt100::Screen, from: usize, count: usize) -> Vec<bool> {
-    crate::scrollback::walk(screen, from, count, |screen, row, _| {
+    crate::screen::walk(screen, from, count, |screen, row, _| {
         screen.row_wrapped(row)
     })
 }
@@ -57,7 +57,7 @@ mod tests {
         let parser = parser(3, 4, 0, b"abcdef");
         assert_eq!(visible(parser.screen(), Some(2)), vec![false, false]);
         assert_eq!(
-            crate::lines::visible(parser.screen(), Some(2), Trailing::Trim).len(),
+            crate::screen::lines::visible(parser.screen(), Some(2), Trailing::Trim).len(),
             2
         );
     }
@@ -67,7 +67,7 @@ mod tests {
         let mut parser = parser(2, 4, 100, b"abcdef\r\n\r\nxy");
         assert_eq!(history(parser.screen_mut(), 0, 10), vec![true, false]);
         assert_eq!(
-            crate::scrollback::lines(parser.screen_mut(), 0, 10, Trailing::Trim),
+            crate::screen::lines(parser.screen_mut(), 0, 10, Trailing::Trim),
             vec!["abcd", "ef"]
         );
     }

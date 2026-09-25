@@ -11,8 +11,8 @@
 use std::rc::Rc;
 
 use neotmux_proto::{PaneId, Size, Want};
+use neotmux_pty::child::Waker;
 use neotmux_pty::terminals::PaneTerminals;
-use neotmux_pty::wakeup::Waker;
 
 use crate::plugins::Plugins;
 
@@ -398,7 +398,7 @@ mod tests {
         let lua = neotmux_lua::LuaSubsystem::build(layers, terminals.clone()).expect("lua");
         let mut plugins = Plugins::new(lua);
         let mut sessions = Sessions::default();
-        let waker = neotmux_pty::wakeup::wakeup().expect("wakeup").1;
+        let waker = neotmux_pty::child::wakeup().expect("wakeup").1;
         let mut clients: Vec<Attached> = Vec::new();
 
         // `new` with no arguments spawns a real shell; a refused name reaches `run`'s match

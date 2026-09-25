@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 use neotmux_proto::screen::{Extent, Lines, PaneRead, Want};
 use neotmux_proto::{GridSnapshot, PaneId, PaneTty, Size};
 
-use crate::query::Queries;
-use crate::state::TermState;
+use crate::parse::Queries;
+use crate::screen::TermState;
 
 /// One pane's terminal: the screen its child writes into, the reply path that answers the
 /// questions it asks, and a stamp that moves whenever either of those has been fed.

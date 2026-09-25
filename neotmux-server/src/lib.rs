@@ -45,8 +45,8 @@ use neotmux_proto::wire::{Attach, Done, End, ToClient, ToServer};
 use neotmux_proto::{Level, SessionId, Size};
 
 use neotmux_layout::windows::PaneIds;
+use neotmux_pty::child::{Waker, Wakeup, wakeup};
 use neotmux_pty::terminals::PaneTerminals;
-use neotmux_pty::wakeup::{Waker, Wakeup, wakeup};
 
 use crate::clip::Clip;
 use crate::plugins::{Plugins, ServerOp};

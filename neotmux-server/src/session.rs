@@ -10,9 +10,9 @@ use neotmux_proto::{
     DrawCmd, Event, Geometry, Level, PaneId, PaneInfo, PaneTty, Rect as PRect, Reserved, Size,
     Window as LuaWindow, WindowId,
 };
-use neotmux_pty::pty::PtyHandle;
+use neotmux_pty::child::PtyHandle;
+use neotmux_pty::child::Waker;
 use neotmux_pty::terminals::PaneTerminals;
-use neotmux_pty::wakeup::Waker;
 
 use crate::input::encode_key;
 use crate::paneinfo::PaneInfoCache;
@@ -871,9 +871,9 @@ fn pane_size(rect: Option<PRect>, pane: PaneId) -> anyhow::Result<Size> {
 #[cfg(test)]
 mod tests {
     use neotmux_proto::MIN_GRID;
-    use neotmux_pty::pty::CommandBuilder;
-    use neotmux_pty::state::TermState;
-    use neotmux_pty::wakeup::wakeup;
+    use neotmux_pty::child::CommandBuilder;
+    use neotmux_pty::child::wakeup;
+    use neotmux_pty::screen::TermState;
 
     use super::*;
 

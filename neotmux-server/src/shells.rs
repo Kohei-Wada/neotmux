@@ -3,9 +3,9 @@ use std::rc::Rc;
 
 use anyhow::Context as _;
 use neotmux_proto::{GridSnapshot, LineMode, PaneId, Rect as PRect, Size};
-use neotmux_pty::pty::{CommandBuilder, PtyEvent, PtyHandle};
+use neotmux_pty::child::Waker;
+use neotmux_pty::child::{CommandBuilder, PtyEvent, PtyHandle};
 use neotmux_pty::terminals::PaneTerminals;
-use neotmux_pty::wakeup::Waker;
 
 const SCROLLBACK: usize = 10_000;
 
@@ -225,7 +225,7 @@ mod tests {
     use nix::sys::wait::{WaitPidFlag, WaitStatus, waitpid};
     use nix::unistd::Pid;
 
-    use neotmux_pty::wakeup::{Wakeup, wakeup};
+    use neotmux_pty::child::{Wakeup, wakeup};
 
     use super::*;
     use neotmux_layout::panes::PaneLayout;

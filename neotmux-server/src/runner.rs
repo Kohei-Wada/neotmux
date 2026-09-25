@@ -16,7 +16,7 @@ use nix::sys::signal::{Signal, kill, killpg};
 use nix::unistd::Pid;
 
 use neotmux_lua::runner::{JobChunk, JobSpec, Runner, Running};
-use neotmux_pty::wakeup::Waker;
+use neotmux_pty::child::Waker;
 
 const OUTPUT_CHANNEL_BOUND: usize = 64;
 

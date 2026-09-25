@@ -6,7 +6,7 @@ use anyhow::Context as _;
 use neotmux_proto::{LineMode, Size};
 use portable_pty::{Child, ExitStatus, MasterPty, PtySize, native_pty_system};
 
-use crate::wakeup::Waker;
+use crate::child::Waker;
 
 // `spawn` takes one, so it is part of this crate's surface either way: re-exported so a
 // caller does not need its own dependency on portable-pty to name the type.
@@ -170,7 +170,7 @@ mod tests {
     fn output_channel_stays_bounded_under_a_flooding_child() {
         let mut cmd = CommandBuilder::new("sh");
         cmd.args(["-c", "yes"]);
-        let (_wakeup, waker) = crate::wakeup::wakeup().expect("wakeup");
+        let (_wakeup, waker) = crate::child::wakeup().expect("wakeup");
         let mut pty = PtyHandle::spawn(cmd, Size { rows: 24, cols: 80 }, waker).expect("spawn pty");
 
         std::thread::sleep(Duration::from_millis(500));
@@ -200,7 +200,7 @@ mod tests {
     #[test]
     fn a_read_error_is_reported_as_error_not_eof() {
         let (tx, rx) = sync_channel(1);
-        let (_wakeup, waker) = crate::wakeup::wakeup().expect("wakeup");
+        let (_wakeup, waker) = crate::child::wakeup().expect("wakeup");
         read_loop(FailingReader, tx, waker);
 
         match rx.recv().expect("event") {

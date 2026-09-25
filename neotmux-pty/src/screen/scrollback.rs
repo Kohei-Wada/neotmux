@@ -72,7 +72,7 @@ pub fn lines(
     trailing: Trailing,
 ) -> Vec<String> {
     walk(screen, from, count, |screen, row, cols| {
-        crate::lines::row(screen, row, cols, trailing)
+        crate::screen::lines::row(screen, row, cols, trailing)
     })
 }
 
@@ -88,7 +88,7 @@ mod tests {
     }
 
     fn visible(parser: &vt100::Parser) -> Vec<String> {
-        crate::lines::visible(parser.screen(), None, Trailing::Trim)
+        crate::screen::lines::visible(parser.screen(), None, Trailing::Trim)
     }
 
     fn lines(screen: &mut vt100::Screen, from: usize, count: usize) -> Vec<String> {

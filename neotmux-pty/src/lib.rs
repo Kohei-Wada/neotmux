@@ -1,10 +1,4 @@
-pub mod evictions;
-mod hvp;
-pub mod lines;
-pub mod pty;
-pub mod query;
-pub mod scrollback;
-pub mod state;
+pub mod child;
+pub mod parse;
+pub mod screen;
 pub mod terminals;
-pub mod wakeup;
-pub mod wrap;

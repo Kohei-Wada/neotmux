@@ -1,6 +1,6 @@
 use std::io::Write as _;
 
-use crate::state::TermState;
+use crate::screen::TermState;
 
 const ESC: u8 = 0x1b;
 
