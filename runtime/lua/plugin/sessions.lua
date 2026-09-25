@@ -14,6 +14,7 @@
 -- other one — what a row says, and what `Enter`, `c`, `r` and `d` do. The frame, the cursor row
 -- and the caret are coloured through `require('neotmux.list').colors`, not this file's.
 local list = require("neotmux.list")
+local prompt = require("neotmux.prompt")
 local pane_state = require("neotmux.state")
 
 local M = {}
@@ -154,6 +155,37 @@ function M.open()
     },
   })
 end
+
+-- The picker's `c` and `r` without the picker, for the palette: a name asked for in a prompt.
+neotmux.command.add("session-new", function()
+  prompt.open({
+    title = "new session",
+    mode = "rename",
+    done = function(text)
+      if text ~= "" then
+        neotmux.session.create(text)
+        neotmux.session.switch(text)
+      end
+    end,
+  })
+end, { desc = "make a session and go there" })
+
+neotmux.command.add("session-rename", function()
+  local name = neotmux.session.current()
+  if not name then
+    return
+  end
+  prompt.open({
+    title = "rename session",
+    value = name,
+    mode = "rename",
+    done = function(text)
+      if text ~= "" and text ~= name then
+        neotmux.session.rename(name, text)
+      end
+    end,
+  })
+end, { desc = "rename the session you are in" })
 
 if package.loaded["plugin.prefix"] then
   require("plugin.prefix").commands["s"] = function()

@@ -1722,7 +1722,8 @@ across by one.
 The palette's items come from `require('plugin.palette').providers`, and the query's first
 character picks which: `@` is the sessions (Enter goes there), `#` the agents (Enter focuses the
 agent's pane, in whatever session it is in), and anything else the commands. `C-b g` is the
-palette opened on `#`, herdr's goto. A provider of your own:
+palette opened on `#`, herdr's goto. Among the commands are `session-new` and `session-rename`,
+the session picker's `c` and `r` without the picker: each asks for a name in a prompt. A provider of your own:
 
 ```lua
 table.insert(require('plugin.palette').providers, 1, {

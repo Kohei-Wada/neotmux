@@ -399,3 +399,83 @@ fn a_provider_can_be_added_and_one_that_raises_is_left_out() {
         .collect();
     assert_eq!(said.len(), 1, "{said:?}");
 }
+
+const SESSIONS: &str =
+    "require('plugin.prefix')\nrequire('plugin.sessions')\nrequire('plugin.palette')\n";
+
+fn session_ops(sub: &Built) -> Vec<Op> {
+    sub.drain_ops(Some(support::one()))
+        .into_iter()
+        .map(|(_, op)| op)
+        .filter(|op| {
+            matches!(
+                op,
+                Op::SessionCreate { .. } | Op::SessionSwitch { .. } | Op::SessionRename { .. }
+            )
+        })
+        .collect()
+}
+
+/// `session-new` from the palette asks for a name, then makes the session and goes there, as
+/// the picker's `c` does.
+#[test]
+fn a_session_can_be_made_from_the_palette() {
+    let (_dir, sub) = built(SESSIONS);
+    sub.name_session(support::one(), "work");
+    open(&sub);
+    keys(
+        &sub,
+        &[
+            "s", "e", "s", "s", "i", "o", "n", "-", "n", "e", "w", "Enter",
+        ],
+    );
+    frame(&sub);
+    keys(&sub, &["h", "o", "m", "e", "Enter"]);
+    assert_eq!(
+        session_ops(&sub),
+        vec![
+            Op::SessionCreate {
+                name: "home".into()
+            },
+            Op::SessionSwitch {
+                name: "home".into()
+            },
+        ]
+    );
+}
+
+/// `session-rename` asks for the new name of the session you are in, starting from the old one.
+#[test]
+fn the_session_you_are_in_can_be_renamed_from_the_palette() {
+    let (_dir, sub) = built(SESSIONS);
+    sub.name_session(support::one(), "work");
+    open(&sub);
+    keys(
+        &sub,
+        &[
+            "s", "e", "s", "s", "i", "o", "n", "-", "r", "e", "n", "Enter",
+        ],
+    );
+    frame(&sub);
+    keys(
+        &sub,
+        &[
+            "Backspace",
+            "Backspace",
+            "Backspace",
+            "Backspace",
+            "h",
+            "o",
+            "m",
+            "e",
+            "Enter",
+        ],
+    );
+    assert_eq!(
+        session_ops(&sub),
+        vec![Op::SessionRename {
+            from: "work".into(),
+            to: "home".into()
+        }]
+    );
+}

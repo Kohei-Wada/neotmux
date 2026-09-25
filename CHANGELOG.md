@@ -27,6 +27,11 @@ and a plugin adds its own to `require('plugin.palette').providers`. `agent-next`
 as `plugin.sidebar.sessions`, one assignment away, and requiring `plugin.sidebar` from your own
 `init.lua` no longer loses `C-b b`.
 
+### A session can be made and renamed from the palette
+
+`session-new` asks for a name, makes the session and goes there; `session-rename` asks for a new
+name for the one you are in. They are the session picker's `c` and `r`, registered as commands.
+
 ### The space you are in shows its windows and panes
 
 Under the session you are in, `spaces` draws its windows and panes as the tree does, so where
