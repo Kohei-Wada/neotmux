@@ -1,6 +1,8 @@
-use std::io::{self, PipeReader, PipeWriter, Read as _, Write as _};
+use std::io::{self, PipeReader, Read as _};
 use std::os::fd::{AsFd, BorrowedFd};
 use std::sync::Arc;
+
+use crate::child::Waker;
 
 /// The two ends of the nudge a pane's reader thread gives the loop that draws it: a
 /// [`Waker`] per reader thread, and one [`Wakeup`] a wait can poll.
@@ -36,21 +38,6 @@ impl Wakeup {
 impl AsFd for Wakeup {
     fn as_fd(&self) -> BorrowedFd<'_> {
         self.reader.as_fd()
-    }
-}
-
-/// The end a reader thread holds. Cloning it is how every pane comes to share one wakeup.
-#[derive(Clone)]
-pub struct Waker {
-    writer: Arc<PipeWriter>,
-}
-
-impl Waker {
-    /// Says there is something to drain. A failure here means the loop that was to be woken
-    /// is gone, which is a session shutting down rather than anything a reader thread can do
-    /// something about.
-    pub fn wake(&self) {
-        let _ = (&*self.writer).write(&[0]);
     }
 }
 

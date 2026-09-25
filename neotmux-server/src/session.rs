@@ -10,9 +10,9 @@ use neotmux_proto::{
     DrawCmd, Event, Geometry, Level, PaneId, PaneInfo, PaneTty, Rect as PRect, Reserved, Size,
     Window as LuaWindow, WindowId,
 };
+use neotmux_pty::PaneTerminals;
 use neotmux_pty::child::PtyHandle;
 use neotmux_pty::child::Waker;
-use neotmux_pty::terminals::PaneTerminals;
 
 use crate::input::encode_key;
 use crate::paneinfo::PaneInfoCache;

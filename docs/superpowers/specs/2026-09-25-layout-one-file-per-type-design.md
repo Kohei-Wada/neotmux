@@ -95,3 +95,8 @@ warnings.
 - **neotmux-client** (2026-09-25): its one public type, `Decoder`, has `decoder.rs` (was
   `decode.rs`) and is flattened (`neotmux_client::Decoder`); `ask`, `attach`, `draw`, `overlay`,
   `start`, `osc52` and `client` are modules of functions whose types are private, and stay.
+- **neotmux-pty** (2026-09-25): `child/` is `pty_handle.rs` (`PtyHandle`, and the
+  `CommandBuilder` re-export its `spawn` takes), `pty_event.rs`, `wakeup.rs` (`wakeup()` and
+  `Wakeup`) and `waker.rs`; `parse/query.rs` is `queries.rs` (`Queries`); `screen/state.rs` is
+  `term_state.rs`; `terminals.rs` is `pane_terminals.rs`, flattened (`neotmux_pty::PaneTerminals`).
+  `scrollback`, `evictions`, `lines` and `wrap` stay named modules under rule 6.

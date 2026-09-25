@@ -1,5 +1,5 @@
 mod hvp;
-mod query;
+mod queries;
 
 pub(crate) use hvp::*;
-pub use query::*;
+pub use queries::*;

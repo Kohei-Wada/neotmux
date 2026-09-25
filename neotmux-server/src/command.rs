@@ -11,8 +11,8 @@
 use std::rc::Rc;
 
 use neotmux_proto::{PaneId, Size, Want};
+use neotmux_pty::PaneTerminals;
 use neotmux_pty::child::Waker;
-use neotmux_pty::terminals::PaneTerminals;
 
 use crate::plugins::Plugins;
 

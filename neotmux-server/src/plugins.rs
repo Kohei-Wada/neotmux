@@ -359,7 +359,7 @@ mod tests {
     use neotmux_lua::plugin::Layers;
     use neotmux_proto::geom::Window;
     use neotmux_proto::{Epoch, Geometry, PaneId, Rect, SessionId, Size, WindowId};
-    use neotmux_pty::terminals::PaneTerminals;
+    use neotmux_pty::PaneTerminals;
 
     use super::*;
 

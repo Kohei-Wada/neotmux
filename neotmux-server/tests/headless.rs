@@ -40,7 +40,7 @@ fn halves(files: &[(&str, &str)]) -> (tempfile::TempDir, Wakeup, Session, Plugin
         fs::write(path, body).expect("write layer file");
     }
     let (wakeup, waker) = wakeup().expect("wakeup");
-    let terminals = std::rc::Rc::new(neotmux_pty::terminals::PaneTerminals::new());
+    let terminals = std::rc::Rc::new(neotmux_pty::PaneTerminals::new());
     let session = Session::new(
         &Setup {
             size: SURFACE,

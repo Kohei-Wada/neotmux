@@ -3,9 +3,9 @@ use std::rc::Rc;
 
 use anyhow::Context as _;
 use neotmux_proto::{GridSnapshot, LineMode, PaneId, Rect as PRect, Size};
+use neotmux_pty::PaneTerminals;
 use neotmux_pty::child::Waker;
 use neotmux_pty::child::{CommandBuilder, PtyEvent, PtyHandle};
-use neotmux_pty::terminals::PaneTerminals;
 
 const SCROLLBACK: usize = 10_000;
 

@@ -16,7 +16,7 @@ use neotmux_lua::host::{JobChunk, JobSpec, Runner, Running};
 use neotmux_lua::plugin::Layers;
 use neotmux_lua::{KeyOutcome, LuaSubsystem};
 use neotmux_proto::{Epoch, Geometry, PaneId, Rect, Size};
-use neotmux_pty::terminals::PaneTerminals;
+use neotmux_pty::PaneTerminals;
 
 /// Panes for a subsystem whose test never writes into one.
 pub fn panes() -> Rc<PaneTerminals> {

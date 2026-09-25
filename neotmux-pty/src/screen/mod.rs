@@ -1,7 +1,7 @@
 pub mod evictions;
 pub mod lines;
 pub mod scrollback;
-mod state;
+mod term_state;
 pub mod wrap;
 
-pub use state::*;
+pub use term_state::*;
