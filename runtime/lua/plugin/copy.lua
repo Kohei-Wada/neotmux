@@ -83,11 +83,9 @@ local function leave()
     hint_handle:close()
     hint_handle = nil
   end
-  if state and state.froze then
-    -- The pane goes back to showing what it is doing, and to moving while it does it — unless
-    -- it was already being held still when the mode was entered, in which case whoever froze
-    -- it is still using it and this is not the mode that thaws it.
-    neotmux.pane.unfreeze(state.pane)
+  if state and state.hold then
+    -- The pane goes back to showing what it is doing, unless somebody else is holding it too.
+    state.hold:release()
   end
   if mode_handle then
     mode_handle:lower()
@@ -379,8 +377,8 @@ function M.enter()
   end
   -- A hint session over this pane ends here, before the snapshot is taken: the mode is about
   -- to take both the pane and the keyboard, and labels left drawn over a pane it has claimed
-  -- could be neither read for what they are nor typed at. Ending it first also hands back
-  -- whatever freeze it was holding, so the freeze this mode takes below is its own.
+  -- could be neither read for what they are nor typed at. Ending it first also lets go of the
+  -- pane it held, so the freeze below takes this instant's screen rather than the pick's.
   hints.cancel()
 
   local buffer = snapshot.take(pane)
@@ -392,14 +390,12 @@ function M.enter()
   end
   -- Held still for the life of the mode. The buffer above is the text the cursor is dragged
   -- over; this is the same instant's cells, and the two have to be the same instant or the
-  -- selection is over one thing and the screen shows another. `freeze` answers `true` for any
-  -- pane that exists rather than for one it changed, so whether this mode is the one holding
-  -- the pane still is a question only `frozen` can answer, and only before the freeze.
-  local froze = not neotmux.pane.frozen(pane) and neotmux.pane.freeze(pane) or false
+  -- selection is over one thing and the screen shows another.
+  local hold = neotmux.pane.freeze(pane)
   local at = neotmux.pane.cursor(pane) or { x = 0, y = 0 }
   state = {
     pane = pane,
-    froze = froze,
+    hold = hold,
     buffer = buffer,
     top = buffer.history,
     cursor = { line = buffer.history + at.y, col = at.x },

@@ -494,7 +494,7 @@ mod tests {
             std::thread::sleep(Duration::from_millis(5));
         }
 
-        assert!(terminals.freeze(pane(1)));
+        let hold = terminals.hold(pane(1)).expect("a live pane");
         let held = drawn(&shells);
         let mut fed = false;
         let until = Instant::now() + Duration::from_millis(300);
@@ -508,7 +508,7 @@ mod tests {
             "the pane's PTY was not read at all while it was frozen"
         );
 
-        assert!(terminals.unfreeze(pane(1)));
+        assert!(terminals.release(hold));
         pump(&mut shells);
         assert_ne!(
             drawn(&shells),

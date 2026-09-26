@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use mlua::{Lua, Table, Value};
 
-use neotmux_proto::screen::{Lines, PaneRead, Trailing, Want};
+use neotmux_proto::screen::{Hold, Lines, PaneRead, Trailing, Want};
 use neotmux_proto::{Dir, Geometry, PaneId, SplitDir};
 
 use crate::api::rect;
@@ -243,16 +243,13 @@ pub(crate) fn install(
         // get away from. Nothing about the tree changes, so there is nothing for the rest of
         // the frame to catch up with.
         let terminals = terminals.clone();
-        let freeze =
-            lua.create_function(move |_, pane: u32| Ok(terminals.freeze(PaneId::from(pane))))?;
+        let freeze = lua.create_function(move |lua, pane: u32| {
+            Ok(match terminals.hold(PaneId::from(pane)) {
+                Some(hold) => Value::Table(hold_handle(lua, terminals.clone(), hold)?),
+                None => Value::Nil,
+            })
+        })?;
         pane.set("freeze", freeze)?;
-    }
-
-    {
-        let terminals = terminals.clone();
-        let unfreeze =
-            lua.create_function(move |_, pane: u32| Ok(terminals.unfreeze(PaneId::from(pane))))?;
-        pane.set("unfreeze", unfreeze)?;
     }
 
     {
@@ -438,4 +435,12 @@ pub(crate) fn install(
     }
 
     Ok(pane)
+}
+
+fn hold_handle(lua: &Lua, terminals: Rc<dyn PaneRead>, hold: Hold) -> mlua::Result<Table> {
+    let handle = lua.create_table()?;
+    handle.set("pane", hold.pane.get())?;
+    let release = lua.create_function(move |_, _self: Value| Ok(terminals.release(hold)))?;
+    handle.set("release", release)?;
+    Ok(handle)
 }

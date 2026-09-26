@@ -83,7 +83,7 @@ fn the_display_stops_moving_while_the_pane_goes_on_being_fed() {
     sub.terminals().feed(pane(1), b"before");
 
     assert_eq!(drawn(&sub, 1), vec!["before", ""]);
-    assert!(sub.terminals().freeze(pane(1)));
+    let hold = sub.terminals().hold(pane(1)).expect("a live pane");
 
     sub.terminals().feed(pane(1), b"\r\nafter");
     assert_eq!(
@@ -92,7 +92,7 @@ fn the_display_stops_moving_while_the_pane_goes_on_being_fed() {
         "the frozen pane drew what its child said after it was frozen"
     );
 
-    assert!(sub.terminals().unfreeze(pane(1)));
+    assert!(sub.terminals().release(hold));
     assert_eq!(
         drawn(&sub, 1),
         vec!["before", "after"],
@@ -111,7 +111,7 @@ fn a_frozen_pane_reads_as_the_text_it_was_frozen_on() {
     let before = ticked(&sub).remove(0);
     assert_eq!(before, "[3|4] rev=1 history=2+0 frozen=false");
 
-    assert!(sub.terminals().freeze(pane(1)));
+    let hold = sub.terminals().hold(pane(1)).expect("a live pane");
     sub.terminals().feed(pane(1), b"\r\n5\r\n6\r\n7");
     assert_eq!(
         ticked(&sub).remove(0),
@@ -119,7 +119,7 @@ fn a_frozen_pane_reads_as_the_text_it_was_frozen_on() {
         "a frozen pane answered about the live screen"
     );
 
-    assert!(sub.terminals().unfreeze(pane(1)));
+    assert!(sub.terminals().release(hold));
     assert_eq!(
         ticked(&sub).remove(0),
         "[6|7] rev=2 history=5+0 frozen=false"
@@ -127,17 +127,20 @@ fn a_frozen_pane_reads_as_the_text_it_was_frozen_on() {
 }
 
 #[test]
-fn freezing_and_unfreezing_from_lua_says_whether_the_pane_was_there() {
+fn a_freeze_from_lua_is_a_handle_that_releases_once() {
     let (_dir, sub) = built(
-        "neotmux.log.info(tostring(neotmux.pane.freeze(1))\n\
+        "local h = neotmux.pane.freeze(1)\n\
+         neotmux.log.info(tostring(h.pane)\n\
          .. ' ' .. tostring(neotmux.pane.freeze(4242))\n\
          .. ' ' .. tostring(neotmux.pane.frozen(1))\n\
-         .. ' ' .. tostring(neotmux.pane.unfreeze(1))\n\
-         .. ' ' .. tostring(neotmux.pane.unfreeze(4242))\n\
-         .. ' ' .. tostring(neotmux.pane.frozen(4242)))",
+         .. ' ' .. tostring(h:release())\n\
+         .. ' ' .. tostring(h.release())\n\
+         .. ' ' .. tostring(neotmux.pane.frozen(1))\n\
+         .. ' ' .. tostring(neotmux.pane.frozen(4242))\n\
+         .. ' ' .. tostring(neotmux.pane.unfreeze))",
     );
     sub.terminals().open(pane(1), SIZE, 100);
-    assert_eq!(ticked(&sub), vec!["true false true true false nil"]);
+    assert_eq!(ticked(&sub), vec!["1 nil true true false false nil nil"]);
 }
 
 /// Output goes on being dispatched while a pane is frozen: freezing decides what is drawn
@@ -146,7 +149,7 @@ fn freezing_and_unfreezing_from_lua_says_whether_the_pane_was_there() {
 fn a_frozen_pane_still_reports_its_output() {
     let (_dir, sub) = built("");
     sub.terminals().open(pane(1), SIZE, 100);
-    sub.terminals().freeze(pane(1));
+    sub.terminals().hold(pane(1));
     assert!(
         sub.terminals().feed(pane(1), b"\x1b[6n") == b"\x1b[1;1R",
         "a frozen pane stopped answering its child"

@@ -25,9 +25,9 @@
 -- session that is gone. `open` returns a handle with `close()`, idempotent, and nil when there
 -- was nothing on the screen to label — a session with no targets is never opened.
 --
--- Every pane a target was found on is frozen for the life of the session and thawed on the
--- way out, whichever way it leaves — except a pane that was already frozen when hints opened
--- (copy mode, say, got there first): that one is left exactly as it was found.
+-- Every pane a target was found on is held still for the life of the session and let go on
+-- the way out, whichever way it leaves. A pane somebody else was already holding (copy mode,
+-- say) stays held by them.
 --
 -- `M.keys` is the home row a label is built from, read fresh every `open` so a user's own
 -- `init.lua` can replace it before this ever runs. One character while there are few enough
@@ -170,8 +170,8 @@ local registered = false
 
 local function close()
   if state then
-    for pane in pairs(state.frozen) do
-      neotmux.pane.unfreeze(pane)
+    for _, hold in ipairs(state.holds) do
+      hold:release()
     end
   end
   if mode_handle then
@@ -483,19 +483,12 @@ function M.open(opts)
     by_label[hit.label] = hit
   end
 
-  -- Frozen once per pane, and only where it was not already: copy mode, or an earlier hint
-  -- session, may have gotten there first, and this session must not be the one that thaws it.
-  -- `freeze` answers `true` for any pane that exists, frozen or not already — it is `frozen`
-  -- that says which, and it has to be asked before `freeze` runs and makes the question moot.
-  local frozen = {}
+  local holds = {}
   local seen = {}
   for _, hit in ipairs(found) do
     if not seen[hit.pane] then
       seen[hit.pane] = true
-      local already = neotmux.pane.frozen(hit.pane)
-      if not already and neotmux.pane.freeze(hit.pane) then
-        frozen[hit.pane] = true
-      end
+      holds[#holds + 1] = neotmux.pane.freeze(hit.pane)
     end
   end
 
@@ -506,7 +499,7 @@ function M.open(opts)
     targets = found,
     by_label = by_label,
     typed = "",
-    frozen = frozen,
+    holds = holds,
     done = opts.done,
     cancel = opts.cancel,
   }

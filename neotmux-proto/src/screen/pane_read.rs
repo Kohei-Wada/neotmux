@@ -28,8 +28,6 @@ pub trait PaneRead {
     fn content(&self, pane: PaneId, last: Option<u64>, want: Want) -> Option<Lines>;
     fn history_extent(&self, pane: PaneId) -> Option<Extent>;
     fn history(&self, pane: PaneId, from: u64, count: u64, want: Want) -> Option<Lines>;
-    fn freeze(&self, pane: PaneId) -> bool;
-    fn unfreeze(&self, pane: PaneId) -> bool;
     fn is_frozen(&self, pane: PaneId) -> Option<bool>;
     /// Holds the pane still until the hold is released: it draws and reads as it was when
     /// the first hold on it was taken. `None` for a pane that does not exist.
