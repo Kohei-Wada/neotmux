@@ -873,10 +873,11 @@ impl LuaSubsystem {
                     // Checked after every handler, whatever it answered: a long call inside
                     // it can run past the deadline without the sampling hook ever catching
                     // it mid-flight, and this is the last point that still knows which
-                    // handler that was.
+                    // handler that was. The budget is the whole dispatch's, so the one named
+                    // is the one running when it ran out, not necessarily the slow one.
                     if self.budget.ran_long() {
                         return WriteVerdict::Refused(format!(
-                            "{tag}: exceeded the {budget_ms} ms budget"
+                            "{tag}: the {budget_ms} ms budget for this write ran out while it was running"
                         ));
                     }
                     if let (Value::Boolean(false), why) = result {

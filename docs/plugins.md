@@ -759,6 +759,10 @@ answer instead. This hook inverts that, and only this hook: a guardrail that fai
 useless exactly when something is wrong, so a broken handler is a closed door rather than an
 open one.
 
+The budget is one interval for the whole write, shared by every handler, and a refusal for it
+names the handler that was running when it ran out. That is usually the slow one, but not
+always: after a handler that spent nearly all of it, the one named is the next.
+
 With nothing registered, the path a write takes is unchanged: the host asks `has_write_hooks`
 before it does anything else, and a session with no handler pays nothing for the question.
 

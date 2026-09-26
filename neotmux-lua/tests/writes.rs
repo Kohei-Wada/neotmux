@@ -214,6 +214,64 @@ fn an_overrun_is_attributed_to_the_handler_that_was_running() {
     );
 }
 
+/// One `string.rep`, the long C call `budget.rs` uses for a tick: too few instructions for the
+/// sampling hook to land inside it, so the overrun is only seen once the handler returns.
+const HOG: &str = "neotmux.opt.tick_budget_ms = 5
+     neotmux.on_write(function()
+       local s = string.rep('x', 8 * 1024 * 1024)
+       neotmux.log.info('hog finished ' .. #s)
+     end)
+     return {}";
+
+/// The overrun the instruction hook never caught mid-flight is still caught, after the
+/// handler, and named — and the handler was not cut off, which is what makes it this path and
+/// not the interrupted one.
+#[test]
+fn a_long_call_in_a_handler_refuses_the_write_and_names_the_handler() {
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.hog')"),
+        ("lua/plugin/hog.lua", HOG),
+    ]);
+    side_by_side(&sub);
+    let WriteVerdict::Refused(why) =
+        sub.dispatch_write(support::one(), PaneId::from(1), "x", "tool")
+    else {
+        panic!("a handler that ran long passed the write");
+    };
+    assert!(why.starts_with("plugin/hog: "), "{why}");
+    assert!(why.contains("ran out while it was running"), "{why}");
+    assert!(
+        logged(&sub, Some(support::one())).contains(&"hog finished 8388608".to_string()),
+        "the handler was cut off, so this was not the uninterrupted path"
+    );
+}
+
+/// Checked after every handler, not once at the end: the handler after the long one never
+/// runs, and the refusal is not the backstop's, which names nobody.
+#[test]
+fn a_long_call_is_named_before_the_next_handler_runs() {
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.hog') require('plugin.after')"),
+        ("lua/plugin/hog.lua", HOG),
+        (
+            "lua/plugin/after.lua",
+            "neotmux.on_write(function() neotmux.log.info('after ran') end) return {}",
+        ),
+    ]);
+    side_by_side(&sub);
+    let WriteVerdict::Refused(why) =
+        sub.dispatch_write(support::one(), PaneId::from(1), "x", "tool")
+    else {
+        panic!("a handler that ran long passed the write");
+    };
+    assert!(why.starts_with("plugin/hog: "), "{why}");
+    assert!(!why.contains("plugin/after"), "{why}");
+    assert!(
+        !logged(&sub, Some(support::one())).contains(&"after ran".to_string()),
+        "the handler after the long one ran"
+    );
+}
+
 /// A handler earlier in the snapshot can remove a later one's registration before the
 /// dispatch reaches it — the same mutation `registry.rs`'s
 /// `snapshot_is_stable_while_a_callback_mutates_the_registry` pins from the registry's own
