@@ -377,9 +377,8 @@ neotmux.pane.title(id)        -- what the program itself last set as its title, 
 neotmux.pane.content(id, opts) -- { line, ... }, revision, wrapped — or nil, nil, nil
 neotmux.pane.history(id)      -- how many lines are above the screen, how many fell off
 neotmux.pane.scrollback(id, opts) -- { line, ... }, revision, wrapped — or nil, nil, nil
-neotmux.pane.freeze(id)       -- hold the pane still; false if there is no such pane
-neotmux.pane.unfreeze(id)     -- let it catch up; false if there is no such pane
-neotmux.pane.frozen(id)       -- true, false, or nil for no such pane
+neotmux.pane.freeze(id)       -- hold the pane still: a handle, or nil if there is no such pane
+neotmux.pane.frozen(id)       -- true while anyone holds it, false, or nil for no such pane
 neotmux.pane.split('horizontal' | 'vertical')
 neotmux.pane.focus(id)
 neotmux.pane.resize('left' | 'right' | 'up' | 'down', cells)
@@ -572,9 +571,9 @@ moment later: the lines move under it and the tint stays where it was put. `free
 that.
 
 ```lua
-neotmux.pane.freeze(id)
+local hold = neotmux.pane.freeze(id)
 -- the pane draws, reads and numbers its history as it was at this moment
-neotmux.pane.unfreeze(id)
+hold:release()
 ```
 
 While a pane is frozen the host draws the screen as it was when you froze it, and
@@ -587,25 +586,32 @@ polling it does not re-read the same held text on every frame.
 
 Nothing is lost. The child's output goes on being read from its PTY, parsed, and fed into the
 live screen underneath, and `pane_output` goes on being dispatched for every chunk of it —
-freezing decides what is drawn and what is read, not whether the child is heard. Unfreezing
-shows everything that arrived.
+freezing decides what is drawn and what is read, not whether the child is heard. Releasing the
+last hold shows everything that arrived.
 
 Four things worth knowing:
 
-- **A second `freeze` keeps the snapshot it already has.** It answers `true`, because the pane
-  is frozen when it returns, but it does not re-take the view — re-anchoring it would move a
-  selection out from under whoever took one. Unfreeze and freeze again if that is what you
-  want.
+- **A freeze is a hold, and a pane is frozen while anyone holds it.** Two plugins freezing the
+  same pane each get their own handle; one releasing does not move the pane under the other.
+  `hold:release()` answers `true` the first time and `false` after, or once the pane is gone —
+  it can only ever let go of its own hold. A second hold shares the snapshot the first one
+  took rather than re-taking the view, since re-anchoring it would move a selection out from
+  under whoever took one.
 - **A resize reaches the child, not the held view.** The pane's PTY and its live screen are
   resized as usual, because a child must never be lied to about its terminal. The frozen view
-  keeps the size it was taken at and is clipped to whatever room the pane now has; unfreezing
+  keeps the size it was taken at and is clipped to whatever room the pane now has; releasing
   shows the reflowed screen. A selection anchored to a frozen line survives the resize, and
-  what it names after the unfreeze is the reflowed text, which is a different thing.
+  what it names after the release is the reflowed text, which is a different thing.
 - **Freezing is not a lifeline.** A pane whose child exits closes like any other, frozen or
   not: `pane_closed` is dispatched, and every read about it answers `nil` from then on.
 - **It costs what the pane costs.** The held view is a copy of the pane's whole screen,
   scrollback included — a pane with a full 10 000-line history is tens of megabytes of it.
   Freeze the pane you are working in, not every pane.
+
+A hold taken through your group — `g.pane.freeze(id)` — is released when the group is emptied,
+so a reload never leaves a pane frozen by code that is no longer loaded. A hold from plain
+`neotmux.pane.freeze` is yours to release, the way a timer armed outside a group is yours to
+stop.
 
 #### What a pane has already said
 
@@ -1765,9 +1771,9 @@ That is what copy mode is built on. Pair it with `pane.freeze`, or the view slid
 the moment the child prints:
 
 ```lua
-neotmux.pane.freeze(pane)          -- on the way in
+local hold = g.pane.freeze(pane)   -- on the way in
 ctx:view(pane, back)               -- every tick, from your own idea of where you are
-neotmux.pane.unfreeze(pane)        -- on the way out
+hold:release()                     -- on the way out
 ```
 
 Two sources asking for the same pane is the later one winning, the rule the overlay already
@@ -1922,14 +1928,11 @@ labels get for free since a session never mixes the two lengths. Nearest targets
 shortest labels: the focused pane's own first, then whichever sits closest to the top of the
 screen.
 
-Every pane a target was found on is frozen for the life of the session and thawed on the way
-out — except a pane that was already frozen when the session opened (`plugin.copy`'s own `[`,
-say, got there first): that one is left exactly as it was found, neither frozen again nor
-thawed underneath whatever froze it first. That is what lets `f` inside copy mode open a hint
-session over the very pane copy mode is already holding still, without either one undoing the
-other's freeze. The host's freeze is a flag and not a count, so the rule runs both ways:
-`plugin.copy` asks `pane.frozen` before it freezes too, and thaws on the way out only what it
-froze. The other direction — a copy mode entered over a live hint session — does not arise,
+Every pane a target was found on is held still for the life of the session and let go on the
+way out, whichever way it leaves. A pane somebody else was holding already — `plugin.copy`'s
+own `[`, say — stays held by them: that is what lets `f` inside copy mode open a hint session
+over the very pane copy mode is holding, without either one undoing the other. The other
+direction — a copy mode entered over a live hint session — does not arise,
 because entering the mode calls `neotmux.hints.cancel()` first: the mode is taking the pane and
 the keyboard, and a pick drawn over a pane somebody else has claimed can be neither read for
 what it is nor typed at.
@@ -2253,18 +2256,20 @@ old one. Two calls are the exception, and not because of groups. A source that s
 adds a command it already holds replaces its own, so those do not double. And a source holds
 one band, so the second `neotmux.reserve` answers `nil` and the old band stays.
 
-`unload` is for what no group can see. A group knows what you registered, not what you did: a
-pane you froze with `neotmux.pane.freeze` stays frozen after the code that meant to unfreeze it
-is gone, unless you unfreeze it on the way out.
+`unload` is for what no group can see. A group knows what you registered through it, not
+everything you did: a hold from plain `neotmux.pane.freeze` stays after the code that meant to
+release it is gone, unless you release it on the way out — or take it with `g.pane.freeze`,
+which the group releases for you.
 
 ```lua
 g.on_event('unload', function()
-  for pane in pairs(frozen) do neotmux.pane.unfreeze(pane) end
+  for _, hold in ipairs(holds) do hold:release() end
 end)
 ```
 
 Registered through your group, the `unload` handler is itself replaced on the next run rather
-than stacked. The shipped copy mode and hints do exactly this.
+than stacked. The shipped copy mode and hints take their holds through their groups, and use
+`unload` for their modes.
 
 The VM and its globals are the same ones after a reload; your module's locals are not, because
 your module ran again. A fold, a cursor, a query typed into a list — whatever you kept in a
