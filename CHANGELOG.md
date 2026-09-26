@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### A pane's shell is not a login shell, and knows the terminal it is in
+
+A pane runs your shell as an interactive shell, not a login one, so `.bash_profile` and its kin
+are not run again for every pane. Its `TERM` is `xterm-256color`, the emulator it is actually
+writing to, rather than whatever terminal the server happened to be started from — or nothing,
+for a server started from a script.
+
 ### The config reloads without losing the panes
 
 `config-reload`, from the palette or anything that runs a command, runs every layer's

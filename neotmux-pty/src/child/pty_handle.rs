@@ -57,8 +57,14 @@ fn pty_size(size: Size) -> PtySize {
 }
 
 impl PtyHandle {
+    /// The user's shell, found the way portable-pty's default program finds it, but named by
+    /// its path: its default program is spawned as a login shell, which a pane is not.
     pub fn default_shell_command() -> CommandBuilder {
-        CommandBuilder::new_default_prog()
+        let mut cmd = CommandBuilder::new(CommandBuilder::new_default_prog().get_shell());
+        // Not the server's own TERM: that is the terminal it was launched from, and what the
+        // program in the pane is writing to is the emulator here.
+        cmd.env("TERM", "xterm-256color");
+        cmd
     }
 
     pub fn spawn(cmd: CommandBuilder, size: Size, waker: Waker) -> anyhow::Result<Self> {
@@ -180,6 +186,23 @@ mod tests {
         assert!(
             drained <= OUTPUT_CHANNEL_BOUND + 1,
             "reader thread buffered {drained} messages, channel bound is {OUTPUT_CHANNEL_BOUND}"
+        );
+    }
+
+    /// A pane's shell is the user's, but not a login shell, and it is told the terminal it is
+    /// in is the emulator here rather than whatever the server inherited from its launcher.
+    #[test]
+    fn the_default_shell_is_interactive_not_login_and_names_its_terminal() {
+        let cmd = PtyHandle::default_shell_command();
+        let argv = cmd.get_argv();
+        assert_eq!(argv.len(), 1, "{argv:?}");
+        assert!(
+            !argv[0].to_string_lossy().starts_with('-'),
+            "a leading '-' makes it a login shell: {argv:?}"
+        );
+        assert_eq!(
+            cmd.get_env("TERM"),
+            Some(std::ffi::OsStr::new("xterm-256color"))
         );
     }
 
