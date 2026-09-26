@@ -32,10 +32,11 @@ plugins are new. `neotmux.reload()` is the function under it, for a key of your 
 because a plugin registers through `neotmux.group(name)`, which is Neovim's augroup: every
 `on_tick`, key, band, float, job and timer made through the group is taken back when the group is
 named again, and a group the reload did not name is emptied, so a deleted `require` line is a
-plugin gone. The `unload` event fires once before, for what no group can see — copy mode and the
-hints thaw the panes they froze on it. A source setting a key or adding a command it already
-holds now replaces its own instead of being refused, and `neotmux.command.remove(name)` takes a
-command away. Every shipped plugin and example registers through a group.
+plugin gone. The `unload` event fires once before, for what no group can see. A source setting
+a key or adding a command it already holds now replaces its own instead of being refused, and
+`neotmux.command.remove(name)` takes a command away. Every shipped plugin and example registers
+through a group. A reload says whether it went well on the notification surface: each source that
+failed to load, at warn, or `config reloaded` when nothing did.
 
 ### The sidebar is herdr's
 

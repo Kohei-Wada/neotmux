@@ -2225,7 +2225,8 @@ file again; the standard library and the host's own tables are left alone. Then 
 swept, and the rest of your config still loads. Then every group nobody named this time is
 forgotten, so a plugin whose `require` line you deleted is gone. The next frame is drawn from what is
 registered now. Nothing else runs in between — a key you type during a reload is read after
-it.
+it. A reload in which everything loaded says `config reloaded` on the notification surface, so
+a reload that went well is not mistaken for one that never ran.
 
 What makes a plugin safe to run twice is a **group**, the way an augroup is in Neovim:
 

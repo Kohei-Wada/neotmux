@@ -340,10 +340,16 @@ impl Plugins {
 
     /// Runs a reload the server carried out of the frame that asked for it, once every other
     /// op of that frame was already applied. Every failure the reload raised is logged and
-    /// notified at warn, and whatever the reloaded layers raised while loading is refused: a
-    /// load acts on no session, so nothing it asked for has anywhere to land.
+    /// notified at warn, a reload with none is notified at info so it is not silent, and
+    /// whatever the reloaded layers raised while loading is refused: a load acts on no
+    /// session, so nothing it asked for has anywhere to land.
     pub fn reload(&mut self, session: Option<SessionId>) {
-        for failure in self.lua.reload(session) {
+        let failures = self.lua.reload(session);
+        if failures.is_empty() {
+            self.notifications
+                .push(Level::Info, "neotmux", "config reloaded");
+        }
+        for failure in failures {
             logging::log(Level::Warn, &failure.source, &failure.message);
             self.notifications
                 .push(Level::Warn, &failure.source, &failure.message);
@@ -546,5 +552,17 @@ mod tests {
         plugins.reload(None);
         let said = plugins.notifications().since(0);
         assert!(said.iter().any(|l| l.contains("broken")), "{said:?}");
+        assert!(
+            !said.iter().any(|l| l.contains("config reloaded")),
+            "a failed reload was announced as a success: {said:?}"
+        );
+    }
+
+    #[test]
+    fn a_reload_that_loads_says_so_on_the_notification_surface() {
+        let (_dir, mut plugins) = built("");
+        plugins.reload(None);
+        let said = plugins.notifications().since(0);
+        assert_eq!(said, vec!["neotmux: config reloaded".to_string()]);
     }
 }
