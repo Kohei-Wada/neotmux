@@ -198,12 +198,7 @@ impl LuaSubsystem {
 
     pub fn run_init(&self) -> Vec<LoadFailure> {
         self.loading.set(true);
-        if let Err(err) = Budget::arm(&self.lua, &self.budget) {
-            self.report_text(
-                crate::plugin::ANONYMOUS,
-                format!("the config budget is off: {err}"),
-            );
-        }
+        self.arm("the config budget");
         for layer in self.layers.paths() {
             let init_path = layer.join("init.lua");
             let source = match fs::read(&init_path) {
@@ -420,12 +415,7 @@ impl LuaSubsystem {
     /// as long as it is on.
     fn budgeted(&self, session: SessionId, batch: impl FnOnce()) {
         let _bound = self.ambient.bind(session);
-        if let Err(err) = Budget::arm(&self.lua, &self.budget) {
-            self.report_text(
-                crate::plugin::ANONYMOUS,
-                format!("the budget is off: {err}"),
-            );
-        }
+        self.arm("the budget");
         batch();
         self.budget.disarm(&self.lua);
     }
@@ -549,12 +539,7 @@ impl LuaSubsystem {
         let _bound = self.ambient.bind(session);
         // The hook is armed for this frame only: with `LUA_MASKCOUNT` set Lua 5.4 traps on
         // every instruction, so an always-armed hook would halve key and event dispatch too.
-        if let Err(err) = Budget::arm(&self.lua, &self.budget) {
-            self.report_text(
-                crate::plugin::ANONYMOUS,
-                format!("the tick budget is off: {err}"),
-            );
-        }
+        self.arm("the tick budget");
         let mut by_source: BTreeMap<SourceId, Vec<RegistrationId>> = BTreeMap::new();
         for id in self.registry.snapshot(KindTag::Tick) {
             let Some(owner) = self.registry.owner(id) else {
@@ -689,17 +674,7 @@ impl LuaSubsystem {
     /// tick. The report is anonymous because one region runs callbacks belonging to different
     /// sources; whichever handler raised is named by the error path that ran it.
     fn measured<T>(&self, run: impl FnOnce() -> T) -> T {
-        if let Err(err) = Budget::arm(&self.lua, &self.budget) {
-            self.report_text(
-                crate::plugin::ANONYMOUS,
-                format!("the budget is off: {err}"),
-            );
-        }
-        let budget_ms = self.opts.borrow().tick_budget_ms;
-        self.budget.enter(Duration::from_millis(budget_ms));
-        let value = run();
-        let outcome = self.budget.leave();
-        self.budget.disarm(&self.lua);
+        let (value, outcome, budget_ms) = self.region(|_| run());
         if outcome != Outcome::WithinBudget {
             self.report_text(
                 crate::plugin::ANONYMOUS,
@@ -707,6 +682,26 @@ impl LuaSubsystem {
             );
         }
         value
+    }
+
+    /// Arms the hook, and says so when it cannot be: `what` names the budget that is off.
+    fn arm(&self, what: &str) {
+        if let Err(err) = Budget::arm(&self.lua, &self.budget) {
+            self.report_text(crate::plugin::ANONYMOUS, format!("{what} is off: {err}"));
+        }
+    }
+
+    /// One region under the tick budget, armed for it and disarmed after. Answers what `run`
+    /// returned, how the region came out, and the budget it was measured against, which `run`
+    /// is handed too so a refusal it words itself can name it.
+    fn region<T>(&self, run: impl FnOnce(u64) -> T) -> (T, Outcome, u64) {
+        self.arm("the budget");
+        let budget_ms = self.opts.borrow().tick_budget_ms;
+        self.budget.enter(Duration::from_millis(budget_ms));
+        let value = run(budget_ms);
+        let outcome = self.budget.leave();
+        self.budget.disarm(&self.lua);
+        (value, outcome, budget_ms)
     }
 
     pub fn dispatch_key(&self, session: SessionId, spec: &str) -> KeyOutcome {
@@ -820,17 +815,8 @@ impl LuaSubsystem {
         from: &str,
     ) -> WriteVerdict {
         let _bound = self.ambient.bind(session);
-        if let Err(err) = Budget::arm(&self.lua, &self.budget) {
-            self.report_text(
-                crate::plugin::ANONYMOUS,
-                format!("the budget is off: {err}"),
-            );
-        }
-        let budget_ms = self.opts.borrow().tick_budget_ms;
-        self.budget.enter(Duration::from_millis(budget_ms));
-        let verdict = self.offer_write(pane, text, from, budget_ms);
-        let outcome = self.budget.leave();
-        self.budget.disarm(&self.lua);
+        let (verdict, outcome, budget_ms) =
+            self.region(|budget_ms| self.offer_write(pane, text, from, budget_ms));
         // `offer_write` already names the handler it caught overrunning; this is the
         // backstop for an overrun neither of its checks was running to attribute — nothing
         // was between handlers when the deadline passed.
@@ -1112,17 +1098,8 @@ impl LuaSubsystem {
         };
         let tag = self.sources.name(owner).unwrap_or_default();
 
-        if let Err(err) = Budget::arm(&self.lua, &self.budget) {
-            self.report_text(
-                crate::plugin::ANONYMOUS,
-                format!("the budget is off: {err}"),
-            );
-        }
-        let budget_ms = self.opts.borrow().tick_budget_ms;
-        self.budget.enter(Duration::from_millis(budget_ms));
-        let outcome = self.call_command(&callback, owner, &tag, args);
-        let final_outcome = self.budget.leave();
-        self.budget.disarm(&self.lua);
+        let (outcome, final_outcome, budget_ms) =
+            self.region(|_| self.call_command(&callback, owner, &tag, args));
 
         // The same backstop `dispatch_write` uses: an overrun neither the hook nor the call's
         // own error path caught is only visible once the region closes, and only a success
