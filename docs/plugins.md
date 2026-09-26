@@ -2236,13 +2236,13 @@ end)
 
 `neotmux.group(name)` answers the group of that name, emptied of whatever it held. Its fields
 are the registering calls you already know — `on_tick`, `on_event`, `on_key`, `on_write`,
-`float`, `reserve`, `keymap.set`, `command.add`, `job.start`, `timer.every`, `timer.after` —
-with the same arguments and the same answers, and what you register through them is filed
-under the group as well as under your chunk. So when the reload runs your file again and your
-first line names the group again, the old tick, the old band and the old key go, and the new
-ones take their place. Emptying takes back each thing the way you would: a handle is removed, a
-key unbound, a command unregistered, a timer stopped, and a job killed *without* its
-`on_exit`, because that callback is the old code's.
+`float`, `reserve`, `keymap.set`, `command.add`, `job.start`, `timer.every`, `timer.after`,
+`pane.freeze` — with the same arguments and the same answers, and what you register through
+them is filed under the group as well as under your chunk. So when the reload runs your file
+again and your first line names the group again, the old tick, the old band and the old key go,
+and the new ones take their place. Emptying takes back each thing the way you would: a handle is
+removed, a key unbound, a command unregistered, a timer stopped, a hold released, and a job
+killed *without* its `on_exit`, because that callback is the old code's.
 
 Name the group after your module, `'plugin.clock'`. Names are one namespace across every
 plugin, so two plugins that pick the same one share a group and either one's run empties both.

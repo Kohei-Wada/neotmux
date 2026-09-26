@@ -7,9 +7,9 @@
 `neotmux.pane.freeze(id)` hands back a hold, and a pane is frozen while anyone holds it:
 `hold:release()` lets go of that one hold and nobody else's, so one plugin can no longer thaw a
 pane out from under another. `g.pane.freeze(id)` is the same through a group, and the group
-releases it when it is emptied, so a reload never leaves a pane frozen. `neotmux.pane.unfreeze`
-is gone. Copy mode and hints take their holds this way and no longer need to ask
-`pane.frozen` first.
+releases it when it is emptied, so a reload never leaves a pane frozen by a hold taken that
+way. `neotmux.pane.unfreeze` is gone. Copy mode and hints take their holds this way and no
+longer need to ask `pane.frozen` first.
 
 ### Faint text is drawn faint
 
