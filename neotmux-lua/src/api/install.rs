@@ -323,8 +323,11 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
             geometry.clone(),
             pane_info,
             pane_tty,
-            panes,
-            groups.clone(),
+            panes.clone(),
+        )?;
+        pane.set(
+            "freeze",
+            super::freeze::install(lua, panes, groups.clone())?,
         )?;
         let pane = seal(lua, pane, "neotmux.pane")?;
         neotmux.set("pane", pane)?;

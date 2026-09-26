@@ -3,13 +3,13 @@ use std::rc::Rc;
 
 use mlua::{Lua, Table, Value};
 
-use neotmux_proto::screen::{Hold, Lines, PaneRead, Trailing, Want};
+use neotmux_proto::screen::{Lines, PaneRead, Trailing, Want};
 use neotmux_proto::{Dir, Geometry, PaneId, SplitDir};
 
 use crate::api::rect;
 use crate::host::{Op, OpBuffer};
 use crate::host::{PaneInfos, PaneTtys};
-use crate::plugin::{self, Groups, Held, Sources};
+use crate::plugin::{self, Sources};
 
 /// A count a caller gave in Lua, where the only wrong value is a negative one: that is a
 /// typo rather than a refusal, as a resize by a negative number of cells is.
@@ -73,7 +73,6 @@ pub(crate) fn install(
     pane_info: Rc<RefCell<PaneInfos>>,
     pane_tty: Rc<RefCell<PaneTtys>>,
     terminals: Rc<dyn PaneRead>,
-    groups: Rc<Groups>,
 ) -> mlua::Result<Table> {
     let pane = lua.create_table()?;
 
@@ -236,24 +235,6 @@ pub(crate) fn install(
             answer(lua, text)
         })?;
         pane.set("scrollback", scrollback)?;
-    }
-
-    {
-        // Immediate, not an op: a plugin freezes a pane in order to read it in the same
-        // call, and an op applied after the tick would hand it the live text it froze to
-        // get away from. Nothing about the tree changes, so there is nothing for the rest of
-        // the frame to catch up with.
-        let terminals = terminals.clone();
-        let freeze = lua.create_function(move |lua, pane: u32| {
-            Ok(match terminals.hold(PaneId::from(pane)) {
-                Some(hold) => {
-                    groups.note(Held::Freeze(hold));
-                    Value::Table(hold_handle(lua, terminals.clone(), hold)?)
-                }
-                None => Value::Nil,
-            })
-        })?;
-        pane.set("freeze", freeze)?;
     }
 
     {
@@ -439,12 +420,4 @@ pub(crate) fn install(
     }
 
     Ok(pane)
-}
-
-fn hold_handle(lua: &Lua, terminals: Rc<dyn PaneRead>, hold: Hold) -> mlua::Result<Table> {
-    let handle = lua.create_table()?;
-    handle.set("pane", hold.pane.get())?;
-    let release = lua.create_function(move |_, _self: Value| Ok(terminals.release(hold)))?;
-    handle.set("release", release)?;
-    Ok(handle)
 }

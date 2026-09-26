@@ -3,6 +3,7 @@ pub mod command;
 pub mod ctx;
 pub mod event;
 pub mod float;
+mod freeze;
 mod group;
 mod install;
 pub mod job;
