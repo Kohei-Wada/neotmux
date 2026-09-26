@@ -206,28 +206,12 @@ fn the_sidebar_follows_init_lua_across_a_reload() {
     .expect("write init.lua");
     reload_from_the_palette(&mut nt);
     nt.wait_for_screen(" spaces", PATIENCE);
-    nt.send("\rS");
-    let deadline = Instant::now() + PATIENCE;
-    while !(PANE_TOP..24).any(|row| nt.cell(row, SIDEBAR_COLS) == "S") {
-        assert!(
-            Instant::now() < deadline,
-            "the pane did not move over for the sidebar:\n{}",
-            nt.screen_after(Duration::ZERO)
-        );
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    // The `X` already on the screen, not a key typed now: a key typed after `\r` is echoed by
+    // the tty while `cat` is still writing its copy of the line, and can land beside it.
+    nt.wait_for_cell(PANE_TOP, SIDEBAR_COLS, "X", PATIENCE);
 
     std::fs::write(&init_lua, QUIET).expect("write init.lua");
     reload_from_the_palette(&mut nt);
     wait_until_gone(&mut nt, " spaces", PATIENCE);
-    nt.send("\rH");
-    let deadline = Instant::now() + PATIENCE;
-    while !(PANE_TOP..24).any(|row| nt.cell(row, 0) == "H") {
-        assert!(
-            Instant::now() < deadline,
-            "the pane did not take the sidebar's columns back:\n{}",
-            nt.screen_after(Duration::ZERO)
-        );
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    nt.wait_for_cell(PANE_TOP, 0, "X", PATIENCE);
 }
