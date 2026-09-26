@@ -11,6 +11,7 @@
 
 use crate::PaneId;
 use crate::screen::Extent;
+use crate::screen::Hold;
 use crate::screen::Lines;
 use crate::screen::Want;
 
@@ -30,4 +31,9 @@ pub trait PaneRead {
     fn freeze(&self, pane: PaneId) -> bool;
     fn unfreeze(&self, pane: PaneId) -> bool;
     fn is_frozen(&self, pane: PaneId) -> Option<bool>;
+    /// Holds the pane still until the hold is released: it draws and reads as it was when
+    /// the first hold on it was taken. `None` for a pane that does not exist.
+    fn hold(&self, pane: PaneId) -> Option<Hold>;
+    /// `false` if this hold was already released or its pane is gone.
+    fn release(&self, hold: Hold) -> bool;
 }

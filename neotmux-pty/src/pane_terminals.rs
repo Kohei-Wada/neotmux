@@ -1,7 +1,7 @@
-use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::cell::{Cell, RefCell};
+use std::collections::{BTreeMap, BTreeSet};
 
-use neotmux_proto::screen::{Extent, Lines, PaneRead, Want};
+use neotmux_proto::screen::{Extent, Hold, Lines, PaneRead, Want};
 use neotmux_proto::{GridSnapshot, PaneId, PaneTty, Size};
 
 use crate::parse::Queries;
@@ -18,6 +18,7 @@ struct Terminal {
     /// what was read: the live one goes on moving as the child prints, and a watcher that
     /// believed it would re-read the same held text on every frame.
     frozen_revision: Option<u64>,
+    holds: BTreeSet<u64>,
 }
 
 impl Terminal {
@@ -40,6 +41,7 @@ impl Terminal {
 #[derive(Default)]
 pub struct PaneTerminals {
     panes: RefCell<BTreeMap<PaneId, Terminal>>,
+    next_hold: Cell<u64>,
 }
 
 impl PaneTerminals {
@@ -55,6 +57,7 @@ impl PaneTerminals {
                 queries: Queries::default(),
                 revision: 0,
                 frozen_revision: None,
+                holds: BTreeSet::new(),
             },
         );
     }
@@ -179,6 +182,33 @@ impl PaneTerminals {
         self.panes.borrow().get(&pane).map(|t| t.state.is_frozen())
     }
 
+    pub fn hold(&self, pane: PaneId) -> Option<Hold> {
+        let mut panes = self.panes.borrow_mut();
+        let terminal = panes.get_mut(&pane)?;
+        if terminal.holds.is_empty() && terminal.state.freeze() {
+            terminal.frozen_revision = Some(terminal.revision);
+        }
+        let id = self.next_hold.get() + 1;
+        self.next_hold.set(id);
+        terminal.holds.insert(id);
+        Some(Hold::new(pane, id))
+    }
+
+    pub fn release(&self, hold: Hold) -> bool {
+        let mut panes = self.panes.borrow_mut();
+        let Some(terminal) = panes.get_mut(&hold.pane) else {
+            return false;
+        };
+        if !terminal.holds.remove(&hold.id()) {
+            return false;
+        }
+        if terminal.holds.is_empty() {
+            terminal.state.unfreeze();
+            terminal.frozen_revision = None;
+        }
+        true
+    }
+
     /// How many lines the pane holds above its visible screen, and how many have already
     /// fallen out of the front of it. `None` for a pane that does not exist. This is the cheap half of reading the history, the way `revision` is the
     /// cheap half of reading the screen: it builds no lines.
@@ -250,6 +280,14 @@ impl PaneRead for PaneTerminals {
 
     fn is_frozen(&self, pane: PaneId) -> Option<bool> {
         PaneTerminals::is_frozen(self, pane)
+    }
+
+    fn hold(&self, pane: PaneId) -> Option<Hold> {
+        PaneTerminals::hold(self, pane)
+    }
+
+    fn release(&self, hold: Hold) -> bool {
+        PaneTerminals::release(self, hold)
     }
 }
 
@@ -387,6 +425,57 @@ mod tests {
         terminals.close(pane(1));
         assert_eq!(terminals.content(pane(1), None, Want::default()), None);
         assert_eq!(terminals.is_frozen(pane(1)), None);
+    }
+
+    /// Two holders are independent: the pane moves again when the last one lets go, and
+    /// until then it shows the screen the first hold took.
+    #[test]
+    fn a_pane_moves_again_only_when_its_last_hold_is_released() {
+        let terminals = terminals();
+        terminals.feed(pane(1), b"first");
+        let a = terminals.hold(pane(1)).expect("a live pane");
+        terminals.feed(pane(1), b"\r\nsecond");
+        let b = terminals.hold(pane(1)).expect("a live pane");
+        assert_eq!(
+            lines(&terminals, 1),
+            vec!["first", "", "", ""],
+            "the second hold re-took the view"
+        );
+
+        assert!(terminals.release(a));
+        assert_eq!(terminals.is_frozen(pane(1)), Some(true));
+        assert_eq!(lines(&terminals, 1), vec!["first", "", "", ""]);
+
+        assert!(terminals.release(b));
+        assert_eq!(terminals.is_frozen(pane(1)), Some(false));
+        assert_eq!(lines(&terminals, 1), vec!["first", "second", "", ""]);
+    }
+
+    #[test]
+    fn a_hold_releases_once() {
+        let terminals = terminals();
+        let a = terminals.hold(pane(1)).expect("a live pane");
+        let b = terminals.hold(pane(1)).expect("a live pane");
+        assert!(terminals.release(a));
+        assert!(
+            !terminals.release(a),
+            "a second release took somebody else's hold"
+        );
+        assert_eq!(terminals.is_frozen(pane(1)), Some(true));
+        assert!(terminals.release(b));
+    }
+
+    #[test]
+    fn a_hold_on_a_pane_that_closed_releases_nothing() {
+        let terminals = terminals();
+        let a = terminals.hold(pane(1)).expect("a live pane");
+        terminals.close(pane(1));
+        assert!(!terminals.release(a));
+    }
+
+    #[test]
+    fn holding_a_pane_nobody_has_answers_none() {
+        assert_eq!(terminals().hold(pane(4242)), None);
     }
 
     /// A shell exiting between one pass of a watcher's loop and the next is not the watcher's
