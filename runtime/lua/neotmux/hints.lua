@@ -488,7 +488,7 @@ function M.open(opts)
   for _, hit in ipairs(found) do
     if not seen[hit.pane] then
       seen[hit.pane] = true
-      holds[#holds + 1] = neotmux.pane.freeze(hit.pane)
+      holds[#holds + 1] = g.pane.freeze(hit.pane)
     end
   end
 

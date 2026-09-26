@@ -10,11 +10,12 @@ use crate::plugin::{GroupId, Groups};
 const TOP: [&str; 6] = [
     "on_tick", "on_event", "on_key", "on_write", "float", "reserve",
 ];
-const NESTED: [(&str, &[&str]); 4] = [
+const NESTED: [(&str, &[&str]); 5] = [
     ("keymap", &["set"]),
     ("command", &["add"]),
     ("job", &["start"]),
     ("timer", &["every", "after"]),
+    ("pane", &["freeze"]),
 ];
 
 fn wrap(lua: &Lua, groups: &Rc<Groups>, id: GroupId, real: Function) -> mlua::Result<Function> {

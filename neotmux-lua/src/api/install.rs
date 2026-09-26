@@ -201,6 +201,7 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
         jobs: jobs.clone(),
         timers: timers.clone(),
         commands: commands.clone(),
+        panes: panes.clone(),
     };
     let neotmux = lua.create_table()?;
 
@@ -323,6 +324,7 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
             pane_info,
             pane_tty,
             panes,
+            groups.clone(),
         )?;
         let pane = seal(lua, pane, "neotmux.pane")?;
         neotmux.set("pane", pane)?;

@@ -64,6 +64,7 @@ pub struct LuaSubsystem {
     jobs: Rc<Jobs>,
     timers: Rc<Timers>,
     groups: Rc<Groups>,
+    panes: Rc<dyn PaneRead>,
 }
 
 impl LuaSubsystem {
@@ -141,7 +142,7 @@ impl LuaSubsystem {
                 pane_info: pane_info.clone(),
                 pane_tty: pane_tty.clone(),
                 notices: notices.clone(),
-                panes,
+                panes: panes.clone(),
                 clipboard,
                 jobs: jobs.clone(),
                 timers: timers.clone(),
@@ -180,6 +181,7 @@ impl LuaSubsystem {
             jobs,
             timers,
             groups,
+            panes,
         })
     }
 
@@ -292,6 +294,7 @@ impl LuaSubsystem {
             jobs: self.jobs.clone(),
             timers: self.timers.clone(),
             commands: self.commands.clone(),
+            panes: self.panes.clone(),
         }
     }
 

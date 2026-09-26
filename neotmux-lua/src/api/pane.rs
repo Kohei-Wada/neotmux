@@ -9,7 +9,7 @@ use neotmux_proto::{Dir, Geometry, PaneId, SplitDir};
 use crate::api::rect;
 use crate::host::{Op, OpBuffer};
 use crate::host::{PaneInfos, PaneTtys};
-use crate::plugin::{self, Sources};
+use crate::plugin::{self, Groups, Held, Sources};
 
 /// A count a caller gave in Lua, where the only wrong value is a negative one: that is a
 /// typo rather than a refusal, as a resize by a negative number of cells is.
@@ -73,6 +73,7 @@ pub(crate) fn install(
     pane_info: Rc<RefCell<PaneInfos>>,
     pane_tty: Rc<RefCell<PaneTtys>>,
     terminals: Rc<dyn PaneRead>,
+    groups: Rc<Groups>,
 ) -> mlua::Result<Table> {
     let pane = lua.create_table()?;
 
@@ -245,7 +246,10 @@ pub(crate) fn install(
         let terminals = terminals.clone();
         let freeze = lua.create_function(move |lua, pane: u32| {
             Ok(match terminals.hold(PaneId::from(pane)) {
-                Some(hold) => Value::Table(hold_handle(lua, terminals.clone(), hold)?),
+                Some(hold) => {
+                    groups.note(Held::Freeze(hold));
+                    Value::Table(hold_handle(lua, terminals.clone(), hold)?)
+                }
                 None => Value::Nil,
             })
         })?;

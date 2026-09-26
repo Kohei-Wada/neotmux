@@ -1,6 +1,7 @@
 use std::rc::Rc;
 
 use mlua::RegistryKey;
+use neotmux_proto::screen::Hold;
 
 use crate::draw::{FloatId, ReservationId};
 use crate::plugin::RegistrationId;
@@ -14,6 +15,7 @@ pub enum Held {
     Float(FloatId),
     Job(JobId),
     Timer(TimerId),
+    Freeze(Hold),
     /// The callback as well as the name, so a command the source registered again since is
     /// not the one taken away.
     Command {

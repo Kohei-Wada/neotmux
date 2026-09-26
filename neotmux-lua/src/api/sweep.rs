@@ -1,5 +1,7 @@
 use std::rc::Rc;
 
+use neotmux_proto::screen::PaneRead;
+
 use crate::api::forget_if_no_longer_drawing;
 use crate::draw::{Buffers, Floats, Reservations};
 use crate::plugin::{Commands, Held, Registry, SourceId};
@@ -7,7 +9,7 @@ use crate::sched::Jobs;
 use crate::sched::timers::Timers;
 
 /// Everything a source that failed to load, or a group being emptied, has to be taken back
-/// out of, as one value: the callers otherwise take seven collaborators.
+/// out of, as one value: the callers otherwise take eight collaborators.
 #[derive(Clone)]
 pub(crate) struct Sweep {
     pub(crate) registry: Rc<Registry>,
@@ -17,6 +19,7 @@ pub(crate) struct Sweep {
     pub(crate) jobs: Rc<Jobs>,
     pub(crate) timers: Rc<Timers>,
     pub(crate) commands: Rc<Commands>,
+    pub(crate) panes: Rc<dyn PaneRead>,
 }
 
 impl Sweep {
@@ -51,6 +54,9 @@ impl Sweep {
                 Held::Job(id) => self.jobs.remove(id),
                 Held::Timer(id) => {
                     self.timers.stop(id);
+                }
+                Held::Freeze(hold) => {
+                    self.panes.release(hold);
                 }
                 Held::Command { name, callback } => {
                     self.commands.remove_if(&name, &callback);

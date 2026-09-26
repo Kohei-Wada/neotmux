@@ -391,7 +391,7 @@ function M.enter()
   -- Held still for the life of the mode. The buffer above is the text the cursor is dragged
   -- over; this is the same instant's cells, and the two have to be the same instant or the
   -- selection is over one thing and the screen shows another.
-  local hold = neotmux.pane.freeze(pane)
+  local hold = g.pane.freeze(pane)
   local at = neotmux.pane.cursor(pane) or { x = 0, y = 0 }
   state = {
     pane = pane,
@@ -492,8 +492,8 @@ g.on_tick(function(ctx)
   })
 end)
 
--- A reload runs this file again with a copy mode that has not entered anything; the pane
--- this one froze would stay frozen with nobody left who knows it.
+-- A reload runs this file again with a copy mode that has not entered anything. The group
+-- lets go of the pane on its own; leaving is for the mode's layer and the pick.
 g.on_event("unload", function()
   leave()
 end)
