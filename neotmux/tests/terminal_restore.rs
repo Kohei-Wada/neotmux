@@ -318,12 +318,15 @@ fn resizing_below_the_floor_does_not_kill_the_renderer() {
 }
 
 /// A shell that closes its descriptors and keeps running, the way `setsid`, `ssh -f` and
-/// anything else that daemonises does.
+/// anything else that daemonises does. It waits for a line first: a key only reaches the pane
+/// once the client is attached and on the alternate screen, and a session that ends before
+/// that never enters it, so there would be no `1049l` to look for.
 fn write_daemonising_shell() -> TempScript {
     use std::os::unix::fs::PermissionsExt as _;
 
     let path = std::env::temp_dir().join(format!("neotmux-daemon-shell-{}", std::process::id()));
-    std::fs::write(&path, "#!/bin/sh\nexec 0<&- 1>&- 2>&-\nsleep 10\n").expect("write script");
+    std::fs::write(&path, "#!/bin/sh\nread _\nexec 0<&- 1>&- 2>&-\nsleep 10\n")
+        .expect("write script");
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
     TempScript(path)
 }
@@ -336,7 +339,7 @@ fn shutdown_does_not_wait_on_a_child_that_outlived_its_descriptors() {
     let shell_path = shell.0.to_str().expect("utf8 path").to_owned();
 
     let started = Instant::now();
-    let (out, ok, termios) = run_in_pty(&[("SHELL", &shell_path)], b"");
+    let (out, ok, termios) = run_in_pty(&[("SHELL", &shell_path)], b"\r");
     let took = started.elapsed();
 
     assert!(ok, "expected a clean exit");
