@@ -127,7 +127,8 @@ impl<'a> Reader<'a> {
                 | CELL_UNDERLINE
                 | CELL_INVERSE
                 | CELL_WIDE
-                | CELL_WIDE_CONTINUATION)
+                | CELL_WIDE_CONTINUATION
+                | CELL_DIM)
             != 0
         {
             return Err(WireError::Malformed("cell flags"));
@@ -137,6 +138,7 @@ impl<'a> Reader<'a> {
             fg,
             bg,
             bold: flags & CELL_BOLD != 0,
+            dim: flags & CELL_DIM != 0,
             italic: flags & CELL_ITALIC != 0,
             underline: flags & CELL_UNDERLINE != 0,
             inverse: flags & CELL_INVERSE != 0,

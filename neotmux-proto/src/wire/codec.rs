@@ -584,6 +584,7 @@ mod tests {
                 cell.fg = self.color();
                 cell.bg = self.color();
                 cell.bold = self.bool();
+                cell.dim = self.bool();
                 cell.italic = self.bool();
                 cell.underline = self.bool();
                 cell.inverse = self.bool();
@@ -812,5 +813,16 @@ mod tests {
             bold: true,
         }];
         round_trip(&frame);
+    }
+
+    #[test]
+    fn a_faint_cell_round_trips() {
+        let mut grid = grid_of(1, 2, &["f", "n"]);
+        grid.cells[0].dim = true;
+        round_trip(&frame_of(vec![OwnedPaneFrame {
+            pane: PaneId::from(1),
+            rect: Rect::new(0, 0, 2, 1),
+            grid,
+        }]));
     }
 }

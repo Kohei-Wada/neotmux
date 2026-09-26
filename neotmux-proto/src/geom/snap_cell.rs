@@ -7,6 +7,7 @@ pub struct SnapCell {
     pub fg: Color,
     pub bg: Color,
     pub bold: bool,
+    pub dim: bool,
     pub italic: bool,
     pub underline: bool,
     pub inverse: bool,
@@ -20,6 +21,7 @@ impl SnapCell {
         self.fg = Color::Default;
         self.bg = Color::Default;
         self.bold = false;
+        self.dim = false;
         self.italic = false;
         self.underline = false;
         self.inverse = false;

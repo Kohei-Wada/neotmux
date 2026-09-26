@@ -88,6 +88,7 @@ pub fn draw_grid(frame: &mut TuiFrame, area: Rect, grid: &GridSnapshot) {
             dst.set_bg(color(src.bg));
             let mut modifier = Modifier::empty();
             modifier.set(Modifier::BOLD, src.bold);
+            modifier.set(Modifier::DIM, src.dim);
             modifier.set(Modifier::ITALIC, src.italic);
             modifier.set(Modifier::UNDERLINED, src.underline);
             modifier.set(Modifier::REVERSED, src.inverse);
@@ -147,6 +148,14 @@ mod tests {
                 .modifier
                 .contains(ratatui::style::Modifier::BOLD)
         );
+    }
+
+    #[test]
+    fn a_faint_cell_is_drawn_dim() {
+        let mut g = GridSnapshot::new(Size { rows: 1, cols: 1 });
+        g.cell_mut(0, 0).unwrap().dim = true;
+        let buf = render(&g, 1, 1);
+        assert!(buf[(0, 0)].modifier.contains(ratatui::style::Modifier::DIM));
     }
 
     #[test]

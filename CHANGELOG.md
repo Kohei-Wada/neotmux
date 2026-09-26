@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Faint text is drawn faint
+
+Text a program draws faint (`ESC[2m`, "dim") comes out faint in a pane, instead of at full
+intensity: the parser always knew, and now the cell carries it across the wire to the screen.
+That is a new cell flag, and protocol 15.
+
 ### A pane's shell is not a login shell, and knows the terminal it is in
 
 A pane runs your shell as an interactive shell, not a login one, so `.bash_profile` and its kin

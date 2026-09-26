@@ -35,6 +35,7 @@ pub(crate) const CELL_UNDERLINE: u8 = 4;
 pub(crate) const CELL_INVERSE: u8 = 8;
 pub(crate) const CELL_WIDE: u8 = 16;
 pub(crate) const CELL_WIDE_CONTINUATION: u8 = 32;
+pub(crate) const CELL_DIM: u8 = 64;
 
 pub(crate) const TO_SERVER_ATTACH: u8 = 0;
 pub(crate) const TO_SERVER_KEY: u8 = 1;

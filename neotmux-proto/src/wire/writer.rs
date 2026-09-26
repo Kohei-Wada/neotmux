@@ -104,6 +104,7 @@ impl Writer {
             (CELL_INVERSE, v.inverse),
             (CELL_WIDE, v.wide),
             (CELL_WIDE_CONTINUATION, v.wide_continuation),
+            (CELL_DIM, v.dim),
         ] {
             if set {
                 flags |= bit;

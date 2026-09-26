@@ -247,6 +247,7 @@ impl TermState {
                 dst.fg = color_from_vt100(src.fgcolor());
                 dst.bg = color_from_vt100(src.bgcolor());
                 dst.bold = src.bold();
+                dst.dim = src.dim();
                 dst.italic = src.italic();
                 dst.underline = src.underline();
                 dst.inverse = src.inverse();
@@ -311,6 +312,15 @@ mod tests {
         assert_eq!(cell.text, "R");
         assert!(cell.bold);
         assert_eq!(cell.fg, Color::Idx(1));
+    }
+
+    #[test]
+    fn sgr_faint_is_carried() {
+        let mut s = TermState::new(Size { rows: 1, cols: 2 }, 0);
+        s.feed(b"\x1b[2mF\x1b[0mN");
+        let g = snap(&s);
+        assert!(g.cell(0, 0).unwrap().dim);
+        assert!(!g.cell(0, 1).unwrap().dim);
     }
 
     #[test]
