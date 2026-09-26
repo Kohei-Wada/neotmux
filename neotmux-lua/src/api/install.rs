@@ -48,6 +48,7 @@ pub(crate) struct Shared {
     /// could set it.
     pub(crate) ambient: Rc<crate::host::Ambient>,
     pub(crate) groups: Rc<Groups>,
+    pub(crate) sweep: Sweep,
 }
 
 pub(crate) fn make_handle(
@@ -192,17 +193,8 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
         home,
         ambient,
         groups,
+        sweep,
     } = shared;
-    let sweep = Sweep {
-        registry: registry.clone(),
-        buffers: buffers.clone(),
-        reservations: reservations.clone(),
-        floats: floats.clone(),
-        jobs: jobs.clone(),
-        timers: timers.clone(),
-        commands: commands.clone(),
-        panes: panes.clone(),
-    };
     let neotmux = lua.create_table()?;
 
     {

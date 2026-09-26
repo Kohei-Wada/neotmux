@@ -64,7 +64,7 @@ pub struct LuaSubsystem {
     jobs: Rc<Jobs>,
     timers: Rc<Timers>,
     groups: Rc<Groups>,
-    panes: Rc<dyn PaneRead>,
+    sweep: api::Sweep,
 }
 
 impl LuaSubsystem {
@@ -128,6 +128,16 @@ impl LuaSubsystem {
         let budget = Budget::new(opts.clone());
         Budget::seal(&lua, &budget).map_err(|err| anyhow::anyhow!("{err:#}"))?;
 
+        let sweep = api::Sweep {
+            registry: registry.clone(),
+            buffers: buffers.clone(),
+            reservations: reservations.clone(),
+            floats: floats.clone(),
+            jobs: jobs.clone(),
+            timers: timers.clone(),
+            commands: commands.clone(),
+            panes: panes.clone(),
+        };
         let loading = api::install(
             &lua,
             api::Shared {
@@ -142,7 +152,7 @@ impl LuaSubsystem {
                 pane_info: pane_info.clone(),
                 pane_tty: pane_tty.clone(),
                 notices: notices.clone(),
-                panes: panes.clone(),
+                panes,
                 clipboard,
                 jobs: jobs.clone(),
                 timers: timers.clone(),
@@ -153,6 +163,7 @@ impl LuaSubsystem {
                 home,
                 ambient: Rc::clone(&ambient),
                 groups: groups.clone(),
+                sweep: sweep.clone(),
             },
         )
         .map_err(|err| anyhow::anyhow!("{err:#}"))?;
@@ -181,7 +192,7 @@ impl LuaSubsystem {
             jobs,
             timers,
             groups,
-            panes,
+            sweep,
         })
     }
 
@@ -258,7 +269,7 @@ impl LuaSubsystem {
     /// Never called from inside Lua — the host calls it between frames.
     pub fn reload(&self, session: Option<SessionId>) -> Vec<LoadFailure> {
         self.dispatch_unload(session);
-        self.sweep().empty(self.groups.begin_reload());
+        self.sweep.empty(self.groups.begin_reload());
         *self.opts.borrow_mut() = Opts::default();
         self.overrun.forget_strikes();
         match self
@@ -281,21 +292,8 @@ impl LuaSubsystem {
             self.overrun.forget_parked(id);
         }
         let failures = self.run_init();
-        self.sweep().empty(self.groups.end_reload());
+        self.sweep.empty(self.groups.end_reload());
         failures
-    }
-
-    fn sweep(&self) -> api::Sweep {
-        api::Sweep {
-            registry: self.registry.clone(),
-            buffers: self.buffers.clone(),
-            reservations: self.reservations.clone(),
-            floats: self.floats.clone(),
-            jobs: self.jobs.clone(),
-            timers: self.timers.clone(),
-            commands: self.commands.clone(),
-            panes: self.panes.clone(),
-        }
     }
 
     /// One place a raised Lua error becomes an attributed error op. M1b needs to tell an
