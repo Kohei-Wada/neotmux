@@ -121,9 +121,11 @@ commands.last(id) -- the newest one, or nil
 ```
 
 - A command starts at a `prompt`, and any of `input`, `output`, `done` and `exit` may be missing.
-- `state` is one of three values:
+- `state` is one of four values:
   - `done` when a `done` mark closed it.
   - `running` when it has an `output` mark and no `done`, and it is the newest command.
+  - `prompt` when it is the newest command and has no `output` yet: the shell is waiting at its
+    prompt, and nothing has been run.
   - `unknown` when a newer prompt arrived before any `done`. That is the "marks stopped" case:
     the shell that would have sent `D` is not the one that sent the next `A`, or nothing was
     run at all.
@@ -167,7 +169,7 @@ of another hook. The first `D` a shell sends has no command before it, and §4 s
   - both `ST` forms, `BEL` and `ESC \`
 - **`neotmux-lua`.** `neotmux.pane.marks` answers with the spellings and the range. It answers
   nil for an unknown pane and `{}` for a pane with no marks. `neotmux.commands.of` returns
-  `done`, `running` and `unknown`, and skips a leading `done`.
+  `done`, `running`, `prompt` and `unknown`, and skips a leading `done`.
 - **By hand.** Start bash with the snippet inside neotmux and run `true`, `false` and
   `sleep 5`. A key handler logs `commands.of` for the pane. While `sleep` runs, the last
   command is `running`. Once it finishes it is `done` with exits 0, 1 and 0. Then `ssh` or
