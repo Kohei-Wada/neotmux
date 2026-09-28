@@ -162,9 +162,27 @@ fn session_cpu(client: u32, server: Option<u32>) -> f64 {
     cpu_seconds(client) + server.map(cpu_seconds).unwrap_or(0.0)
 }
 
-/// Spawns neotmux over a PTY with `plugins` as its runtime layer and reports the CPU seconds
-/// it spends over `window` once the session has settled.
-fn idle_cpu(plugins: &[(&str, &str)], window: Duration) -> f64 {
+/// A session started for measuring, kept alive until it is dropped.
+struct Idle {
+    child: Box<dyn portable_pty::Child + Send + Sync>,
+    pid: u32,
+    log: std::path::PathBuf,
+    _master: Box<dyn portable_pty::MasterPty + Send>,
+    // Declared before the directories so the server is ended before its runtime dir goes.
+    _end_session: session::EndsSession,
+    _isolation: tempfile::TempDir,
+    _runtime: tempfile::TempDir,
+}
+
+impl Drop for Idle {
+    fn drop(&mut self) {
+        self.child.kill().ok();
+        self.child.wait().ok();
+    }
+}
+
+/// Spawns neotmux over a PTY with `plugins` as its runtime layer.
+fn spawn_idle(plugins: &[(&str, &str)]) -> Idle {
     let pair = native_pty_system()
         .openpty(PtySize {
             rows: 24,
@@ -175,7 +193,7 @@ fn idle_cpu(plugins: &[(&str, &str)], window: Duration) -> f64 {
         .expect("openpty");
 
     let isolation = tempfile::tempdir().expect("isolation dir");
-    let _end_session = session::EndsSession::new(isolation.path());
+    let end_session = session::EndsSession::new(isolation.path());
     let runtime = tempfile::tempdir().expect("runtime dir");
     for (path, body) in plugins {
         let full = runtime.path().join(path);
@@ -183,6 +201,7 @@ fn idle_cpu(plugins: &[(&str, &str)], window: Duration) -> f64 {
         std::fs::write(full, body).expect("write plugin");
     }
 
+    let log = isolation.path().join("neotmux.log");
     let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_neotmux"));
     cmd.env("TERM", "xterm-256color");
     cmd.env("SHELL", "/bin/cat");
@@ -191,11 +210,10 @@ fn idle_cpu(plugins: &[(&str, &str)], window: Duration) -> f64 {
     cmd.env("XDG_RUNTIME_DIR", isolation.path());
     cmd.env("NEOTMUX_RUNTIME", runtime.path());
     cmd.arg("--log");
-    cmd.arg(isolation.path().join("neotmux.log"));
-    let mut child = pair.slave.spawn_command(cmd).expect("spawn");
+    cmd.arg(&log);
+    let child = pair.slave.spawn_command(cmd).expect("spawn");
     drop(pair.slave);
     let pid = child.process_id().expect("a pid");
-    let log = isolation.path().join("neotmux.log");
 
     // The output is drained so the multiplexer is never blocked on a full pipe.
     let mut reader = pair.master.try_clone_reader().expect("reader");
@@ -208,16 +226,39 @@ fn idle_cpu(plugins: &[(&str, &str)], window: Duration) -> f64 {
         }
     });
 
+    Idle {
+        child,
+        pid,
+        log,
+        _master: pair.master,
+        _end_session: end_session,
+        _isolation: isolation,
+        _runtime: runtime,
+    }
+}
+
+/// The CPU seconds each of `layers` spends over `window` once its session has settled, all
+/// of them measured over the same window. The claims below compare them with each other, and
+/// measured one after another each would carry whatever else the machine was doing at the
+/// time: a busy moment during one of them is enough to turn the comparison around.
+fn idle_cpu(layers: &[&[(&str, &str)]], window: Duration) -> Vec<f64> {
+    let sessions: Vec<Idle> = layers.iter().map(|plugins| spawn_idle(plugins)).collect();
+
     // The splits, the shells and the first frames are startup, not idle.
     std::thread::sleep(Duration::from_millis(1500));
-    let server = server_pid(&log);
-    let before = session_cpu(pid, server);
+    let servers: Vec<Option<u32>> = sessions.iter().map(|s| server_pid(&s.log)).collect();
+    let cpu = |sessions: &[Idle]| -> Vec<f64> {
+        sessions
+            .iter()
+            .zip(&servers)
+            .map(|(s, server)| session_cpu(s.pid, *server))
+            .collect()
+    };
+    let before = cpu(&sessions);
     std::thread::sleep(window);
-    let after = session_cpu(pid, server);
+    let after = cpu(&sessions);
 
-    child.kill().ok();
-    child.wait().ok();
-    after - before
+    after.iter().zip(&before).map(|(a, b)| a - b).collect()
 }
 
 /// The cost control has to be doing something. A plugin that asks about every pane on every
@@ -231,9 +272,18 @@ fn idle_cpu(plugins: &[(&str, &str)], window: Duration) -> f64 {
 fn reading_every_pane_every_tick_costs_about_nothing_while_the_session_is_idle() {
     const WINDOW: Duration = Duration::from_secs(3);
 
-    let base = idle_cpu(&[("init.lua", SPLITTER)], WINDOW);
-    let gated = idle_cpu(&[("init.lua", &format!("{SPLITTER}\n{GATED}"))], WINDOW);
-    let ungated = idle_cpu(&[("init.lua", &format!("{SPLITTER}\n{UNGATED}"))], WINDOW);
+    let gated = format!("{SPLITTER}\n{GATED}");
+    let ungated = format!("{SPLITTER}\n{UNGATED}");
+    let [base, gated, ungated] = idle_cpu(
+        &[
+            &[("init.lua", SPLITTER)],
+            &[("init.lua", &gated)],
+            &[("init.lua", &ungated)],
+        ],
+        WINDOW,
+    )[..] else {
+        unreachable!("one measurement per layer")
+    };
     println!("idle cpu over {WINDOW:?}: none {base:.3}s gated {gated:.3}s ungated {ungated:.3}s");
 
     let with_gate = gated - base;
@@ -282,12 +332,13 @@ end)
 fn sampling_every_pane_in_every_window_costs_about_nothing_while_the_session_is_idle() {
     const WINDOW: Duration = Duration::from_secs(3);
 
-    let one_pane = idle_cpu(&[], WINDOW);
-    let eight_panes = idle_cpu(&[("init.lua", WINDOWS)], WINDOW);
-    let reading = idle_cpu(
-        &[("init.lua", &format!("{WINDOWS}\n{INFO_EVERY_PANE}"))],
+    let reading = format!("{WINDOWS}\n{INFO_EVERY_PANE}");
+    let [one_pane, eight_panes, reading] = idle_cpu(
+        &[&[], &[("init.lua", WINDOWS)], &[("init.lua", &reading)]],
         WINDOW,
-    );
+    )[..] else {
+        unreachable!("one measurement per layer")
+    };
     println!(
         "idle cpu over {WINDOW:?}: one pane {one_pane:.3}s eight panes {eight_panes:.3}s \
          eight panes read every tick {reading:.3}s"
