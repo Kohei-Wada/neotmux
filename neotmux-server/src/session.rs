@@ -836,12 +836,19 @@ impl Session {
         self.wants_pane_output = wanted;
     }
 
-    /// The first half of a frame: the panes' output, and everything the client's Lua layer
-    /// has to be told before it ticks. The tick itself happens in the other process.
-    pub fn tick(&mut self) -> anyhow::Result<Tick> {
+    /// What the panes have written since, fed to their terminals between frames. The frame
+    /// it makes dirty is the next one.
+    pub fn drain(&mut self) -> anyhow::Result<()> {
         if self.drain_panes()? == DrainOutcome::Eof {
             self.ended = true;
         }
+        Ok(())
+    }
+
+    /// The first half of a frame: the panes' output, and everything the client's Lua layer
+    /// has to be told before it ticks. The tick itself happens in the other process.
+    pub fn tick(&mut self) -> anyhow::Result<Tick> {
+        self.drain()?;
         let pane_info = self.refresh_pane_info();
         let pane_tty = self.pane_tty();
         let now = Instant::now();

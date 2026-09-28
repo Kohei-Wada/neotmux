@@ -89,6 +89,44 @@ fn a_keystroke_is_echoed_back_well_inside_a_frame() {
     );
 }
 
+/// The other half of the same wait: output that never stops is drawn once a frame, not once
+/// per line. A pane writing every millisecond makes every frame one that ticks, so the ticks
+/// a plugin counts are the frames. Sixty-two is what 16 ms allows; the slack is the timer's.
+#[test]
+fn a_pane_that_writes_every_millisecond_is_drawn_once_a_frame() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let dir = harness::runtime(&[(
+        "init.lua",
+        "local ticks = 0\n\
+         neotmux.on_tick(function() ticks = ticks + 1 end)\n\
+         neotmux.timer.every(1000, function()\n\
+           neotmux.log.info('ticks in a second: ' .. ticks .. ';')\n\
+           ticks = 0\n\
+         end)",
+    )]);
+    let shell = dir.path().join("trickle");
+    std::fs::write(&shell, "#!/bin/sh\nwhile :; do echo x; sleep 0.001; done\n").expect("write");
+    std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    let nt = Neotmux::start_layered(&[dir.path()], shell.to_str().expect("utf8 path"));
+
+    // The first second began before the pane did; the two after it are the whole of one each.
+    nt.wait_until("three seconds of ticks", PATIENCE, |nt| {
+        nt.log_text().matches("ticks in a second: ").count() >= 3
+    });
+    let counts: Vec<u32> = nt
+        .log_text()
+        .lines()
+        .filter_map(|line| line.split_once("ticks in a second: "))
+        .filter_map(|(_, rest)| rest.split(';').next()?.parse().ok())
+        .skip(1)
+        .collect();
+    assert!(
+        counts.iter().all(|&ticks| ticks <= 70),
+        "a pane writing every millisecond was drawn more than once a frame: {counts:?} a second"
+    );
+}
+
 #[test]
 fn clock_draws_a_status_line_sized_from_ctx_size_on_every_frame() {
     let (mut nt, _init) = start("require('plugin.clock')", "/bin/cat");

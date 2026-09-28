@@ -136,6 +136,9 @@ fn serve(listener: &UnixListener, shutdown: &ShutdownSignal) -> anyhow::Result<(
     // still there at the next door look, rather than being a frame's own problem.
     let mut pending: Vec<Pending> = Vec::new();
     let born = Instant::now();
+    // When the last frame that pane output started began: the next one it starts waits a
+    // whole `FRAME` after it.
+    let mut cue: Option<Instant> = None;
 
     loop {
         if shutdown.raised().is_some() {
@@ -160,6 +163,7 @@ fn serve(listener: &UnixListener, shutdown: &ShutdownSignal) -> anyhow::Result<(
             &mut clients,
             &mut pending,
             &serving,
+            &mut cue,
         )? {
             return Ok(());
         }
@@ -412,6 +416,7 @@ fn frame(
     clients: &mut Vec<Attached>,
     pending: &mut Vec<Pending>,
     serving: &Serving<'_>,
+    cue: &mut Option<Instant>,
 ) -> anyhow::Result<bool> {
     // The door is looked at once a frame rather than polled on every wait: a client that
     // arrived while the previous frame was still running is adopted here, before the tick,
@@ -521,9 +526,15 @@ fn frame(
 
     // The rest of the frame's time belongs to whatever the clients have to say and to the
     // panes: a key reaches its shell the moment it arrives, and the panes' output is the cue
-    // to start the next frame rather than to wait the deadline out.
+    // to start the next frame rather than to wait the deadline out — but no sooner than a
+    // `FRAME` after the last frame it started, so a pane writing a line a millisecond is drawn
+    // sixty times a second rather than a thousand. The first output after a quiet spell is
+    // drawn at once, which is what keeps an echoed key from waiting.
     let mut live: Vec<usize> = Vec::with_capacity(clients.len() + 1);
     let frame_end = Instant::now() + FRAME;
+    let floor = cue.map(|at| at + FRAME);
+    // Output has arrived and the frame it starts is waiting for the floor.
+    let mut owed = false;
     loop {
         if serving.shutdown.raised().is_some() {
             return Ok(true);
@@ -537,13 +548,21 @@ fn frame(
                 deliver(clients, i, sessions, plugins);
             }
         }
-        if Instant::now() >= frame_end {
+        let now = Instant::now();
+        if now >= frame_end || (owed && floor.is_none_or(|floor| now >= floor)) {
+            if owed {
+                *cue = Some(now);
+            }
             break;
         }
         live.clear();
         // Not a held client: what it has is waiting on purpose, and would wake this every time.
         live.extend((0..clients.len()).filter(|&i| !clients[i].gone && !clients[i].held));
-        let ready = wait_over(clients, &live, serving.wakeup, frame_end)?;
+        let deadline = match floor {
+            Some(floor) if owed => floor.min(frame_end),
+            _ => frame_end,
+        };
+        let ready = wait_over(clients, &live, serving.wakeup, deadline)?;
         match ready {
             neotmux_sys::tty::Any::Ready(slot) => match live.get(slot).copied() {
                 Some(i) => {
@@ -551,10 +570,15 @@ fn frame(
                         deliver(clients, i, sessions, plugins);
                     }
                 }
-                // The panes: their output is the cue to start the next frame.
+                // The panes: their output is the cue to start the next frame. While that frame
+                // waits for the floor the output is still read, so the children are not held
+                // back to the pace of the drawing.
                 None => {
                     serving.wakeup.clear();
-                    break;
+                    for held in sessions.live.values_mut() {
+                        held.session.drain()?;
+                    }
+                    owed = true;
                 }
             },
             neotmux_sys::tty::Any::HangUp(slot) => {
