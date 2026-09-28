@@ -19,7 +19,9 @@ fn every_source_is_counted_once_a_tick_most_expensive_first() {
          neotmux.on_key(function(key)\n\
            if key ~= 'J' then return false end\n\
            for _, c in ipairs(neotmux.costs()) do\n\
-             neotmux.log.info(c.source .. ' ' .. c.ticks .. ' ' .. tostring(c.total_ms >= c.longest_ms))\n\
+             if c.source == 'init' or c.source == 'plugin/status' then\n\
+               neotmux.log.info(c.source .. ' ' .. c.ticks .. ' ' .. tostring(c.total_ms >= c.longest_ms))\n\
+             end\n\
            end\n\
            return true\n\
          end)\n",

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### When every line arrived
+
+`C-b t`, or the palette's `timestamps`, shows down each pane's left edge the time each line
+arrived, where it differs from the line above, on a gutter coloured by how long the pane sat
+before it: yellow after two seconds, red after ten. Every pane's times are kept from the start,
+hidden windows included, and a line takes its time with it when it falls off the history. A
+progress bar rewriting its row keeps the time it first appeared, and a full-screen program's
+rows get none.
+
 ### A plugin can read what colour a cell is
 
 `neotmux.pane.content(id, { runs = true })` answers each row as the stretches it is drawn in,

@@ -40,6 +40,9 @@ return {
   -- On, and nothing but a command in the palette: what each plugin's ticks cost, which the host
   -- counts whether or not anyone asks.
   costs = true,
+  -- On, and nothing on screen until `C-b t`: when every line of every pane arrived is kept
+  -- from the start, since a time nobody wrote down is one nobody can show later.
+  stamps = true,
   -- Off, unlike the four above: which command is worth stopping to ask about is an opinion
   -- about what you run, and one with no rules in it would stop nothing anyway.
   guard = false,
