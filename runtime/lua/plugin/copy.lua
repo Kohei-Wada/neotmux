@@ -508,6 +508,7 @@ end)
 -- `C-b [` unbound. Loading it here is what it was about to do anyway.
 if package.loaded["plugin.prefix"] or require("neotmux.defaults").prefix then
   require("plugin.prefix").commands["["] = M.enter
+  require("plugin.prefix").descriptions["["] = "enter copy mode"
 end
 
 return M

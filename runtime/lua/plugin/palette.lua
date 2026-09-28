@@ -301,6 +301,8 @@ if package.loaded["plugin.prefix"] or require("neotmux.defaults").prefix then
   require("plugin.prefix").commands["g"] = function()
     M.open("#")
   end
+  require("plugin.prefix").descriptions[":"] = "open the command palette"
+  require("plugin.prefix").descriptions["g"] = "go to an agent, from the palette's list of them"
 end
 
 return M

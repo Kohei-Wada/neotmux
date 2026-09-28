@@ -203,6 +203,7 @@ if package.loaded["plugin.prefix"] then
   require("plugin.prefix").commands["s"] = function()
     M.open()
   end
+  require("plugin.prefix").descriptions["s"] = "pick a session to switch to, make or end one"
 end
 
 return M

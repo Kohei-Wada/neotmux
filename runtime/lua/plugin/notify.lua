@@ -84,6 +84,7 @@ if package.loaded["plugin.prefix"] then
   require("plugin.prefix").commands["N"] = function()
     neotmux.notifications.clear()
   end
+  require("plugin.prefix").descriptions["N"] = "clear the notifications"
 end
 
 g.on_tick(function(ctx)

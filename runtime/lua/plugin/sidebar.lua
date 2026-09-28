@@ -330,6 +330,7 @@ end
 
 if prefix() then
   prefix().commands["b"] = M.toggle
+  prefix().descriptions["b"] = "fold the sidebar to its rail, or open it"
 end
 
 g.on_tick(function(ctx)
@@ -430,6 +431,8 @@ M.sections = {
 if prefix() then
   prefix().commands["w"] = require("plugin.sidebar.spaces").navigate
   prefix().commands["a"] = require("plugin.sidebar.agents").navigate
+  prefix().descriptions["w"] = "move a cursor over the sidebar's sessions"
+  prefix().descriptions["a"] = "move a cursor over the sidebar's agents"
 end
 
 return M

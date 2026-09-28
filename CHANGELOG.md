@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### `C-b ?` lists the keys
+
+`C-b ?` opens every prefix key in a list, as tmux's `list-keys` does: the key, the command it
+runs and what that command does. Enter runs the one under the cursor. A key a plugin bound to
+a function says what it does through `require('plugin.prefix').descriptions`.
+
 ### Sessions are numbered, not `default`
 
 `neotmux` with no name starts a new session every time, as tmux does, called the lowest number

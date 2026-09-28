@@ -1396,7 +1396,10 @@ width), `C-b -` splits horizontally (one above the other), `C-b o` focuses the n
 the first press unzooms), `C-b z` zooms the focused pane and back, `C-b r` enters
 resize mode, `C-b [` enters copy mode, `C-b s` opens the session picker, `C-b :` opens the
 command palette, `C-b c` opens a window and switches to it, and `C-b n` and `C-b p`
-walk to the next window and the one before, each wrapping around.
+walk to the next window and the one before, each wrapping around. `C-b ?` lists every one of
+them — the key, the command it runs, what that does — and Enter runs the one under the cursor.
+A plugin that binds a key to a function rather than a command's name says what it does in
+`require('plugin.prefix').descriptions[key]`, so the list has something to show for it.
 
 Every one of the prefix's own verbs is a `neotmux.command`, registered by `plugin.prefix`
 itself — the palette lists **commands, not keys**, so what it shows is whatever has been

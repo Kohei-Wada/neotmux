@@ -26,6 +26,14 @@
 --   c  n  p     a new window, the next one, the one before
 --   ,           name the window you are in; an empty name leaves it its number
 --   d           leave the session running and let go of this terminal
+--   ?           every key here, what it runs and what that does; Enter runs it
+--
+-- A key given a function rather than a command's name has no description to show there; the
+-- plugin that binds one says what it does in `descriptions`, under the same key:
+--
+--   prefix.commands['!'] = function() ... end
+--   prefix.descriptions['!'] = 'count the panes'
+local list = require("neotmux.list")
 local nav = require("neotmux.nav")
 local modes = require("neotmux.mode")
 local prompt = require("neotmux.prompt")
@@ -180,6 +188,11 @@ register("window-next", next_window, "switch to the next window")
 register("window-prev", prev_window, "switch to the window before this one")
 register("window-rename", rename_window, "name the window you are in")
 register("detach", leave_session, "leave the session running and let go of this terminal")
+-- Defined below, once `M` it reads is: the command only has to exist by the time it runs.
+local show_keys
+register("keys", function()
+  show_keys()
+end, "list every prefix key and what it does")
 
 local M = {
   key = "C-b",
@@ -203,7 +216,10 @@ local M = {
     ["p"] = "window-prev",
     [","] = "window-rename",
     ["d"] = "detach",
+    ["?"] = "keys",
   },
+  -- What a key whose entry is a function does, for `?`: a command's name brings its own.
+  descriptions = {},
 }
 
 -- Said now, with the key named alongside the name: silently, `C-b d` would run whichever
@@ -227,6 +243,69 @@ local function dispatch(key)
       neotmux.notify("error", why)
     end
   end
+end
+
+-- tmux's `list-keys` for this prefix: every key in `commands`, in key order, with the command
+-- it runs and that command's description. Read when it opens, so a key bound after load is in
+-- it, and Enter runs the one under the cursor as pressing it would have.
+local function key_rows()
+  local descs = {}
+  for _, command in ipairs(neotmux.command.list()) do
+    descs[command.name] = command.desc
+  end
+  local rows = {}
+  for key, target in pairs(M.commands) do
+    local name = type(target) == "string" and target or nil
+    rows[#rows + 1] = {
+      key = key,
+      name = name,
+      desc = (name and descs[name]) or M.descriptions[key] or "",
+    }
+  end
+  table.sort(rows, function(a, b)
+    return a.key < b.key
+  end)
+  return rows
+end
+
+local KEY_COLOURS = { key = "#89b4fa", name = "#cba6f7", desc = "#a6adc8" }
+
+function show_keys()
+  local rows = key_rows()
+  local key_width, name_width = 0, 0
+  for _, it in ipairs(rows) do
+    key_width = math.max(key_width, neotmux.width(M.key .. " " .. it.key))
+    name_width = math.max(name_width, neotmux.width(it.name or ""))
+  end
+  list.open({
+    title = "keys",
+    mode = "keys",
+    width = 0.8,
+    -- Every key at once where the terminal holds them; the list scrolls where it does not.
+    rows = #rows,
+    items = function()
+      return rows
+    end,
+    row = function(it)
+      local key = M.key .. " " .. it.key
+      local name = it.name or ""
+      return {
+        { text = key .. string.rep(" ", key_width - neotmux.width(key) + 2), fg = KEY_COLOURS.key },
+        {
+          text = name .. string.rep(" ", name_width - neotmux.width(name) + 2),
+          fg = KEY_COLOURS.name,
+        },
+        { text = it.desc, fg = KEY_COLOURS.desc },
+      }
+    end,
+    footer = function()
+      return "j k  enter run  esc close"
+    end,
+    done = function(it, handle)
+      handle:close()
+      dispatch(it.key)
+    end,
+  })
 end
 
 g.on_key(function(key)
