@@ -28,6 +28,7 @@
 -- Nothing here is a host feature. `neotmux.reserve('left', n)` takes the band,
 -- `handle:resize_to(n)` widens and folds it, and `ctx:reserved()` answers where it landed.
 local segments = require("status.segments")
+local style = require("neotmux.style")
 local g = neotmux.group("plugin.herdr.sidebar")
 
 local M = {}
@@ -43,37 +44,37 @@ M.widths = {
   closed = 4,
 }
 
--- Catppuccin Mocha, the palette the status bar was drawn from. Every section reads these, and
--- every field is read on the tick, so assigning to one from your own `init.lua` takes effect.
-M.colors = {
-  -- The band everything sits on: nil is the terminal's own background, which is herdr's.
-  bar = nil,
-  text = "#cdd6f4",
-  subtext = "#a6adc8", -- subtext0: a name you are not at
-  overlay = "#6c7086", -- overlay0: headers, and what is detail rather than name
-  branch = "#cba6f7", -- mauve: the branch of the session you are in
+-- Catppuccin Mocha, the palette the status bar was drawn from. Every section reads these
+-- through `style.get('sidebar')`, so restyling it with `neotmux.style.set('sidebar', ...)`
+-- takes effect on the next tick. `bar` has no default: the terminal's own background, which is
+-- herdr's.
+style.default("sidebar", {
+  text = "text",
+  subtext = "subtext0", -- a name you are not at
+  overlay = "overlay0", -- headers, and what is detail rather than name
+  branch = "mauve", -- the branch of the session you are in
   -- The rows you are at: the session you are in and the agent you are focused on.
-  here = "#1e1e2e", -- base
-  header = "#6c7086",
-  session = "#9399b2", -- overlay2: a session you are not in
-  current_session = "#f9e2af", -- yellow, so a session reads as a different kind of row
-  window = "#cdd6f4",
-  current_window = "#cba6f7", -- mauve, the status bar's accent for the window being shown
-  pane = "#6c7086", -- overlay0: a pane in a window you are not looking at
-  focused_pane = "#a6e3a1", -- green
+  here = "base",
+  header = "overlay0",
+  session = "overlay2", -- a session you are not in
+  current_session = "yellow", -- so a session reads as a different kind of row
+  window = "text",
+  current_window = "mauve", -- the status bar's accent for the window being shown
+  pane = "overlay0", -- a pane in a window you are not looking at
+  focused_pane = "green",
   -- The second row of an entry, and anything else that is detail rather than name.
-  detail = "#585b70", -- surface2
-  rule = "#1e1e2e", -- base: the band's right edge and the line between sections
+  detail = "surface2",
+  rule = "base", -- the band's right edge and the line between sections
   -- One per state, so the icon carries its meaning in the colour as well as the shape.
   -- herdr's, so a herdr user reads them without learning them again.
-  working = "#f9e2af", -- yellow
-  blocked = "#f38ba8", -- red: the one that wants you
-  done = "#94e2d5", -- teal: finished while you were not looking (`neotmux.seen`)
-  idle = "#a6e3a1", -- green
-  unknown = "#6c7086", -- a session with no agent in it, which has no state to say
+  working = "yellow",
+  blocked = "red", -- the one that wants you
+  done = "teal", -- finished while you were not looking (`neotmux.seen`)
+  idle = "green",
+  unknown = "overlay0", -- a session with no agent in it, which has no state to say
   -- The navigate cursor (`C-b w`, `C-b a`).
-  selection = "#313244", -- surface0
-}
+  selection = "surface0",
+})
 
 -- One per state, herdr's `dots`: the colour says which, the shape only whether anything is
 -- going on. herdr's `symbols` are one assignment away:
@@ -112,6 +113,7 @@ M.folds = { open = "\u{ab}", closed = "\u{bb}" } -- «, »
 -- A token answers its text, its colour and whether it is bold. One that answers nil or an empty
 -- string is left out, so a row whose tokens are all empty is no row.
 function M.row(tokens, names, it)
+  local c = style.get("sidebar")
   local runs = {}
   for _, name in ipairs(names) do
     local token = tokens[name]
@@ -119,10 +121,9 @@ function M.row(tokens, names, it)
       local text, colour, bold = token(it)
       if text and text ~= "" then
         if #runs > 0 then
-          runs[#runs + 1] = { text = " ", bg = M.colors.bar }
+          runs[#runs + 1] = { text = " ", bg = c.bar }
         end
-        runs[#runs + 1] =
-          { text = text, fg = colour or M.colors.detail, bg = M.colors.bar, bold = bold }
+        runs[#runs + 1] = { text = text, fg = colour or c.detail, bg = c.bar, bold = bold }
       end
     end
   end
@@ -133,7 +134,8 @@ end
 -- number is how many rows are not on screen on that side.
 local function arrow(glyph)
   return function(n)
-    return { { text = glyph .. " " .. n, fg = M.colors.detail, bg = M.colors.bar } }
+    local c = style.get("sidebar")
+    return { { text = glyph .. " " .. n, fg = c.detail, bg = c.bar } }
   end
 end
 
@@ -238,11 +240,11 @@ local function header(section, width)
   if gap < 1 then
     right, gap = "", 0
   end
-  local style = { fg = M.colors.header, bg = M.colors.bar, bold = true }
+  local c = style.get("sidebar")
   return {
-    { text = left, fg = style.fg, bg = style.bg, bold = true },
-    { text = string.rep(" ", gap), bg = style.bg },
-    { text = right, fg = style.fg, bg = style.bg, bold = true },
+    { text = left, fg = c.header, bg = c.bar, bold = true },
+    { text = string.rep(" ", gap), bg = c.bar },
+    { text = right, fg = c.header, bg = c.bar, bold = true },
   }
 end
 
@@ -260,8 +262,9 @@ local function draw_row(ctx, x, y, width, runs)
   if runs.fill then
     ctx:rect(nil, x, y, width, 1, { bg = runs.fill })
     -- Over the band's own colour too, which `row` gives every run it builds.
+    local c = style.get("sidebar")
     for _, run in ipairs(runs) do
-      if run.bg == nil or run.bg == M.colors.bar then
+      if run.bg == nil or run.bg == c.bar then
         run.bg = runs.fill
       end
     end
@@ -323,6 +326,7 @@ end
 require("neotmux.bind").prefix("b", M.toggle, "fold the sidebar to its rail, or open it")
 
 g.on_tick(function(ctx)
+  local c = style.get("sidebar")
   local band = ctx:reserved()
   -- Nil while the terminal is too narrow to spare the columns. The panes have them back, so
   -- there is nowhere to draw and nothing to draw over.
@@ -358,13 +362,13 @@ g.on_tick(function(ctx)
     end
   end
 
-  ctx:rect(nil, band.x, band.y, band.w, band.h, { bg = M.colors.bar })
+  ctx:rect(nil, band.x, band.y, band.w, band.h, { bg = c.bar })
 
   local ruled = band.w > 1
   local inner = ruled and band.w - 1 or band.w
   if ruled then
     for row = band.y, band.y + band.h - 1 do
-      ctx:text(nil, band.x + inner, row, M.rule, { fg = M.colors.rule, bg = M.colors.bar })
+      ctx:text(nil, band.x + inner, row, M.rule, { fg = c.rule, bg = c.bar })
     end
   end
 
@@ -374,7 +378,7 @@ g.on_tick(function(ctx)
     height = height - 1
     local glyph = rail and M.folds.closed or M.folds.open
     local x = rail and band.x + math.floor((inner - 1) / 2) or band.x + inner - 1
-    ctx:text(nil, x, band.y + height, glyph, { fg = M.colors.overlay, bg = M.colors.bar })
+    ctx:text(nil, x, band.y + height, glyph, { fg = c.overlay, bg = c.bar })
   end
 
   local heights = heights_of(live, height)
@@ -386,7 +390,7 @@ g.on_tick(function(ctx)
     local top = y
     if i > 1 and room then
       local line = string.rep("\u{2500}", inner)
-      ctx:text(nil, band.x, top, line, { fg = M.colors.rule, bg = M.colors.bar })
+      ctx:text(nil, band.x, top, line, { fg = c.rule, bg = c.bar })
       top = top + 1
     end
     if it.section.title and not rail and room then

@@ -19,6 +19,7 @@ local detect = require("neotmux.detect")
 local modes = require("neotmux.mode")
 local seen = require("neotmux.seen")
 local state = require("neotmux.state")
+local style = require("neotmux.style")
 local g = neotmux.group("plugin.herdr.sidebar.agents")
 
 local M = { title = "agents", share = 0.5, always = true }
@@ -42,37 +43,37 @@ M.clock = function()
   return neotmux.now()
 end
 
--- The sidebar, set by `build` for the tokens.
-local sidebar
+-- The sidebar, set by `build` for the tokens, and the sidebar's colours, taken with it.
+local sidebar, c
 
 M.tokens = {
   state_icon = function(it)
-    return sidebar.icon(it.state), sidebar.colors[it.state]
+    return sidebar.icon(it.state), c[it.state]
   end,
   state_text = function(it)
-    return it.state, sidebar.colors[it.state]
+    return it.state, c[it.state]
   end,
   session = function(it)
-    return it.session, it.focused and sidebar.colors.text or sidebar.colors.subtext, true
+    return it.session, it.focused and c.text or c.subtext, true
   end,
   window = function(it)
     if it.windows < 2 then
       return nil
     end
-    return it.window_name or tostring(it.window), sidebar.colors.subtext
+    return it.window_name or tostring(it.window), c.subtext
   end,
   location = function(it)
     return it.session .. ":" .. it.window .. "." .. it.pane,
-      it.focused and sidebar.colors.focused_pane or sidebar.colors.window
+      it.focused and c.focused_pane or c.window
   end,
   agent = function(it)
-    return it.agent, sidebar.colors.overlay
+    return it.agent, c.overlay
   end,
   command = function(it)
-    return it.command, sidebar.colors.overlay
+    return it.command, c.overlay
   end,
   age = function(it)
-    return it.age, sidebar.colors.overlay
+    return it.age, c.overlay
   end,
 }
 
@@ -196,14 +197,14 @@ end, { desc = "go to the previous agent" })
 M.cursor = nil
 
 function M.build(given)
-  sidebar = given
+  sidebar, c = given, style.get("sidebar")
   local rows, anchor = {}, nil
   for index, it in ipairs(M.collect()) do
     local selected = M.cursor == index
     if (it.focused and not M.cursor) or selected then
       anchor = #rows + 1
     end
-    local fill = selected and sidebar.colors.selection or it.focused and sidebar.colors.here or nil
+    local fill = selected and c.selection or it.focused and c.here or nil
     for at, names in ipairs(M.rows) do
       local runs = sidebar.row(M.tokens, names, it)
       if #runs > 0 then
@@ -218,14 +219,14 @@ end
 
 -- Folded: `1 ●`, an agent a row, numbered as `1`-`9` in navigate go to them.
 function M.rail(given)
-  sidebar = given
+  sidebar, c = given, style.get("sidebar")
   local rows = {}
   for at, it in ipairs(M.collect()) do
     rows[#rows + 1] = {
-      { text = tostring(at), fg = it.focused and sidebar.colors.text or sidebar.colors.overlay },
+      { text = tostring(at), fg = it.focused and c.text or c.overlay },
       { text = " " },
-      { text = sidebar.icon(it.state), fg = sidebar.colors[it.state] },
-      fill = it.focused and sidebar.colors.here or nil,
+      { text = sidebar.icon(it.state), fg = c[it.state] },
+      fill = it.focused and c.here or nil,
     }
   end
   return rows

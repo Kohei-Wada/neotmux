@@ -19,6 +19,7 @@ local sessions = require("plugin.herdr.sidebar.sessions")
 local seen = require("neotmux.seen")
 local state = require("neotmux.state")
 local modes = require("neotmux.mode")
+local style = require("neotmux.style")
 local g = neotmux.group("plugin.herdr.sidebar.spaces")
 
 local M = { title = "spaces" }
@@ -45,29 +46,29 @@ M.refresh = 5000
 M.asks_per_build = 2
 local budget = 0
 
--- The sidebar, set by `build` for the tokens.
-local sidebar
+-- The sidebar, set by `build` for the tokens, and the sidebar's colours, taken with it.
+local sidebar, c
 
 M.tokens = {
   state_icon = function(it)
-    return sidebar.icon(it.state), sidebar.colors[it.state]
+    return sidebar.icon(it.state), c[it.state]
   end,
   name = function(it)
     if it.here then
-      return it.name, sidebar.colors.text, true
+      return it.name, c.text, true
     end
-    return it.name, sidebar.colors.subtext
+    return it.name, c.subtext
   end,
   branch = function(it)
-    return it.git and it.git.branch, it.here and sidebar.colors.branch or sidebar.colors.overlay
+    return it.git and it.git.branch, it.here and c.branch or c.overlay
   end,
   ahead = function(it)
     local n = it.git and it.git.ahead or 0
-    return n > 0 and ("\u{2191}" .. n) or nil, sidebar.colors.idle -- ↑, green
+    return n > 0 and ("\u{2191}" .. n) or nil, c.idle -- ↑, green
   end,
   behind = function(it)
     local n = it.git and it.git.behind or 0
-    return n > 0 and ("\u{2193}" .. n) or nil, sidebar.colors.blocked -- ↓, red
+    return n > 0 and ("\u{2193}" .. n) or nil, c.blocked -- ↓, red
   end,
 }
 
@@ -169,12 +170,12 @@ end
 -- Shaped as `plugin.herdr.sidebar.sessions` shapes its model, each space's own rows and the tree
 -- hung under the one you are in, so that section's fit cuts this one the same way.
 function M.build(given)
-  sidebar = given
+  sidebar, c = given, style.get("sidebar")
   local rows, anchor, spaces = {}, 1, {}
   local tree = { rows = {} }
   for at, it in ipairs(entries()) do
     local selected = M.cursor == at
-    local fill = selected and sidebar.colors.selection or it.here and sidebar.colors.here or nil
+    local fill = selected and c.selection or it.here and c.here or nil
     if (it.here and not M.cursor) or selected then
       anchor = #rows + 1
     end
@@ -203,7 +204,7 @@ function M.build(given)
       end
     end
     for _ = 1, M.row_gap or 0 do
-      rows[#rows + 1] = { { text = "", bg = sidebar.colors.bar } }
+      rows[#rows + 1] = { { text = "", bg = c.bar } }
     end
   end
   return { rows = rows, anchor = anchor, entries = spaces, tree = tree }
@@ -220,14 +221,14 @@ end
 
 -- Folded: `1 ●`, a session a row, numbered as `1`-`9` in navigate go to them.
 function M.rail(given)
-  sidebar = given
+  sidebar, c = given, style.get("sidebar")
   local rows = {}
   for at, it in ipairs(entries()) do
     rows[#rows + 1] = {
-      { text = tostring(at), fg = it.here and sidebar.colors.text or sidebar.colors.overlay },
+      { text = tostring(at), fg = it.here and c.text or c.overlay },
       { text = " " },
-      { text = sidebar.icon(it.state), fg = sidebar.colors[it.state] },
-      fill = it.here and sidebar.colors.here or nil,
+      { text = sidebar.icon(it.state), fg = c[it.state] },
+      fill = it.here and c.here or nil,
     }
   end
   return rows
@@ -292,19 +293,20 @@ end
 local MOVES = { j = 1, Down = 1, k = -1, Up = -1 }
 
 -- herdr's, along the bottom row while the cursor is up: that you are in it and what the keys do.
-M.bar_colors = { mode = "#89b4fa", on = "#181825", text = "#6c7086" }
+-- Restyle it with `neotmux.style.set('sidebar.bar', ...)`.
+style.default("sidebar.bar", { mode = "blue", on = "mantle", text = "overlay0" })
 
 -- `what` is what the arrows move between: `workspace` here, `agent` for the agents'.
 function M.help_bar(ctx, what)
   local area = ctx:area()
   local y = area.y + area.h - 1
-  local c = M.bar_colors
-  ctx:rect(nil, area.x, y, area.w, 1, { bg = c.on })
+  local bar_c = style.get("sidebar.bar")
+  ctx:rect(nil, area.x, y, area.w, 1, { bg = bar_c.on })
   require("status.segments").draw(ctx, area.x, y, area.w, {
-    { text = " NAVIGATE ", fg = c.on, bg = c.mode, bold = true },
-    { text = " esc back  ", fg = c.text, bg = c.on },
-    { text = "\u{2191}/\u{2193}", fg = c.mode, bg = c.on, bold = true },
-    { text = " " .. what, fg = c.text, bg = c.on },
+    { text = " NAVIGATE ", fg = bar_c.on, bg = bar_c.mode, bold = true },
+    { text = " esc back  ", fg = bar_c.text, bg = bar_c.on },
+    { text = "\u{2191}/\u{2193}", fg = bar_c.mode, bg = bar_c.on, bold = true },
+    { text = " " .. what, fg = bar_c.text, bg = bar_c.on },
   })
 end
 

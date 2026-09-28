@@ -9,9 +9,9 @@
 --   sessions.panes.rows = { { 'state_icon', 'number', 'command' } }
 --
 -- so moving what is on which line, or dropping a token you do not care about, is an assignment
--- rather than a fork of this file. The colours are the sidebar's:
--- `require('plugin.herdr.sidebar').colors`.
+-- rather than a fork of this file. The colours are the sidebar's: `style.get('sidebar')`.
 local state = require("neotmux.state")
+local style = require("neotmux.style")
 
 local M = {}
 
@@ -177,7 +177,7 @@ end
 -- `plugin.herdr.sidebar.spaces` hangs the same rows under the space you are in, laid out by its own
 -- `levels`: `{ windows = ..., panes = ... }`, shaped as `M.windows` and `M.panes` are.
 function M.subtree(sidebar, out, levels)
-  colors = sidebar.colors
+  colors = style.get("sidebar")
   levels = levels or M
   local anchor
   local current_window = neotmux.window.current()
@@ -218,7 +218,7 @@ end
 -- Beside the rows, what a fit needs to cut them sensibly: each session's own rows and which one
 -- is here, and the subtree hung under it with the row inside it worth keeping.
 function M.build(sidebar)
-  colors = sidebar.colors
+  colors = style.get("sidebar")
   local rows, entries, anchor = {}, {}, 1
   local tree = { rows = {} }
   local here = neotmux.session.current()
@@ -261,7 +261,7 @@ end
 -- row and no subtree; else those first rows scrolled around the one you are in. Where a session
 -- is, is the thing the sidebar is for, and the panes of the one you are in are on your screen.
 function M.fit(model, height, sidebar)
-  colors = sidebar.colors
+  colors = style.get("sidebar")
   if #model.rows <= height then
     return model.rows
   end

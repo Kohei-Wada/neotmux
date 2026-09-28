@@ -1088,7 +1088,7 @@ fn navigate_says_so_along_the_bottom_and_paints_the_cursor() {
 /// on, whatever the band is.
 #[test]
 fn a_band_colour_of_your_own_still_shows_the_rows_you_are_at() {
-    let (_dir, sub) = built_herdr("require('plugin.herdr.sidebar').colors.bar = '#181825'\n");
+    let (_dir, sub) = built_herdr("require('neotmux.style').set('sidebar', { bar = '#181825' })\n");
     let s = [Sess::new(1, "work", vec![vec![101]])];
     open(&sub, &s);
     settled(&sub, &s, 1);
