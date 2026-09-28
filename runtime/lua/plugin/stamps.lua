@@ -1,32 +1,35 @@
 -- When every line of every pane arrived, and how long each one kept you waiting.
 --
 -- A terminal forgets the one thing about a line it cannot get back: when it came. This keeps
--- it, for every pane in every window, and `C-b t` (or the palette's `timestamps`) shows it
--- down each pane's left edge — the time a line arrived, where it differs from the line above,
--- on a gutter coloured by how long the pane sat before it:
+-- it, for every pane in every window, and `C-b t` (or the palette's `timestamps`) shows it in a
+-- band down each pane's left edge — the time a line arrived, where it differs from the line
+-- above, yellow or red when the pane sat still before it:
 --
 --   require('plugin.stamps').stall = { slow = 2, stuck = 10 }   -- seconds: yellow, then red
 --
--- The gutter covers the first columns of the pane while it is shown, which is why it is shown
--- only when asked for. A time is known per tick, not per line — lines that came together get
--- the same one — and only a line that is new gets one: a progress bar rewriting its row keeps
--- the time it first appeared, and nothing is kept while a pane is on its alternate screen. A
--- line that falls off the pane's history takes its time with it.
+-- The band is the pane's own columns, not drawn over them: while it is shown, every pane's
+-- shell is that many columns narrower, and hiding it gives them back. A time is known per tick,
+-- not per line — lines that came together get the same one — and only a line that is new gets
+-- one: a progress bar rewriting its row keeps the time it first appeared, and nothing is kept
+-- while a pane is on its alternate screen. A line that falls off the pane's history takes its
+-- time with it.
 local g = neotmux.group("plugin.stamps")
 
 local M = {
   shown = false,
-  -- How long a pane sat before a line for the gutter to say so, in seconds.
+  -- How long a pane sat before a line for the band to say so, in seconds.
   stall = { slow = 2, stuck = 10 },
-  -- The gutter: `HH:MM:SS` and a space.
-  width = 9,
+  -- `HH:MM:SS`, a space, and the rule.
+  width = 10,
   colors = {
-    time = "#a6adc8",
-    gutter = "#181825",
+    time = "#6c7086",
+    rule = "#45475a",
     slow = "#f9e2af",
     stuck = "#f38ba8",
   },
 }
+
+local band
 
 -- Per pane: `next`, the line number the pane will write next, and `at`, each line's arrival
 -- in `os.time()` seconds, keyed by line number. A line number counts every line the pane has
@@ -102,28 +105,25 @@ end
 
 local function draw(ctx, pane)
   local it = panes[pane]
-  local rect = ctx:pane_rect(pane)
+  local rect = ctx:pane_band(pane)
   if it == nil or rect == nil or it.top == nil then
     return
   end
-  local width = math.min(M.width, rect.w)
+  local rule = rect.x + rect.w - 1
   for row = 0, rect.h - 1 do
+    ctx:text(nil, rule, rect.y + row, "│", { fg = M.colors.rule })
     local line = it.top + row
     local at = it.at[line]
-    if at then
-      local before = it.at[line - 1]
+    local before = it.at[line - 1]
+    if at and before ~= at then
       local waited = before and at - before or 0
-      local bg = M.colors.gutter
+      local fg = M.colors.time
       if waited >= M.stall.stuck then
-        bg = M.colors.stuck
+        fg = M.colors.stuck
       elseif waited >= M.stall.slow then
-        bg = M.colors.slow
+        fg = M.colors.slow
       end
-      ctx:rect(pane, 0, row, width, 1, { bg = bg })
-      if before ~= at then
-        local fg = bg == M.colors.gutter and M.colors.time or M.colors.gutter
-        ctx:text(pane, 0, row, os.date("%H:%M:%S", at):sub(1, width), { fg = fg, bg = bg })
-      end
+      ctx:text(nil, rect.x, rect.y + row, os.date("%H:%M:%S", at):sub(1, rect.w - 2), { fg = fg })
     end
   end
 end
@@ -146,6 +146,12 @@ end)
 
 function M.toggle()
   M.shown = not M.shown
+  if M.shown then
+    band = g.reserve_pane("left", M.width)
+  elseif band then
+    band:remove()
+    band = nil
+  end
 end
 
 g.command.add("timestamps", M.toggle, {

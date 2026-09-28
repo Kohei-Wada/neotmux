@@ -2,8 +2,8 @@
 
 mod support;
 
-use neotmux_proto::DrawCmd;
-use support::{Built, built, feed, keys, one, pane};
+use neotmux_proto::{Color, DrawCmd, Epoch, Geometry, Rect};
+use support::{Built, SIZE, built, feed, keys, one, pane};
 
 const SHOWN: &str = "require('plugin.stamps')\n\
     neotmux.on_key(function(key)\n\
@@ -12,19 +12,39 @@ const SHOWN: &str = "require('plugin.stamps')\n\
       return true\n\
     end)\n";
 
-/// The `HH:MM:SS` drawn at each row of the gutter, and the rows painted with nothing on them.
-fn gutter(sub: &Built) -> (Vec<(u16, String)>, Vec<u16>) {
+/// What the host publishes once it has taken the band off the pane: the pane's outer rect over
+/// the whole surface and its content ten columns in.
+fn banded(sub: &Built) {
+    let outer = Rect::new(0, 0, SIZE.cols, SIZE.rows);
+    sub.begin_frame(
+        one(),
+        Epoch::new(SIZE, vec![pane()], Some(pane())),
+        Geometry {
+            area: outer,
+            panes: vec![(pane(), Rect::new(10, 0, SIZE.cols - 10, SIZE.rows))],
+            outer: vec![(pane(), outer)],
+            focus: Some(pane()),
+            ..Default::default()
+        },
+    );
+}
+
+/// Each row's time, with the colour it is written in, and the rows the rule is drawn down.
+fn gutter(sub: &Built) -> (Vec<(u16, String, Color)>, Vec<u16>) {
     sub.dispatch_tick(one());
     let mut times = Vec::new();
-    let mut painted = Vec::new();
+    let mut rule = Vec::new();
     for cmd in sub.frame_output() {
         match cmd {
-            DrawCmd::Text { x: 0, y, text, .. } if is_time(&text) => times.push((y, text)),
-            DrawCmd::Rect { rect, .. } if rect.x == 0 => painted.push(rect.y),
+            DrawCmd::Text {
+                x: 0, y, text, fg, ..
+            } if is_time(&text) => times.push((y, text, fg)),
+            DrawCmd::Text { x: 9, y, text, .. } if text == "│" => rule.push(y),
+            DrawCmd::Rect { .. } => panic!("the band paints no background: {cmd:?}"),
             _ => {}
         }
     }
-    (times, painted)
+    (times, rule)
 }
 
 fn is_time(text: &str) -> bool {
@@ -56,17 +76,18 @@ fn lines_that_came_together_share_one_time_written_once() {
     publish(&sub);
     sub.dispatch_tick(one());
     more(&sub, b"one\r\ntwo\r\nthree\r\n");
-    let (times, painted) = gutter(&sub);
+    let (times, rule) = gutter(&sub);
     assert!(
-        times.is_empty() && painted.is_empty(),
+        times.is_empty() && rule.is_empty(),
         "drawn before it was asked for"
     );
 
     keys(&sub, &["T"]);
-    let (times, painted) = gutter(&sub);
+    banded(&sub);
+    let (times, rule) = gutter(&sub);
     assert_eq!(times.len(), 1, "{times:?}");
     assert_eq!(times[0].0, 0, "the time is on the first of them: {times:?}");
-    assert_eq!(painted, vec![0, 1, 2]);
+    assert_eq!(rule, (0..SIZE.rows).collect::<Vec<_>>());
 }
 
 /// A full-screen program's rows are not lines: nothing is stamped on the alternate screen.
@@ -78,11 +99,9 @@ fn nothing_is_stamped_on_the_alternate_screen() {
     sub.dispatch_tick(one());
     more(&sub, b"top\r\nof\r\nhtop\r\n");
     keys(&sub, &["T"]);
-    let (times, painted) = gutter(&sub);
-    assert!(
-        times.is_empty() && painted.is_empty(),
-        "{times:?} {painted:?}"
-    );
+    banded(&sub);
+    let (times, _rule) = gutter(&sub);
+    assert!(times.is_empty(), "{times:?}");
 }
 
 /// A line that came after the pane sat still for longer than `stall.slow` is painted so.
@@ -99,19 +118,21 @@ fn a_line_after_a_wait_is_coloured_by_it() {
     std::thread::sleep(std::time::Duration::from_millis(1100));
     more(&sub, b"after\r\n");
     keys(&sub, &["T"]);
-    sub.dispatch_tick(one());
-    let slow = neotmux_proto::Color::Rgb(0xf9, 0xe2, 0xaf);
-    let rows: Vec<(u16, neotmux_proto::Color)> = sub
-        .frame_output()
-        .into_iter()
-        .filter_map(|cmd| match cmd {
-            DrawCmd::Rect { rect, bg, .. } if rect.x == 0 => Some((rect.y, bg)),
-            _ => None,
-        })
-        .collect();
-    assert!(
-        rows.contains(&(1, slow)),
-        "the line after the wait was not marked: {rows:?}"
-    );
-    assert!(!rows.contains(&(0, slow)), "{rows:?}");
+    banded(&sub);
+    let (times, _rule) = gutter(&sub);
+    let slow = Color::Rgb(0xf9, 0xe2, 0xaf);
+    let on_row = |row: u16| times.iter().find(|(y, ..)| *y == row).map(|(_, _, fg)| *fg);
+    assert_eq!(on_row(1), Some(slow), "{times:?}");
+    assert_ne!(on_row(0), Some(slow), "{times:?}");
+}
+
+/// Hidden, the plugin holds no band, so the panes get their columns back.
+#[test]
+fn hiding_the_times_gives_the_columns_back() {
+    let (_dir, sub) = built(SHOWN);
+    assert_eq!(sub.pane_band(), 0);
+    keys(&sub, &["T"]);
+    assert_eq!(sub.pane_band(), 10);
+    keys(&sub, &["T"]);
+    assert_eq!(sub.pane_band(), 0);
 }
