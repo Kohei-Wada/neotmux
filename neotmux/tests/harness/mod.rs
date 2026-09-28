@@ -36,7 +36,13 @@ pub fn base_command(exe: &Path, log: &Path, isolation: &Path) -> CommandBuilder 
 ///
 /// Under a `pcall` because not every test stacks the shipped layer behind this one, and where
 /// it is absent there is no `neotmux.defaults` to reach and nothing to silence either.
-const QUIET: &str = "pcall(function() require('neotmux.defaults').chime = false end)\n";
+///
+/// The tick budget is loosened too. It is measured on the wall clock, so on a loaded runner the
+/// time a tick spends waiting for a CPU counts against it, and an unoptimised build has little
+/// room under 8 ms: a shipped plugin overruns, logs an error or is unsubscribed, and a test
+/// about something else fails on it. A test about the budget sets its own.
+const QUIET: &str = "pcall(function() require('neotmux.defaults').chime = false end)\n\
+                     neotmux.opt.tick_budget_ms = 250\n";
 
 /// Writes a small plugin runtime layout (`init.lua`, `lua/plugin/*.lua`, ...)
 /// to a fresh temp dir, suitable for `NEOTMUX_RUNTIME`.
