@@ -10,5 +10,6 @@ pub struct Tock {
     pub overlay: Vec<DrawCmd>,
     pub reserved: Reserved,
     pub gutter: u16,
+    pub pane_band: u16,
     pub wants_pane_output: bool,
 }

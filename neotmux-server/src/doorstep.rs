@@ -320,6 +320,7 @@ fn admit(
         first_window: lua.reserve_window_id(),
         reserved: lua.reserved(),
         gutter: lua.opt().pane_gutter,
+        pane_band: lua.pane_band(),
         wants_pane_output: lua.has_subscriber("pane_output"),
     };
     let name = attach

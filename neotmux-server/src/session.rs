@@ -103,7 +103,7 @@ impl Session {
             size: clamp_to_min_grid(setup.size),
             reserved: setup.reserved,
             gutter: setup.gutter,
-            pane_band: 0,
+            pane_band: setup.pane_band,
             minimum: neotmux_proto::MIN_GRID,
         };
         let (windows, first) = Windows::new(setup.first_window, surface, pane_ids);
@@ -315,6 +315,7 @@ impl Session {
         self.surface.size = clamp_to_min_grid(setup.size);
         self.surface.reserved = setup.reserved;
         self.surface.gutter = setup.gutter;
+        self.surface.pane_band = setup.pane_band;
         self.wants_pane_output = setup.wants_pane_output;
         // What happened while nobody was looking is not news for a client that was not
         // there: geometry is how a plugin learns what exists, events how it learns what
@@ -717,6 +718,16 @@ impl Session {
         true
     }
 
+    /// Whether the columns every pane gives up just changed, which changes every pane's size.
+    /// Sampled at the frame boundary for the same reason `reserved_changed` is.
+    fn pane_band_changed(&mut self, pane_band: u16) -> bool {
+        if pane_band == self.surface.pane_band {
+            return false;
+        }
+        self.surface.pane_band = pane_band;
+        true
+    }
+
     /// The shared part of any picture: the session's dirty and the panes' grids are
     /// frozen before the render, because a render is what clears the dirty, and a hidden
     /// pane's terminal goes on taking its child's output, but copying its grid into a
@@ -778,7 +789,8 @@ impl Session {
         }
         let reserved_changed = self.reserved_changed(tock.reserved);
         let gutter_changed = self.gutter_changed(tock.gutter);
-        if reserved_changed || gutter_changed {
+        let pane_band_changed = self.pane_band_changed(tock.pane_band);
+        if reserved_changed || gutter_changed || pane_band_changed {
             self.apply_geometry()?;
         }
         let eof = self.ended;

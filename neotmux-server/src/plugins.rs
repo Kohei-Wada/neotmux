@@ -158,6 +158,7 @@ impl Plugins {
             overlay,
             reserved: self.lua.reserved(),
             gutter: self.lua.opt().pane_gutter,
+            pane_band: self.lua.pane_band(),
             wants_pane_output: self.lua.has_subscriber("pane_output"),
         };
         Answer {

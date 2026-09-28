@@ -47,6 +47,7 @@ fn halves(files: &[(&str, &str)]) -> (tempfile::TempDir, Wakeup, Session, Plugin
             first_window: WindowId::from(1),
             reserved: Reserved::default(),
             gutter: 0,
+            pane_band: 0,
             wants_pane_output: false,
         },
         waker,
@@ -366,6 +367,7 @@ fn two_applies_are_two_stops_on_the_way_to_two_frames() {
         overlay: Vec::new(),
         reserved: neotmux_proto::Reserved::default(),
         gutter: 0,
+        pane_band: 0,
         wants_pane_output: false,
     };
     // A fresh session hands out with its own steps already queued (`Session::new`:
@@ -451,5 +453,65 @@ fn a_quiet_session_skips_its_ticks_until_a_key_or_the_idle_interval() {
     assert!(
         frame(&mut session, &mut plugins).frame.is_some(),
         "a quarter of a second went by and nothing ticked"
+    );
+}
+
+/// A pane band held by a plugin narrows the pane's shell by its columns and moves its grid
+/// across, and giving it back puts both back.
+#[test]
+fn a_pane_band_narrows_the_shell_and_giving_it_back_widens_it() {
+    let (_dir, _wakeup, mut session, mut plugins) = halves(&[(
+        "init.lua",
+        "local held\n\
+         neotmux.keymap.set('B', function()\n\
+           if held then held:remove() held = nil\n\
+           else held = neotmux.reserve_pane('left', 10) end\n\
+           return true\n\
+         end)\n",
+    )]);
+    key(&mut session, &plugins, Key::plain(KeyCode::Char('B')));
+    assert!(
+        step_until(&mut session, &mut plugins, |frame| {
+            frame
+                .panes
+                .iter()
+                .all(|pane| pane.rect.x == 10 && pane.grid.size.cols == SURFACE.cols - 10)
+        }),
+        "the pane was not narrowed"
+    );
+    key(&mut session, &plugins, Key::plain(KeyCode::Char('B')));
+    assert!(
+        step_until(&mut session, &mut plugins, |frame| {
+            frame
+                .panes
+                .iter()
+                .all(|pane| pane.rect.x == 0 && pane.grid.size.cols == SURFACE.cols)
+        }),
+        "the pane did not get its columns back"
+    );
+}
+
+/// A pane made while a band is held starts at its content width, not at the width of the
+/// rect the tree cut for it.
+#[test]
+fn a_pane_split_while_a_band_is_held_starts_at_its_content_width() {
+    let (_dir, _wakeup, mut session, mut plugins) = halves(&[(
+        "init.lua",
+        "neotmux.reserve_pane('left', 5)\n\
+         neotmux.keymap.set('S', function() neotmux.pane.split('vertical') return true end)\n",
+    )]);
+    assert!(step_until(&mut session, &mut plugins, |frame| {
+        frame.panes.iter().all(|pane| pane.rect.x == 5)
+    }));
+    key(&mut session, &plugins, Key::plain(KeyCode::Char('S')));
+    assert!(
+        step_until(&mut session, &mut plugins, |frame| {
+            frame.panes.len() == 2
+                && frame
+                    .panes
+                    .iter()
+                    .all(|pane| pane.grid.size.cols == pane.rect.w && pane.rect.w == 15)
+        }),
+        "the new pane's shell is not its content's width"
     );
 }
