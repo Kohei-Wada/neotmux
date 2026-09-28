@@ -91,17 +91,8 @@ pointing `NEOTMUX_RUNTIME` at a checkout's `runtime/` is the other way to give i
 Deleting `<prefix>/share/neotmux/lua/plugin` turns the shipped defaults off. Nothing in the
 program knows what they said.
 
-The shipped status bar takes the top row: the windows on the left, and the focused pane's
-command and working directory on the right. It draws with Nerd Font glyphs — a rounded cap
-either side and one in front of each module. Without such a font, two lines in your own
-`init.lua` take them off and leave the colours:
-
-```lua
-require('plugin.tmux.status').caps = { left = '', right = '' }
-require('plugin.tmux.status').icons = { command = '', directory = '' }
-```
-
-`docs/plugins.md` has the colours, and the `home` field the `~` comes from.
+The shipped status bar takes the top row: herdr's tab bar, a tab for each window.
+`docs/plugins.md` has its colours, and how to put something on its right.
 
 Configuration lives in `$XDG_CONFIG_HOME/neotmux` (or `~/.config/neotmux`): `init.lua` at the
 top, and modules under `lua/`, so `require('plugin.clock')` loads `lua/plugin/clock.lua`. The

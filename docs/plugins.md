@@ -403,9 +403,9 @@ different pane — and it is why nothing renumbers.
 
 What a person reads off a bar is a **position**: where the pane sits among the ones that exist
 now, which closes the gap when a neighbour goes. `list()` is in layout order, so the position
-is the index in it, and finding it is a loop over the list you already have. The shipped bar
-does exactly that in `status/position.lua`. Use an id for anything you look a pane up by, and
-a position for anything you print.
+is the index in it, and finding it is a loop over the list you already have — the shipped bar
+does the same with `window.list()` to number its tabs. Use an id for anything you look a pane
+up by, and a position for anything you print.
 
 **A zoomed pane** is tmux's: the focused pane gets the whole window and the others are hidden
 rather than gone — their shells run, their terminals keep the size they had, and
@@ -1395,7 +1395,7 @@ do what tmux does and live under `plugin/tmux/`, loaded together by `plugin.tmux
 
 | plugin | what it does |
 |---|---|
-| `tmux.status` | the default status bar, on one reserved top row |
+| `tmux.status` | the default status bar, on one reserved top row: herdr's tab bar, a tab a window |
 | `tmux.prefix` | a `C-b` prefix over `v`, `-`, `o`, `h/j/k/l`, `r`, `z`, `c`, `n`, `p`, `,`, `[` and `?` |
 | `tmux.copy` | copy mode: read back over a pane's scrollback, select a region, yank it |
 | `tmux.sessions` | the session picker on `C-b s`: every session and what it is running, `Enter` to go, `c` to make one, `r` to rename one, `d` to end one |
@@ -1633,36 +1633,32 @@ like it turned something off.
 
 ### Changing what the status bar looks like
 
-`plugin.tmux.status` reserves the top row and draws the windows on the left, then the focused
-pane's command and its working directory on the right. A window's block is numbered with its
-position, and the one being shown carries the focused pane's position after a dot — tmux's
-`window.pane`. Positions and not ids, for the reason the pane API gives. It returns four
-tables, all read every tick:
+`plugin.tmux.status` reserves the top row and draws herdr's tab bar in it: a tab a window, the
+name you gave it or else its position counted from 1, with ` Z` after it while the one being
+shown is zoomed. A tab is its label centred in four more columns than it needs, never fewer than eight,
+with a column of bar between two. The window being shown is in the accent, and a named one is
+set bold there and brighter than a number elsewhere. When the tabs do not fit, the strip starts
+where the one being shown sits nearest the middle, never so late that the last tab is cut, and
+an ellipsis at either end says there is more that way.
+
+The right of the row is empty, as herdr ships it. `right` is a list of functions, each answering
+the text to put there — and `true` after it for the accent — or nil to be left out that tick,
+drawn flush right in order with `separator` between. It is left off whole rather than squeezed
+when it would leave the tabs fewer than seventeen columns.
 
 ```lua
 local status = require('plugin.tmux.status')
-status.colors.current = '#f5c2e7'   -- the cap on the window being shown
-status.caps = { left = '', right = '' }              -- no Nerd Font: no caps
-status.icons = { command = '', directory = '' }      -- and no icons
-status.home = '/home/you'           -- the prefix written `~`
+status.colors.accent = '#cba6f7'                  -- the window being shown
+status.right = {
+  function() return neotmux.pane.zoomed() and 'ZOOM', true end,
+  function() return os.date('%H:%M') end,
+}
+status.separator = ' · '
 ```
 
-The glyphs default to Nerd Font ones — a rounded cap either side (`U+E0B6`, `U+E0B4`), and
-one in front of each module (`U+F1AE`, `U+F07B`). Without such a font they come out as boxes,
-and the two lines above are the whole escape: empty strings leave the coloured blocks and take
-the glyphs off.
-
-`colors` is Catppuccin Mocha, keyed by what each colour is for rather than by its name:
-`bar`, `current`, `inactive`, `on_current`, `on_inactive`, `body`, `body_text`, `module`,
-`module_text`, `icon`, `command`, `directory`.
-
-`home` is what gets written `~`, the way a shell prompt writes it. It defaults to
-`neotmux.home`: the VM has no `os.getenv`, so the host reads `$HOME` once — the same read the
-config layer is resolved from — and publishes it. It is `nil` where the process had no `HOME`,
-which costs you the `~` and nothing else; assign to it if you want a different prefix.
-
-A directory too long for the space left loses its leading components — `.../src/neotmux` —
-and is dropped along with its icon if not even its last component fits.
+`colors` is herdr's palette, which is Catppuccin Mocha, keyed by what each colour is for: `bar`,
+`accent`, `on_accent`, `tab`, `tab_text`, `named_text`, `right_text`, `dim`. All three fields
+are read every tick.
 
 ### Changing what copy mode does
 
@@ -1782,7 +1778,7 @@ measure a string in columns.
 
 `plugin.herdr.sidebar` takes the left of the screen and stacks its sections down it. In the tree, a ▸
 marks the window being shown and a • the focused pane. Numbers are positions, the same way the
-status bar writes them, so a pane reads `2.1`.
+`window.pane`, so a pane reads `2.1`.
 
 ```lua
 require('plugin.herdr.sidebar').colors.focused_pane = '#f9e2af'

@@ -63,6 +63,13 @@ Apache-2.0 only:
   the file: no symlink is resolved, lower-casing is ASCII, and a comm of `node-MainThread` is
   read as `node`.
 
+- runtime/lua/plugin/tmux/status.lua
+
+  A port of herdr's tab bar, render_tab_bar and what it calls in src/client/shell/tabs.rs,
+  last changed upstream in 052779c4159ed851ae78ed1271130811986d1166: a tab's width, its
+  colours, where a strip too long for the row scrolls to, and the right side. The mouse's
+  buttons are left out.
+
 - neotmux-lua/tests/agent.rs, neotmux-lua/tests/manifest.rs
 
   herdr's tests of the above, from src/detect/mod.rs and src/detect/manifest/tests.rs, their

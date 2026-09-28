@@ -537,10 +537,10 @@ fn the_prefix_splits_horizontally() {
 /// 1..23. A gutter of one goes between the panes, so a vertical split leaves the left pane
 /// columns 0..39, the divider column 40 and the right pane the rest; a horizontal one leaves
 /// the top pane rows 1..11, the divider row 12 and the bottom pane the rest.
-/// The cap `plugin.tmux.status` opens every block of the bar with, and what the bar says about a
-/// window whose focused pane is running `cat`: the window's position, the focused pane's
-/// position after it, then that command.
-const CAP_LEFT: &str = "\u{e0b6}";
+/// The first of `plugin.tmux.status`'s tabs, flush left, and what the harness's marker on the
+/// right of the bar says about a window whose focused pane is running `cat`: the window's
+/// position, the focused pane's position after it, then that command.
+const FIRST_TAB: &str = "   1    ";
 const FIRST_WINDOW: &str = "1.1  cat";
 const SECOND_WINDOW: &str = "2.1  cat";
 const THIRD_WINDOW: &str = "3.1  cat";
@@ -935,8 +935,7 @@ fn copy_tree(from: &Path, to: &Path) {
 }
 
 /// Task 5: the default status bar is a shipped plugin, so it is there with no user config at
-/// all — in the row it reserved, naming the window it is showing and what the focused pane
-/// is running.
+/// all — in the row it reserved, with a tab for the window it is showing.
 #[test]
 fn the_shipped_status_line_shows_with_no_user_config() {
     let init = harness::runtime(&[("init.lua", "require('plugin.splitter')")]);
@@ -951,9 +950,8 @@ fn the_shipped_status_line_shows_with_no_user_config() {
     nt.send("\x0f"); // C-o: focus the other one
     nt.wait_for_log("splitter focus_changed 1", PATIENCE);
     nt.wait_for_status("cat", PATIENCE);
-    assert_eq!(
-        nt.cell(0, 0),
-        CAP_LEFT,
+    assert!(
+        nt.status().starts_with(FIRST_TAB),
         "the status bar is not in the row it reserved:\n{}",
         nt.screen_after(Duration::ZERO)
     );
@@ -985,7 +983,8 @@ fn the_bar_says_something_different_about_each_focused_pane() {
 }
 
 /// Nothing else wakes the frame. A command starting, that command ending and a `cd` each move
-/// the bar on their own — the second of those with no keystroke at all in between.
+/// what the bar's right side is given on their own — the second of those with no keystroke at
+/// all in between.
 #[test]
 fn the_bar_follows_a_command_and_a_cd_with_no_keystroke() {
     let (mut nt, _init) = start_shipped("", "bash");
@@ -1188,11 +1187,11 @@ fn a_flooding_shell_cannot_reach_a_reserved_band() {
     );
     let status = nt.status();
     assert!(
-        !status.contains("ZZ"),
+        !status.contains("ZZZZ"),
         "the shell wrote into the reserved band:\n{screen}"
     );
     assert!(
-        status.starts_with(CAP_LEFT) && status.contains("cat"),
+        status.starts_with(FIRST_TAB) && status.contains("cat"),
         "the band's content did not survive the flood:\n{screen}"
     );
 }
@@ -1278,7 +1277,7 @@ fn a_user_config_can_switch_off_a_shipped_default() {
     let screen = nt.screen_after(Duration::from_millis(500));
     // The top row is the shell's again, which is the row the bar would have taken.
     assert!(
-        !screen.contains(CAP_LEFT) && nt.status().contains("STILL-HERE"),
+        !screen.contains(FIRST_TAB) && nt.status().contains("STILL-HERE"),
         "the shipped status bar ignored the opt-out:\n{screen}"
     );
     assert!(
@@ -1304,7 +1303,7 @@ fn deleting_the_shipped_plugins_leaves_a_working_multiplexer() {
 
     let screen = nt.screen_after(Duration::from_millis(500));
     assert!(
-        !screen.contains(CAP_LEFT) && nt.status().contains("STILL-HERE"),
+        !screen.contains(FIRST_TAB) && nt.status().contains("STILL-HERE"),
         "a status bar survived the deletion:\n{screen}"
     );
     assert!(
@@ -1347,11 +1346,7 @@ fn an_installed_neotmux_starts_on_its_shipped_layer() {
     install_into(prefix.path());
 
     let mut nt = Neotmux::start_installed(prefix.path(), "cat");
-    let status = nt.wait_for_status("cat", PATIENCE);
-    assert!(
-        status.starts_with(CAP_LEFT),
-        "the installed bar is missing its glyphs: {status:?}"
-    );
+    nt.wait_for_status(FIRST_TAB, PATIENCE);
 
     // Out of the box, with no user Lua at all: the shipped prefix is the only way to reach
     // a second pane, so this is what v0.1's line costs an installed user.
@@ -1999,18 +1994,16 @@ fn the_shipped_status_band_survives_a_switch() {
 
     nt.send("\x02c"); // C-b c: a window, shown
     nt.wait_for_status(SECOND_WINDOW, PATIENCE);
-    assert_eq!(
-        nt.cell(0, 0),
-        CAP_LEFT,
+    assert!(
+        nt.status().starts_with(FIRST_TAB),
         "the status bar left the row it reserved:\n{}",
         nt.screen_after(Duration::ZERO)
     );
 
     nt.send("\x02n"); // C-b n: back
     nt.wait_for_status(FIRST_WINDOW, PATIENCE);
-    assert_eq!(
-        nt.cell(0, 0),
-        CAP_LEFT,
+    assert!(
+        nt.status().starts_with(FIRST_TAB),
         "the status bar lost its band on the way back:\n{}",
         nt.screen_after(Duration::ZERO)
     );
@@ -3058,7 +3051,10 @@ fn focusing_another_pane_ends_the_zoom() {
     nt.wait_for_status("1.2Z", PATIENCE);
 
     nt.send("\x02o"); // C-b o
-    nt.wait_for_status(FIRST_PANE, PATIENCE);
-    assert!(!nt.status().contains('Z'), "{}", nt.status());
+    let status = nt.wait_for_status(FIRST_PANE, PATIENCE);
+    assert!(
+        !status.contains("1 Z") && !status.contains("1.1Z"),
+        "{status}"
+    );
     nt.wait_for_cell(PANE_TOP, DIVIDER_COL, VERTICAL_DIVIDER, PATIENCE);
 }

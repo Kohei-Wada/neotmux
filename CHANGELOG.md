@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### The status bar is herdr's tab bar
+
+The top row is now herdr's tab bar: a tab for each window, the name you gave it or its
+position, ` Z` after it while zoomed, the window being shown in blue, and a strip that scrolls
+to keep it in view when there are too many. The focused pane's command and directory are gone
+from the right; `require('plugin.tmux.status').right` is a list of functions whose text goes
+there instead, and is empty to begin with, as herdr's is. `caps`, `icons` and `home` are gone
+with the old look, and the colour fields are renamed after what they colour now.
+
 ### What tmux does is `plugin.tmux`
 
 The six shipped plugins that do what tmux does — the status bar, the prefix, copy mode, the

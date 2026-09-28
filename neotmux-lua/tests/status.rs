@@ -1,39 +1,24 @@
 //! The shipped status bar, driven as the host drives it: the real `runtime/` layer, a frame,
 //! and the draw commands it produced. What a PTY test can only see as characters on a screen
-//! is a run of text with a foreground and a background here, which is where the colours and
-//! the glyphs are pinned.
+//! is a run of text with a foreground and a background here, which is where herdr's tab bar
+//! is pinned: its widths, its colours and where it scrolls to.
 
-use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use neotmux_lua::LuaSubsystem;
 use neotmux_lua::plugin::Layers;
-use neotmux_proto::{
-    Color, DrawCmd, Epoch, Geometry, PaneId, PaneInfo, Rect, Size, Window, WindowId,
-};
+use neotmux_proto::{Color, DrawCmd, Epoch, Geometry, PaneId, Rect, Size, Window, WindowId};
 
 mod support;
 
 const COLS: u16 = 80;
-const SURFACE: Size = Size {
-    rows: 24,
-    cols: COLS,
-};
 
 const BAR: Color = rgb("#181825");
-const MAUVE: Color = rgb("#cba6f7");
+const BLUE: Color = rgb("#89b4fa");
 const SURFACE0: Color = rgb("#313244");
-const SURFACE1: Color = rgb("#45475a");
-const TEXT: Color = rgb("#cdd6f4");
-const CRUST: Color = rgb("#11111b");
-const MAROON: Color = rgb("#eba0ac");
-const GREEN: Color = rgb("#a6e3a1");
-
-const CAP_LEFT: &str = "\u{e0b6}";
-const CAP_RIGHT: &str = "\u{e0b4}";
-const COMMAND_ICON: &str = "\u{f1ae}";
-const DIRECTORY_ICON: &str = "\u{f07b}";
+const OVERLAY0: Color = rgb("#6c7086");
+const OVERLAY1: Color = rgb("#7f849c");
 
 const fn hex(byte: u8) -> u8 {
     match byte {
@@ -71,72 +56,46 @@ fn built(init: &str) -> (tempfile::TempDir, LuaSubsystem) {
     (dir, sub)
 }
 
-/// The shipped layer with nothing configured, under the `$HOME` the host published.
-fn built_with_home(home: &str) -> LuaSubsystem {
-    let layers = Layers::from_paths(vec![shipped_layer()]).with_home(PathBuf::from(home));
-    let sub = LuaSubsystem::build(layers, support::panes()).unwrap();
-    assert!(sub.run_init().is_empty());
-    sub
-}
-
-fn info(command: &str, cwd: &str) -> PaneInfo {
-    PaneInfo {
-        command: Some(command.to_string()),
-        cwd: Some(cwd.to_string()),
-        job: None,
-    }
-}
-
-/// One frame with the given panes, the given focus and the given windows, laid out the way
-/// the host lays one out: bands first, then the geometry the panes were left with.
+/// One frame of one pane in the window `current` among `windows`, each with the name it was
+/// given if any, laid out the way the host lays one out: bands first, then the geometry the
+/// panes were left with.
 fn frame(
     sub: &LuaSubsystem,
-    panes: &[(u32, PaneInfo)],
-    focus: u32,
-    windows: &[u32],
+    cols: u16,
+    windows: &[(u32, Option<&str>)],
     current: u32,
+    zoomed: bool,
 ) -> Vec<DrawCmd> {
+    let surface = Size { rows: 24, cols };
     let reserved = sub.reserved();
-    sub.lay_out_reservations(support::one(), SURFACE, reserved);
+    sub.lay_out_reservations(support::one(), surface, reserved);
     let content = Size {
-        rows: SURFACE.rows - reserved.rows(),
-        cols: COLS,
+        rows: surface.rows - reserved.rows(),
+        cols,
     };
-    sub.publish_pane_info(
-        support::one(),
-        panes
-            .iter()
-            .map(|(id, info)| (PaneId::from(*id), info.clone()))
-            .collect::<BTreeMap<_, _>>(),
-    );
-    let ids: Vec<PaneId> = panes.iter().map(|(id, _)| PaneId::from(*id)).collect();
+    let pane = PaneId::from(1);
+    let ids = vec![pane];
     sub.begin_frame(
         support::one(),
-        Epoch::new(content, ids.clone(), Some(PaneId::from(focus))),
+        Epoch::new(content, ids.clone(), Some(pane)),
         Geometry {
-            area: Rect::new(0, reserved.top, COLS, content.rows),
-            panes: ids
-                .iter()
-                .map(|id| (*id, Rect::new(0, reserved.top, COLS, content.rows)))
-                .collect(),
-            focus: Some(PaneId::from(focus)),
+            area: Rect::new(0, reserved.top, cols, content.rows),
+            panes: vec![(pane, Rect::new(0, reserved.top, cols, content.rows))],
+            focus: Some(pane),
             windows: windows
                 .iter()
-                .copied()
-                .map(|id| Window {
-                    id: WindowId::from(id),
-                    // A status bar asks for the window ids; only the shown window's panes
-                    // are ever read out of this fixture.
-                    panes: if id == current {
+                .map(|(id, name)| Window {
+                    id: WindowId::from(*id),
+                    panes: if *id == current {
                         ids.clone()
                     } else {
                         Vec::new()
                     },
-                    name: None,
+                    name: name.map(str::to_string),
                 })
                 .collect(),
             window: Some(WindowId::from(current)),
-            zoomed: None,
+            zoomed: zoomed.then_some(pane),
         },
     );
     sub.dispatch_tick(support::one());
@@ -153,42 +112,52 @@ fn runs(cmds: &[DrawCmd]) -> Vec<(String, Color, Color)> {
         .collect()
 }
 
-fn line(cmds: &[DrawCmd]) -> String {
-    runs(cmds).into_iter().map(|(text, _, _)| text).collect()
+fn bold(cmds: &[DrawCmd], wanted: &str) -> bool {
+    cmds.iter().any(
+        |cmd| matches!(cmd, DrawCmd::Text { text, bold, .. } if text.trim() == wanted && *bold),
+    )
 }
 
-/// The bar the capture was taken from, run for run: the current window capped in mauve with
-/// what its focused pane is running beside it, then that command and that directory as the
-/// two right-hand modules.
-#[test]
-fn the_bar_is_composed_of_the_runs_it_was_drawn_from() {
-    let (_dir, sub) = built("require('plugin.tmux.status').home = '/home/kohei'");
-    let cmds = frame(&sub, &[(1, info("bash", "/home/kohei/life"))], 1, &[1], 1);
+fn unnamed(ids: &[u32]) -> Vec<(u32, Option<&'static str>)> {
+    ids.iter().map(|id| (*id, None)).collect()
+}
 
+/// The row as it lands: every text at its column, later draws over earlier, trailing bar trimmed.
+fn line(cmds: &[DrawCmd]) -> String {
+    let mut cells = vec![' '; COLS as usize];
+    for cmd in cmds {
+        if let DrawCmd::Text { text, x, .. } = cmd {
+            for (i, c) in text.chars().enumerate() {
+                if let Some(cell) = cells.get_mut(*x as usize + i) {
+                    *cell = c;
+                }
+            }
+        }
+    }
+    cells.into_iter().collect::<String>().trim_end().to_string()
+}
+
+/// herdr's tab: the label centred in its width plus four, never under eight, one column of bar
+/// between two; the one being shown in the accent, the rest on surface0.
+#[test]
+fn every_window_is_a_tab_and_the_current_one_is_in_the_accent() {
+    let (_dir, sub) = built("");
+    let cmds = frame(&sub, COLS, &unnamed(&[5, 9, 12]), 9, false);
     assert_eq!(
         runs(&cmds),
         vec![
-            (CAP_LEFT.to_string(), MAUVE, BAR),
-            ("1.1 ".to_string(), BAR, MAUVE),
-            (" bash".to_string(), TEXT, SURFACE1),
-            (CAP_RIGHT.to_string(), SURFACE1, BAR),
-            (" ".to_string(), BAR, BAR),
-            (CAP_LEFT.to_string(), MAROON, BAR),
-            (format!("{COMMAND_ICON} "), CRUST, MAROON),
-            (" bash ".to_string(), TEXT, SURFACE0),
-            (CAP_LEFT.to_string(), GREEN, BAR),
-            (format!("{DIRECTORY_ICON} "), CRUST, GREEN),
-            (" ~/life ".to_string(), TEXT, SURFACE0),
+            ("   1    ".to_string(), OVERLAY0, SURFACE0),
+            ("   2    ".to_string(), BAR, BLUE),
+            ("   3    ".to_string(), OVERLAY0, SURFACE0),
         ]
     );
 }
 
-/// The band is painted before anything lands in it, so the row is the bar's colour from end
-/// to end rather than whatever the terminal's default happens to be.
+/// The band is painted before anything lands in it, so the gaps between tabs are the bar.
 #[test]
 fn the_whole_row_is_painted_in_the_bars_colour() {
     let (_dir, sub) = built("");
-    let cmds = frame(&sub, &[(1, info("bash", "/tmp"))], 1, &[1], 1);
+    let cmds = frame(&sub, COLS, &unnamed(&[1]), 1, false);
     let painted = cmds.iter().find_map(|cmd| match cmd {
         DrawCmd::Rect { rect, bg, .. } => Some((*rect, *bg)),
         _ => None,
@@ -196,195 +165,103 @@ fn the_whole_row_is_painted_in_the_bars_colour() {
     assert_eq!(painted, Some((Rect::new(0, 0, COLS, 1), BAR)));
 }
 
-/// The requirement the user stated first: what the bar *says* follows the focus, not merely
-/// that the focus moved.
+/// A window you named shows its name, brighter than a number, and bold while it is shown.
 #[test]
-fn the_bar_follows_the_focused_pane() {
-    let (_dir, sub) = built("require('plugin.tmux.status').home = '/home/kohei'");
-    let panes = [
-        (1, info("bash", "/home/kohei/life")),
-        (2, info("nvim", "/etc")),
-    ];
-
-    let first = line(&frame(&sub, &panes, 1, &[1], 1));
-    let second = line(&frame(&sub, &panes, 2, &[1], 1));
-
-    assert_ne!(first, second);
-    assert!(
-        first.contains("bash") && first.contains("~/life"),
-        "{first}"
-    );
-    assert!(
-        second.contains("nvim") && second.contains("/etc"),
-        "{second}"
-    );
-    assert!(!second.contains("bash"), "{second}");
-}
-
-/// Every window is listed, in `window.list()` order, and only the one being shown is capped
-/// in the current colour.
-///
-/// The ids here are 5, 9 and 12 with pane 4 focused — none of them a position — because what
-/// a block is numbered with is its place in the list and not the id, which is allocated once
-/// and never reused. The window being shown carries the focused pane's position after a dot.
-#[test]
-fn every_window_is_listed_and_the_current_one_is_capped_in_mauve() {
+fn a_named_window_is_its_name() {
     let (_dir, sub) = built("");
-    let cmds = frame(&sub, &[(4, info("bash", "/tmp"))], 4, &[5, 9, 12], 9);
-    let indices: Vec<(String, Color)> = runs(&cmds)
-        .into_iter()
-        .filter(|(text, _, _)| matches!(text.as_str(), "1 " | "2.1 " | "3 "))
-        .map(|(text, _, bg)| (text, bg))
-        .collect();
-
+    let cmds = frame(
+        &sub,
+        COLS,
+        &[(1, Some("editor")), (2, Some("logs"))],
+        1,
+        false,
+    );
     assert_eq!(
-        indices,
+        runs(&cmds),
         vec![
-            ("1 ".to_string(), SURFACE0),
-            ("2.1 ".to_string(), MAUVE),
-            ("3 ".to_string(), SURFACE0),
+            ("  editor  ".to_string(), BAR, BLUE),
+            ("  logs  ".to_string(), OVERLAY1, SURFACE0),
         ]
     );
-    let text = line(&cmds);
-    assert!(
-        text.starts_with(&format!("{CAP_LEFT}1 {CAP_RIGHT} ")),
-        "{text}"
-    );
-    assert!(
-        text.contains(&format!("{CAP_LEFT}2.1  bash{CAP_RIGHT} ")),
-        "{text}"
-    );
-    assert!(
-        text.contains(&format!("{CAP_LEFT}3 {CAP_RIGHT} ")),
-        "{text}"
-    );
+    assert!(bold(&cmds, "editor"));
+    assert!(!bold(&cmds, "logs"));
 }
 
-/// A cap is the half-circle that closes a block: drawn in the block's own colour on the bar
-/// behind it. The other way round it reads as a notch bitten out of the block.
 #[test]
-fn every_cap_is_its_blocks_colour_on_the_bar() {
+fn a_zoomed_window_says_so() {
     let (_dir, sub) = built("");
-    let cmds = frame(&sub, &[(1, info("bash", "/tmp"))], 1, &[1, 2], 1);
-    let caps: Vec<(String, Color, Color)> = runs(&cmds)
-        .into_iter()
-        .filter(|(text, _, _)| text == CAP_LEFT || text == CAP_RIGHT)
-        .collect();
-
-    assert_eq!(
-        caps,
-        vec![
-            (CAP_LEFT.to_string(), MAUVE, BAR),
-            (CAP_RIGHT.to_string(), SURFACE1, BAR),
-            (CAP_LEFT.to_string(), SURFACE0, BAR),
-            (CAP_RIGHT.to_string(), SURFACE0, BAR),
-            (CAP_LEFT.to_string(), MAROON, BAR),
-            (CAP_LEFT.to_string(), GREEN, BAR),
-        ]
-    );
+    let text = line(&frame(&sub, COLS, &unnamed(&[1, 2]), 2, true));
+    assert_eq!(text, "   1       2 Z");
 }
 
-/// A colour is a field, and the field is read on the tick: changing one changes what reaches
-/// the screen and nothing else.
+/// Too many to fit: the strip starts where the current tab sits nearest the middle, and an
+/// ellipsis at either end says there is more that way.
 #[test]
-fn a_colour_field_reaches_the_screen() {
-    let (_dir, sub) = built("require('plugin.tmux.status').colors.command = '#ff0000'");
-    let cmds = frame(&sub, &[(1, info("bash", "/tmp"))], 1, &[1], 1);
-    let icon = runs(&cmds)
-        .into_iter()
-        .find(|(text, _, _)| text.starts_with(COMMAND_ICON))
-        .expect("the command module");
-    assert_eq!(icon.2, rgb("#ff0000"));
+fn a_strip_too_long_for_the_row_scrolls_to_the_current_tab() {
+    let (_dir, sub) = built("");
+    let ids: Vec<u32> = (1..=15).collect();
+    let text = line(&frame(&sub, COLS, &unnamed(&ids), 10, false));
+    assert!(text.starts_with('…'), "{text}");
+    assert!(text.contains("   10   "), "{text}");
+    assert!(!text.contains("   1    "), "{text}");
+
+    let first = line(&frame(&sub, COLS, &unnamed(&ids), 1, false));
+    assert!(first.starts_with("   1    "), "{first}");
+    assert!(first.ends_with('…'), "{first}");
 }
 
-/// And so is a glyph: the one line someone without a Nerd Font writes.
+/// The last tabs are shown whole rather than the strip scrolled past them.
 #[test]
-fn emptying_the_caps_takes_the_glyphs_off_the_bar() {
+fn the_strip_never_scrolls_past_its_last_tab() {
+    let (_dir, sub) = built("");
+    let ids: Vec<u32> = (1..=15).collect();
+    let text = line(&frame(&sub, COLS, &unnamed(&ids), 15, false));
+    assert!(text.ends_with("   15"), "{text}");
+}
+
+/// herdr's `tab_bar_right`: empty unless given, each entry separated, the accented one in the
+/// accent, and flush right.
+#[test]
+fn what_is_given_for_the_right_is_drawn_flush_right() {
     let (_dir, sub) = built(
         "local s = require('plugin.tmux.status')\n\
-         s.caps = { left = '', right = '' }\n\
-         s.icons = { command = '', directory = '' }",
+         s.right = {\n\
+           function() return 'prod', true end,\n\
+           function() return nil end,\n\
+           function() return '12:00' end,\n\
+         }\n\
+         s.separator = ' · '",
     );
-    let text = line(&frame(&sub, &[(1, info("bash", "/tmp"))], 1, &[1], 1));
-    assert_eq!(text, "1.1  bash   bash   /tmp ");
+    let cmds = frame(&sub, COLS, &unnamed(&[1]), 1, false);
+    assert_eq!(
+        runs(&cmds)[..3],
+        [
+            ("prod".to_string(), BAR, BLUE),
+            (" · ".to_string(), OVERLAY0, BAR),
+            ("12:00".to_string(), OVERLAY1, BAR),
+        ]
+    );
+    let at = cmds.iter().find_map(|cmd| match cmd {
+        DrawCmd::Text { text, x, .. } if text == "prod" => Some(*x),
+        _ => None,
+    });
+    assert_eq!(at, Some(COLS - "prod · 12:00".chars().count() as u16));
 }
 
-/// `$HOME` is written the way a prompt writes it.
+/// And a right side that would leave the strip too narrow is left off rather than squeezed.
 #[test]
-fn the_home_directory_is_written_as_a_tilde() {
-    let (_dir, sub) = built("require('plugin.tmux.status').home = '/home/kohei'");
-    let text = line(&frame(
-        &sub,
-        &[(1, info("bash", "/home/kohei"))],
-        1,
-        &[1],
-        1,
-    ));
-    assert!(text.ends_with(" ~ "), "{text}");
-}
-
-/// A directory too long for what is left of the row loses its leading components, keeping
-/// the end — the part that says where you are.
-#[test]
-fn a_directory_that_does_not_fit_keeps_its_tail() {
-    let (_dir, sub) = built("require('plugin.tmux.status').home = '/home/kohei'");
-    let deep = format!("/home/kohei/{}leaf", "middle/".repeat(12));
-    let text = line(&frame(&sub, &[(1, info("bash", &deep))], 1, &[1], 1));
-    assert!(
-        text.contains(" .../middle/") && text.ends_with("/leaf "),
-        "{text}"
+fn a_right_side_with_no_room_is_left_off() {
+    let (_dir, sub) = built(
+        "require('plugin.tmux.status').right = { function() return string.rep('x', 70) end }",
     );
-    assert!(!text.contains("~/middle"), "{text}");
-    assert!(
-        text.chars().count() <= COLS as usize,
-        "the bar is {} columns wide: {text}",
-        text.chars().count()
-    );
-}
-
-/// And when not even its last component fits, the module goes rather than the bar being
-/// drawn over itself.
-#[test]
-fn a_directory_with_no_room_at_all_is_dropped() {
-    let (_dir, sub) = built("require('plugin.tmux.status').home = '/home/kohei'");
-    let long = format!("/home/kohei/{}", "x".repeat(200));
-    let text = line(&frame(&sub, &[(1, info("bash", &long))], 1, &[1], 1));
+    let text = line(&frame(&sub, COLS, &unnamed(&[1]), 1, false));
     assert!(!text.contains('x'), "{text}");
-    assert!(text.contains("bash"), "{text}");
 }
 
-/// And the `~` is there with nothing configured at all: the host publishes `$HOME` and the
-/// bar reads it. A directory outside it stays absolute.
+/// A colour is a field, and the field is read on the tick.
 #[test]
-fn the_published_home_is_abbreviated_and_nothing_else_is() {
-    let sub = built_with_home("/home/someone");
-
-    let inside = line(&frame(
-        &sub,
-        &[(1, info("bash", "/home/someone/work"))],
-        1,
-        &[1],
-        1,
-    ));
-    assert!(inside.ends_with(" ~/work "), "{inside}");
-
-    let outside = line(&frame(&sub, &[(1, info("bash", "/srv/work"))], 1, &[1], 1));
-    assert!(outside.ends_with(" /srv/work "), "{outside}");
-}
-
-/// With no `HOME` in the host's environment there is nothing to publish, so the bar writes
-/// the path out in full rather than raising on a nil.
-#[test]
-fn with_no_home_published_the_path_stays_absolute() {
-    let sub =
-        LuaSubsystem::build(Layers::from_paths(vec![shipped_layer()]), support::panes()).unwrap();
-    assert!(sub.run_init().is_empty());
-    let text = line(&frame(
-        &sub,
-        &[(1, info("bash", "/home/someone/work"))],
-        1,
-        &[1],
-        1,
-    ));
-    assert!(text.ends_with(" /home/someone/work "), "{text}");
+fn a_colour_field_reaches_the_screen() {
+    let (_dir, sub) = built("require('plugin.tmux.status').colors.accent = '#ff0000'");
+    let cmds = frame(&sub, COLS, &unnamed(&[1]), 1, false);
+    assert_eq!(runs(&cmds)[0].2, rgb("#ff0000"));
 }

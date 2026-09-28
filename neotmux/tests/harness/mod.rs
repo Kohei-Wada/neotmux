@@ -44,6 +44,27 @@ pub fn base_command(exe: &Path, log: &Path, isolation: &Path) -> CommandBuilder 
 const QUIET: &str = "pcall(function() require('neotmux.defaults').chime = false end)\n\
                      neotmux.opt.tick_budget_ms = 250\n";
 
+/// What these tests wait on, appended to every `init.lua` this harness writes: on the right of
+/// the shipped bar, the window's position, the focused pane's after a dot (and `Z` while it is
+/// zoomed), then what it is running and where — `1.2  cat` once a split has landed and focused
+/// the new pane. herdr's bar says none of it, so it is added the way a user adds to the right,
+/// and only where the test's own `init.lua` left the bar on.
+const PANE_MARKER: &str = "pcall(function()\n\
+       local defaults = require('neotmux.defaults')\n\
+       if not (defaults.tmux and defaults.status) then return end\n\
+       require('plugin.tmux.status').right = { function()\n\
+         local window, pane = neotmux.window.current(), neotmux.pane.current()\n\
+         local function at(list, id)\n\
+           for i, it in ipairs(list or {}) do if it == id then return i end end\n\
+         end\n\
+         local w, p = at(neotmux.window.list(), window), at(neotmux.window.panes(window), pane)\n\
+         if not (w and p) then return end\n\
+         local info = neotmux.pane.info(pane) or {}\n\
+         return w .. '.' .. p .. (neotmux.pane.zoomed() and 'Z' or '') .. '  '\n\
+           .. (info.command or '') .. '  ' .. (info.cwd or '')\n\
+       end }\n\
+     end)\n";
+
 /// Writes a small plugin runtime layout (`init.lua`, `lua/plugin/*.lua`, ...)
 /// to a fresh temp dir, suitable for `NEOTMUX_RUNTIME`.
 pub fn runtime(files: &[(&str, &str)]) -> tempfile::TempDir {
@@ -54,7 +75,7 @@ pub fn runtime(files: &[(&str, &str)]) -> tempfile::TempDir {
             std::fs::create_dir_all(parent).expect("create runtime subdir");
         }
         let content = match *path {
-            "init.lua" => format!("{QUIET}{content}"),
+            "init.lua" => format!("{QUIET}{content}\n{PANE_MARKER}"),
             _ => content.to_string(),
         };
         std::fs::write(&full, content).expect("write runtime file");
