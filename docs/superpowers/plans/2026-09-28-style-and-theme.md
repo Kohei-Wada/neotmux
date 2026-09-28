@@ -377,3 +377,38 @@ accent = '#ff0000'` is now `require('neotmux.style').set('status', { accent = '#
 
 - [ ] `make check` passes. Commit — `git commit -m "docs for neotmux.theme and neotmux.style, and every look is changed through them"`.
 - [ ] **(controller) Real screen:** `init.lua` with `require('neotmux.style').set('*', { rule = 'red' })` and `require('neotmux.theme').set({ blue = '#ff0000' })`; with the sidebar on and `C-b t` shown, the rules and every blue (status bar's current tab, sidebar's mode) are red, nothing else changed; `config-reload` keeps them red.
+
+---
+
+### Task 5: The four Catppuccin flavours, and a `theme` command in the palette
+
+Added at the user's request (2026-09-29): pick a theme from the palette; to keep it, the user
+writes it in `init.lua` — neotmux saves nothing.
+
+**Files:** Modify `runtime/lua/neotmux/theme.lua`; create `runtime/lua/plugin/theme.lua`;
+modify `runtime/lua/neotmux/defaults.lua`, `runtime/init.lua` (load list), `docs/plugins.md`,
+`CHANGELOG.md`; test `neotmux-lua/tests/style.rs` (or a new `neotmux-lua/tests/theme.rs`).
+
+**Interfaces:**
+- `theme.flavours` — `{ latte = {...26}, frappe = {...}, macchiato = {...}, mocha = {...} }`, the
+  26 names each, values **from the official palette**, not from memory:
+  https://raw.githubusercontent.com/catppuccin/palette/main/palette.json (fetch it; each flavour's
+  `colors.<name>.hex`). Mocha's must equal today's `theme.colors` exactly.
+- `theme.use(name)` — `theme.set(theme.flavours[name])` and `theme.current = name`; an unknown
+  name raises `unknown theme '<name>'`. `theme.current` starts as `'mocha'`.
+- `plugin.theme` — on by default (`defaults.theme = true`, loaded from `runtime/init.lua`'s list):
+  registers the command `theme` (desc: "pick a theme; write require('neotmux.theme').use('<name>')
+  in init.lua to keep it"). Running it opens a `neotmux.list` of the flavour names in the order
+  latte, frappe, macchiato, mocha, the current one marked; Enter calls `theme.use(name)` and
+  `neotmux.notify('info', "theme " .. name .. " — to keep it, add require('neotmux.theme').use('"
+  .. name .. "') to init.lua")`. No prefix key.
+
+- [ ] Tests first: `theme.use('latte')` changes `style.get('status').accent` to Latte's blue
+  (`#1e66f5` if the fetched palette agrees — assert against the fetched value); `theme.use('nope')`
+  raises; the `theme` command exists and running it opens a list (drive it the way
+  `neotmux-lua/tests/palette.rs` or `tests/list.rs` drive a list: open, move, Enter) and Enter on
+  `latte` applies it and notifies.
+- [ ] Implement; `make check`; commit
+  `"four Catppuccin flavours in neotmux.theme, and a theme command that picks one"`.
+- [ ] Docs: the Styling section gets the flavours, `theme.use`, and the `theme` command; the
+  shipped-defaults table gets a `theme` row; CHANGELOG line added to the style entry.
