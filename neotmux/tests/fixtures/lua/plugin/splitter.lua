@@ -15,6 +15,10 @@ neotmux.on_key(function(key)
     end
     return true
   end
+  if key == "C-k" then
+    neotmux.pane.kill(neotmux.pane.current())
+    return true
+  end
   if key == "C-u" then
     neotmux.pane.focus(99)
     return true

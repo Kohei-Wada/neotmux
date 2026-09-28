@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### `C-b x` ends a pane
+
+`C-b x` now ends the focused pane rather than the window, as tmux's does; the window moves to
+`C-b &`. `neotmux.pane.kill(id)` is what it calls.
+
 ### A pane's commands, from its shell's marks
 
 A shell that sends OSC 133 marks says where its prompts, command lines and outputs start, and

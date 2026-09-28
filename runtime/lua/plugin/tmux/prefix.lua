@@ -151,6 +151,14 @@ local function rename_window()
   })
 end
 
+-- The last pane going is the session going, which the host sees to.
+local function kill_pane()
+  local id = neotmux.pane.current()
+  if id ~= nil then
+    neotmux.pane.kill(id)
+  end
+end
+
 -- The last window going is the session going, which the host sees to.
 local function kill_window()
   local id = neotmux.window.current()
@@ -192,6 +200,7 @@ register(
   begin_resize,
   "enter resize mode: h/j/k/l move the boundary, anything else leaves"
 )
+register("pane-kill", kill_pane, "end the focused pane and its shell")
 register("window-new", new_window, "open a new window and switch to it")
 register("window-next", next_window, "switch to the next window")
 register("window-prev", prev_window, "switch to the window before this one")
@@ -225,7 +234,8 @@ local M = {
     ["n"] = "window-next",
     ["p"] = "window-prev",
     [","] = "window-rename",
-    ["x"] = "window-kill",
+    ["x"] = "pane-kill",
+    ["&"] = "window-kill",
     ["d"] = "detach",
     ["?"] = "keys",
   },

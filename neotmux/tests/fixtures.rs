@@ -408,6 +408,35 @@ fn a_pane_whose_shell_exits_is_closed_and_its_sibling_takes_over() {
     nt.send("SURVIVOR");
     nt.wait_for_screen("SURVIVOR", PATIENCE);
 }
+/// `pane.kill` ends the focused pane only: its sibling keeps running and takes the focus.
+#[test]
+fn killing_a_pane_closes_it_and_its_sibling_takes_over() {
+    let (mut nt, _init) = start("require('plugin.splitter')", "cat");
+    nt.send("\x02");
+    nt.wait_for_log("splitter pane_opened 2", PATIENCE);
+
+    nt.send("\x0b"); // C-k
+    let log = nt.wait_for_log("splitter pane_closed 2", PATIENCE);
+    assert!(
+        line_with(&log, "splitter pane_closed 2").contains("panes=1 current=1"),
+        "{log}"
+    );
+
+    nt.send("SURVIVOR");
+    nt.wait_for_screen("SURVIVOR", PATIENCE);
+}
+
+/// Killing the only pane is killing the session, and it ends cleanly.
+#[test]
+fn killing_the_last_pane_exits_cleanly() {
+    let (mut nt, _init) = start("require('plugin.splitter')", "cat");
+    nt.send("UP\r");
+    nt.wait_for_screen("UP", PATIENCE);
+
+    nt.send("\x0b"); // C-k
+    assert!(nt.exited_cleanly(PATIENCE));
+}
+
 /// §5.5's first exit criterion in the running program: the offender loses its tick, the
 /// well-behaved neighbour keeps drawing, and the child is still there to talk to.
 fn spinner_is_dropped_while_the_rest_of_the_program_carries_on(module: &str, echo: &str) {

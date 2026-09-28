@@ -272,6 +272,29 @@ fn there_is_nothing_past_the_edge_of_the_window() {
     );
 }
 
+/// `C-b x` ends the focused pane, as tmux's does; the window is `C-b &`.
+#[test]
+fn prefix_x_kills_the_focused_pane_and_ampersand_the_window() {
+    let (_d, sub) = with_prefix();
+    side_by_side(&sub);
+    sub.dispatch_key(support::one(), "C-b");
+    sub.dispatch_key(support::one(), "x");
+    assert_eq!(
+        ops(&sub),
+        vec![Op::PaneKill {
+            pane: PaneId::from(2)
+        }]
+    );
+    sub.dispatch_key(support::one(), "C-b");
+    sub.dispatch_key(support::one(), "&");
+    assert_eq!(
+        ops(&sub),
+        vec![Op::WindowKill {
+            window: WindowId::from(1)
+        }]
+    );
+}
+
 /// Resize mode is a flag in the plugin and an `on_key`, like the prefix itself: the host
 /// learns nothing about modes. Every key in it is swallowed, and the first that is not an
 /// adjustment leaves.

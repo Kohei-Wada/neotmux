@@ -377,6 +377,11 @@ impl Session {
                 }
                 SessionOp::PaneResize { dir, cells } => self.apply_resize(tag, *dir, *cells)?,
                 SessionOp::PaneZoom => self.apply_zoom()?,
+                SessionOp::PaneKill { pane } => {
+                    if self.apply_pane_kill(tag, *pane)? {
+                        ended = ended.or(Some(End::Quit));
+                    }
+                }
                 SessionOp::WindowCreate { .. } if spawned >= MAX_NEW_SHELLS_PER_FRAME => {
                     logging::log(
                         Level::Error,
@@ -539,6 +544,23 @@ impl Session {
         for pane in panes {
             self.close_pane(*pane)?;
         }
+        Ok(false)
+    }
+
+    fn apply_pane_kill(&mut self, tag: &str, pane: PaneId) -> anyhow::Result<bool> {
+        let windows = self.windows.panes();
+        if !windows.iter().any(|(_, panes)| panes.contains(&pane)) {
+            logging::log(
+                Level::Error,
+                tag,
+                &format!("pane.kill({pane}) refused: no such pane"),
+            );
+            return Ok(false);
+        }
+        if self.shells.len() == 1 {
+            return Ok(true);
+        }
+        self.close_pane(pane)?;
         Ok(false)
     }
 

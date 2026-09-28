@@ -19,6 +19,10 @@ pub enum SessionOp {
     },
     /// Zoom the focused pane over the whole area, or unzoom.
     PaneZoom,
+    /// The pane's shell, ended; the last pane there is ending ends the session.
+    PaneKill {
+        pane: PaneId,
+    },
     /// Text into a pane's shell, as though it had been typed there. The pane is named rather
     /// than taken from the focus: a plugin sends to the pane it is answering, which is not
     /// usually the one under the cursor.

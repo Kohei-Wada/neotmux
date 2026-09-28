@@ -27,6 +27,9 @@ pub enum Op {
     },
     /// Zoom the focused pane, or unzoom.
     PaneZoom,
+    PaneKill {
+        pane: PaneId,
+    },
     PaneSend {
         pane: PaneId,
         text: String,

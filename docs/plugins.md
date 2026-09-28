@@ -439,6 +439,7 @@ neotmux.pane.freeze(id)       -- hold the pane still: a handle, or nil if there 
 neotmux.pane.frozen(id)       -- true while anyone holds it, false, or nil for no such pane
 neotmux.pane.split('horizontal' | 'vertical')
 neotmux.pane.focus(id)
+neotmux.pane.kill(id)         -- end its shell; the last pane there is ends the session
 neotmux.pane.resize('left' | 'right' | 'up' | 'down', cells)
 neotmux.pane.zoom()           -- the focused pane over the whole window, or back
 neotmux.pane.send(id, text)   -- true, or false and why
@@ -1523,8 +1524,8 @@ width), `C-b -` splits horizontally (one above the other), `C-b o` focuses the n
 the first press unzooms), `C-b z` zooms the focused pane and back, `C-b r` enters
 resize mode, `C-b [` enters copy mode, `C-b s` opens the session picker, `C-b :` opens the
 command palette, `C-b c` opens a window and switches to it, and `C-b n` and `C-b p`
-walk to the next window and the one before, each wrapping around. `C-b x` ends the window
-you are in, and ending the last one ends the session. `C-b ?` lists every one of
+walk to the next window and the one before, each wrapping around. `C-b x` ends the focused
+pane and `C-b &` the window you are in, and ending the last one ends the session. `C-b ?` lists every one of
 them — the key, the command it runs, what that does — and Enter runs the one under the cursor.
 A plugin that binds a key to a function rather than a command's name says what it does in
 `require('plugin.tmux.prefix').descriptions[key]`, so the list has something to show for it.

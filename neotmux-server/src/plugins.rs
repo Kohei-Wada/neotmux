@@ -208,6 +208,7 @@ impl Plugins {
                 Op::PaneFocus { pane } => SessionOp::PaneFocus { pane },
                 Op::PaneResize { dir, cells } => SessionOp::PaneResize { dir, cells },
                 Op::PaneZoom => SessionOp::PaneZoom,
+                Op::PaneKill { pane } => SessionOp::PaneKill { pane },
                 Op::PaneSend { pane, text } => {
                     // After the tick has returned, so the VM is idle: a handler is never
                     // re-entered from inside the tick that queued this. With no session yet
@@ -353,6 +354,11 @@ impl Plugins {
                 SessionOp::PaneZoom => refuse(
                     &tag,
                     "pane.zoom()",
+                    "no panes exist until the session starts",
+                ),
+                SessionOp::PaneKill { pane } => refuse(
+                    &tag,
+                    &format!("pane.kill({pane})"),
                     "no panes exist until the session starts",
                 ),
                 SessionOp::PaneFocus { pane } => refuse(

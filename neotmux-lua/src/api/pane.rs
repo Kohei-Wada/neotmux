@@ -546,6 +546,8 @@ pub(crate) fn install(
     }
 
     {
+        let sources = sources.clone();
+        let ops = ops.clone();
         let focus = lua.create_function(move |lua, pane: u32| {
             ops.push(
                 plugin::caller(lua, &sources),
@@ -556,6 +558,19 @@ pub(crate) fn install(
             Ok(())
         })?;
         pane.set("focus", focus)?;
+    }
+
+    {
+        let kill = lua.create_function(move |lua, pane: u32| {
+            ops.push(
+                plugin::caller(lua, &sources),
+                Op::PaneKill {
+                    pane: PaneId::from(pane),
+                },
+            );
+            Ok(())
+        })?;
+        pane.set("kill", kill)?;
     }
 
     Ok(pane)
