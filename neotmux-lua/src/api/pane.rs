@@ -44,7 +44,49 @@ fn want(opts: Option<&Table>) -> mlua::Result<Want> {
             Trailing::Trim
         },
         wrapped: flag(opts, "wrapped")?,
+        runs: false,
     })
+}
+
+/// A colour as the draw verbs take one, so that a colour read can be drawn back: a palette
+/// index, `#rrggbb`, or nil for the terminal's own.
+fn color_value(lua: &Lua, color: neotmux_proto::Color) -> mlua::Result<Value> {
+    Ok(match color {
+        neotmux_proto::Color::Default => Value::Nil,
+        neotmux_proto::Color::Idx(i) => Value::Integer(i64::from(i)),
+        neotmux_proto::Color::Rgb(r, g, b) => {
+            Value::String(lua.create_string(format!("#{r:02x}{g:02x}{b:02x}"))?)
+        }
+    })
+}
+
+/// One row as its runs, each `{ text =, fg =, bg =, bold = true, … }` with an attribute there
+/// only where it is on.
+fn runs_value(lua: &Lua, rows: Vec<Vec<neotmux_proto::screen::Run>>) -> mlua::Result<Value> {
+    let out = lua.create_table()?;
+    for (i, row) in rows.into_iter().enumerate() {
+        let runs = lua.create_table()?;
+        for (j, run) in row.into_iter().enumerate() {
+            let entry = lua.create_table()?;
+            entry.set("text", run.text)?;
+            entry.set("fg", color_value(lua, run.fg)?)?;
+            entry.set("bg", color_value(lua, run.bg)?)?;
+            for (name, on) in [
+                ("bold", run.bold),
+                ("dim", run.dim),
+                ("italic", run.italic),
+                ("underline", run.underline),
+                ("inverse", run.inverse),
+            ] {
+                if on {
+                    entry.set(name, true)?;
+                }
+            }
+            runs.set(j + 1, entry)?;
+        }
+        out.set(i + 1, runs)?;
+    }
+    Ok(Value::Table(out))
 }
 
 /// One read of a pane's text as Lua sees it: the lines, the revision they were read at, and
@@ -54,11 +96,11 @@ fn answer(lua: &Lua, text: Lines) -> mlua::Result<(Value, Value, Value)> {
         Some(wrapped) => Value::Table(lua.create_sequence_from(wrapped)?),
         None => Value::Nil,
     };
-    Ok((
-        Value::Table(lua.create_sequence_from(text.lines)?),
-        Value::Integer(text.revision as i64),
-        wrapped,
-    ))
+    let rows = match text.runs {
+        Some(runs) => runs_value(lua, runs)?,
+        None => Value::Table(lua.create_sequence_from(text.lines)?),
+    };
+    Ok((rows, Value::Integer(text.revision as i64), wrapped))
 }
 
 /// The M2 pane API (§6), signatures frozen now. `list`, `current` and `rect` read this
@@ -214,7 +256,10 @@ pub(crate) fn install(
                 None => None,
             };
             let last = count("content", "lines count", last)?;
-            let want = want(opts.as_ref())?;
+            let want = Want {
+                runs: flag(opts.as_ref(), "runs")?,
+                ..want(opts.as_ref())?
+            };
             let Some(text) = terminals.content(PaneId::from(pane), last, want) else {
                 return Ok((Value::Nil, Value::Nil, Value::Nil));
             };

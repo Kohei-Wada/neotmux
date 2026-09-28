@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### A plugin can read what colour a cell is
+
+`neotmux.pane.content(id, { runs = true })` answers each row as the stretches it is drawn in,
+each with its text, its foreground and background — a palette index, `#rrggbb`, or nil for
+the terminal's own, the way the draw verbs take them — and whether it is bold, dim, italic,
+underlined or inverse. Output a program coloured itself can be told from plain text now.
+
 ### An idle session costs a thirteenth of what it did
 
 The plugins tick only when something happened to the session — a key a plugin took, output

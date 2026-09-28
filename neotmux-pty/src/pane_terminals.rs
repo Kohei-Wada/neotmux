@@ -208,6 +208,8 @@ impl PaneTerminals {
             wrapped: want
                 .wrapped
                 .then(|| terminal.state.history_wrapped(from, count)),
+            // The screen's runs only: a history read in runs is as long as the history.
+            runs: None,
             revision: terminal.read_revision(),
         })
     }
@@ -220,6 +222,7 @@ impl PaneTerminals {
         Some(Lines {
             lines: terminal.state.lines(last, want.trailing),
             wrapped: want.wrapped.then(|| terminal.state.wrapped(last)),
+            runs: want.runs.then(|| terminal.state.runs(last)),
             revision: terminal.read_revision(),
         })
     }

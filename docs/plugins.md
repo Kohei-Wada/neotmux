@@ -579,6 +579,19 @@ A resize clears the flags. The terminal drops them on every row when the column 
 changes, because the old wrap points no longer describe the new width, and neotmux does not
 invent replacements.
 
+`runs = true` answers each row as the stretches it is drawn in rather than as a string: the
+text of consecutive cells that look the same, with their colours and attributes. A colour is
+what the draw verbs take — a palette index, `'#rrggbb'`, or `nil` for the terminal's own — so
+a colour read can be drawn back, and an attribute is there only where it is on.
+
+```lua
+local rows = neotmux.pane.content(id, { runs = true })
+-- rows[1] = { { text = 'say ' }, { text = 'red', fg = 1, bold = true }, { text = ' now' } }
+```
+
+A run's text is a slice of the line the same row reads as, and the blank rest of a row is left
+off unless the program painted it. It is the screen's alone: `pane.scrollback` answers lines.
+
 #### Holding a pane still
 
 A selection highlight over a pane that is still printing is a highlight over different text a

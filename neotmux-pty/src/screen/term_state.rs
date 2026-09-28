@@ -180,6 +180,11 @@ impl TermState {
         crate::screen::lines::visible(self.reading(), last, trailing)
     }
 
+    /// Those same lines as the runs they are drawn in (`crate::screen::runs`).
+    pub fn runs(&self, last: Option<usize>) -> Vec<Vec<neotmux_proto::screen::Run>> {
+        crate::screen::runs::visible(self.reading(), last)
+    }
+
     /// Whether each of those lines runs on into the next (`crate::screen::wrap`).
     pub fn wrapped(&self, last: Option<usize>) -> Vec<bool> {
         crate::screen::wrap::visible(self.reading(), last)
