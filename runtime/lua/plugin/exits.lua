@@ -29,50 +29,80 @@ local M = {
 
 local band
 
--- Per pane, when each of its `output` and `done` marks on the screen was first seen, in
--- `neotmux.now()` milliseconds, keyed by line and kind; `false` for the marks already there the
--- first time the pane was looked at. Only the screen is read: a command whose prompt has
--- scrolled above it is not drawn, so its marks are not worth a read every tick.
+-- Per pane: `at`, when each `output` and `done` mark was first seen, in `neotmux.now()`
+-- milliseconds, as `at[line][kind]`; `false` for a mark whose time nobody knows, because it was
+-- already there, or already in the history, when it was first seen. `dropped` is how many lines
+-- had fallen off the history when it was last looked at.
+--
+-- A line in the history cannot be written again, so what is known about its marks is kept until
+-- the history drops it: copy mode winds back to it later, and a command watched on the screen
+-- still says how long it took. Only the screen is read again every tick, since that is where
+-- marks arrive and where a redrawn prompt writes over old ones.
 local seen = {}
 
--- The line number of the pane's top row, or nil for a pane with no marks worth reading: none
--- at all, or a full-screen program up, whose rows are not the shell's lines and whose screen
--- keeps no history to count from.
-local function top_of(pane)
+-- The pane's live top row and the row drawn at its top, which is the live one wound back by
+-- whatever view is up, or nil for a full-screen program, whose rows are not the shell's lines
+-- and whose screen keeps no history to count from.
+local function tops(pane)
   local mode = neotmux.pane.mode(pane)
   if mode and mode.alternate then
     return nil
   end
   local len, dropped = neotmux.pane.history(pane)
-  return len and dropped + len
+  if len == nil then
+    return nil
+  end
+  local live = dropped + len
+  return live, live - neotmux.pane.view(pane), dropped
 end
 
 local function note(pane, now)
-  local top = top_of(pane)
-  local marks = top and neotmux.pane.marks(pane, top)
-  if marks == nil then
+  local live, drawn, dropped = tops(pane)
+  if live == nil then
     return
   end
-  local was = seen[pane]
-  local now_seen = {}
+  local it = seen[pane]
+  local first = it == nil
+  if first then
+    it = { at = {}, dropped = dropped }
+    seen[pane] = it
+  end
+  local from = first and 0 or math.min(live, drawn)
+  local marks = neotmux.pane.marks(pane, from) or {}
+  local present = {}
   for _, mark in ipairs(marks) do
     if mark.kind == "output" or mark.kind == "done" then
-      local key = mark.line .. ":" .. mark.kind
-      if was == nil then
-        now_seen[key] = false
-      elseif was[key] ~= nil then
-        now_seen[key] = was[key]
-      else
-        now_seen[key] = now
+      local line = it.at[mark.line] or {}
+      it.at[mark.line] = line
+      if line[mark.kind] == nil then
+        line[mark.kind] = not first and mark.line >= live and now or false
+      end
+      present[mark.line] = present[mark.line] or {}
+      present[mark.line][mark.kind] = true
+    end
+  end
+  -- A mark on the screen that is no longer there was written over: `clear`, or a redrawn prompt.
+  local rect = neotmux.pane.rect(pane)
+  for line = live, live + (rect and rect.h or 0) do
+    local kinds = it.at[line]
+    if kinds then
+      for kind in pairs(kinds) do
+        if not (present[line] and present[line][kind]) then
+          kinds[kind] = nil
+        end
       end
     end
   end
-  seen[pane] = now_seen
+  for line = it.dropped, dropped - 1 do
+    it.at[line] = nil
+  end
+  it.dropped = dropped
 end
 
 local function when(pane, line, kind)
-  local at = seen[pane] and line and seen[pane][line .. ":" .. kind]
-  return at or nil
+  local it = seen[pane]
+  local kinds = it and line and it.at[line]
+  return kinds and kinds[kind] or nil
 end
 
 local function span(ms)
@@ -96,7 +126,7 @@ local function draw(ctx, pane, now)
   for row = 0, rect.h - 1 do
     ctx:text(nil, rule, rect.y + row, "│", { fg = M.colors.rule })
   end
-  local top = top_of(pane)
+  local _, top = tops(pane)
   if top == nil then
     return
   end
@@ -123,7 +153,7 @@ local function draw(ctx, pane, now)
         end
         ended = when(pane, command.done, "done")
       end
-      if started and ended and rect.w >= 9 then
+      if started and ended and ended >= started and rect.w >= 9 then
         ctx:text(nil, rect.x + 5, y, string.format("%3s", span(ended - started)), {
           fg = M.colors.time,
         })
@@ -178,9 +208,9 @@ function M.toggle()
     end
     return
   end
-  if M.width < 1 or M.width > 16 then
+  if M.width < 1 or M.width > 24 then
     M.shown = false
-    neotmux.notify("warn", "plugin.exits: width must be 1..16, got " .. tostring(M.width))
+    neotmux.notify("warn", "plugin.exits: width must be 1..24, got " .. tostring(M.width))
     return
   end
   local handle, message = g.reserve_pane("left", M.width)

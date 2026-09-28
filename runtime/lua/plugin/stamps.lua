@@ -109,10 +109,12 @@ local function draw(ctx, pane)
   if it == nil or rect == nil or it.top == nil then
     return
   end
+  -- Wound back with the pane when copy mode, or anything else, draws it into its history.
+  local top = it.top - neotmux.pane.view(pane)
   local rule = rect.x + rect.w - 1
   for row = 0, rect.h - 1 do
     ctx:text(nil, rule, rect.y + row, "│", { fg = M.colors.rule })
-    local line = it.top + row
+    local line = top + row
     local at = it.at[line]
     local before = it.at[line - 1]
     if at and before ~= at then
@@ -159,9 +161,9 @@ function M.toggle()
     end
     return
   end
-  if M.width < 1 or M.width > 16 then
+  if M.width < 1 or M.width > 24 then
     M.shown = false
-    neotmux.notify("warn", "plugin.stamps: width must be 1..16, got " .. tostring(M.width))
+    neotmux.notify("warn", "plugin.stamps: width must be 1..24, got " .. tostring(M.width))
     return
   end
   local handle, message = g.reserve_pane("left", M.width)

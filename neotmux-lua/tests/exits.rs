@@ -218,3 +218,64 @@ fn a_done_with_no_status_is_not_shown_as_a_success() {
     );
     assert!(!texts.iter().any(|(_, _, t, _)| t == "✔"), "{texts:?}");
 }
+
+/// Copy mode winds the pane back into its history with `ctx:view`; a command up there is marked
+/// beside its own line, the way it would be if it were on the screen.
+#[test]
+fn a_command_in_the_history_is_marked_when_the_view_winds_back_to_it() {
+    let (_dir, sub) = built(&format!(
+        "local back = nil\n\
+         neotmux.on_tick(function(ctx) if back then ctx:view(1, back) end end)\n\
+         neotmux.on_key(function(key) if key ~= 'V' then return false end back = 6 return true end)\n\
+         {SHOWN}"
+    ));
+    let mut bytes =
+        b"\x1b]133;A\x07$ \x1b]133;B\x07true\r\n\x1b]133;C\x07\x1b]133;D;0\x07".to_vec();
+    for i in 0..20 {
+        bytes.extend(format!("x{i}\r\n").as_bytes());
+    }
+    bytes.extend(b"\x1b]133;A\x07$ ");
+    feed(&sub, &bytes);
+    shown(&sub);
+    assert_eq!(drawn(&sub), vec![], "the command is in the history");
+
+    keys(&sub, &["V"]);
+    banded(&sub);
+    let texts = drawn(&sub);
+    assert!(texts.contains(&(0, 0, "✔".to_string(), OK)), "{texts:?}");
+}
+
+/// A command watched on the screen keeps its time once its lines have scrolled into the history,
+/// so winding the view back to it shows how long it took, not a time counted from the moment the
+/// view got there.
+#[test]
+fn a_command_keeps_its_time_after_scrolling_into_the_history() {
+    let (_dir, sub) = built(&format!(
+        "local back = nil\n\
+         neotmux.on_tick(function(ctx) if back then ctx:view(1, back) end end)\n\
+         neotmux.on_key(function(key) if key ~= 'V' then return false end back = 20 return true end)\n\
+         {SHOWN}"
+    ));
+    feed(&sub, b"\x1b]133;A\x07$ \x1b]133;B\x07sleep 1\r\n");
+    sub.dispatch_tick(one());
+    more(&sub, b"\x1b]133;C\x07");
+    sub.dispatch_tick(one());
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    let mut bytes = b"\x1b]133;D;0\x07\r\n".to_vec();
+    for i in 0..20 {
+        bytes.extend(format!("x{i}\r\n").as_bytes());
+        more(&sub, &std::mem::take(&mut bytes));
+        sub.dispatch_tick(one());
+    }
+    more(&sub, b"\x1b]133;A\x07$ ");
+    sub.dispatch_tick(one());
+    keys(&sub, &["V"]);
+    shown(&sub);
+    let texts = drawn(&sub);
+    let times: Vec<String> = texts
+        .iter()
+        .filter(|(x, _, _, _)| *x == 5)
+        .map(|(_, _, t, _)| t.clone())
+        .collect();
+    assert_eq!(times, vec![" 1s".to_string()], "{texts:?}");
+}

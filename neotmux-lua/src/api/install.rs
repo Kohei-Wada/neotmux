@@ -18,7 +18,7 @@ use crate::plugin::Commands;
 use crate::plugin::{self, Groups, Held, SourceId, Sources};
 use crate::plugin::{Kind, KindTag, RegistrationId, Registry};
 use crate::sched::Overrun;
-use neotmux_proto::{Geometry, Level};
+use neotmux_proto::{Geometry, Level, PaneId};
 
 /// The state every binding is wired to, passed as one value because `install` otherwise takes
 /// eight collaborators.
@@ -324,7 +324,24 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
         )?;
         pane.set(
             "freeze",
-            super::freeze::install(lua, panes, groups.clone())?,
+            super::freeze::install(lua, panes.clone(), groups.clone())?,
+        )?;
+        // How far back `ctx:view` has the pane drawn as the frame stands: whatever a source
+        // that ticked earlier asked for this frame, else what was asked last frame, and no
+        // further than the history goes, which is as far as the host will wind it. Anything
+        // drawn beside a pane's lines has to wind back with it, or it sits beside the wrong one.
+        let views = buffers.clone();
+        let extents = panes.clone();
+        pane.set(
+            "view",
+            lua.create_function(move |_, id: u32| {
+                let pane = PaneId::from(id);
+                let asked = views.applicable_views().get(&pane).copied().unwrap_or(0);
+                let held = extents
+                    .history_extent(pane)
+                    .map_or(0, |extent| extent.len as usize);
+                Ok(asked.min(held))
+            })?,
         )?;
         let pane = seal(lua, pane, "neotmux.pane")?;
         neotmux.set("pane", pane)?;

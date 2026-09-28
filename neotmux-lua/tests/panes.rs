@@ -719,3 +719,54 @@ fn nav_finds_the_pane_above_a_narrow_one_that_lost_its_band() {
     sub.dispatch_key(support::one(), "C-x");
     assert_eq!(logged(&sub, Some(support::one())), vec!["up 1"]);
 }
+
+/// What `ctx:view` asked for this frame is readable by everyone else: a source drawing beside
+/// a pane that copy mode has wound back has to know how far, or it draws beside the wrong line.
+/// It is no further than the pane's history goes, which is as far as the host winds it.
+#[test]
+fn a_panes_view_is_read_back_by_the_other_sources() {
+    let dir = tempfile::tempdir().unwrap();
+    for (rel, body) in [
+        (
+            "init.lua",
+            "require('plugin.viewer') require('plugin.reader')",
+        ),
+        (
+            "lua/plugin/viewer.lua",
+            "neotmux.on_tick(function(ctx) ctx:view(2, 7) ctx:view(1, 3) end) return {}",
+        ),
+        (
+            "lua/plugin/reader.lua",
+            "neotmux.on_tick(function()
+               neotmux.log.info('tick ' .. neotmux.pane.view(2) .. ' ' .. neotmux.pane.view(1))
+             end)
+             neotmux.on_key(function()
+               neotmux.log.info('key ' .. neotmux.pane.view(2) .. ' ' .. neotmux.pane.view(99))
+               return true
+             end)
+             return {}",
+        ),
+    ] {
+        let path = dir.path().join(rel);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, body).unwrap();
+    }
+    let terminals = support::panes();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf()]),
+        terminals.clone(),
+    )
+    .unwrap();
+    assert!(sub.run_init().is_empty());
+    terminals.open(PaneId::from(2), Size { rows: 24, cols: 40 }, 100);
+    let lines: String = (0..30).map(|i| format!("{i}\r\n")).collect();
+    terminals.feed(PaneId::from(2), lines.as_bytes());
+    side_by_side(&sub);
+    sub.dispatch_tick(support::one());
+    sub.dispatch_key(support::one(), "C-x");
+    assert_eq!(
+        logged(&sub, Some(support::one())),
+        vec!["tick 7 0", "key 7 0"],
+        "pane 1 has no history to wind back into"
+    );
+}

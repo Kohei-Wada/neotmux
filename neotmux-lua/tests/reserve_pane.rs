@@ -150,11 +150,11 @@ fn a_second_band_from_one_source_and_one_past_the_cap_are_refused_with_a_message
         local first = neotmux.reserve_pane('left', 10)
         local second, why = neotmux.reserve_pane('left', 1)
         assert(first and second == nil and why:find('already holds'), why)
-        assert(first:resize_to(16))
-        assert(not pcall(first.resize_to, first, 17), 'a count past the cap raises')
+        assert(first:resize_to(24))
+        assert(not pcall(first.resize_to, first, 25), 'a count past the cap raises')
         "#,
     )]);
-    assert_eq!(sub.pane_band(), 16);
+    assert_eq!(sub.pane_band(), 24);
 
     let (_dir, sub) = built(&[
         ("init.lua", "require('plugin.a') require('plugin.b')"),
@@ -164,7 +164,7 @@ fn a_second_band_from_one_source_and_one_past_the_cap_are_refused_with_a_message
         ),
         (
             "lua/plugin/b.lua",
-            "local h, why = neotmux.reserve_pane('left', 7)\n\
+            "local h, why = neotmux.reserve_pane('left', 15)\n\
              assert(h == nil and why:find('will not fit'), why)\n\
              return {}",
         ),
@@ -177,7 +177,7 @@ fn an_edge_other_than_left_and_a_count_out_of_range_raise() {
     for body in [
         "neotmux.reserve_pane('top', 1)",
         "neotmux.reserve_pane('left', 0)",
-        "neotmux.reserve_pane('left', 17)",
+        "neotmux.reserve_pane('left', 25)",
     ] {
         let dir = tempfile::tempdir().unwrap();
         fs::write(dir.path().join("init.lua"), body).unwrap();

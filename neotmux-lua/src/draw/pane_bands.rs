@@ -8,7 +8,7 @@ use crate::plugin::SourceId;
 /// The most columns every pane band together may take off a pane. A pane band is a gutter of
 /// text down a pane's edge — a time, a line number — and past this it is not a gutter but the
 /// pane.
-pub const MAX_PANE_BAND_COLS: u16 = 16;
+pub const MAX_PANE_BAND_COLS: u16 = 24;
 
 struct Entry {
     id: ReservationId,
@@ -176,9 +176,9 @@ mod tests {
         let (_s, a, b) = sources();
         let bands = PaneBands::new();
         let first = bands.add(a, 10).expect("granted");
-        assert!(bands.add(b, 7).is_err());
+        assert!(bands.add(b, 15).is_err());
         bands.add(b, 6).expect("granted");
-        assert!(bands.resize(first, 11).is_err());
+        assert!(bands.resize(first, 19).is_err());
         bands.resize(first, 2).expect("fits");
         let content = Rect::new(28, 1, 32, 10);
         assert_eq!(

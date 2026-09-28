@@ -336,9 +336,10 @@ Each source gets one band; a second `reserve_pane` from the same source is refus
 first is removed, the same distinction `reserve` and `keymap.set` draw between a typo and a
 lost race. Bands are filled from the pane's edge inwards in the order they were granted, and
 `resize_to(cells) -> true | nil, message` keeps a band's place in that order the way it does on
-the surface. Every source's bands share one cap: **16 columns**, summed across all of them —
-past that a pane band is not a gutter of text but the pane. The reservation is held by the
-group it was made through, so `config-reload` takes it back like every other registration.
+the surface. Every source's bands share one cap: **24 columns**, summed across all of them —
+room for `plugin.stamps` and `plugin.exits` side by side, and past that a pane band is not a
+gutter of text but the pane. The reservation is held by the group it was made through, so
+`config-reload` takes it back like every other registration.
 
 `ctx:pane_band(pane)` answers the caller's own columns of that pane, in surface coordinates,
 the same as `ctx:reserved()` does for a surface band. It is `nil` when the caller holds none,
@@ -434,6 +435,7 @@ neotmux.pane.title(id)        -- what the program itself last set as its title, 
 neotmux.pane.marks(id, first, last)  -- the shell's OSC 133 marks on those lines, or nil
 neotmux.pane.content(id, opts) -- { line, ... }, revision, wrapped — or nil, nil, nil
 neotmux.pane.history(id)      -- how many lines are above the screen, how many fell off
+neotmux.pane.view(id)         -- how many lines back `ctx:view` has it drawn this frame, 0 for none
 neotmux.pane.scrollback(id, opts) -- { line, ... }, revision, wrapped — or nil, nil, nil
 neotmux.pane.freeze(id)       -- hold the pane still: a handle, or nil if there is no such pane
 neotmux.pane.frozen(id)       -- true while anyone holds it, false, or nil for no such pane
@@ -1926,6 +1928,12 @@ hold:release()                     -- on the way out
 Two sources asking for the same pane is the later one winning, the rule the overlay already
 follows for the same cells. A view is committed and discarded with your drawing, so a tick that
 overran leaves no pane scrolled.
+
+Anything drawn beside a pane's lines has to wind back with it. `neotmux.pane.view(id)` answers
+how far back the pane is drawn as the frame stands — what a source that ticked earlier asked for
+this frame, else what was asked last frame — and `0` when nothing is winding it back. The row at
+the top of the pane is then line `dropped + len - view`, in the numbering `neotmux.pane.history`
+gives; that is how `plugin.stamps` and `plugin.exits` keep their bands beside copy mode's lines.
 
 ### The notification surface
 

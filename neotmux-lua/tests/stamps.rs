@@ -154,11 +154,11 @@ fn hiding_the_times_gives_the_columns_back() {
 #[test]
 fn toggling_on_past_the_cap_stays_hidden_and_says_why() {
     let (_dir, sub) = built(&format!(
-        "neotmux.reserve_pane('left', 10)\n{SHOWN_WITH_PROBE}"
+        "neotmux.reserve_pane('left', 15)\n{SHOWN_WITH_PROBE}"
     ));
-    assert_eq!(sub.pane_band(), 10);
+    assert_eq!(sub.pane_band(), 15);
     keys(&sub, &["T"]);
-    assert_eq!(sub.pane_band(), 10, "no double reservation");
+    assert_eq!(sub.pane_band(), 15, "no double reservation");
     let CommandOutcome::Ran(lines) = sub.run_command(one(), "stamps-shown", &[]) else {
         panic!("stamps-shown did not run");
     };
@@ -167,5 +167,38 @@ fn toggling_on_past_the_cap_stays_hidden_and_says_why() {
     assert!(
         notices.iter().any(|n| n.contains("plugin.stamps")),
         "{notices:?}"
+    );
+}
+
+/// Copy mode winds the pane back with `ctx:view`; the times go with it, so each is still beside
+/// its own line. Twenty lines that came together have one time, on the first of them, which is
+/// in the history until the view is wound back to it.
+#[test]
+fn the_times_follow_a_view_wound_back_into_the_history() {
+    let (_dir, sub) = built(&format!(
+        "local back = nil\n\
+         neotmux.on_tick(function(ctx) if back then ctx:view(1, back) end end)\n\
+         neotmux.on_key(function(key) if key ~= 'V' then return false end back = 5 return true end)\n\
+         {SHOWN}"
+    ));
+    feed(&sub, b"");
+    publish(&sub);
+    sub.dispatch_tick(one());
+    let lines: String = (0..20).map(|i| format!("L{i}\r\n")).collect();
+    more(&sub, lines.as_bytes());
+    keys(&sub, &["T"]);
+    banded(&sub);
+    let (times, _) = gutter(&sub);
+    assert!(
+        times.is_empty(),
+        "the first line is in the history: {times:?}"
+    );
+
+    keys(&sub, &["V"]);
+    banded(&sub);
+    let (times, _) = gutter(&sub);
+    assert_eq!(
+        times.iter().map(|(y, _, _)| *y).collect::<Vec<_>>(),
+        vec![0]
     );
 }

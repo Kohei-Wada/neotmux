@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### The times and the exits follow copy mode
+
+`C-b t`'s times and `C-b e`'s marks stayed where the live screen's lines were while copy mode
+scrolled the pane back, so each sat beside the wrong line. They now wind back with it.
+`neotmux.pane.view(id)` is what they read: how many lines back `ctx:view` has a pane drawn this
+frame.
+
+The pane bands' cap goes from 16 columns to 24, so `C-b t` and `C-b e` can be shown together.
+
 ### Shrinking the terminal keeps the bottom of every pane
 
 A shorter terminal used to cut rows off the bottom of every pane's screen, so the output you had
