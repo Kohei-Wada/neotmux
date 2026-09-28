@@ -47,6 +47,9 @@ return {
   -- On, and nothing but a command in the palette: what each plugin's ticks cost, which the host
   -- counts whether or not anyone asks.
   costs = true,
+  -- On, and nothing but a command in the palette: picking a theme recolours every plugin next
+  -- frame, and neotmux saves nothing — keeping it is a line in init.lua.
+  theme = true,
   -- On, and nothing on screen until `C-b t`: when every line of every pane arrived is kept
   -- from the start, since a time nobody wrote down is one nobody can show later.
   stamps = true,

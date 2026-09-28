@@ -5,38 +5,33 @@
 --
 --   local theme = require('neotmux.theme')
 --   theme.set({ blue = '#7aa2f7', base = '#1a1b26' })   -- some of them, or all
+--   theme.use('nord')                                   -- a whole shipped theme, by name
 local M = {
-  colors = {
-    rosewater = "#f5e0dc",
-    flamingo = "#f2cdcd",
-    pink = "#f5c2e7",
-    mauve = "#cba6f7",
-    red = "#f38ba8",
-    maroon = "#eba0ac",
-    peach = "#fab387",
-    yellow = "#f9e2af",
-    green = "#a6e3a1",
-    teal = "#94e2d5",
-    sky = "#89dceb",
-    sapphire = "#74c7ec",
-    blue = "#89b4fa",
-    lavender = "#b4befe",
-    text = "#cdd6f4",
-    subtext1 = "#bac2de",
-    subtext0 = "#a6adc8",
-    overlay2 = "#9399b2",
-    overlay1 = "#7f849c",
-    overlay0 = "#6c7086",
-    surface2 = "#585b70",
-    surface1 = "#45475a",
-    surface0 = "#313244",
-    base = "#1e1e2e",
-    mantle = "#181825",
-    crust = "#11111b",
-  },
+  colors = {},
   -- Moved by every `set`, so a cache of resolved colours knows to let go of them.
   generation = 0,
+  -- `catppuccin-*` first, then the rest in the order they were added.
+  names = {
+    "catppuccin-latte",
+    "catppuccin-frappe",
+    "catppuccin-macchiato",
+    "catppuccin-mocha",
+    "tokyonight-night",
+    "tokyonight-storm",
+    "gruvbox-dark",
+    "nord",
+    "dracula",
+    "rose-pine",
+    "kanagawa",
+    "onedark",
+    "everforest-dark",
+  },
+  current = "catppuccin-mocha",
 }
+
+for name, hex in pairs(require("neotmux.themes.catppuccin-mocha")) do
+  M.colors[name] = hex
+end
 
 -- Replaces the colours named in `t` and leaves the rest; a name of its own is added.
 function M.set(t)
@@ -44,6 +39,17 @@ function M.set(t)
     M.colors[name] = hex
   end
   M.generation = M.generation + 1
+end
+
+-- A whole shipped theme, by name — `theme.names`, `catppuccin-*` first. Raises for a name that
+-- is not one of them.
+function M.use(name)
+  local ok, colors = pcall(require, "neotmux.themes." .. name)
+  if not ok then
+    error("unknown theme '" .. tostring(name) .. "'")
+  end
+  M.set(colors)
+  M.current = name
 end
 
 -- A name's colour, a `#rrggbb` as itself, or nil for a name the theme does not have — which
