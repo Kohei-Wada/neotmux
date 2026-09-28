@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Every text field takes the same keys
+
+A prompt — naming a window, a new session from the palette — a list's query and the question a
+list asks all edit with the same keys now: Backspace and `C-h` take a character back, `C-w` the
+last word, `C-u` the whole line. The prompt used to take only Backspace. Taking a character back
+off Japanese left a byte of it behind in all three, and takes the whole character now. The keys
+are `neotmux.line`, for a plugin with a field of its own.
+
 ### A yank reaches the session it was made in
 
 With a client on each of two sessions, a yank in copy mode went to the terminal of whichever

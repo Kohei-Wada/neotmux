@@ -11,10 +11,13 @@
 --   })
 --
 -- `done` is called with what was typed when Enter is pressed, and not at all when Esc is. The
+-- line is edited with `neotmux.line`'s keys — `Backspace`, `C-h`, `C-w`, `C-u` — as every other
+-- is. The
 -- terminal's own cursor belongs to the focused pane, so the caret is drawn — which is what a
 -- text field is anywhere else too.
 local modes = require("neotmux.mode")
 local box = require("neotmux.box")
+local line = require("neotmux.line")
 local g = neotmux.group("neotmux.prompt")
 
 local M = {}
@@ -85,10 +88,8 @@ g.on_key(function(key)
     if done then
       done(value)
     end
-  elseif key == "BS" or key == "Backspace" then
-    state.value = state.value:sub(1, -2)
-  elseif utf8.len(key) == 1 then
-    state.value = state.value .. key
+  else
+    state.value = line.edit(state.value, key) or state.value
   end
   return true
 end)

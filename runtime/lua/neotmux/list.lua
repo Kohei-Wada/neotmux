@@ -30,8 +30,9 @@
 -- to draw when nothing is left to show, so a query that matched nothing says so rather than
 -- leaving a frame with nothing in it.
 --
--- An input line — a query or an `ask` — takes the editing keys a line of text takes anywhere:
--- `BS` and `C-h` take the last character back, and `C-u` clears the line.
+-- An input line — a query or an `ask` — takes the editing keys a line of text takes anywhere,
+-- `neotmux.line`'s: `Backspace` and `C-h` take the last character back, `C-w` the last word,
+-- and `C-u` clears the line.
 --
 -- `input = true` turns the line on: every printable key joins a query,
 -- `C-j`/`C-k` move the cursor instead of the plain `j`/`k`, and `handle:query()` reads what
@@ -61,6 +62,7 @@
 -- dismissed it.
 local modes = require("neotmux.mode")
 local box = require("neotmux.box")
+local line = require("neotmux.line")
 local g = neotmux.group("neotmux.list")
 
 local M = {}
@@ -256,24 +258,20 @@ local function typing(key)
         fail("ask done", err)
       end
     end
-  elseif key == "C-u" then
-    input.value = ""
-  elseif key == "BS" or key == "Backspace" or key == "C-h" then
-    input.value = input.value:sub(1, -2)
-  elseif utf8.len(key) == 1 then
-    -- `accept`, when given, is asked before the character joins the buffer: the picker's
-    -- refusal of a leading `-` is "no" here and nowhere else, since this is the one place a
-    -- character is ever added to it.
-    if not input.accept then
-      input.value = input.value .. key
-    else
-      local ok, accepted = pcall(input.accept, key, input.value)
-      if not ok then
-        fail("ask accept", accepted)
-      elseif accepted then
-        input.value = input.value .. key
+  else
+    -- `accept`, when given, is asked before a character joins the buffer: the picker's
+    -- refusal of a leading `-` is "no" here and nowhere else. Guarded like every callback: a
+    -- raise is a refusal, and says so.
+    local accept = input.accept
+      and function(char, value)
+        local ok, accepted = pcall(input.accept, char, value)
+        if not ok then
+          fail("ask accept", accepted)
+          return false
+        end
+        return accepted
       end
-    end
+    input.value = line.edit(input.value, key, accept) or input.value
   end
 end
 
@@ -398,13 +396,13 @@ local function arm()
         M.commands.up()
         return true
       end
-      if key == "C-u" then
-        state.query = ""
-        state.at = 1
-      elseif key == "BS" or key == "Backspace" or key == "C-h" then
-        state.query = state.query:sub(1, -2)
-      elseif utf8.len(key) == 1 then
-        state.query = state.query .. key
+      local edited = line.edit(state.query, key)
+      if edited ~= nil then
+        -- A query cleared starts the list again from the top.
+        if edited == "" then
+          state.at = 1
+        end
+        state.query = edited
       end
       return true
     end
