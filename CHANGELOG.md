@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### How each command ended, beside it
+
+`C-b e` (the palette's `exits`) shows a band down each pane's left edge with, on the line every
+command was typed on, `✔` for a zero exit, `✘` and the status otherwise, or `⋯` while it runs,
+and how long it took. It is `plugin.exits`, it reads `neotmux.commands`, and it needs a shell
+that sends OSC 133 marks. `require('neotmux.defaults').exits = false` keeps it out.
+
 ### `C-b x` ends a pane
 
 `C-b x` now ends the focused pane rather than the window, as tmux's does; the window moves to

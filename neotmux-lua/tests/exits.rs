@@ -1,0 +1,165 @@
+//! `plugin.exits`: how each command ended and how long it took, down each pane's left edge by
+//! `C-b e`, out of the shell's OSC 133 marks.
+
+mod support;
+
+use neotmux_proto::{Color, DrawCmd, Epoch, Geometry, Rect};
+use support::{Built, SIZE, built, feed, keys, one, pane};
+
+const SHOWN: &str = "require('plugin.exits')\n\
+    neotmux.on_key(function(key)\n\
+      if key ~= 'E' then return false end\n\
+      require('plugin.exits').toggle()\n\
+      return true\n\
+    end)\n";
+
+const OK: Color = Color::Rgb(0xa6, 0xe3, 0xa1);
+const FAILED: Color = Color::Rgb(0xf3, 0x8b, 0xa8);
+
+/// The host once it has taken the band off the pane: the outer rect over the whole surface and
+/// the content nine columns in.
+fn banded(sub: &Built) {
+    let outer = Rect::new(0, 0, SIZE.cols, SIZE.rows);
+    sub.begin_frame(
+        one(),
+        Epoch::new(SIZE, vec![pane()], Some(pane())),
+        Geometry {
+            area: outer,
+            panes: vec![(pane(), Rect::new(9, 0, SIZE.cols - 9, SIZE.rows))],
+            outer: vec![(pane(), outer)],
+            focus: Some(pane()),
+            ..Default::default()
+        },
+    );
+}
+
+/// Every text the band drew that is not its rule, as (x, y, text, colour).
+fn drawn(sub: &Built) -> Vec<(u16, u16, String, Color)> {
+    sub.dispatch_tick(one());
+    sub.frame_output()
+        .into_iter()
+        .filter_map(|cmd| match cmd {
+            DrawCmd::Text { x, y, text, fg, .. } if x < 9 && text != "│" => {
+                Some((x, y, text, fg))
+            }
+            DrawCmd::Rect { .. } => panic!("the band paints no background: {cmd:?}"),
+            _ => None,
+        })
+        .collect()
+}
+
+fn rule(sub: &Built) -> usize {
+    sub.dispatch_tick(one());
+    sub.frame_output()
+        .into_iter()
+        .filter(|cmd| matches!(cmd, DrawCmd::Text { x: 8, text, .. } if text == "│"))
+        .count()
+}
+
+fn more(sub: &Built, text: &[u8]) {
+    sub.terminals().feed(pane(), text);
+}
+
+fn shown(sub: &Built) {
+    keys(sub, &["E"]);
+    banded(sub);
+}
+
+#[test]
+fn a_command_that_exited_zero_is_ticked_on_the_line_it_was_typed_on() {
+    let (_dir, sub) = built(SHOWN);
+    feed(
+        &sub,
+        b"\r\n\x1b]133;A\x07$ \x1b]133;B\x07true\r\n\x1b]133;C\x07\x1b]133;D;0\x07\x1b]133;A\x07$ ",
+    );
+    shown(&sub);
+    let texts = drawn(&sub);
+    assert!(texts.contains(&(0, 1, "✔".to_string(), OK)), "{texts:?}");
+    assert!(
+        !texts.iter().any(|(_, y, _, _)| *y == 0 || *y == 2),
+        "only the command's own line is marked: {texts:?}"
+    );
+}
+
+#[test]
+fn a_failed_command_shows_its_status() {
+    let (_dir, sub) = built(SHOWN);
+    feed(
+        &sub,
+        b"\x1b]133;A\x07$ \x1b]133;B\x07false\r\n\x1b]133;C\x07\x1b]133;D;127\x07\x1b]133;A\x07$ ",
+    );
+    shown(&sub);
+    let texts = drawn(&sub);
+    assert!(
+        texts.contains(&(0, 0, "✘".to_string(), FAILED)),
+        "{texts:?}"
+    );
+    assert!(
+        texts.contains(&(1, 0, "127".to_string(), FAILED)),
+        "{texts:?}"
+    );
+}
+
+#[test]
+fn a_running_command_is_marked_as_running() {
+    let (_dir, sub) = built(SHOWN);
+    feed(
+        &sub,
+        b"\x1b]133;A\x07$ \x1b]133;B\x07sleep 9\r\n\x1b]133;C\x07",
+    );
+    shown(&sub);
+    let texts = drawn(&sub);
+    assert!(
+        texts
+            .iter()
+            .any(|(x, y, t, _)| (*x, *y) == (0, 0) && t == "⋯"),
+        "{texts:?}"
+    );
+}
+
+/// The time is when the plugin first saw the output start and the command end, so a command it
+/// watched says how long it took, and one that had already finished when it looked says nothing.
+#[test]
+fn a_command_it_watched_says_how_long_it_took() {
+    let (_dir, sub) = built(SHOWN);
+    feed(
+        &sub,
+        b"\x1b]133;A\x07$ \x1b]133;B\x07true\r\n\x1b]133;C\x07\x1b]133;D;0\x07\r\n",
+    );
+    sub.dispatch_tick(one());
+    more(
+        &sub,
+        b"\x1b]133;A\x07$ \x1b]133;B\x07sleep 1\r\n\x1b]133;C\x07",
+    );
+    sub.dispatch_tick(one());
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    more(&sub, b"\x1b]133;D;0\x07\r\n\x1b]133;A\x07$ ");
+    sub.dispatch_tick(one());
+    shown(&sub);
+    let texts = drawn(&sub);
+    let times: Vec<(u16, String)> = texts
+        .iter()
+        .filter(|(x, _, _, _)| *x == 5)
+        .map(|(_, y, t, _)| (*y, t.clone()))
+        .collect();
+    assert_eq!(times, vec![(2, " 1s".to_string())], "{texts:?}");
+}
+
+#[test]
+fn a_shell_that_sends_no_marks_gets_an_empty_band() {
+    let (_dir, sub) = built(SHOWN);
+    feed(&sub, b"$ ls\r\nout\r\n$ ");
+    shown(&sub);
+    assert_eq!(drawn(&sub), vec![]);
+    assert_eq!(rule(&sub), usize::from(SIZE.rows));
+}
+
+#[test]
+fn hiding_the_band_gives_the_columns_back() {
+    let (_dir, sub) = built(SHOWN);
+    assert_eq!(sub.pane_band(), 0);
+    keys(&sub, &["E"]);
+    assert_eq!(sub.pane_band(), 9);
+    keys(&sub, &["E"]);
+    assert_eq!(sub.pane_band(), 0);
+}

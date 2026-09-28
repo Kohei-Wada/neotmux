@@ -1479,7 +1479,7 @@ costs one plugin one frame instead of costing you the program.
 
 ## The shipped defaults
 
-neotmux ships sixteen plugins in the runtime layer an install puts on the search path. Six
+neotmux ships seventeen plugins in the runtime layer an install puts on the search path. Six
 do what tmux does and live under `plugin/tmux/`, loaded together by `plugin.tmux`:
 
 | plugin | what it does |
@@ -1509,6 +1509,7 @@ The rest are neotmux's own:
 | `palette` | the command palette on `C-b :`: every registered command, fuzzy-filtered as you type, `Enter` to run the one under the cursor; `@` for the sessions, `#` for the agents, and `C-b g` opens it on `#` |
 | `costs` | the palette's `costs`: what each plugin's ticks have cost, most first |
 | `stamps` | `C-b t` shows when every line of every pane arrived, in a band down each pane's left edge that the pane gives up while it is shown |
+| `exits` | `C-b e` shows how each command in every pane ended — `✔`, `✘` and its status, `⋯` while it runs — and how long it took, in a band down each pane's left edge; it needs a shell that sends OSC 133 marks (see [The commands convention](#the-commands-convention)) |
 | `guard` | holds back the Enter that would run a line `neotmux.guard`'s rules name, until you press it again — **off by default** |
 | `footer` | whichever mode is raised through `neotmux.mode`, on one reserved bottom row — **off by default** |
 
@@ -1516,7 +1517,7 @@ Each is a field of `neotmux.defaults` by its own name — `defaults.copy = false
 out — and `defaults.tmux = false` keeps all six of tmux's out at once, whatever their own fields
 say; `defaults.herdr = false` does the same for herdr's three.
 
-None of them is a host feature — all sixteen are ordinary files making ordinary API calls, and
+None of them is a host feature — all seventeen are ordinary files making ordinary API calls, and
 the prefix is the only reason a fresh install can make a second pane at all. `C-b v` splits
 vertically (the panes end up side by side, because `pane.split('vertical')` divides the
 width), `C-b -` splits horizontally (one above the other), `C-b o` focuses the next pane,

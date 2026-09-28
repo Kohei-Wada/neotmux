@@ -50,6 +50,9 @@ return {
   -- On, and nothing on screen until `C-b t`: when every line of every pane arrived is kept
   -- from the start, since a time nobody wrote down is one nobody can show later.
   stamps = true,
+  -- On, and nothing on screen until `C-b e`: when each command's output started and ended is
+  -- noted from the start, for the same reason, and a shell that sends no marks costs nothing.
+  exits = true,
   -- Off, unlike the four above: which command is worth stopping to ask about is an opinion
   -- about what you run, and one with no rules in it would stop nothing anyway.
   guard = false,
