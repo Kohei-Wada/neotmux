@@ -1,6 +1,6 @@
 -- Which pane is that way.
 --
--- Geometry and nothing else: it reads `neotmux.pane.rect`, which answers outside a tick, and
+-- Geometry and nothing else: it reads `neotmux.pane.outer`, which answers outside a tick, and
 -- returns an id. What to do about that id is the caller's business, so this file has no
 -- opinion about keys and registers nothing.
 --
@@ -41,14 +41,14 @@ local FACING = {
 function M.toward(dir)
   local facing = FACING[dir] or error("unknown direction '" .. tostring(dir) .. "'")
   local me = neotmux.pane.current()
-  local mine = me and neotmux.pane.rect(me)
+  local mine = me and neotmux.pane.outer(me)
   if not mine then
     return nil
   end
 
   local best, best_gap, best_faced
   for _, id in ipairs(neotmux.pane.list()) do
-    local it = id ~= me and neotmux.pane.rect(id)
+    local it = id ~= me and neotmux.pane.outer(id)
     if it then
       local gap, faced = facing(mine, it)
       if

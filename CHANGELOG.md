@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### `neotmux.pane.outer`
+
+`neotmux.pane.outer(id)` answers a pane's rect with its pane bands, the way `ctx:pane_outer`
+does inside a tick. The pickers and the palette are now placed over the panes' outer rects, so
+`C-b t` no longer moves them across or takes their columns, and `neotmux.nav` compares outer
+rects, so a pane too narrow for its band is still found above or below its neighbours.
+
 ### The times have a band of their own
 
 `C-b t` no longer paints over the first nine columns of every pane. While the times are shown,

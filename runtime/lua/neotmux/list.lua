@@ -324,9 +324,9 @@ local function input_first()
   return state.opts.place == "top"
 end
 
--- The rect every pane together covers, read through `rect_of`, or nil when no pane has one. The
--- tick reads it through `ctx:pane_rect`; `open` reads the same geometry through
--- `neotmux.pane.rect`, because the tick that would otherwise tell it is armed by that open, and a
+-- The rect every pane together covers, bands and all, read through `rect_of`, or nil when no pane
+-- has one. The tick reads it through `ctx:pane_outer`; `open` reads the same geometry through
+-- `neotmux.pane.outer`, because the tick that would otherwise tell it is armed by that open, and a
 -- list placed before the area is known is drawn in the corner for a frame.
 local function pane_area(rect_of)
   local left, top, right, bottom
@@ -418,7 +418,7 @@ local function arm()
 
   g.on_tick(function(ctx)
     area = pane_area(function(pane)
-      return ctx:pane_rect(pane)
+      return ctx:pane_outer(pane)
     end) or area
 
     if state == nil or win == nil then
@@ -602,7 +602,7 @@ function M.open(opts)
     fail("items", err)
     return nil
   end
-  area = pane_area(neotmux.pane.rect) or area
+  area = pane_area(neotmux.pane.outer) or area
   local float = g.float(wanted())
   if not float then
     state = nil

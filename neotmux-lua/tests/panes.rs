@@ -564,3 +564,135 @@ fn a_pane_the_frame_did_not_describe_has_no_cursor_and_no_mode() {
         vec!["nil nil".to_string()]
     );
 }
+
+/// The two side-by-side panes again, each with ten columns given up to a pane band: the rects
+/// in `panes` are the content, and `outer` has the bands put back.
+fn side_by_side_banded(sub: &LuaSubsystem) {
+    let size = Size { rows: 24, cols: 80 };
+    let (one, two) = (PaneId::from(1), PaneId::from(2));
+    sub.begin_frame(
+        support::one(),
+        Epoch::new(size, vec![one, two], Some(two)),
+        Geometry {
+            area: Rect::new(0, 0, size.cols, size.rows),
+            windows: vec![Window {
+                id: WindowId::from(1),
+                panes: vec![one, two],
+                name: None,
+            }],
+            window: Some(WindowId::from(1)),
+            panes: vec![
+                (one, Rect::new(10, 0, 30, 24)),
+                (two, Rect::new(50, 0, 30, 24)),
+            ],
+            outer: vec![
+                (one, Rect::new(0, 0, 40, 24)),
+                (two, Rect::new(40, 0, 40, 24)),
+            ],
+            focus: Some(two),
+            zoomed: None,
+        },
+    );
+}
+
+#[test]
+fn a_pane_outer_read_from_a_key_handler_matches_the_one_read_from_a_tick() {
+    let (_d, sub) = built(&[
+        ("init.lua", "require('plugin.asker')"),
+        (
+            "lua/plugin/asker.lua",
+            &format!(
+                "{SPELL}
+                neotmux.on_key(function()
+                  spell('key', neotmux.pane.outer(2))
+                  spell('none', neotmux.pane.outer(99))
+                  return true
+                end)
+                neotmux.on_tick(function(ctx) spell('tick', ctx:pane_outer(2)) end)
+                return {{}}"
+            ),
+        ),
+    ]);
+    side_by_side_banded(&sub);
+    sub.dispatch_key(support::one(), "C-x");
+    sub.dispatch_tick(support::one());
+
+    let lines = logged(&sub, Some(support::one()));
+    assert_eq!(
+        lines,
+        vec!["key 40,0,40,24", "none nil", "tick 40,0,40,24"],
+        "{lines:?}"
+    );
+}
+
+/// A host that published no outer rects has panes with no bands, and their outer rect is
+/// their content.
+#[test]
+fn a_pane_with_no_outer_rect_published_answers_its_content() {
+    let (_d, sub) = built(&[
+        ("init.lua", "require('plugin.asker')"),
+        (
+            "lua/plugin/asker.lua",
+            &format!(
+                "{SPELL}
+                neotmux.on_key(function() spell('key', neotmux.pane.outer(2)) return true end)
+                return {{}}"
+            ),
+        ),
+    ]);
+    side_by_side(&sub);
+    sub.dispatch_key(support::one(), "C-x");
+    assert_eq!(logged(&sub, Some(support::one())), vec!["key 40,0,40,24"]);
+}
+
+/// A pane too narrow for its band keeps all its columns, so its content starts left of a
+/// banded neighbour's above it. The two still face each other: `nav` compares the panes, not
+/// the parts the shells write in.
+#[test]
+fn nav_finds_the_pane_above_a_narrow_one_that_lost_its_band() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(
+        dir.path().join("init.lua"),
+        "neotmux.on_key(function()
+           neotmux.log.info('up ' .. tostring(require('neotmux.nav').toward('up')))
+           return true
+         end)",
+    )
+    .unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf(), support::shipped_layer()]),
+        support::panes(),
+    )
+    .unwrap();
+    assert!(sub.run_init().is_empty());
+
+    let size = Size { rows: 24, cols: 80 };
+    let (top, narrow, wide) = (PaneId::from(1), PaneId::from(2), PaneId::from(3));
+    sub.begin_frame(
+        support::one(),
+        Epoch::new(size, vec![top, narrow, wide], Some(narrow)),
+        Geometry {
+            area: Rect::new(0, 0, size.cols, size.rows),
+            windows: vec![Window {
+                id: WindowId::from(1),
+                panes: vec![top, narrow, wide],
+                name: None,
+            }],
+            window: Some(WindowId::from(1)),
+            panes: vec![
+                (top, Rect::new(10, 0, 70, 12)),
+                (narrow, Rect::new(0, 13, 9, 11)),
+                (wide, Rect::new(20, 13, 60, 11)),
+            ],
+            outer: vec![
+                (top, Rect::new(0, 0, 80, 12)),
+                (narrow, Rect::new(0, 13, 9, 11)),
+                (wide, Rect::new(10, 13, 70, 11)),
+            ],
+            focus: Some(narrow),
+            zoomed: None,
+        },
+    );
+    sub.dispatch_key(support::one(), "C-x");
+    assert_eq!(logged(&sub, Some(support::one())), vec!["up 1"]);
+}

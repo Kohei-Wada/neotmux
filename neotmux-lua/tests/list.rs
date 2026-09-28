@@ -1030,3 +1030,39 @@ fn the_first_list_opened_is_created_where_it_belongs() {
     let centred_x = (SIZE.cols - 20) / 2;
     assert_eq!(rects[0].x, centred_x, "created at {:?}", rects[0]);
 }
+
+/// The pane with ten columns given up to a pane band: its content starts ten in, and its outer
+/// rect is still the whole surface.
+fn banded(sub: &LuaSubsystem) {
+    sub.begin_frame(
+        support::one(),
+        Epoch::new(SIZE, vec![pane()], Some(pane())),
+        Geometry {
+            area: Rect::new(0, 0, SIZE.cols, SIZE.rows),
+            panes: vec![(pane(), Rect::new(10, 0, SIZE.cols - 10, SIZE.rows))],
+            outer: vec![(pane(), Rect::new(0, 0, SIZE.cols, SIZE.rows))],
+            focus: Some(pane()),
+            windows: vec![Window {
+                id: WindowId::from(1),
+                panes: vec![pane()],
+                name: None,
+            }],
+            window: Some(WindowId::from(1)),
+            zoomed: None,
+        },
+    );
+}
+
+/// A list is placed over the panes, bands and all, the way the prompt is: a pane band neither
+/// moves it across nor takes its columns, whether it is asked for on opening or on a tick.
+#[test]
+fn a_pane_band_does_not_move_the_list() {
+    let (_dir, plain) = built(THREE);
+    open_three(&plain);
+    let without = frame(&plain);
+
+    let (_dir, sub) = built(THREE);
+    banded(&sub);
+    open_three(&sub);
+    assert_eq!(frame(&sub), without, "the band moved the list");
+}

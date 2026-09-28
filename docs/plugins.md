@@ -425,6 +425,7 @@ neotmux.pane.list()      -- { id, ... }, in layout order; the zoomed pane alone 
 neotmux.pane.current()   -- id, or nil
 neotmux.pane.zoomed()    -- the zoomed pane's id, or nil
 neotmux.pane.rect(id)    -- { x = , y = , w = , h = }, or nil
+neotmux.pane.outer(id)   -- the same pane with its pane bands, or nil
 neotmux.pane.info(id)    -- { command = ..., cwd = ..., job = { group =, processes = { { pid =, name =, argv = }, ... } } }, or nil
 neotmux.pane.cursor(id)  -- { x = , y = , visible = }, or nil
 neotmux.pane.mode(id)    -- { canonical = , echo = , alternate = , application_cursor = }, or nil
@@ -513,7 +514,10 @@ reading, not the shell underneath it.
 coordinates and with the same table — so geometry is a question you can ask from a key
 handler, where there is no `ctx`. Which pane is to my left is that kind of question, and
 answering it should not oblige you to draw. Inside a tick `ctx:pane_rect` remains the natural
-call. An id no pane has answers `nil`, the way `pane.current()` answers nothing.
+call. An id no pane has answers `nil`, the way `pane.current()` answers nothing. `outer` is
+`ctx:pane_outer` the same way: the pane with every pane band put back, or its `rect` when it
+has none — what to compare when the question is where the panes are rather than where their
+shells write, as `neotmux.nav` and `neotmux.list` do.
 
 `info` is what a status line needs to say more than how many panes there are. `command` is the
 pane's **foreground** process, not the shell neotmux spawned for it: a pane sitting at its

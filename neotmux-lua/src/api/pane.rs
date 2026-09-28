@@ -4,7 +4,7 @@ use std::rc::Rc;
 use mlua::{Lua, Table, Value};
 
 use neotmux_proto::screen::{Lines, PaneRead, Trailing, Want};
-use neotmux_proto::{Dir, Geometry, PaneId, SplitDir};
+use neotmux_proto::{Dir, Geometry, PaneId, Rect, SplitDir};
 
 use crate::api::rect;
 use crate::host::{Op, OpBuffer};
@@ -173,6 +173,27 @@ pub(crate) fn install(
             }
         })?;
         pane.set("rect", rect)?;
+    }
+
+    {
+        // `ctx:pane_outer` from a key handler: what draws around a pane, or places something
+        // over the panes, asks for it where there is no `ctx` too.
+        let geometry = geometry.clone();
+        let outer = lua.create_function(move |lua, pane: u32| {
+            let pane = PaneId::from(pane);
+            let geometry = geometry.borrow();
+            let find = |rects: &[(PaneId, Rect)]| {
+                rects
+                    .iter()
+                    .find(|(id, _)| *id == pane)
+                    .map(|(_, rect)| *rect)
+            };
+            match find(&geometry.outer).or_else(|| find(&geometry.panes)) {
+                Some(found) => Ok(Value::Table(rect::to_table(lua, found)?)),
+                None => Ok(Value::Nil),
+            }
+        })?;
+        pane.set("outer", outer)?;
     }
 
     {
