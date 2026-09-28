@@ -262,9 +262,9 @@ one row at the bottom.
 **The unit is the edge's own.** `top` and `bottom` are counted in rows, `left` and `right` in
 columns. Nothing else about the two axes differs, which is why there is one call and not two.
 
-A horizontal band spans the full width; a vertical one spans only what the horizontal bands
-left. No two bands ever share a cell, and the corner goes to the status line, because that is
-what a line across the terminal means.
+A vertical band spans the full height; a horizontal one spans only what the vertical bands
+left. No two bands ever share a cell, and the corner goes to the sidebar, as herdr's does: a
+sidebar is a column down the terminal, and a status line is a line across the panes beside it.
 
 `ctx:reserved()` answers **your own** band, as `{ x, y, w, h }` in surface coordinates, or
 `nil`. It is per source: two plugins reserving the bottom get a row each, and the one that

@@ -160,18 +160,18 @@ impl Reservations {
     /// surface coordinates, or — for an axis the surface could not afford, which `applied`
     /// reports as nothing reserved on its edges — no band at all.
     ///
-    /// A horizontal band spans the full width and a vertical one only what the horizontal
-    /// bands left, so no two bands ever share a cell. The corner goes to the status line
-    /// because that is what a line across the terminal means; a sidebar is the column
-    /// between the lines.
+    /// A vertical band spans the full height and a horizontal one only what the vertical
+    /// bands left, so no two bands ever share a cell. The corner goes to the sidebar, as
+    /// herdr's does: a sidebar is a column down the terminal, and a status line is a line
+    /// across the panes beside it.
     ///
     /// Called at a frame boundary and nowhere else, so the bands a tick reads are the ones
     /// the layout it is drawing against was computed from.
     pub fn lay_out(&self, surface: Size, applied: Reserved) {
         let mut inner = self.inner.borrow_mut();
         let mut bands = BTreeMap::new();
-        let middle_y = applied.top;
-        let middle_h = surface.rows.saturating_sub(applied.rows());
+        let middle_x = applied.left;
+        let middle_w = surface.cols.saturating_sub(applied.cols());
         let (mut top, mut bottom, mut left, mut right) = (0u16, 0u16, 0u16, 0u16);
         for entry in &inner.entries {
             if applied.of(entry.edge) == 0 {
@@ -179,21 +179,21 @@ impl Reservations {
             }
             let rect = match entry.edge {
                 Edge::Top => {
-                    let rect = Rect::new(0, top, surface.cols, entry.cells);
+                    let rect = Rect::new(middle_x, top, middle_w, entry.cells);
                     top += entry.cells;
                     rect
                 }
                 Edge::Bottom => {
                     bottom += entry.cells;
                     Rect::new(
-                        0,
+                        middle_x,
                         surface.rows.saturating_sub(bottom),
-                        surface.cols,
+                        middle_w,
                         entry.cells,
                     )
                 }
                 Edge::Left => {
-                    let rect = Rect::new(left, middle_y, entry.cells, middle_h);
+                    let rect = Rect::new(left, 0, entry.cells, surface.rows);
                     left += entry.cells;
                     rect
                 }
@@ -201,9 +201,9 @@ impl Reservations {
                     right += entry.cells;
                     Rect::new(
                         surface.cols.saturating_sub(right),
-                        middle_y,
+                        0,
                         entry.cells,
-                        middle_h,
+                        surface.rows,
                     )
                 }
             };
@@ -310,17 +310,20 @@ mod tests {
         );
     }
 
-    /// A vertical band takes only what the horizontal ones left, so the corner belongs to
-    /// exactly one source.
+    /// A horizontal band takes only what the vertical ones left, so the corner belongs to
+    /// exactly one source — the sidebar, as herdr's does.
     #[test]
-    fn a_vertical_band_stops_where_a_horizontal_one_starts() {
-        let (_s, a, b) = sources();
+    fn a_horizontal_band_starts_where_a_vertical_one_stops() {
+        let (s, a, b) = sources();
         let reservations = Reservations::new();
         reservations.add(a, Edge::Top, 1).expect("granted");
         reservations.add(b, Edge::Left, 20).expect("granted");
+        reservations
+            .add(s.intern("@c.lua"), Edge::Right, 10)
+            .expect("granted");
         lay_out(&reservations);
-        assert_eq!(reservations.band(a), Some(Rect::new(0, 0, 80, 1)));
-        assert_eq!(reservations.band(b), Some(Rect::new(0, 1, 20, 23)));
+        assert_eq!(reservations.band(a), Some(Rect::new(20, 0, 50, 1)));
+        assert_eq!(reservations.band(b), Some(Rect::new(0, 0, 20, 24)));
     }
 
     /// The host refuses the axes separately, and so does the hand-out: the bands of the axis
@@ -334,6 +337,9 @@ mod tests {
         reservations.lay_out(surface(), Reserved::vertical(20, 0));
         assert_eq!(reservations.band(a), None);
         assert_eq!(reservations.band(b), Some(Rect::new(0, 0, 20, 24)));
+        reservations.lay_out(surface(), Reserved::horizontal(1, 0));
+        assert_eq!(reservations.band(a), Some(Rect::new(0, 0, 80, 1)));
+        assert_eq!(reservations.band(b), None);
     }
 
     /// Forty columns is a sidebar; forty rows is a mistake. The two bounds are decided

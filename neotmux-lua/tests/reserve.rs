@@ -318,7 +318,7 @@ fn two_sources_reserving_one_vertical_edge_get_separate_bands() {
     );
 }
 
-/// A band on each axis: the vertical one takes what the horizontal one left, so the two
+/// A band on each axis: the horizontal one takes what the vertical one left, so the two
 /// never share a cell.
 #[test]
 fn a_vertical_band_and_a_horizontal_one_do_not_overlap() {
@@ -350,7 +350,7 @@ fn a_vertical_band_and_a_horizontal_one_do_not_overlap() {
     frame(&sub, true);
     assert_eq!(
         texts(&sub),
-        vec!["bar=0,0 80x1".to_string(), "side=0,1 20x23".to_string()]
+        vec!["bar=20,0 60x1".to_string(), "side=0,0 20x24".to_string()]
     );
 }
 

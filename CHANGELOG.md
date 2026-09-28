@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### A sidebar runs the full height
+
+A band on the left or right now takes the terminal's full height, and one on the top or bottom
+only the width between them, as herdr lays its sidebar and tab bar out: the status bar and the
+footer start beside the sidebar rather than over it. `ctx:reserved()` answers the new rects, and
+the panes' area is the same as before.
+
 ### The status bar is herdr's tab bar
 
 The top row is now herdr's tab bar: a tab for each window, the name you gave it or its

@@ -2296,6 +2296,8 @@ fn is_a_state_icon(cell: &str) -> bool {
     SESSION_ICONS.contains(&cell)
 }
 const CURRENT_WINDOW_MARKER: &str = "\u{25b8}";
+/// The sidebar's first row: it runs the full height, and the status bar starts beside it.
+const SIDEBAR_TOP: u16 = 0;
 
 /// The tree of the session you are in, which these tests are about: herdr's spaces are the
 /// shipped default now, and the tree is still shipped, one assignment away — shared out by what
@@ -2334,11 +2336,11 @@ fn the_shipped_sidebar_lists_the_session_and_narrows_the_panes() {
     let mut nt = Neotmux::start_layered(&[init.path(), &shipped_layer()], "cat");
 
     nt.wait_for_status("cat", PATIENCE);
-    nt.wait_for_cell(PANE_TOP, 0, IDLE_SESSION_ICON, PATIENCE);
+    nt.wait_for_cell(SIDEBAR_TOP, 0, IDLE_SESSION_ICON, PATIENCE);
     // A session is two rows — its name, then what it is running — and its windows hang under
     // it, because that is where they are: a window belongs to a session and a pane to a
     // window, and the sidebar draws what the thing is.
-    nt.wait_for_cell(PANE_TOP + 2, 0, CURRENT_WINDOW_MARKER, PATIENCE);
+    nt.wait_for_cell(SIDEBAR_TOP + 2, 0, CURRENT_WINDOW_MARKER, PATIENCE);
     sidebar_row_naming(&mut nt, "1.1", "cat", PATIENCE);
 
     // What the band costs: a pane starts where the sidebar ends, so the shell's own echo
@@ -2382,7 +2384,7 @@ fn the_shipped_sidebar_folds_to_a_rail_and_back() {
     nt.wait_for_cell(PANE_TOP, SIDEBAR_RAIL_COLS, "X", PATIENCE);
     // The pane moves on the frame the layout changes; the rail can be drawn a frame later.
     nt.wait_until("the fold took the markers column too", PATIENCE, |nt| {
-        is_a_state_icon(&nt.cell(PANE_TOP, 0))
+        is_a_state_icon(&nt.cell(SIDEBAR_TOP, 0))
     });
     let folded = nt.screen_after(Duration::ZERO);
     // Below the status bar, which names the focused pane whatever the sidebar is doing.
@@ -2398,7 +2400,7 @@ fn the_shipped_sidebar_folds_to_a_rail_and_back() {
     nt.wait_for_cell(PANE_TOP, SIDEBAR_COLS, "X", PATIENCE);
     sidebar_row_naming(&mut nt, "1.1", "cat", PATIENCE);
     assert!(
-        is_a_state_icon(&nt.cell(PANE_TOP, 0)),
+        is_a_state_icon(&nt.cell(SIDEBAR_TOP, 0)),
         "the band came back somewhere other than the left edge:\n{}",
         nt.screen_after(Duration::ZERO)
     );
@@ -2412,7 +2414,7 @@ fn the_shipped_sidebar_keeps_the_pane_you_are_in_on_screen() {
     let init = harness::runtime(&[("init.lua", TREE_SIDEBAR)]);
     // Short on purpose: five windows do not fit in what is left of ten rows.
     let mut nt = Neotmux::start_sized(&[init.path(), &shipped_layer()], "cat", 10, 80);
-    nt.wait_for_cell(PANE_TOP, 0, IDLE_SESSION_ICON, PATIENCE);
+    nt.wait_for_cell(SIDEBAR_TOP, 0, IDLE_SESSION_ICON, PATIENCE);
 
     for window in 2..=5 {
         nt.send("\x02c"); // C-b c
