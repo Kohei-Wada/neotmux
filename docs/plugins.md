@@ -629,6 +629,12 @@ its `output` and `done` on the very line the next prompt is drawn on. A second m
 kind on the same line replaces the first, which is what takes an old `prompt` or `input` off a
 line a redrawn prompt lands on.
 
+Marks are always the live pane's, `freeze` or not: the lines a live eviction has dropped since
+the freeze have lost their marks even though the frozen screen still shows them, and marks past
+the frozen screen's bottom are included, since freezing holds what is drawn and not what is
+marked. After a resize, a mark's `col` can be past the pane's new width until the shell redraws
+its prompt at the new size.
+
 `opts.lines` bounds the work as well as the answer: the rows above it are never built. Ask for
 the few at the bottom if a prompt is what you are after.
 
@@ -2216,7 +2222,8 @@ never came.
 
 #### Setting up your shell
 
-`neotmux` installs nothing; these are lines you add to your own rc file.
+`neotmux` installs nothing; these are lines you add to your own rc file. The bash lines need
+bash 4.4 or later — `PS0` does not exist before that.
 
 ```bash
 # bash
