@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### A pane's commands, from its shell's marks
+
+A shell that sends OSC 133 marks says where its prompts, command lines and outputs start, and
+how each command exited. neotmux now keeps those marks against the lines they landed on:
+`neotmux.pane.marks(id)` reads them, and `require('neotmux.commands').of(id)` turns them into
+commands, each `done`, `running`, `prompt` or `unknown`. A shell that sends none behaves exactly
+as before. Nothing is drawn yet. `docs/plugins.md` has the lines to add to bash or zsh.
+
 ### `neotmux.pane.outer`
 
 `neotmux.pane.outer(id)` answers a pane's rect with its pane bands, the way `ctx:pane_outer`

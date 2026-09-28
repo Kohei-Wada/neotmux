@@ -431,6 +431,7 @@ neotmux.pane.cursor(id)  -- { x = , y = , visible = }, or nil
 neotmux.pane.mode(id)    -- { canonical = , echo = , alternate = , application_cursor = }, or nil
 neotmux.pane.revision(id)     -- a number that moves when the pane is fed, or nil
 neotmux.pane.title(id)        -- what the program itself last set as its title, or nil
+neotmux.pane.marks(id, first, last)  -- the shell's OSC 133 marks on those lines, or nil
 neotmux.pane.content(id, opts) -- { line, ... }, revision, wrapped — or nil, nil, nil
 neotmux.pane.history(id)      -- how many lines are above the screen, how many fell off
 neotmux.pane.scrollback(id, opts) -- { line, ... }, revision, wrapped — or nil, nil, nil
@@ -599,6 +600,23 @@ It is `nil` for a pane that has never set one, which is every pane until its she
 program inside it does. It is the program's own word, not anything the host inferred from
 `/proc` — that is `pane.info`'s business — so a title can say something the command line
 never would.
+
+A shell that sends OSC 133 says more: where its prompts start, where the command line the user
+typed starts, where its output starts, and how it exited. `marks` is those, kept against the
+lines they landed on:
+
+```lua
+neotmux.pane.marks(id)            -- every mark, oldest first, or nil for no such pane
+neotmux.pane.marks(id, first, last)
+-- { { line = 1203, col = 0, kind = 'prompt' }, { line = 1203, col = 28, kind = 'input' },
+--   { line = 1204, col = 0, kind = 'output' }, { line = 1210, col = 0, kind = 'done', exit = 0 } }
+```
+
+`line` counts the way `pane.history` does — the oldest line the pane still holds is `0`, and a
+mark goes with its line when the history drops it. `kind` is one of `prompt`, `input`, `output`
+or `done`; `exit` is only there for a `done` that carried a status. A shell that sends no marks
+answers `{}`, exactly as if OSC 133 did not exist — and a mark written to the alternate screen
+is dropped, because a TUI's rows are not the shell's lines.
 
 `opts.lines` bounds the work as well as the answer: the rows above it are never built. Ask for
 the few at the bottom if a prompt is what you are after.
@@ -2149,6 +2167,51 @@ than on a tick of its own: every caller is already in one.
 The three words are herdr's, and so is what they are for: an agent you are running is either
 getting on with it, waiting for you, or doing nothing, and which of those it is, is the thing
 you open a sidebar to find out.
+
+### The commands convention
+
+`neotmux.pane.marks` is the shell's own word and nothing else — a line number and a letter.
+`neotmux.commands`, in `runtime/lua/neotmux/commands.lua`, is where those turn into commands: a
+prompt, the input typed at it, where its output started, and how it ended.
+
+```lua
+local commands = require('neotmux.commands')
+
+commands.of(id)    -- oldest first:
+-- { { prompt = 1203, input = 1203, output = 1204, done = 1210, exit = 0, state = 'done' }, ... }
+commands.last(id)  -- the newest one, or nil
+```
+
+A command starts at a `prompt` mark, and `input`, `output`, `done` and `exit` may all be
+missing. `state` is one of four words:
+
+- `done`, once a `done` mark closed it.
+- `running`, when it has an `output` mark and no `done` yet, and it is the newest command — for
+  as long as it runs, with no timeout.
+- `prompt`, when it is the newest command and has no `output` yet: the shell is sitting at its
+  prompt with nothing run.
+- `unknown`, when a newer prompt arrived before any `done` came. That is marks stopping
+  partway — `ssh` or a `bash --norc` run inside a shell that marks, whose own `D` never
+  arrives because the prompt that follows is the outer shell's, not a hang this convention
+  guesses at.
+
+#### Setting up your shell
+
+`neotmux` installs nothing; these are lines you add to your own rc file.
+
+```bash
+# bash
+PS0='\e]133;C\a'
+PS1='\[\e]133;A\a\]'"$PS1"'\[\e]133;B\a\]'
+PROMPT_COMMAND='printf "\e]133;D;%s\a" "$?"'"${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
+```
+
+```zsh
+# zsh
+precmd()  { print -Pn "\e]133;D;$?\a\e]133;A\a" }
+preexec() { print -n "\e]133;C\a" }
+PS1="$PS1"$'%{\e]133;B\a%}'
+```
 
 ### The chime
 
