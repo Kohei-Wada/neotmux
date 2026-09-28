@@ -103,7 +103,10 @@ pub(crate) fn open(
             }
         };
         match wire::decode_to_client(&message).context("decode a server message")? {
-            OwnedToClient::Done(done) if done.end.is_some() => {
+            // Over before it had a screen only when there is nothing to show: a first frame
+            // that also ends the session is a shell that printed and exited before the session
+            // drew once, and what it printed is in that frame.
+            OwnedToClient::Done(done) if done.end.is_some() && done.frame.is_none() => {
                 return Ok(Opened::Over(transcript));
             }
             OwnedToClient::Done(done) => return Ok(Opened::Running(Box::new(done))),
@@ -130,6 +133,9 @@ pub(crate) fn run(
     let winch = WindowChange::install()?;
     if let Some(frame) = &first.frame {
         crate::draw::show(terminal, &frame.frame())?;
+    }
+    if first.end.is_some() {
+        return Ok(Left { signal: None });
     }
 
     #[cfg(debug_assertions)]
@@ -241,4 +247,72 @@ fn gone(peer: &mut Link) -> anyhow::Error {
         }
     }
     anyhow::anyhow!("the neotmux server went away")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use neotmux_proto::wire::End;
+    use std::os::unix::net::UnixStream;
+
+    /// A client link and the server's end of it, both past the hello.
+    fn pair() -> (Rc<RefCell<Link>>, Link) {
+        let (a, b) = UnixStream::pair().expect("socketpair");
+        let server = std::thread::spawn(move || Link::open(a).expect("open"));
+        let client = Link::open(b).expect("open");
+        (Rc::new(RefCell::new(client)), server.join().expect("join"))
+    }
+
+    /// The server's side, on its own thread: it reads the attach `open` sends before it answers.
+    fn answer(mut server: Link, frame: bool, end: Option<End>) -> std::thread::JoinHandle<()> {
+        std::thread::spawn(move || answer_now(&mut server, frame, end))
+    }
+
+    fn answer_now(server: &mut Link, frame: bool, end: Option<End>) {
+        server.recv().expect("the attach").expect("an attach");
+        let rects = neotmux_proto::PaneRects::new();
+        let drawn = neotmux_proto::Frame {
+            size: Size { rows: 2, cols: 2 },
+            panes: Vec::new(),
+            rects: &rects,
+            cursor: None,
+            overlay: &[],
+        };
+        let done = wire::Done {
+            frame: frame.then_some(&drawn),
+            end,
+        };
+        server
+            .send(&wire::encode_to_client(&wire::ToClient::Done(&done)))
+            .expect("send");
+    }
+
+    /// A shell that printed and exited before the session's first frame ends the session in
+    /// that frame, and the frame is its last output: the client draws it, and does not take it
+    /// for a session that was over before it had a screen.
+    #[test]
+    fn a_first_frame_that_is_also_the_last_is_drawn() {
+        let (client, server) = pair();
+        let answered = answer(server, true, Some(End::Eof));
+        let opened = open(&client, Size { rows: 2, cols: 2 }, None).expect("open");
+        answered.join().expect("the server's side");
+        match opened {
+            Opened::Running(done) => {
+                assert!(done.frame.is_some());
+                assert_eq!(done.end, Some(End::Eof));
+            }
+            Opened::Over(_) => panic!("the last frame was thrown away as a session never begun"),
+        }
+    }
+
+    /// And a session a plugin ended while it loaded, which sends no frame, is still over before
+    /// the screen is touched.
+    #[test]
+    fn an_end_with_no_frame_is_a_session_over_before_it_began() {
+        let (client, server) = pair();
+        let answered = answer(server, false, Some(End::Quit));
+        let opened = open(&client, Size { rows: 2, cols: 2 }, None).expect("open");
+        answered.join().expect("the server's side");
+        assert!(matches!(opened, Opened::Over(_)));
+    }
 }
