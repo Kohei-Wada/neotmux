@@ -12,9 +12,11 @@
 --
 -- The marks are the shell's word and nothing else, so they are read as hints. A shell that
 -- sends none has no commands. A command whose `done` never came — `ssh` or `bash --norc` run
--- inside a shell that marks, where the next prompt is the outer shell's — is `unknown` once a
--- prompt follows it, never `running` forever. Only the newest command can be `running`, and it
--- is for as long as it runs: there is no timeout.
+-- inside a shell that marks, where the next prompt is the outer shell's, or a `done` with no
+-- `output` before it, which an empty Enter or Ctrl-C at a prompt sends (bash's `PS0` is not
+-- shown for an empty line) — is `unknown` once a prompt follows it, never `running` forever.
+-- Only the newest command can be `running`, and it is for as long as it runs: there is no
+-- timeout.
 local M = {}
 
 function M.of(pane)
@@ -31,7 +33,7 @@ function M.of(pane)
         current.input = current.input or mark.line
       elseif mark.kind == "output" then
         current.output = current.output or mark.line
-      elseif mark.kind == "done" then
+      elseif mark.kind == "done" and current.output then
         current.done = mark.line
         current.exit = mark.exit
         current.state = "done"

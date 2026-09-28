@@ -118,3 +118,22 @@ fn a_done_with_no_prompt_before_it_is_skipped() {
     keys(&sub, &["C"]);
     assert_eq!(logged(&sub), vec!["prompt 0 nil nil", "last prompt"]);
 }
+
+/// bash's `PS0` (which sends `C`) is not shown for an empty line, so an empty Enter or Ctrl-C
+/// at a prompt sends `A`, `B` and `D` with no `C` in between. A `done` with no `output` before
+/// it closes nothing: the command stays open, `unknown` once a prompt follows, and a command
+/// that did print still closes on its `done` as before.
+#[test]
+fn a_done_with_no_output_before_it_closes_nothing() {
+    let (_dir, sub) = built(COMMANDS);
+    feed(
+        &sub,
+        b"\x1b]133;A\x07$ \x1b]133;B\x07\r\n\x1b]133;D;1\x07\
+          \x1b]133;A\x07$ \x1b]133;B\x07true\r\n\x1b]133;C\x07\x1b]133;D;0\x07",
+    );
+    keys(&sub, &["C"]);
+    assert_eq!(
+        logged(&sub),
+        vec!["unknown 0 nil nil", "done 1 2 0", "last done"]
+    );
+}

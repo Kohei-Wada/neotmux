@@ -135,6 +135,10 @@ commands.last(id) -- the newest one, or nil
   timeout: a long build is running for as long as it runs.
 - A `done` with no `prompt` before it, left over from a history that dropped its prompt, starts
   no command and is skipped.
+- A `done` with no `output` before it closes nothing: the command it belongs to stays open,
+  `unknown` once the next `prompt` arrives. An empty Enter or Ctrl-C at a prompt sends `A`, `B`
+  and `D` with no `C` between them — bash's `PS0` is not shown for an empty line, and zsh's
+  `preexec` does not run for one.
 
 ## 5. Shell setup (docs only)
 

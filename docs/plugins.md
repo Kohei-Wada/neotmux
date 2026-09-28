@@ -2207,7 +2207,12 @@ missing. `state` is one of four words:
   guesses at.
 
 A `done` mark with no `prompt` before it starts no command and is skipped — the first `D` a
-shell sends has nothing before it, and so does one whose `prompt` fell off the history.
+shell sends has nothing before it, and so does one whose `prompt` fell off the history. A
+`done` with no `output` before it closes nothing either, and the command it belongs to stays
+open: an empty Enter or Ctrl-C at a prompt sends `A`, `B` and `D` with no `C` between them,
+since bash's `PS0` is not shown for an empty line and zsh's `preexec` does not run for one.
+That command is `unknown` once the next `prompt` arrives, the same as any other `done` that
+never came.
 
 #### Setting up your shell
 
