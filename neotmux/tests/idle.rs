@@ -91,6 +91,11 @@ neotmux.on_tick(function()
 end)
 "#;
 
+/// A timer due every frame, so the plugins tick every frame and not four times a second. At an
+/// idle session's four, reading every pane costs nothing whether or not it is gated: what the
+/// gate saves shows only while something keeps the ticks coming, and the panes stay quiet.
+const EVERY_FRAME: &str = "neotmux.timer.every(16, function() end)";
+
 /// The discipline the shipped watcher follows: ask the cheap question every tick, build the
 /// lines only for a pane that has been fed since.
 const GATED: &str = r#"
@@ -261,22 +266,23 @@ fn idle_cpu(layers: &[&[(&str, &str)]], window: Duration) -> Vec<f64> {
     after.iter().zip(&before).map(|(a, b)| a - b).collect()
 }
 
-/// The cost control has to be doing something. A plugin that asks about every pane on every
-/// tick must cost close to what no plugin costs, and taking the gate out has to be visible —
-/// otherwise the gate is decoration and a watcher is paying for every pane's screen sixty
-/// times a second.
+/// The cost control has to be doing something. With the plugins ticking every frame and nothing
+/// written to any pane, a plugin that asks about every pane on every tick must cost close to what
+/// no plugin costs, and taking the gate out has to be visible — otherwise the gate is decoration
+/// and a watcher is paying for every pane's screen sixty times a second.
 ///
 /// The claim is about the *plugin's* share, not the absolute seconds, which belong to
 /// whatever runner this is and to an unoptimised test build.
 #[test]
-fn reading_every_pane_every_tick_costs_about_nothing_while_the_session_is_idle() {
+fn reading_every_pane_every_frame_costs_about_nothing_while_the_panes_are_quiet() {
     const WINDOW: Duration = Duration::from_secs(3);
 
-    let gated = format!("{SPLITTER}\n{GATED}");
-    let ungated = format!("{SPLITTER}\n{UNGATED}");
+    let base = format!("{SPLITTER}\n{EVERY_FRAME}");
+    let gated = format!("{base}\n{GATED}");
+    let ungated = format!("{base}\n{UNGATED}");
     let [base, gated, ungated] = idle_cpu(
         &[
-            &[("init.lua", SPLITTER)],
+            &[("init.lua", &base)],
             &[("init.lua", &gated)],
             &[("init.lua", &ungated)],
         ],
@@ -284,7 +290,7 @@ fn reading_every_pane_every_tick_costs_about_nothing_while_the_session_is_idle()
     )[..] else {
         unreachable!("one measurement per layer")
     };
-    println!("idle cpu over {WINDOW:?}: none {base:.3}s gated {gated:.3}s ungated {ungated:.3}s");
+    println!("cpu over {WINDOW:?}: none {base:.3}s gated {gated:.3}s ungated {ungated:.3}s");
 
     let with_gate = gated - base;
     let without = ungated - base;
@@ -296,7 +302,7 @@ fn reading_every_pane_every_tick_costs_about_nothing_while_the_session_is_idle()
     // A loose absolute floor under the ratio, so a run where both are noise cannot pass.
     assert!(
         with_gate <= 0.25,
-        "reading every pane every tick cost {with_gate:.3}s of CPU over {WINDOW:?} above the \
+        "reading every pane every frame cost {with_gate:.3}s of CPU over {WINDOW:?} above the \
          {base:.3}s baseline"
     );
 }
