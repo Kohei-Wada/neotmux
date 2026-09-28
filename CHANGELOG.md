@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### A busy machine no longer parks the plugins
+
+The tick budget measured the wall clock, so a parallel build that took the CPU away from
+neotmux in the middle of a tick counted against the plugin, and five of those in a row parked
+it: the sidebar, the chime and `neotmux.seen` went quiet whenever cargo ran. The 8 ms is now
+the thread's CPU time. A tick is only over once it has run past the deadline on the wall clock
+and used more than its budget of CPU.
+
 ### A plugin set up from your `init.lua` keeps its prefix key
 
 Setting a shipped plugin up from your own `init.lua` — `require('plugin.stamps').stall = ...`,

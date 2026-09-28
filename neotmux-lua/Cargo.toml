@@ -17,6 +17,7 @@ exclude = ["tests/agent.rs", "tests/manifest.rs"]
 neotmux-proto.workspace = true
 anyhow.workspace = true
 mlua.workspace = true
+nix.workspace = true
 regex.workspace = true
 
 [dev-dependencies]

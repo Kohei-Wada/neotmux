@@ -27,7 +27,7 @@ neotmux-server = { path = "neotmux-server", version = "0.1.0" }
 anyhow = "1"
 base64 = "0.22"
 mlua = { version = "0.12", features = ["lua54", "vendored"] }
-nix = { version = "0.28", features = ["term", "signal", "poll", "user", "fs", "process"] }
+nix = { version = "0.28", features = ["term", "signal", "poll", "user", "fs", "process", "time"] }
 portable-pty = "0.9"
 libc = "0.2"
 ratatui = "0.30"

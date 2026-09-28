@@ -1380,6 +1380,11 @@ function and call the library from inside it.
 Your tick gets **8 ms per frame**, and it is 8 ms for the *file*, not for each callback: two
 `on_tick` callbacks written in the same file share one slice.
 
+It is 8 ms of **CPU**, not of the clock on the wall. A machine busy with a parallel build can
+take the CPU away from neotmux in the middle of your tick, and the time it spent waiting is not
+yours: the deadline is only up once your tick has run past it on the wall clock *and* used more
+than 8 ms of the thread's CPU. A host call that blocks is waiting in the same way.
+
 What an overrun looks like from inside your plugin: nothing you can catch. Your code stops
 between two instructions with an error you did not raise, wherever it happened to be. A
 coroutine does not help — the measurement follows into `coroutine.wrap` — and neither does

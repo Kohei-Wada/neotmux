@@ -1,5 +1,5 @@
 use crate::api::Opts;
-use crate::sched::Outcome;
+use crate::sched::{Outcome, thread_cpu};
 use mlua::{HookTriggers, Lua, VmState};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -42,7 +42,27 @@ coroutine.resume = function(...) return guard(_pack(_resume(...))) end
 #[derive(Clone, Copy)]
 struct Active {
     start: Instant,
+    /// This thread's CPU at the start, or `None` where it cannot be read, and then the wall
+    /// clock is all there is to go on.
+    cpu: Option<Duration>,
     budget: Duration,
+}
+
+impl Active {
+    /// What the region has spent, if it is past its deadline: the CPU it used, once the wall
+    /// clock says the deadline has gone by. Waiting — the machine giving the CPU to a parallel
+    /// build, a host call blocking — is not spending, and a plugin is not parked for it.
+    fn over(&self) -> Option<Duration> {
+        let wall = self.start.elapsed();
+        if wall <= self.budget {
+            return None;
+        }
+        let spent = match (self.cpu, thread_cpu()) {
+            (Some(start), Some(now)) => now.saturating_sub(start),
+            _ => wall,
+        };
+        (spent > self.budget).then_some(spent)
+    }
 }
 
 /// What a tick is measured against, and nothing else: counting overruns and acting on them
@@ -78,13 +98,14 @@ impl Budget {
         let measured = self.armed.get() && self.enabled();
         self.active.set(measured.then(|| Active {
             start: Instant::now(),
+            cpu: thread_cpu(),
             budget,
         }));
         self.overran.set(false);
     }
 
-    /// Closes the slice and says what it came to. The elapsed comparison is what catches a
-    /// tick the hook never got to sample past the deadline.
+    /// Closes the slice and says what it came to. The comparison here is what catches a tick
+    /// the hook never got to sample past the deadline.
     ///
     /// The flag is taken rather than read: the sealed `pcall` consults it, so an overrun that
     /// outlived its region would re-raise an unrelated failure in the next one.
@@ -93,15 +114,8 @@ impl Budget {
         if self.overran.replace(false) {
             return Outcome::Interrupted;
         }
-        match active {
-            Some(active) => {
-                let elapsed = active.start.elapsed();
-                if elapsed > active.budget {
-                    Outcome::RanLong { elapsed }
-                } else {
-                    Outcome::WithinBudget
-                }
-            }
+        match active.and_then(|active| active.over()) {
+            Some(elapsed) => Outcome::RanLong { elapsed },
             None => Outcome::WithinBudget,
         }
     }
@@ -116,10 +130,9 @@ impl Budget {
     /// long call the sampling hook never caught mid-flight — is attributed to whichever
     /// handler was running when it was noticed, not lost by the time the region ends.
     pub fn ran_long(&self) -> bool {
-        match self.active.get() {
-            Some(active) => active.start.elapsed() > active.budget,
-            None => false,
-        }
+        self.active
+            .get()
+            .is_some_and(|active| active.over().is_some())
     }
 
     /// Arms the hook for one frame of tick dispatch, and `disarm` takes it away again. It is
@@ -145,7 +158,7 @@ impl Budget {
                 let Some(active) = sampled.active.get() else {
                     return Ok(VmState::Continue);
                 };
-                if active.start.elapsed() <= active.budget {
+                if active.over().is_none() {
                     return Ok(VmState::Continue);
                 }
                 sampled.overran.set(true);
@@ -553,5 +566,54 @@ mod tests {
             took >= ms(200),
             "a 200 ms region was cut off after {took:?}"
         );
+    }
+
+    /// A tick is billed for the CPU it used, not for the time the machine kept it waiting: a
+    /// parallel build that takes the CPU away from neotmux for a while is not the plugin's
+    /// doing, and parking it for that took the sidebar down whenever cargo ran.
+    #[test]
+    fn time_spent_off_the_cpu_does_not_spend_the_budget() {
+        let (_lua, budget) = armed(5);
+        budget.enter(ms(5));
+        std::thread::sleep(ms(20));
+        assert!(
+            !budget.ran_long(),
+            "a region that slept was taken as running long"
+        );
+        assert_eq!(budget.leave(), Outcome::WithinBudget);
+    }
+
+    /// The same inside Lua, where the hook samples the clock: a host call that blocks past the
+    /// deadline is waiting, not spending, and the tick is not cut off for it.
+    #[test]
+    fn a_tick_that_waits_past_its_deadline_is_not_cut_off() {
+        let (lua, budget) = armed(5);
+        let nap = lua
+            .create_function(|_, ()| {
+                std::thread::sleep(ms(8));
+                Ok(())
+            })
+            .unwrap();
+        lua.globals().set("nap", nap).unwrap();
+        let ticked: Function = lua
+            .load(
+                "return function()
+                   for _ = 1, 3 do
+                     nap()
+                     local n = 0
+                     for _ = 1, 5000 do n = n + 1 end
+                   end
+                   return true
+                 end",
+            )
+            .eval()
+            .unwrap();
+
+        budget.enter(ms(5));
+        let result = ticked.call::<bool>(());
+        let outcome = budget.leave();
+
+        assert!(result.unwrap(), "a tick that only waited was cut off");
+        assert_eq!(outcome, Outcome::WithinBudget);
     }
 }
