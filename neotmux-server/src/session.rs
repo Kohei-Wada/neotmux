@@ -390,6 +390,11 @@ impl Session {
                     self.apply_window_create(tag, *window)?;
                 }
                 SessionOp::WindowFocus { window } => self.apply_window_focus(tag, *window)?,
+                SessionOp::WindowKill { window } => {
+                    if self.apply_window_kill(tag, *window)? {
+                        ended = ended.or(Some(End::Quit));
+                    }
+                }
                 SessionOp::WindowRename { window, name } => {
                     if !self.windows.rename(*window, name.clone()) {
                         logging::log(
@@ -512,6 +517,27 @@ impl Session {
         }
         self.dirty = true;
         Ok(())
+    }
+
+    /// Ends every pane in `window`, each the way a pane whose shell exited is closed. True
+    /// when it is the last window, which is left standing for the session's end to take.
+    fn apply_window_kill(&mut self, tag: &str, window: WindowId) -> anyhow::Result<bool> {
+        let windows = self.windows.panes();
+        let Some((_, panes)) = windows.iter().find(|(id, _)| *id == window) else {
+            logging::log(
+                Level::Error,
+                tag,
+                &format!("window.kill({window}) refused: no such window"),
+            );
+            return Ok(false);
+        };
+        if windows.len() == 1 {
+            return Ok(true);
+        }
+        for pane in panes {
+            self.close_pane(*pane)?;
+        }
+        Ok(false)
     }
 
     /// A refusal is logged against whoever asked, as a refused split is: the op is applied

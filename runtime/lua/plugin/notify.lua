@@ -9,7 +9,7 @@
 -- between, because two things raised by two plugins at two moments are two things, and a
 -- single frame round them reads as one.
 --
---   C-b N       take them all down
+--   C-b C       take them all down
 --
 -- Nothing here is a host feature. `neotmux.notifications.list()` is the surface, `ctx:area()`
 -- is the corner to put them in — the pane area, so a sidebar or a footer moves them rather
@@ -81,10 +81,10 @@ local function draw(ctx, x, y, w, h)
 end
 
 if package.loaded["plugin.tmux.prefix"] then
-  require("plugin.tmux.prefix").commands["N"] = function()
+  require("plugin.tmux.prefix").commands["C"] = function()
     neotmux.notifications.clear()
   end
-  require("plugin.tmux.prefix").descriptions["N"] = "clear the notifications"
+  require("plugin.tmux.prefix").descriptions["C"] = "clear the notifications"
 end
 
 g.on_tick(function(ctx)

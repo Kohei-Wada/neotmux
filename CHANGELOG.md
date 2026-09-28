@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Closing a window or a session from the prefix
+
+`C-b x` ends the window you are in and every shell in it, and ending the last one ends the
+session; `neotmux.window.kill(id)` is what it calls. `C-b N` makes a session and goes there,
+without the picker, and `C-b X` ends the session you are in, moving you to another first when
+there is one. Clearing the notifications moves from `C-b N` to `C-b C`.
+
 ### A sidebar runs the full height
 
 A band on the left or right now takes the terminal's full height, and one on the top or bottom

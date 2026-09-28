@@ -49,6 +49,9 @@ pub enum Op {
         window: WindowId,
         name: Option<String>,
     },
+    WindowKill {
+        window: WindowId,
+    },
     /// The set of sessions changing, which is the server's rather than a session's: these
     /// three never reach `Session::apply`.
     SessionCreate {

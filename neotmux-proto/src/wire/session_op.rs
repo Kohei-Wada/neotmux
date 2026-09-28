@@ -36,4 +36,8 @@ pub enum SessionOp {
         window: WindowId,
         name: Option<String>,
     },
+    /// Every pane in the window, ended; the last window ending ends the session.
+    WindowKill {
+        window: WindowId,
+    },
 }

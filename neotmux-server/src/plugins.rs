@@ -243,6 +243,7 @@ impl Plugins {
                 Op::WindowCreate { window } => SessionOp::WindowCreate { window },
                 Op::WindowFocus { window } => SessionOp::WindowFocus { window },
                 Op::WindowRename { window, name } => SessionOp::WindowRename { window, name },
+                Op::WindowKill { window } => SessionOp::WindowKill { window },
                 Op::SessionCreate { name } => {
                     server.push((tag, ServerOp::Create { name }));
                     continue;
@@ -376,6 +377,11 @@ impl Plugins {
                 SessionOp::WindowRename { window, .. } => refuse(
                     &tag,
                     &format!("window.rename({window}, ...)"),
+                    "no windows exist until the session starts",
+                ),
+                SessionOp::WindowKill { window } => refuse(
+                    &tag,
+                    &format!("window.kill({window})"),
                     "no windows exist until the session starts",
                 ),
             }

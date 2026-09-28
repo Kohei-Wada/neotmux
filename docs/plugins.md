@@ -867,6 +867,7 @@ neotmux.window.create()   -- the new window's id
 neotmux.window.focus(id)  -- show that one
 neotmux.window.name(id)   -- what somebody called it, or nil
 neotmux.window.rename(id, name)  -- call it that; nil takes the name away again
+neotmux.window.kill(id)   -- end it and every shell in it; the last one ends the session
 ```
 
 A `WindowId` is stable and never reused, exactly as a `PaneId` is, and the same rule follows:
@@ -1396,9 +1397,9 @@ do what tmux does and live under `plugin/tmux/`, loaded together by `plugin.tmux
 | plugin | what it does |
 |---|---|
 | `tmux.status` | the default status bar, on one reserved top row: herdr's tab bar, a tab a window |
-| `tmux.prefix` | a `C-b` prefix over `v`, `-`, `o`, `h/j/k/l`, `r`, `z`, `c`, `n`, `p`, `,`, `[` and `?` |
+| `tmux.prefix` | a `C-b` prefix over `v`, `-`, `o`, `h/j/k/l`, `r`, `z`, `c`, `n`, `p`, `,`, `x`, `[` and `?` |
 | `tmux.copy` | copy mode: read back over a pane's scrollback, select a region, yank it |
-| `tmux.sessions` | the session picker on `C-b s`: every session and what it is running, `Enter` to go, `c` to make one, `r` to rename one, `d` to end one |
+| `tmux.sessions` | the session picker on `C-b s`: every session and what it is running, `Enter` to go, `c` to make one, `r` to rename one, `d` to end one; `C-b N` makes one and `C-b X` ends the one you are in without it |
 | `tmux.borders` | a rule along every boundary between two panes |
 | `tmux.sync` | relays every key to every pane of the window — tmux's `synchronize-panes`, turned on and off with `:sync-panes` or `C-b S`; the plugin loads by default, the relaying starts off |
 
@@ -1435,7 +1436,8 @@ width), `C-b -` splits horizontally (one above the other), `C-b o` focuses the n
 the first press unzooms), `C-b z` zooms the focused pane and back, `C-b r` enters
 resize mode, `C-b [` enters copy mode, `C-b s` opens the session picker, `C-b :` opens the
 command palette, `C-b c` opens a window and switches to it, and `C-b n` and `C-b p`
-walk to the next window and the one before, each wrapping around. `C-b ?` lists every one of
+walk to the next window and the one before, each wrapping around. `C-b x` ends the window
+you are in, and ending the last one ends the session. `C-b ?` lists every one of
 them — the key, the command it runs, what that does — and Enter runs the one under the cursor.
 A plugin that binds a key to a function rather than a command's name says what it does in
 `require('plugin.tmux.prefix').descriptions[key]`, so the list has something to show for it.

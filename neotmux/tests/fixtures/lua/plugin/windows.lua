@@ -48,6 +48,10 @@ neotmux.on_key(function(key)
     neotmux.window.focus(99)
     return true
   end
+  if key == "C-x" then
+    neotmux.window.kill(neotmux.window.current())
+    return true
+  end
   if key == "C-r" then
     neotmux.log.info("windows report" .. seen())
     return true

@@ -9,6 +9,9 @@
 --   d           end the one under the cursor
 --   Esc q       leave
 --
+--   C-b N       make one without the picker: type a name, Enter to make it and go there
+--   C-b X       end the one you are in, going to another first if there is one
+--
 -- A composition on `neotmux.list`: the float, the cursor, the scrolling and the caret are
 -- that module's. What is left here is what makes this list a session picker rather than any
 -- other one — what a row says, and what `Enter`, `c`, `r` and `d` do. The frame, the cursor row
@@ -199,11 +202,30 @@ g.command.add("session-rename", function()
   })
 end, { desc = "rename the session you are in" })
 
+-- The client is moved before the session goes, so it lands somewhere rather than being let
+-- go; with no other session there is nowhere to land, and the server ends with it.
+g.command.add("session-kill", function()
+  local name = neotmux.session.current()
+  if not name then
+    return
+  end
+  for _, other in ipairs(neotmux.session.list()) do
+    if other ~= name then
+      neotmux.session.switch(other)
+      break
+    end
+  end
+  neotmux.session.kill(name)
+end, { desc = "end the session you are in, going to another first" })
+
 if package.loaded["plugin.tmux.prefix"] then
-  require("plugin.tmux.prefix").commands["s"] = function()
+  local prefix = require("plugin.tmux.prefix")
+  prefix.commands["s"] = function()
     M.open()
   end
-  require("plugin.tmux.prefix").descriptions["s"] = "pick a session to switch to, make or end one"
+  prefix.descriptions["s"] = "pick a session to switch to, make or end one"
+  prefix.commands["N"] = "session-new"
+  prefix.commands["X"] = "session-kill"
 end
 
 return M

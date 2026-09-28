@@ -25,6 +25,7 @@
 --   r           resize mode: h/j/k/l move the boundary, anything else leaves
 --   c  n  p     a new window, the next one, the one before
 --   ,           name the window you are in; an empty name leaves it its number
+--   x           end the window you are in, and every shell in it
 --   d           leave the session running and let go of this terminal
 --   ?           every key here, what it runs and what that does; Enter runs it
 --
@@ -150,6 +151,14 @@ local function rename_window()
   })
 end
 
+-- The last window going is the session going, which the host sees to.
+local function kill_window()
+  local id = neotmux.window.current()
+  if id ~= nil then
+    neotmux.window.kill(id)
+  end
+end
+
 local function leave_session()
   neotmux.detach()
 end
@@ -187,6 +196,7 @@ register("window-new", new_window, "open a new window and switch to it")
 register("window-next", next_window, "switch to the next window")
 register("window-prev", prev_window, "switch to the window before this one")
 register("window-rename", rename_window, "name the window you are in")
+register("window-kill", kill_window, "end the window you are in, and every shell in it")
 register("detach", leave_session, "leave the session running and let go of this terminal")
 -- Defined below, once `M` it reads is: the command only has to exist by the time it runs.
 local show_keys
@@ -215,6 +225,7 @@ local M = {
     ["n"] = "window-next",
     ["p"] = "window-prev",
     [","] = "window-rename",
+    ["x"] = "window-kill",
     ["d"] = "detach",
     ["?"] = "keys",
   },

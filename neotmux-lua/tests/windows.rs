@@ -202,3 +202,19 @@ fn renaming_a_window_is_an_op_with_the_name_on_it() {
         ]
     );
 }
+
+#[test]
+fn killing_a_window_is_an_op_naming_it() {
+    let (_dir, sub) = built("neotmux.window.kill(2)");
+    publish(&sub);
+    sub.dispatch_tick(support::one());
+    assert_eq!(
+        sub.drain_ops(Some(support::one()))
+            .into_iter()
+            .map(|(_, op)| op)
+            .collect::<Vec<_>>(),
+        vec![Op::WindowKill {
+            window: WindowId::from(2),
+        }]
+    );
+}

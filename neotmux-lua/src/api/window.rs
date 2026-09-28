@@ -128,6 +128,8 @@ pub(crate) fn install(
     }
 
     {
+        let sources = sources.clone();
+        let ops = ops.clone();
         let focus = lua.create_function(move |lua, id: u32| {
             ops.push(
                 plugin::caller(lua, &sources),
@@ -138,6 +140,19 @@ pub(crate) fn install(
             Ok(())
         })?;
         window.set("focus", focus)?;
+    }
+
+    {
+        let kill = lua.create_function(move |lua, id: u32| {
+            ops.push(
+                plugin::caller(lua, &sources),
+                Op::WindowKill {
+                    window: WindowId::from(id),
+                },
+            );
+            Ok(())
+        })?;
+        window.set("kill", kill)?;
     }
 
     Ok(window)

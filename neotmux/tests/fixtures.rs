@@ -1709,7 +1709,7 @@ fn a_plugin_asking_every_tick_does_not_make_an_idle_session_redraw() {
 /// while the panes of the others go on running.
 ///
 /// Both fixture plugins are loaded together where a test needs a split as well as a switch:
-/// `plugin.splitter` owns `C-b`/`C-o`/`C-g`, `plugin.windows` owns `C-w`/`C-t`/`C-n`/`C-r`.
+/// `plugin.splitter` owns `C-b`/`C-o`/`C-g`, `plugin.windows` owns `C-w`/`C-t`/`C-n`/`C-x`/`C-r`.
 const WINDOW_FIXTURES: &str = "require('plugin.splitter') require('plugin.windows')";
 
 /// Switching shows a different pane, and switching back shows the first one's content
@@ -1965,6 +1965,40 @@ fn closing_the_last_window_exits_cleanly() {
     nt.wait_for_log("windows window_closed 2", PATIENCE);
 
     nt.send("\x04"); // and the first window's, which is the last pane there is
+    assert!(nt.exited_cleanly(PATIENCE));
+}
+
+/// `window.kill` ends every pane of the window, split ones included, and shows another.
+#[test]
+fn killing_a_split_window_ends_its_panes_and_shows_another() {
+    let (mut nt, _init) = start(WINDOW_FIXTURES, "cat");
+    nt.send("UP\r");
+    nt.wait_for_screen("UP", PATIENCE);
+    nt.send("\x17"); // C-w
+    nt.wait_for_log("windows window_changed 2", PATIENCE);
+    nt.send("\x02"); // C-b: split the second window
+    nt.wait_for_log("splitter pane_opened 3", PATIENCE);
+
+    nt.send("\x18"); // C-x: kill the shown window
+    let log = nt.wait_for_log("windows window_closed 2", PATIENCE);
+    assert!(
+        line_with(&log, "window_closed 2").contains("windows=1"),
+        "a window_closed handler still saw the killed window:\n{log}"
+    );
+    nt.wait_for_log("windows window_changed 1", PATIENCE);
+
+    nt.send("SURVIVOR");
+    nt.wait_for_screen("SURVIVOR", PATIENCE);
+}
+
+/// Killing the only window is killing the session, and it ends cleanly.
+#[test]
+fn killing_the_last_window_exits_cleanly() {
+    let (mut nt, _init) = start("require('plugin.windows')", "cat");
+    nt.send("UP\r");
+    nt.wait_for_screen("UP", PATIENCE);
+
+    nt.send("\x18"); // C-x
     assert!(nt.exited_cleanly(PATIENCE));
 }
 
