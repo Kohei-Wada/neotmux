@@ -70,6 +70,7 @@ fn make(sub: &Built, id: SessionId, name: &str, command: &str) {
             PaneInfo {
                 command: Some(command.to_string()),
                 cwd: None,
+                job: None,
             },
         )]),
     );

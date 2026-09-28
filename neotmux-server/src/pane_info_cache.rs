@@ -75,6 +75,7 @@ mod tests {
         PaneInfo {
             command: Some(name.to_string()),
             cwd: None,
+            job: None,
         }
     }
 

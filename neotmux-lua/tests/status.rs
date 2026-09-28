@@ -83,6 +83,7 @@ fn info(command: &str, cwd: &str) -> PaneInfo {
     PaneInfo {
         command: Some(command.to_string()),
         cwd: Some(cwd.to_string()),
+        job: None,
     }
 }
 

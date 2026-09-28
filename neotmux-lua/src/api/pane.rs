@@ -139,6 +139,25 @@ pub(crate) fn install(
             if let Some(cwd) = &info.cwd {
                 table.set("cwd", cwd.as_str())?;
             }
+            if let Some(job) = &info.job {
+                let processes = lua.create_table()?;
+                for (i, process) in job.processes.iter().enumerate() {
+                    let entry = lua.create_table()?;
+                    entry.set("pid", process.pid)?;
+                    entry.set("name", process.name.as_str())?;
+                    if let Some(argv) = &process.argv {
+                        entry.set(
+                            "argv",
+                            lua.create_sequence_from(argv.iter().map(String::as_str))?,
+                        )?;
+                    }
+                    processes.set(i + 1, entry)?;
+                }
+                let job_table = lua.create_table()?;
+                job_table.set("group", job.group)?;
+                job_table.set("processes", processes)?;
+                table.set("job", job_table)?;
+            }
             Ok(Value::Table(table))
         })?;
         pane.set("info", info)?;

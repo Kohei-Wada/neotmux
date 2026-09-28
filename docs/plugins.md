@@ -369,7 +369,7 @@ is idempotent, the way every `remove` in this API is.
 neotmux.pane.list()      -- { id, ... }, in layout order
 neotmux.pane.current()   -- id, or nil
 neotmux.pane.rect(id)    -- { x = , y = , w = , h = }, or nil
-neotmux.pane.info(id)    -- { command = ..., cwd = ... }, or nil
+neotmux.pane.info(id)    -- { command = ..., cwd = ..., job = { group =, processes = { { pid =, name =, argv = }, ... } } }, or nil
 neotmux.pane.cursor(id)  -- { x = , y = , visible = }, or nil
 neotmux.pane.mode(id)    -- { canonical = , echo = , alternate = , application_cursor = }, or nil
 neotmux.pane.revision(id)     -- a number that moves when the pane is fed, or nil
@@ -2007,9 +2007,12 @@ file's own model.
 Every other shipped ruleset is herdr's manifest for that program — Codex, Gemini, Cursor,
 OpenCode, Copilot and sixteen more — run as it is written by `neotmux.manifest`, herdr's engine
 ported to Lua. `tools/herdr-manifests.py` makes them from a herdr checkout, so a newer herdr is
-taken by running it again. A manifest ruleset claims a pane by the name of the program in it,
-herdr's list of names: a pane that reports `codex` is Codex's, and the Claude ruleset steps back
-from it. One of your own in herdr's format is a table away:
+taken by running it again. A manifest ruleset claims a pane by the agent
+`require('neotmux.agent').of(info)` finds in it: herdr's reading of the pane's whole foreground
+job, `pane.info(id).job` — the script a `node` or a shell was handed, the native binary under a
+wrapper — so Codex and Gemini as npm installs them are Codex's and Gemini's, where `command`
+says `node-MainThread`. Where the host could not read the job, the program's name is looked up
+in herdr's list instead. The Claude ruleset steps back from a pane that is another agent's. One of your own in herdr's format is a table away:
 
 ```lua
 require('neotmux.detect').agents.mine = require('neotmux.manifest').ruleset({

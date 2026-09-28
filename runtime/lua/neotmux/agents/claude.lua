@@ -449,10 +449,13 @@ claude.shells = {
 -- answer coming back. There the screen is the only evidence there is, and refusing it would
 -- turn off the detector rather than narrow it.
 --
--- And a program another ruleset names is that ruleset's: this one claims by elimination, so it
--- would otherwise run first on every other agent's screen and answer out of the words the two
--- programs happen to share.
+-- And a pane the host has identified is the identified agent's, and a program another ruleset
+-- names is that ruleset's: this one claims by elimination, so it would otherwise run first on
+-- every other agent's screen and answer out of the words the two programs happen to share.
 function claude.claims(info)
+  if info ~= nil and info.agent ~= nil then
+    return info.agent == "claude"
+  end
   local command = info and info.command
   if command == nil then
     return true

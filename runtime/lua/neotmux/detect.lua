@@ -59,6 +59,7 @@
 -- idle disbelieved until it settles, unless the screen says idle in so many words — is
 -- `src/pane/agent_detection.rs`.
 local g = neotmux.group("neotmux.detect")
+local agent = require("neotmux.agent")
 
 local M = {}
 
@@ -300,7 +301,11 @@ end
 -- A `claims` that raises declines, and says which ruleset it was — once, for the same reason a
 -- rule that raises is reported once. The ruleset is the thing that is broken, and skipping it
 -- leaves the pane where it would have been had nobody written it.
-function M.claimed(name, rules, pane)
+--
+-- `info` is the `pane.info` to ask about, when the caller has read it already — `of` reads it
+-- once a look and fills in `info.agent`, `neotmux.agent`'s reading of the job, for every
+-- ruleset to claim by. Without it the pane's is read here.
+function M.claimed(name, rules, pane, info)
   local ask = rules.claims
   if ask == nil then
     return true
@@ -308,7 +313,7 @@ function M.claimed(name, rules, pane)
   -- The `info` read is inside the `pcall` too: it is `neotmux.pane.info`, which answers nil
   -- rather than raising today, and a change that made it raise must not take a look down.
   local ok, yes = pcall(function()
-    return ask(neotmux.pane.info(pane))
+    return ask(info or neotmux.pane.info(pane))
   end)
   if not ok then
     if not complained[rules] then
@@ -347,14 +352,14 @@ g.on_event("pane_closed", function(event)
   M.forget(event.pane)
 end)
 
--- What the pane is running, or nil for a pane nothing can be read about. `pane.info` answers
--- nil rather than raising today; the pcall is for the day it does not.
-local function command_of(pane)
+-- What the host knows about the pane, or nil for a pane nothing can be read about.
+-- `pane.info` answers nil rather than raising today; the pcall is for the day it does not.
+local function info_of(pane)
   local ok, info = pcall(neotmux.pane.info, pane)
-  if not ok or info == nil then
+  if not ok then
     return nil
   end
-  return info.command
+  return info
 end
 
 -- Whether the title on this pane is still the title of the program that is running on it.
@@ -374,8 +379,7 @@ end
 -- against a `pane.info` up to the host's 250 ms old — the same window `claims` is judged in.
 -- `pane.info` is `/proc`, so on anything but Linux the command is always nil and this seam,
 -- like `claims` above it, is inert.
-local function title_is_the_running_program(pane, title)
-  local command = command_of(pane)
+local function title_is_the_running_program(pane, title, command)
   local was = titled[pane]
   if was == nil or was.title ~= title then
     titled[pane] = { title = title, command = command }
@@ -458,17 +462,21 @@ function M.of(pane)
     M.forget(pane)
     return nil
   end
-  local command = command_of(pane)
+  local info = info_of(pane)
+  local command = info and info.command
   local it = seen[pane]
   if it == nil or it.revision ~= revision or it.command ~= command then
     it = { revision = revision, command = command, view = M.view(pane) }
     if it.view ~= nil then
-      if not title_is_the_running_program(pane, it.view.title) then
+      if not title_is_the_running_program(pane, it.view.title, command) then
         it.view.title = ""
+      end
+      if info ~= nil then
+        info.agent = agent.of(info)
       end
       for _, name in ipairs(names()) do
         local rules = M.agents[name]
-        if M.claimed(name, rules, pane) then
+        if M.claimed(name, rules, pane, info) then
           local state, id, visible = M.judge(rules, it.view)
           if id ~= nil then
             it.state, it.visible, it.matched, it.agent = state, visible, true, name

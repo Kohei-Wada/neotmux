@@ -363,9 +363,9 @@ end
 M.gate = gate
 
 -- What a pane's command is called once it is a name herdr would look up: the basename, lower
--- case. herdr also reads a wrapper's argv to find the agent under `node` or a shell; neotmux's
--- `pane.info` names the foreground process alone, so an agent started through one is not
--- claimed here.
+-- case. `pane.info` answers `agent` too, herdr's reading of the whole foreground job — the
+-- agent under a `node` or a shell — and a ruleset claims by that where the host could read it,
+-- by the command's name where it could not.
 local function lookup_name(command)
   return (command:match("([^/]+)$") or command):lower()
 end
@@ -442,8 +442,13 @@ function M.ruleset(manifest)
   end
   set.names = names
   function set.claims(info)
-    local command = info and info.command
-    return command ~= nil and names[lookup_name(command)] == true
+    if info == nil then
+      return false
+    end
+    if info.agent ~= nil then
+      return info.agent == manifest.id
+    end
+    return info.command ~= nil and names[lookup_name(info.command)] == true
   end
   return set
 end

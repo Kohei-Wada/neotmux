@@ -4,7 +4,7 @@
 
 mod support;
 
-use support::{built, feed, keys, logged, running};
+use support::{built, feed, keys, logged, running, running_job};
 
 /// Runs `body` on `J` and answers what it logged. The modules are loaded by init, as a plugin
 /// loads them: loading every ruleset is more than a key's budget has room for.
@@ -191,4 +191,47 @@ fn an_unrecognised_screen_is_idle_for_an_agent_herdr_knows_and_not_for_codex() {
     running(&sub, "codex");
     keys(&sub, &["J"]);
     assert_eq!(logged(&sub).last().map(String::as_str), Some("nil nil"));
+}
+
+/// Codex as npm installs it: the pane's foreground process is `node`, under the name Node gives
+/// its main thread, and it is herdr's reading of the job that says Codex. The Claude ruleset, which claims `node` by
+/// elimination, steps back from a pane the host has named.
+#[test]
+fn a_codex_run_by_node_is_codexs_by_what_the_host_identified() {
+    let (_dir, sub) = built(
+        "local state = require('neotmux.state')\n\
+         local detect = require('neotmux.detect')\n\
+         neotmux.on_key(function(key)\n\
+           if key == 'J' then\n\
+             neotmux.log.info(tostring(state.of(1)) .. ' ' .. tostring(detect.agent(1)))\n\
+             return true\n\
+           end\n\
+           return false\n\
+         end)\n",
+    );
+    running_job(
+        &sub,
+        "node-MainThread",
+        &[
+            (
+                100,
+                "node-MainThread",
+                &["node", "/home/user/.npm-global/bin/codex"],
+            ),
+            (
+                101,
+                "codex",
+                &["/home/user/.npm-global/lib/node_modules/@openai/codex/vendor/codex"],
+            ),
+        ],
+    );
+    feed(
+        &sub,
+        "• Working (12s • esc to interrupt)\r\n\r\n› ".as_bytes(),
+    );
+    keys(&sub, &["J"]);
+    assert_eq!(
+        logged(&sub).last().map(String::as_str),
+        Some("working codex")
+    );
 }

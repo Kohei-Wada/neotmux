@@ -56,6 +56,19 @@ Apache-2.0 only:
   tools/herdr-manifests.py. The list of names each claims is herdr's lookup_agent in
   src/detect/mod.rs.
 
+- runtime/lua/neotmux/agent.lua
+
+  herdr's identification of the agent in a foreground job, identify_agent_in_job and what it
+  calls in src/detect/mod.rs, at the same commit, in Lua. What differs says so at the top of
+  the file: no symlink is resolved, lower-casing is ASCII, and a comm of `node-MainThread` is
+  read as `node`.
+
+- neotmux-lua/tests/agent.rs, neotmux-lua/tests/manifest.rs
+
+  herdr's tests of the above, from src/detect/mod.rs and src/detect/manifest/tests.rs, their
+  inputs and expectations carried over. neotmux-lua's Cargo.toml excludes both from its
+  package, so they are in this repository and nowhere else.
+
 The three words a pane's state is spelled in — working, blocked, idle — are herdr's too.
 
 The Cargo `license` field on every crate stays "MIT OR Apache-2.0": no crate

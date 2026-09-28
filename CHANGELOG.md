@@ -6,8 +6,10 @@
 
 A pane running Codex, Gemini, Cursor, OpenCode, Copilot, Amp, Kiro, Qwen or any other agent herdr
 has a manifest for is read the way herdr reads it: `working`, `blocked` and `idle` come from
-herdr's rules for that program, run by `neotmux.manifest`, a port of herdr's engine. A pane is
-claimed by the name of the program in it; one started through `node` or a wrapper is not yet.
+herdr's rules for that program, run by `neotmux.manifest`, a port of herdr's engine. Which agent
+a pane is running is herdr's reading of its foreground job, so an agent started through `node`
+or a wrapper is found too: `neotmux.pane.info(id).job` is every process of the pane's foreground
+job with its argv, and `require('neotmux.agent').of(info)` says which agent that is.
 The rules are written in Rust's regex syntax, which a plugin can use now too, as
 `neotmux.regex.is_match(pattern, text)`.
 

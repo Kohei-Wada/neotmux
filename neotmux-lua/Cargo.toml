@@ -10,6 +10,8 @@ readme.workspace = true
 keywords.workspace = true
 categories.workspace = true
 repository.workspace = true
+# herdr's tests, carried over: Apache-2.0 only, and no crate packages those (see NOTICE).
+exclude = ["tests/agent.rs", "tests/manifest.rs"]
 
 [dependencies]
 neotmux-proto.workspace = true

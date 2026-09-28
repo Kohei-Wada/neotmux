@@ -128,6 +128,34 @@ pub fn running(sub: &Built, command: &str) {
             neotmux_proto::PaneInfo {
                 command: Some(command.to_string()),
                 cwd: None,
+                job: None,
+            },
+        )]),
+    );
+}
+
+/// The same, with the foreground job the host read: `processes` is `(pid, comm, argv)`, and the
+/// first is the group's leader. What agent it is, is `neotmux.agent`'s to say.
+pub fn running_job(sub: &Built, command: &str, processes: &[(i32, &str, &[&str])]) {
+    let job = neotmux_proto::Job {
+        group: processes[0].0,
+        processes: processes
+            .iter()
+            .map(|(pid, name, argv)| neotmux_proto::JobProcess {
+                pid: *pid,
+                name: name.to_string(),
+                argv: Some(argv.iter().map(|arg| arg.to_string()).collect()),
+            })
+            .collect(),
+    };
+    sub.publish_pane_info(
+        one(),
+        std::collections::BTreeMap::from([(
+            pane(),
+            neotmux_proto::PaneInfo {
+                command: Some(command.to_string()),
+                cwd: None,
+                job: Some(job),
             },
         )]),
     );

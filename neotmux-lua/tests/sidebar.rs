@@ -164,6 +164,7 @@ fn frame_in(sub: &Built, surface: Size, sessions: &[Sess], current: u32) -> Vec<
                     PaneInfo {
                         command: Some(command.to_string()),
                         cwd: s.cwd.clone(),
+                        job: None,
                     },
                 )
             })
