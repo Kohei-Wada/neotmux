@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### One place for every plugin's colours
+
+Every shipped plugin now reads its colours from `neotmux.style`, and every colour is a name in
+`neotmux.theme` — the 26 Catppuccin Mocha colours, which is what they all were. Restyle every
+float, one plugin, or one part of it with `require('neotmux.style').set('float', { frame =
+'crust' })`; recolour everything at once with `require('neotmux.theme').set({ blue =
+'#7aa2f7' })`. **`require('plugin.x').colors` is gone**: `require('plugin.tmux.status').colors.
+accent = '#ff0000'` is now `require('neotmux.style').set('status', { accent = '#ff0000' })`, and
+`docs/plugins.md` lists every selector and its parts. Twelve themes ship in `neotmux.themes` —
+the four Catppuccin flavours, tokyonight, gruvbox, nord, dracula, rose-pine, kanagawa, onedark
+and everforest — switched with `require('neotmux.theme').use('<name>')`, and a new `theme`
+command in the palette picks one from a list; nothing is written to disk, so keeping a pick
+means adding that line to `init.lua`.
+
 ### Resize moves the boundary the way the key points
 
 `h` and `l` in resize mode grew the pane at whichever end was named, so the middle of three

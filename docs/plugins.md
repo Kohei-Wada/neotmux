@@ -1493,7 +1493,7 @@ costs one plugin one frame instead of costing you the program.
 
 ## The shipped defaults
 
-neotmux ships seventeen plugins in the runtime layer an install puts on the search path. Six
+neotmux ships eighteen plugins in the runtime layer an install puts on the search path. Six
 do what tmux does and live under `plugin/tmux/`, loaded together by `plugin.tmux`:
 
 | plugin | what it does |
@@ -1521,6 +1521,7 @@ The rest are neotmux's own:
 | `hints` | `C-b f` labels every url, path, hash (7–64 hex characters, taken whole) and ip on screen and copies the one you pick; `hint-send` and `hint-open` are the same pick, typed rather than copied |
 | `notify` | draws each notification in a frame of its own, stacked up from the bottom-right |
 | `palette` | the command palette on `C-b :`: every registered command, fuzzy-filtered as you type, `Enter` to run the one under the cursor; `@` for the sessions, `#` for the agents, and `C-b g` opens it on `#` |
+| `theme` | the palette's `theme`: a list of the twelve shipped themes, the current one marked, Enter to switch — see [Styling](#styling) |
 | `costs` | the palette's `costs`: what each plugin's ticks have cost, most first |
 | `stamps` | `C-b t` shows when every line of every pane arrived, in a band down each pane's left edge that the pane gives up while it is shown |
 | `exits` | `C-b e` shows how each command in every pane ended — `✔`, `✘` and its status, `⋯` while it runs — and how long it took, in a band down each pane's left edge; it needs a shell that sends OSC 133 marks (see [The commands convention](#the-commands-convention)) |
@@ -1605,7 +1606,9 @@ Folded (`C-b b`), the band is herdr's rail, four columns: every session numbered
 a line, every agent numbered with its state, and `»` at the bottom.
 
 **States and colours** are herdr's: working yellow, blocked red, done teal, idle green, each a
-`●` except idle's `○` (`require('plugin.herdr.sidebar').icons` and `.colors`; herdr's `symbols` are
+`●` except idle's `○` (`require('plugin.herdr.sidebar').icons`, the shapes; the colours are
+`style.get('sidebar')`'s `working`, `blocked`, `done` and `idle`, restyled with
+`require('neotmux.style').set('sidebar', { working = 'yellow', ... })`; herdr's `symbols` are
 `{ working = '◐', blocked = '×', done = '✓', idle = '○' }`). **Done** is an agent that went idle
 where nobody was looking — not in the current window of a session a client is attached to —
 and stays done until somebody looks. It is `neotmux.seen`'s, not `neotmux.state`'s, so the chime
@@ -1753,7 +1756,7 @@ when it would leave the tabs fewer than seventeen columns.
 
 ```lua
 local status = require('plugin.tmux.status')
-status.colors.accent = '#cba6f7'                  -- the window being shown
+require('neotmux.style').set('status', { accent = '#cba6f7' })   -- the window being shown
 status.right = {
   function() return neotmux.pane.zoomed() and 'ZOOM', true end,
   function() return os.date('%H:%M') end,
@@ -1761,9 +1764,9 @@ status.right = {
 status.separator = ' · '
 ```
 
-`colors` is herdr's palette, which is Catppuccin Mocha, keyed by what each colour is for: `bar`,
-`accent`, `on_accent`, `tab`, `tab_text`, `named_text`, `right_text`, `dim`. All three fields
-are read every tick.
+The colours are `style.get('status')`, herdr's palette keyed by what each is for: `bar`,
+`accent`, `on_accent`, `tab`, `tab_text`, `named_text`, `right_text`, `dim` — see
+[Styling](#styling). `right` and `separator` are read every tick.
 
 ### Changing what copy mode does
 
@@ -1790,7 +1793,7 @@ nameable from outside the file:
 local copy = require('plugin.tmux.copy')
 copy.keys['v'] = 'begin-selection'   -- vi muscle memory, alongside Space
 copy.keys['C-b'] = nil               -- and one taken away
-copy.colors.selection = '#45475a'    -- read every tick
+require('neotmux.style').set('copy', { selection = '#45475a' })   -- read every tick
 copy.page = 0.5                      -- what C-u and C-d move, as a fraction of the pane
 neotmux.log.info(copy.register)      -- what the last yank took
 ```
@@ -1886,13 +1889,13 @@ marks the window being shown and a • the focused pane. Numbers are positions, 
 `window.pane`, so a pane reads `2.1`.
 
 ```lua
-require('plugin.herdr.sidebar').colors.focused_pane = '#f9e2af'
+require('neotmux.style').set('sidebar', { focused_pane = '#f9e2af' })
 require('plugin.herdr.sidebar.sessions').markers =
   { current_window = '>', window = ' ', focused_pane = '*', pane = ' ' }
 ```
 
-`colors` and `markers` are read every tick. The colours are the sidebar's and every section reads
-them. A marker is one cell: one that measured two columns would push every name on its row
+`style.get('sidebar')` and `markers` are read every tick. The colours are the sidebar's and every
+section reads them (see [Styling](#styling)). A marker is one cell: one that measured two columns would push every name on its row
 across by one.
 
 ### Adding to the palette
@@ -2366,9 +2369,115 @@ end)
 ```
 
 `draw` fills the rect, puts a frame with rounded corners on its edge, and hands back the rect
-*inside* the frame, so the arithmetic is done once. `M.glyphs` and `M.colors` are read on every
-call, so an `init.lua` that wants square corners or another palette assigns to them. A float
-too small to hold a frame is filled and handed back whole rather than drawn over.
+*inside* the frame, so the arithmetic is done once. `M.glyphs` is read on every call, so an
+`init.lua` that wants square corners assigns to it; the colours are `style.get('float.box')`,
+restyled with `require('neotmux.style').set('float.box', { frame = 'crust' })` (see
+[Styling](#styling)). A float too small to hold a frame is filled and handed back whole rather
+than drawn over.
+
+### Styling
+
+Every colour every shipped plugin draws is a name in `neotmux.theme`, and which name each part
+of each plugin uses is `neotmux.style`, a cascade over dotted selectors. Two modules, neither a
+plugin — they register nothing.
+
+```lua
+local theme = require('neotmux.theme')
+theme.colors.blue            --> '#89b4fa'
+theme.set({ blue = '#7aa2f7', base = '#1a1b26' })   -- some names, or all
+theme.resolve('blue')        --> '#89b4fa'; a '#rrggbb' is itself; an unknown name is nil
+```
+
+`theme.colors` holds 26 names — `rosewater` `flamingo` `pink` `mauve` `red` `maroon` `peach`
+`yellow` `green` `teal` `sky` `sapphire` `blue` `lavender` `text` `subtext1` `subtext0`
+`overlay2` `overlay1` `overlay0` `surface2` `surface1` `surface0` `base` `mantle` `crust` — and
+starts as Catppuccin Mocha, which every colour every plugin ships with is one of. `theme.set(t)`
+replaces the named ones and leaves the rest.
+
+**Twelve themes** ship in `neotmux.themes`, `theme.names` in this order: the four Catppuccin
+flavours (`catppuccin-latte`, `catppuccin-frappe`, `catppuccin-macchiato`, `catppuccin-mocha`),
+then `tokyonight-night`, `tokyonight-storm`, `gruvbox-dark`, `nord`, `dracula`, `rose-pine`,
+`kanagawa`, `onedark`, `everforest-dark`. `theme.use(name)` sets every one of the 26 names to
+that theme's and sets `theme.current`; an unknown name raises `unknown theme '<name>'`.
+`theme.current` starts as `'catppuccin-mocha'`.
+
+```lua
+require('neotmux.theme').use('nord')
+```
+
+`plugin.theme` (on by default) puts `theme` in the palette (`C-b :`): a list of `theme.names`,
+the current one marked, Enter switches. Picking one from the palette is not saved — neotmux
+writes nothing to disk, and the theme lasts until `config-reload` or a restart puts Mocha back.
+To keep it, add the line the command's own notification gives you — `require('neotmux.theme')
+.use('<name>')` — to your `init.lua`.
+
+```lua
+local style = require('neotmux.style')
+
+-- a plugin, at load: its parts and the colours they are by default
+style.default('status', { bar = 'mantle', accent = 'blue', tab = 'surface0' })
+
+-- the user, in init.lua, whenever it runs
+style.set('*', { rule = 'surface2' })         -- every plugin's `rule`
+style.set('float', { frame = 'crust' })       -- every float's frame
+style.set('status', { accent = 'mauve' })     -- one plugin's part
+style.set('status', { accent = '#ff8800' })   -- a hex is a colour too
+
+-- a plugin, when it draws
+local c = style.get('status')   --> { bar = '#181825', accent = '#cba6f7', ... }, resolved
+```
+
+Selectors are dotted names: `get('float.list')` reads `*`, then `float`, then `float.list`, a
+later one winning key by key. The user always beats a default, whatever order they ran in — the
+user's `init.lua` runs before the shipped layer loads a single plugin, so "the later wins" would
+let every shipped default override the user. There are two layers instead: `default` is a
+plugin's own, lowest, and a second `default` for the same selector replaces the first, so a
+reload does not stack them; `set` is the user's, always above every default, merged key by key.
+Values are theme names or `#rrggbb`, resolved at `get`, so `theme.set` and `style.set` take
+effect on the next frame with no reload; a name the theme does not have resolves to nil, which
+draws as the terminal's own colour. `get` caches each selector's merged, resolved table, dropped
+on any `default`, `set` or `theme.set` — a plugin reads the table it returns and does not write
+to it. `config-reload` re-runs everything, and both modules are loaded again, so their state
+starts empty and is rebuilt by the plugins and `init.lua` as they run.
+
+Selectors the shipped plugins declare:
+
+| selector | file | parts (today's Mocha names) |
+|---|---|---|
+| `status` | plugin/tmux/status | bar accent on_accent tab tab_text named_text right_text dim |
+| `sidebar` | plugin/herdr/sidebar | text subtext overlay branch here header session current_session window current_window pane focused_pane detail rule working blocked done idle unknown selection bar |
+| `sidebar.bar` | plugin/herdr/sidebar/spaces | mode on text |
+| `sessions` | plugin/tmux/sessions | name current working blocked idle doing |
+| `notify` | plugin/notify | frame tag info warn error |
+| `exits` | plugin/exits | ok failed running time rule |
+| `stamps` | plugin/stamps | time rule slow stuck |
+| `float.list` | neotmux/list | frame text cursor caret hint |
+| `float.prompt` | neotmux/prompt | frame text caret hint |
+| `float.box` | neotmux/box | frame line title |
+| `palette` | plugin/palette | name match desc source |
+| `copy` | plugin/tmux/copy | selection cursor cursor_text |
+| `footer` | plugin/footer | bar text |
+| `hints` | neotmux/hints | bg fg |
+| `prefix` | plugin/tmux/prefix | key name desc |
+| `costs` | plugin/costs | source number label spark |
+| `theme` | plugin/theme | name current |
+
+`notify` draws a float, but its parts are not a list's or a prompt's, so it stays `notify`.
+`sidebar`'s sections (`spaces`, `agents`, `sessions`) read `style.get('sidebar')`, since they
+draw in the sidebar's colours.
+
+A plugin of your own declares its selector the same way the shipped ones do: `style.default` at
+load, with every part it draws and a Mocha name for each, and `style.get` where it draws:
+
+```lua
+local style = require('neotmux.style')
+style.default('my-plugin', { text = 'text', accent = 'mauve' })
+
+neotmux.on_tick(function(ctx)
+  local c = style.get('my-plugin')
+  ctx:text(win, 0, 0, 'hi', { fg = c.accent })
+end)
+```
 
 ### The mode convention
 
@@ -2415,13 +2524,12 @@ plugin, found the same way a leaked band is: by looking at the screen.
 answers, or nothing at all when that is nil:
 
 ```lua
-local footer = require('plugin.footer')
-footer.colors.bar = '#181825'
-footer.colors.text = '#f9e2af'
+require('neotmux.style').set('footer', { bar = '#181825', text = '#f9e2af' })
 ```
 
-Both are Catppuccin Mocha, matching `plugin.tmux.status`, and both are read every tick. There are no
-keys — the footer only reads the convention above, it does not raise a mode of its own.
+The colours (`bar`, `text`) are `style.get('footer')`, matching `plugin.tmux.status`, read every
+tick — see [Styling](#styling). There are no keys — the footer only reads the convention above,
+it does not raise a mode of its own.
 
 ### Changing what the borders look like
 
