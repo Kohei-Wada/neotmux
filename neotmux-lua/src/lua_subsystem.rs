@@ -364,11 +364,12 @@ impl LuaSubsystem {
 
     /// What this session's jobs have to say, before the tick that will draw it. The session is
     /// bound so that an op a callback raises reaches the frame that is running.
-    pub fn dispatch_jobs(&self, session: SessionId) {
+    /// Answers whether any callback ran, which is a change the next tick has to draw.
+    pub fn dispatch_jobs(&self, session: SessionId) -> bool {
         let limit = self.opts.borrow().job_output_bytes;
         let deliveries = self.jobs.deliver(session, limit);
         if deliveries.is_empty() {
-            return;
+            return false;
         }
         let overrun_limit = self.opts.borrow().tick_overrun_limit;
         self.budgeted(session, || {
@@ -380,15 +381,18 @@ impl LuaSubsystem {
                 self.judge(&*self.jobs, job, owner, measured, overrun_limit);
             }
         });
+        true
     }
 
     /// The timers this session owes a call at `now`, before the tick that will draw what they
     /// changed. The instant is the caller's rather than read here, so that every timer in a
     /// frame is judged against the one moment the frame happened at.
-    pub fn dispatch_timers(&self, session: SessionId, now: Instant) {
+    ///
+    /// Answers whether any timer was due, which is a change the next tick has to draw.
+    pub fn dispatch_timers(&self, session: SessionId, now: Instant) -> bool {
         let due = self.timers.due(session, now);
         if due.is_empty() {
-            return;
+            return false;
         }
         let overrun_limit = self.opts.borrow().tick_overrun_limit;
         self.budgeted(session, || {
@@ -412,6 +416,7 @@ impl LuaSubsystem {
                 );
             }
         });
+        true
     }
 
     /// Runs a batch of job or timer callbacks with `session` bound and the hook armed. Armed

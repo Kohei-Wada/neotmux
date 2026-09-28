@@ -971,7 +971,7 @@ fn a_plugin_ticks_while_no_client_is_attached() {
         "local n = 0\n\
          neotmux.on_tick(function()\n\
            n = n + 1\n\
-           if n % 10 == 0 then neotmux.log.info('ticked ' .. n) end\n\
+           neotmux.log.info('ticked ' .. n)\n\
          end)\n",
     )]);
 
@@ -983,7 +983,7 @@ fn a_plugin_ticks_while_no_client_is_attached() {
     drop(first);
 
     // Nobody is attached for this second. The old server drained its panes and did nothing
-    // else; this one is still ticking the plugin.
+    // else; this one is still ticking the plugin, at the idle rate with nothing happening.
     let before = log_text(runtime.path()).matches("ticked ").count();
     std::thread::sleep(Duration::from_secs(1));
     let after = log_text(runtime.path()).matches("ticked ").count();

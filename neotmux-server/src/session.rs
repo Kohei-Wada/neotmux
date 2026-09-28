@@ -41,6 +41,12 @@ const MAX_CHUNKS_PER_FRAME: usize = 32;
 /// milliseconds of the frame on something a session asks for a handful of times.
 const MAX_NEW_SHELLS_PER_FRAME: usize = 3;
 
+/// The longest a session goes without its plugins ticking when nothing is happening: often
+/// enough that what changes with time alone — a notification timing out, a state settling from
+/// working to idle — does so within a quarter of a second, and seldom enough that an idle
+/// session costs a fifteenth of ticking every frame.
+const IDLE_TICK: std::time::Duration = std::time::Duration::from_millis(250);
+
 /// The state one frame carries into the next. Every step of a frame is a method on it, so
 /// the loop driving the session reads as the order of the steps and nothing else.
 pub struct Session {
@@ -71,6 +77,8 @@ pub struct Session {
     /// draws that pane's final output.
     ended: bool,
     terminals: Rc<PaneTerminals>,
+    /// When the last tick that was not quiet was handed out, for `IDLE_TICK`.
+    last_ticked: Instant,
 }
 
 /// What draining the panes found: `Eof` means the last pane is gone and the session ends
@@ -119,6 +127,7 @@ impl Session {
             wants_pane_output: setup.wants_pane_output,
             ended: false,
             terminals,
+            last_ticked: Instant::now(),
         };
         session.lay_out_reservations();
         // Before the first key rather than at the first tick: a plugin asking `pane.list()`
@@ -773,7 +782,16 @@ impl Session {
         }
         let pane_info = self.refresh_pane_info();
         let pane_tty = self.pane_tty();
+        let now = Instant::now();
+        let quiet = self.steps.is_empty()
+            && !self.dirty
+            && pane_info.is_none()
+            && now.duration_since(self.last_ticked) < IDLE_TICK;
+        if !quiet {
+            self.last_ticked = now;
+        }
         Ok(Tick {
+            quiet,
             steps: std::mem::take(&mut self.steps),
             epoch: self.windows.current().epoch(),
             geometry: self.geometry(),

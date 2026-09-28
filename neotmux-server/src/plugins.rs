@@ -10,6 +10,7 @@
 //! call rather than a socket.
 
 use crate::Answer;
+use crate::Drawn;
 use crate::Notifications;
 use crate::ServerOp;
 use crate::input::{encode_key, key_spec};
@@ -18,7 +19,8 @@ use neotmux_lua::{KeyOutcome, LuaSubsystem, WriteVerdict};
 use neotmux_proto::wire::{SessionOp, Step, Tick, Tock};
 use neotmux_proto::{Key, Level, PaneId, PaneTty, SessionId};
 use neotmux_sys::logging;
-use std::collections::BTreeMap;
+use std::cell::RefCell;
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 
 /// The Lua subsystem and the notification surface that goes with it, driven a frame at a
@@ -26,6 +28,14 @@ use std::time::Instant;
 pub struct Plugins {
     lua: LuaSubsystem,
     notifications: Notifications,
+    /// Each session's last ticked frame. The draw buffers are one set for every session, each
+    /// session's tick overwriting the last one's, so a session whose tick is skipped is handed
+    /// what it drew itself, from here, and not whatever the buffers hold now.
+    drawn: BTreeMap<SessionId, Drawn>,
+    /// The sessions a plugin has taken a key in since their last tick. The session never hears
+    /// of a key a plugin consumed, and what the plugin did with it is something it will want
+    /// to draw.
+    keyed: RefCell<BTreeSet<SessionId>>,
 }
 
 impl Plugins {
@@ -33,6 +43,8 @@ impl Plugins {
         Self {
             lua,
             notifications: Notifications::new(),
+            drawn: BTreeMap::new(),
+            keyed: RefCell::new(BTreeSet::new()),
         }
     }
 
@@ -76,6 +88,9 @@ impl Plugins {
     pub fn key(&self, session: SessionId, key: Key) -> (KeyOutcome, bool) {
         let before = self.lua.ops_raised();
         let outcome = self.lua.dispatch_key(session, &key_spec(&key));
+        if outcome == KeyOutcome::Consumed {
+            self.keyed.borrow_mut().insert(session);
+        }
         (outcome, self.lua.ops_raised() > before)
     }
 
@@ -106,17 +121,41 @@ impl Plugins {
         self.lua.begin_frame(session, tick.epoch, tick.geometry);
         // Before the tick, so a plugin drawing the surface draws what is on it now.
         self.notifications.expire(Instant::now());
-        self.lua.publish_notices(self.notifications.visible());
+        let notices = self.notifications.visible();
+        self.lua.publish_notices(notices.clone());
         // Before the tick, so a tick sees what this frame's jobs and timers have already
         // changed rather than finding out next frame.
-        self.lua.dispatch_jobs(session);
-        self.lua.dispatch_timers(session, Instant::now());
-        self.lua.dispatch_tick(session);
+        let jobs_ran = self.lua.dispatch_jobs(session);
+        let timers_ran = self.lua.dispatch_timers(session, Instant::now());
+
+        // A quiet frame stands on the last one this session ticked in, where there is one and
+        // nothing a plugin was told since could have changed it.
+        let keyed = self.keyed.borrow_mut().remove(&session);
+        let kept = self.drawn.get(&session).filter(|drawn| {
+            tick.quiet && !keyed && !jobs_ran && !timers_ran && drawn.notices == notices
+        });
+        let (overlay, views) = match kept {
+            Some(drawn) => (drawn.overlay.clone(), drawn.views.clone()),
+            None => {
+                self.lua.dispatch_tick(session);
+                let overlay = self.lua.frame_output();
+                let views = self.lua.frame_views();
+                self.drawn.insert(
+                    session,
+                    Drawn {
+                        overlay: overlay.clone(),
+                        views: views.clone(),
+                        notices,
+                    },
+                );
+                (overlay, views)
+            }
+        };
 
         let (ops, server) = self.drain_ops(Some(session), &tty);
         let tock = Tock {
             ops,
-            overlay: self.lua.frame_output(),
+            overlay,
             reserved: self.lua.reserved(),
             gutter: self.lua.opt().pane_gutter,
             wants_pane_output: self.lua.has_subscriber("pane_output"),
@@ -124,7 +163,7 @@ impl Plugins {
         Answer {
             tock,
             server,
-            views: self.lua.frame_views(),
+            views,
         }
     }
 
@@ -350,6 +389,8 @@ impl Plugins {
     /// whatever the reloaded layers raised while loading is refused: a load acts on no
     /// session, so nothing it asked for has anywhere to land.
     pub fn reload(&mut self, session: Option<SessionId>) {
+        // What the old code drew is not what the new code would: every session ticks next.
+        self.drawn.clear();
         let failures = self.lua.reload(session);
         if failures.is_empty() {
             self.notifications

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### An idle session costs a thirteenth of what it did
+
+The plugins tick only when something happened to the session — a key a plugin took, output
+in a pane, a resize, an event, a job's output, a timer coming due, a notification appearing or
+going — and otherwise four times a second, instead of sixty. A frame with nothing happening
+shows what they drew last. Measured with the sidebar on and nothing happening for about twenty
+seconds: 109 ticks where there were 1380, and the sidebar's 803 ms down to 64. A thing that
+changes with time alone, like a notification timing out, is redrawn up to a quarter of a second
+late; a plugin that needs it sooner arms a timer.
+
 ### What each plugin's ticks cost
 
 The palette's `costs` lists every source with how many ticks it has run since the config

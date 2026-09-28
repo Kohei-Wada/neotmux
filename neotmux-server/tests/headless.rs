@@ -416,3 +416,40 @@ fn two_applies_are_two_stops_on_the_way_to_two_frames() {
     session.wants_output(false);
     let _ = session.is_dirty();
 }
+
+/// A source that draws how many times it has ticked, so a frame shows whether it ticked.
+const COUNTING: &str = "local n = 0\n\
+    neotmux.keymap.set('Q', function() return true end)\n\
+    neotmux.on_tick(function(ctx)\n\
+      n = n + 1\n\
+      ctx:text(nil, 0, 0, 'ticks ' .. n)\n\
+    end)\n";
+
+/// With nothing happening, the plugins do not tick: a frame stands on the last one they drew.
+/// A key a plugin takes is something happening, and so is a quarter of a second going by —
+/// what changes with time alone still changes, a little late.
+#[test]
+fn a_quiet_session_skips_its_ticks_until_a_key_or_the_idle_interval() {
+    let (_dir, _wakeup, mut session, mut plugins) = halves(&[("init.lua", COUNTING)]);
+    settle(&mut session, &mut plugins);
+
+    for _ in 0..5 {
+        assert!(
+            frame(&mut session, &mut plugins).frame.is_none(),
+            "a frame with nothing happening ticked the plugins"
+        );
+    }
+
+    key(&mut session, &plugins, Key::plain(KeyCode::Char('Q')));
+    assert!(
+        frame(&mut session, &mut plugins).frame.is_some(),
+        "a key a plugin took did not tick it"
+    );
+    assert!(frame(&mut session, &mut plugins).frame.is_none());
+
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(
+        frame(&mut session, &mut plugins).frame.is_some(),
+        "a quarter of a second went by and nothing ticked"
+    );
+}

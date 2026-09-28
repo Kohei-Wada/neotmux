@@ -31,6 +31,7 @@ mod apply;
 mod clip;
 mod doorstep;
 mod drained;
+mod drawn;
 mod notifications;
 mod pane_info_cache;
 mod pane_row;
@@ -57,6 +58,7 @@ pub use setup::*;
 
 pub(crate) use clip::*;
 pub(crate) use drained::*;
+pub(crate) use drawn::*;
 pub(crate) use notifications::*;
 pub(crate) use pane_info_cache::*;
 pub(crate) use sessions::*;

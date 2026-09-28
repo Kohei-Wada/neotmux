@@ -169,6 +169,13 @@ Drawing happens only from a tick, through the `ctx` your callback is handed. It 
 immediate-mode: **what you draw this tick is your entire output for this frame.** Draw nothing
 and you show nothing. There is no clear call because you never need one.
 
+A tick does not run every frame. It runs when something happened to the session — a key a
+plugin took, output in a pane, a resize, an event, a job's output, a timer coming due, a
+notification appearing or going — and otherwise four times a second, and a frame with none of
+that shows what the ticks drew last. So a thing that changes with time alone is redrawn within
+a quarter of a second of changing; one that has to move sooner than that asks with
+`neotmux.timer.every`, and its callback coming due ticks the plugins in that frame.
+
 ```lua
 neotmux.on_tick(function(ctx)
   local size = ctx:size()                      -- { rows = , cols = }: what the panes have

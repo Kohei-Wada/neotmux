@@ -23,4 +23,9 @@ pub struct Tick {
     /// price is that it describes the pane as of this frame rather than this instant, which
     /// is what the stamp already promises: it says the screen *may* have changed.
     pub revisions: BTreeMap<PaneId, u64>,
+    /// Nothing has happened to the session since the last frame the plugins ticked in: no step,
+    /// no change to the picture, no resample, and not long enough for time alone to have moved
+    /// anything. A key a plugin took is the plugins' to know, not the session's. The plugins' drawing from that frame still stands, so their ticks
+    /// can be skipped — which is most frames of a session nobody is typing into.
+    pub quiet: bool,
 }
