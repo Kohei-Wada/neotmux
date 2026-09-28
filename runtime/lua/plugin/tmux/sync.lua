@@ -5,7 +5,7 @@
 --
 -- While it is on, every key you press is relayed to each pane in the window you are looking
 -- at, the focused one included, and the mode `sync` is raised so whoever draws modes says so.
--- The prefix is untouched: `plugin.prefix` sees a key before this does, so `C-b` still opens
+-- The prefix is untouched: `plugin.tmux.prefix` sees a key before this does, so `C-b` still opens
 -- the palette, the picker and everything else — which is what tmux does too, and what makes
 -- the thing switchable off once it is on.
 --
@@ -18,7 +18,7 @@
 -- run, this file is a key handler that answers no. What is on by default is the command being
 -- there to run.
 local modes = require("neotmux.mode")
-local g = neotmux.group("plugin.sync")
+local g = neotmux.group("plugin.tmux.sync")
 
 local M = {}
 
@@ -50,8 +50,11 @@ g.command.add("sync-panes", function()
   return M.toggle()
 end, { desc = "type into every pane of this window at once" })
 
-if package.loaded["plugin.prefix"] or require("neotmux.defaults").prefix then
-  require("plugin.prefix").commands["S"] = "sync-panes"
+if
+  package.loaded["plugin.tmux.prefix"]
+  or require("neotmux.defaults").tmux and require("neotmux.defaults").prefix
+then
+  require("plugin.tmux.prefix").commands["S"] = "sync-panes"
 end
 
 g.on_key(function(key)

@@ -12,7 +12,7 @@ local g = neotmux.group("plugin.footer")
 
 local M = {}
 
--- Catppuccin Mocha, matching `plugin.status`. Read every tick, so assigning to one from your
+-- Catppuccin Mocha, matching `plugin.tmux.status`. Read every tick, so assigning to one from your
 -- own `init.lua` takes effect.
 M.colors = {
   bar = "#181825", -- mantle: the same band colour the status bar sits on

@@ -1,6 +1,6 @@
 -- A sidebar down the left: a stack of sections, each a table saying what rows it has and how to
--- cut them to a height. The shipped ones are herdr's: every session, `plugin.sidebar.spaces`,
--- and under it every agent in every session, `plugin.sidebar.agents`.
+-- cut them to a height. The shipped ones are herdr's: every session, `plugin.herdr.sidebar.spaces`,
+-- and under it every agent in every session, `plugin.herdr.sidebar.agents`.
 -- `C-b b` folds the band to its first column and back, when the prefix is loaded.
 --
 -- Off by default, unlike the status bar: a status line spends a row nobody was using for
@@ -11,7 +11,7 @@
 --
 -- What is in it is `sections`, top to bottom, a list you assign to like any other field here:
 --
---   table.insert(require('plugin.sidebar').sections, {
+--   table.insert(require('plugin.herdr.sidebar').sections, {
 --     title = 'mine',   -- a header above it; nil for none
 --     share = 0.3,      -- the most of the band it takes when there is not room for everybody
 --     always = true,    -- headed even with nothing to show
@@ -28,7 +28,7 @@
 -- Nothing here is a host feature. `neotmux.reserve('left', n)` takes the band,
 -- `handle:resize_to(n)` widens and folds it, and `ctx:reserved()` answers where it landed.
 local segments = require("status.segments")
-local g = neotmux.group("plugin.sidebar")
+local g = neotmux.group("plugin.herdr.sidebar")
 
 local M = {}
 
@@ -78,7 +78,8 @@ M.colors = {
 -- One per state, herdr's `dots`: the colour says which, the shape only whether anything is
 -- going on. herdr's `symbols` are one assignment away:
 --
---   require('plugin.sidebar').icons = { working = '◐', blocked = '×', done = '✓', idle = '○' }
+--   require('plugin.herdr.sidebar').icons =
+--     { working = '◐', blocked = '×', done = '✓', idle = '○' }
 M.icons = {
   working = "\u{25cf}", -- ●
   blocked = "\u{25cf}",
@@ -183,7 +184,7 @@ local function guarded(section, at, what, fn, ...)
   end
   if not complained[section] then
     complained[section] = true
-    local which = "plugin.sidebar: section '" .. tostring(section.title or at) .. "' " .. what
+    local which = "plugin.herdr.sidebar: section '" .. tostring(section.title or at) .. "' " .. what
     neotmux.notify("error", which .. ": " .. tostring(result))
   end
   return nil
@@ -301,7 +302,7 @@ function M.toggle()
 end
 
 -- The next session round, in the order `session.list` gives, which is name order. Not bound to
--- anything: `plugin.sessions` has `C-b s` and shows you what you are choosing between. This is
+-- anything: `plugin.tmux.sessions` has `C-b s` and shows you what you are choosing between. This is
 -- here for an `init.lua` that would rather step than pick.
 function M.next_session()
   local names = neotmux.session.list()
@@ -323,8 +324,11 @@ end
 -- yet, and a plain probe would leave `C-b b` unbound — `plugin.palette` binds `:` this way for
 -- the same reason.
 local function prefix()
-  if package.loaded["plugin.prefix"] or require("neotmux.defaults").prefix then
-    return require("plugin.prefix")
+  if
+    package.loaded["plugin.tmux.prefix"]
+    or require("neotmux.defaults").tmux and require("neotmux.defaults").prefix
+  then
+    return require("plugin.tmux.prefix")
   end
 end
 
@@ -418,19 +422,20 @@ g.on_tick(function(ctx)
 end)
 
 -- Last, so a section's own file can already find everything above in the module it is handed.
--- herdr's two halves. The tree of the session you are in is `plugin.sidebar.sessions`, kept for
--- anyone who wants it: `table.insert(sidebar.sections, 1, require('plugin.sidebar.sessions'))`.
+-- herdr's two halves. The tree of the session you are in is `plugin.herdr.sidebar.sessions`, kept
+-- for anyone who wants it:
+-- `table.insert(sidebar.sections, 1, require('plugin.herdr.sidebar.sessions'))`.
 M.sections = {
-  require("plugin.sidebar.spaces"),
-  require("plugin.sidebar.agents"),
+  require("plugin.herdr.sidebar.spaces"),
+  require("plugin.herdr.sidebar.agents"),
 }
 
 -- `C-b w`, herdr's navigate: a cursor over the spaces, and `C-b a` the same over the agents.
 -- Bound here rather than in the sections, for the reason `b` is: the prefix is the standard
 -- plugin and this one is optional.
 if prefix() then
-  prefix().commands["w"] = require("plugin.sidebar.spaces").navigate
-  prefix().commands["a"] = require("plugin.sidebar.agents").navigate
+  prefix().commands["w"] = require("plugin.herdr.sidebar.spaces").navigate
+  prefix().commands["a"] = require("plugin.herdr.sidebar.agents").navigate
   prefix().descriptions["w"] = "move a cursor over the sidebar's sessions"
   prefix().descriptions["a"] = "move a cursor over the sidebar's agents"
 end

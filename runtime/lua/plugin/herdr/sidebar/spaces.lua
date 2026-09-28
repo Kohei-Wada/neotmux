@@ -1,8 +1,8 @@
--- Every session, the upper section of `plugin.sidebar`: herdr's `spaces`, one entry a session —
--- what it is doing and what it is called, then the git branch it is on and how far that is from
--- its upstream.
+-- Every session, the upper section of `plugin.herdr.sidebar`: herdr's `spaces`, one entry a
+-- session — what it is doing and what it is called, then the git branch it is on and how far
+-- that is from its upstream.
 --
---   local spaces = require('plugin.sidebar.spaces')
+--   local spaces = require('plugin.herdr.sidebar.spaces')
 --   spaces.rows = { { 'state_icon', 'name' } }       -- one row, no git
 --
 -- Each space takes every row in `rows`, with or without a branch to put on the second.
@@ -12,14 +12,14 @@
 -- `1`-`9` go straight to that one, Esc leaves. herdr's navigate mode, on the same key.
 --
 -- The tree this replaced, every window and pane of the session you are in, is still
--- `plugin.sidebar.sessions`, and goes back with one assignment to `require('plugin.sidebar')
--- .sections`.
+-- `plugin.herdr.sidebar.sessions`, and goes back with one assignment to
+-- `require('plugin.herdr.sidebar').sections`.
 local detect = require("neotmux.detect")
-local sessions = require("plugin.sidebar.sessions")
+local sessions = require("plugin.herdr.sidebar.sessions")
 local seen = require("neotmux.seen")
 local state = require("neotmux.state")
 local modes = require("neotmux.mode")
-local g = neotmux.group("plugin.sidebar.spaces")
+local g = neotmux.group("plugin.herdr.sidebar.spaces")
 
 local M = { title = "spaces" }
 
@@ -27,9 +27,9 @@ M.rows = { { "state_icon", "name" }, { "branch", "ahead", "behind" } }
 M.row_gap = 0
 
 -- The windows and panes of the session you are in, under its space, drawn as
--- `plugin.sidebar.sessions` draws them — its `markers`, `tree` and `tokens` apply here too — to
--- these rows. Where a pane is, not what it runs: the agents below say that for the ones that
--- matter. `{ 'marker', 'tree', 'number', 'command' }` puts it back.
+-- `plugin.herdr.sidebar.sessions` draws them — its `markers`, `tree` and `tokens` apply here
+-- too — to these rows. Where a pane is, not what it runs: the agents below say that for the
+-- ones that matter. `{ 'marker', 'tree', 'number', 'command' }` puts it back.
 M.tree = true
 M.tree_rows = {
   windows = { rows = { { "marker", "tree", "number", "name" } } },
@@ -172,8 +172,8 @@ local function entries()
   return out
 end
 
--- Shaped as `plugin.sidebar.sessions` shapes its model, each space's own rows and the tree hung
--- under the one you are in, so that section's fit cuts this one the same way.
+-- Shaped as `plugin.herdr.sidebar.sessions` shapes its model, each space's own rows and the tree
+-- hung under the one you are in, so that section's fit cuts this one the same way.
 function M.build(given)
   sidebar = given
   local rows, anchor, spaces = {}, 1, {}
@@ -248,7 +248,7 @@ local function leave()
     mode:lower()
     mode = nil
   end
-  local bar = package.loaded["plugin.sidebar"]
+  local bar = package.loaded["plugin.herdr.sidebar"]
   if bar and bar.navigating_unfolded then
     bar.open, bar.navigating_unfolded = false, nil
   end
@@ -266,7 +266,7 @@ M.leave = leave
 
 function M.navigate()
   local names = neotmux.session.list()
-  local bar = package.loaded["plugin.sidebar"]
+  local bar = package.loaded["plugin.herdr.sidebar"]
   local shown = false
   for _, section in ipairs(bar and bar.sections or {}) do
     shown = shown or section == M
@@ -283,7 +283,7 @@ function M.navigate()
     end
   end
   -- One cursor at a time: the agents' goes when this one comes.
-  local agents = package.loaded["plugin.sidebar.agents"]
+  local agents = package.loaded["plugin.herdr.sidebar.agents"]
   if agents and agents.cursor then
     agents.leave()
   end

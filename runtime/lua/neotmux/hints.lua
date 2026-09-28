@@ -224,7 +224,7 @@ local function gather(opts)
     local lines = neotmux.pane.content(pane)
     if opts.find then
       -- Called whether or not this pane's content could be read: a caller's finder is not
-      -- obliged to work from `lines` at all — `plugin.copy`'s reads its own snapshot — and
+      -- obliged to work from `lines` at all — `plugin.tmux.copy`'s reads its own snapshot — and
       -- skipping it here would open a session with no targets on a pane that has plenty.
       local ok, hits = pcall(opts.find, pane, lines)
       if not ok then
@@ -440,7 +440,7 @@ end
 
 -- Cancels the session that is up, if one is, exactly as its own `Esc` would: the caller hears
 -- its own `cancel` and the keyboard goes back where it came from. What it is for is a mode
--- taking the pane for itself — `plugin.copy` calls it on the way in — since a pick left drawn
+-- taking the pane for itself — `plugin.tmux.copy` calls it on the way in — since a pick left drawn
 -- over a pane somebody else has claimed can be neither seen for what it is nor reached.
 function M.cancel()
   if state then

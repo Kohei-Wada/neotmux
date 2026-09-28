@@ -1,4 +1,4 @@
-//! `plugin.chime`: a pane that starts waiting for you makes a noise, once, on a player the
+//! `plugin.herdr.chime`: a pane that starts waiting for you makes a noise, once, on a player the
 //! machine actually has.
 //!
 //! The panes are driven with the captured Claude Code screens `support` holds, so the path
@@ -464,7 +464,7 @@ fn a_player_list_set_after_it_gave_up_is_tried_again() {
         &format!(
             "{TWO_PANES}neotmux.on_key(function(key)\n\
                if key == 'R' then\n\
-                 require('plugin.chime').players = {{ {{ 'aplay' }} }}\n\
+                 require('plugin.herdr.chime').players = {{ {{ 'aplay' }} }}\n\
                  return true\n\
                end\n\
                return false\n\

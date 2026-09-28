@@ -80,11 +80,11 @@ local function draw(ctx, x, y, w, h)
   end
 end
 
-if package.loaded["plugin.prefix"] then
-  require("plugin.prefix").commands["N"] = function()
+if package.loaded["plugin.tmux.prefix"] then
+  require("plugin.tmux.prefix").commands["N"] = function()
     neotmux.notifications.clear()
   end
-  require("plugin.prefix").descriptions["N"] = "clear the notifications"
+  require("plugin.tmux.prefix").descriptions["N"] = "clear the notifications"
 end
 
 g.on_tick(function(ctx)

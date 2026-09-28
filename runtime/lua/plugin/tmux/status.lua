@@ -14,7 +14,7 @@
 local position = require("status.position")
 local segments = require("status.segments")
 local path = require("status.path")
-local g = neotmux.group("plugin.status")
+local g = neotmux.group("plugin.tmux.status")
 
 local M = {}
 
@@ -37,8 +37,8 @@ M.colors = {
 
 -- Nerd Font glyphs. Without the font, one line in your own init.lua takes them away:
 --
---   require('plugin.status').caps = { left = '', right = '' }
---   require('plugin.status').icons = { command = '', directory = '' }
+--   require('plugin.tmux.status').caps = { left = '', right = '' }
+--   require('plugin.tmux.status').icons = { command = '', directory = '' }
 --
 -- Written as escapes rather than as the characters themselves so the file stays readable in
 -- an editor that has no such font.

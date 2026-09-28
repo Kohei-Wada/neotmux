@@ -311,8 +311,8 @@ fn a_selection_reads_the_same_way_round_whichever_way_it_was_dragged() {
 
 /// A prefix command that says what is in the register, so a yank can be read back through
 /// the same door a user has.
-const REPORT: &str = "require('plugin.prefix').commands['R'] = function()\n\
-                        neotmux.log.info('register=[' .. require('plugin.copy').register .. ']')\n\
+const REPORT: &str = "require('plugin.tmux.prefix').commands['R'] = function()\n\
+                        neotmux.log.info('register=[' .. require('plugin.tmux.copy').register .. ']')\n\
                       end\n";
 
 /// Yank takes the text of the region — across the boundary between the history and the
@@ -333,7 +333,7 @@ fn yanking_puts_the_selected_text_in_the_register() {
     );
     assert!(
         said.iter().any(|line| line
-            == "yanked 3 lines into plugin.copy.register, \
+            == "yanked 3 lines into plugin.tmux.copy.register, \
                 and offered them to the terminal's clipboard"),
         "{said:?}"
     );
@@ -521,7 +521,7 @@ fn an_end_above_the_view_is_clamped_and_the_rest_still_shows() {
 /// The keys are a table of command names, so one assignment rebinds one of them.
 #[test]
 fn a_key_can_be_rebound_from_a_user_config() {
-    let (_dir, sub) = built("require('plugin.copy').keys['v'] = 'begin-selection'\n");
+    let (_dir, sub) = built("require('plugin.tmux.copy').keys['v'] = 'begin-selection'\n");
     scrolled(&sub);
     enter(&sub);
     keys(&sub, &["v", "l"]);
@@ -572,7 +572,7 @@ fn a_yank_claims_the_register_and_only_offers_the_clipboard() {
     let said = logged(&sub);
     assert!(
         said.iter().any(|line| line
-            == "yanked 1 line into plugin.copy.register, \
+            == "yanked 1 line into plugin.tmux.copy.register, \
                 and offered them to the terminal's clipboard"),
         "{said:?}"
     );
@@ -699,9 +699,9 @@ fn f_in_copy_mode_lands_on_the_buffer_line_behind_a_scrolled_view() {
 /// middle four, so a `finish` that crept past its own run's last column into the gap shows up
 /// immediately in the text rather than only in a length nobody checked.
 ///
-/// The spy sits in front of `hints.open` rather than reading `plugin.copy` internals directly:
+/// The spy sits in front of `hints.open` rather than reading `plugin.tmux.copy` internals directly:
 /// user layers load before the shipped one, so wrapping `neotmux.hints.open` here is in effect
-/// before `plugin.copy` ever requires the same, cached module table, and every `find` `f`
+/// before `plugin.tmux.copy` ever requires the same, cached module table, and every `find` `f`
 /// builds — production code, unmodified — passes through it on the way to the real thing.
 #[test]
 fn the_finder_stops_each_word_at_its_own_last_column() {

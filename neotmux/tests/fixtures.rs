@@ -537,7 +537,7 @@ fn the_prefix_splits_horizontally() {
 /// 1..23. A gutter of one goes between the panes, so a vertical split leaves the left pane
 /// columns 0..39, the divider column 40 and the right pane the rest; a horizontal one leaves
 /// the top pane rows 1..11, the divider row 12 and the bottom pane the rest.
-/// The cap `plugin.status` opens every block of the bar with, and what the bar says about a
+/// The cap `plugin.tmux.status` opens every block of the bar with, and what the bar says about a
 /// window whose focused pane is running `cat`: the window's position, the focused pane's
 /// position after it, then that command.
 const CAP_LEFT: &str = "\u{e0b6}";
@@ -2291,7 +2291,7 @@ fn the_shipped_watcher_is_off_by_default() {
     );
 }
 
-/// `plugin/sidebar.lua`'s width, herdr's: 25 columns and the rule down its edge.
+/// `plugin/herdr/sidebar.lua`'s width, herdr's: 25 columns and the rule down its edge.
 const SIDEBAR_COLS: u16 = 26;
 /// The state icon against a session: idle, working, or waiting for you. Which one it is
 /// depends on what the shell said and when, so a test that only cares that the band is there
@@ -2309,8 +2309,8 @@ const CURRENT_WINDOW_MARKER: &str = "\u{25b8}";
 /// each section has rather than cut at half, since a tree wants the rows an idle agent list is
 /// not using.
 const TREE_SIDEBAR: &str = "require('neotmux.defaults').sidebar = true\n\
-    local sidebar = require('plugin.sidebar')\n\
-    sidebar.sections = { require('plugin.sidebar.sessions'), require('plugin.sidebar.agents') }\n\
+    local sidebar = require('plugin.herdr.sidebar')\n\
+    sidebar.sections = { require('plugin.herdr.sidebar.sessions'), require('plugin.herdr.sidebar.agents') }\n\
     sidebar.split = nil";
 
 /// The sidebar's rows are two columns — a label on the left and what the thing is running
@@ -2466,7 +2466,7 @@ fn the_shipped_sidebar_is_off_by_default() {
     nt.wait_for_cell(PANE_TOP, 0, "X", PATIENCE);
 }
 
-/// Copy mode's own colours, as `plugin/copy.lua` sets them. A tint changes nothing a
+/// Copy mode's own colours, as `plugin/tmux/copy.lua` sets them. A tint changes nothing a
 /// `contents()` can see, so these are what the assertions below are made of.
 const COPY_CURSOR: (u8, u8, u8) = (0xf9, 0xe2, 0xaf);
 const COPY_SELECTION: (u8, u8, u8) = (0x45, 0x47, 0x5a);
@@ -2752,7 +2752,7 @@ fn the_footer_shows_the_armed_prefix_and_clears_when_it_fires() {
 }
 
 /// Resize mode names itself too, and differently from the armed prefix — the whole reason
-/// `plugin.prefix` was asked to raise two names rather than one.
+/// `plugin.tmux.prefix` was asked to raise two names rather than one.
 #[test]
 fn the_footer_shows_resize_mode_and_clears_when_it_leaves() {
     let (mut nt, _init) = start_shipped("require('neotmux.defaults').footer = true", "cat");
@@ -2774,7 +2774,7 @@ fn the_footer_shows_resize_mode_and_clears_when_it_leaves() {
 }
 
 /// Copy mode raises its own name too, entirely independently of the prefix's two — proving
-/// the footer reads one shared convention rather than something specific to `plugin.prefix`.
+/// the footer reads one shared convention rather than something specific to `plugin.tmux.prefix`.
 #[test]
 fn the_footer_shows_copy_mode_and_clears_when_it_leaves() {
     let (mut nt, _init) = start_shipped("require('neotmux.defaults').footer = true", "cat");
@@ -2980,7 +2980,7 @@ fn copy_mode_keeps_the_colours_the_pane_was_written_in() {
 fn a_notification_in_japanese_keeps_its_characters() {
     let init = harness::runtime(&[(
         "init.lua",
-        "require('plugin.prefix').commands['Y'] = function()\n\
+        "require('plugin.tmux.prefix').commands['Y'] = function()\n\
            neotmux.notify('warn', 'ペインが返事を待っています')\n\
          end\n",
     )]);
@@ -2996,7 +2996,7 @@ fn a_notification_in_japanese_keeps_its_characters() {
 fn a_notification_is_drawn_on_a_ground_of_its_own() {
     let init = harness::runtime(&[(
         "init.lua",
-        "require('plugin.prefix').commands['Y'] = function()\n\
+        "require('plugin.tmux.prefix').commands['Y'] = function()\n\
            neotmux.notify('info', 'noticed')\n\
          end\n",
     )]);

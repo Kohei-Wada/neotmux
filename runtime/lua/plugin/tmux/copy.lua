@@ -33,7 +33,7 @@ local selection = require("neotmux.selection")
 local words = require("neotmux.words")
 local modes = require("neotmux.mode")
 local hints = require("neotmux.hints")
-local g = neotmux.group("plugin.copy")
+local g = neotmux.group("plugin.tmux.copy")
 
 local M = {}
 
@@ -59,7 +59,7 @@ M.page = 0.5
 -- `clipboard` below). Keeping the two apart is what lets a paste command attach here later
 -- without caring whether the clipboard worked.
 --
---   neotmux.log.info(require('plugin.copy').register)
+--   neotmux.log.info(require('plugin.tmux.copy').register)
 M.register = ""
 
 -- The mode, and everything in it. Nil when it is off, which is also what makes the tick below
@@ -203,7 +203,7 @@ end
 -- `M.keys` and a name up in here, and does nothing else. Rebinding is then one assignment
 -- from an `init.lua`, and a command is nameable from outside this file:
 --
---   local copy = require('plugin.copy')
+--   local copy = require('plugin.tmux.copy')
 --   copy.keys['v'] = 'begin-selection'
 --   copy.keys['C-b'] = nil
 --
@@ -302,7 +302,7 @@ M.commands = {
       "yanked "
         .. count
         .. (count == 1 and " line" or " lines")
-        .. " into plugin.copy.register"
+        .. " into plugin.tmux.copy.register"
         .. (offered and ", and offered them to the terminal's clipboard" or "")
     )
   end,
@@ -506,9 +506,12 @@ end)
 -- keys above has to `require` this file from their own `init.lua`, which runs before the
 -- shipped layer's — so the prefix is not loaded yet and a plain probe would silently leave
 -- `C-b [` unbound. Loading it here is what it was about to do anyway.
-if package.loaded["plugin.prefix"] or require("neotmux.defaults").prefix then
-  require("plugin.prefix").commands["["] = M.enter
-  require("plugin.prefix").descriptions["["] = "enter copy mode"
+if
+  package.loaded["plugin.tmux.prefix"]
+  or require("neotmux.defaults").tmux and require("neotmux.defaults").prefix
+then
+  require("plugin.tmux.prefix").commands["["] = M.enter
+  require("plugin.tmux.prefix").descriptions["["] = "enter copy mode"
 end
 
 return M

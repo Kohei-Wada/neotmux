@@ -1,4 +1,4 @@
-//! `plugin.sidebar` and its sections, driven without a host: sessions named and framed the way
+//! `plugin.herdr.sidebar` and its sections, driven without a host: sessions named and framed the way
 //! the server frames them, a tick for the one being looked at, and the band read back off the
 //! draw commands as lines of text.
 
@@ -68,13 +68,13 @@ fn built(extra: &str) -> (tempfile::TempDir, Built) {
 /// container shares the band and how those two sections cut their rows, and both sections are
 /// still shipped, so they are built by name here, in the band they were written against: wider,
 /// shared out rather than cut at half, no fold corner, and agents only when there are some.
-const TREE: &str = "local sidebar = require('plugin.sidebar')\n\
-    sidebar.sections = { require('plugin.sidebar.sessions'), require('plugin.sidebar.agents') }\n\
+const TREE: &str = "local sidebar = require('plugin.herdr.sidebar')\n\
+    sidebar.sections = { require('plugin.herdr.sidebar.sessions'), require('plugin.herdr.sidebar.agents') }\n\
     sidebar.widths = { min = 27, max = 36, closed = 1 }\n\
     sidebar.split, sidebar.folds = nil, nil\n\
-    require('plugin.sidebar.agents').always = false\n\
+    require('plugin.herdr.sidebar.agents').always = false\n\
     sidebar.icons = { working = '\u{25cf}', blocked = '\u{25c9}', done = '\u{2713}', idle = '\u{25cb}' }\n\
-    local agents = require('plugin.sidebar.agents')\n\
+    local agents = require('plugin.herdr.sidebar.agents')\n\
     agents.rows = { { 'state_icon', 'location', 'agent', 'age' } }\n\
     agents.sort = 'priority'\n";
 
@@ -246,7 +246,7 @@ fn the_tree_is_what_the_shipped_sidebar_draws() {
 #[test]
 fn a_section_added_from_init_lua_draws_under_its_title() {
     let (_dir, sub) = built(
-        "table.insert(require('plugin.sidebar').sections, {\n\
+        "table.insert(require('plugin.herdr.sidebar').sections, {\n\
            title = 'mine',\n\
            build = function() return { rows = { { { text = 'hello' } } } } end,\n\
          })",
@@ -263,7 +263,7 @@ fn a_section_added_from_init_lua_draws_under_its_title() {
 #[test]
 fn a_section_with_no_rows_takes_no_room_and_draws_no_title() {
     let (_dir, sub) = built(
-        "table.insert(require('plugin.sidebar').sections, {\n\
+        "table.insert(require('plugin.herdr.sidebar').sections, {\n\
            title = 'mine',\n\
            build = function() return { rows = {} } end,\n\
          })",
@@ -277,7 +277,7 @@ fn a_section_with_no_rows_takes_no_room_and_draws_no_title() {
 #[test]
 fn a_section_that_raises_is_skipped_and_named_once() {
     let (_dir, sub) = built(
-        "table.insert(require('plugin.sidebar').sections, 1, {\n\
+        "table.insert(require('plugin.herdr.sidebar').sections, 1, {\n\
            title = 'broken',\n\
            build = function() error('boom') end,\n\
          })",
@@ -299,7 +299,7 @@ fn a_section_that_raises_is_skipped_and_named_once() {
 #[test]
 fn a_capped_section_takes_its_share_and_then_what_is_left() {
     let (_dir, sub) = built(
-        "local sidebar = require('plugin.sidebar')\n\
+        "local sidebar = require('plugin.herdr.sidebar')\n\
          local function rows(prefix, n)\n\
            local out = {}\n\
            for i = 1, n do out[i] = { { text = prefix .. i } } end\n\
@@ -329,7 +329,7 @@ fn a_capped_section_takes_its_share_and_then_what_is_left() {
 #[test]
 fn a_share_is_not_applied_when_everything_fits() {
     let (_dir, sub) = built(
-        "local sidebar = require('plugin.sidebar')\n\
+        "local sidebar = require('plugin.herdr.sidebar')\n\
          local function rows(prefix, n)\n\
            local out = {}\n\
            for i = 1, n do out[i] = { { text = prefix .. i } } end\n\
@@ -351,7 +351,7 @@ fn a_share_is_not_applied_when_everything_fits() {
 #[test]
 fn a_row_wider_than_the_widest_band_is_cut_at_it() {
     let (_dir, sub) = built(
-        "require('plugin.sidebar').sections = {\n\
+        "require('plugin.herdr.sidebar').sections = {\n\
            { build = function() return { rows = { { { text = string.rep('x', 100) } } } } end },\n\
          }",
     );
@@ -368,7 +368,7 @@ fn the_default_fit_says_how_much_it_cut_on_each_side() {
     let (_dir, sub) = built(
         "local rows = {}\n\
          for i = 1, 20 do rows[i] = { { text = 'r' .. i } } end\n\
-         require('plugin.sidebar').sections = {\n\
+         require('plugin.herdr.sidebar').sections = {\n\
            { build = function() return { rows = rows, anchor = 10 } end },\n\
          }",
     );
@@ -476,11 +476,11 @@ const AGENTS: &str = "local detect = require('neotmux.detect')\n\
         match = function(v) return v.lines[#v.lines] == 'DONE' end },\n\
     } }\n\
     T = 0\n\
-    require('plugin.sidebar.agents').clock = function() return T end\n\
+    require('plugin.herdr.sidebar.agents').clock = function() return T end\n\
     neotmux.on_key(function(key)\n\
       if key == 'T' then T = T + 180000 return true end\n\
       if key == 'S' then T = T + 10000 return true end\n\
-      if key == 'B' then require('plugin.sidebar').toggle() return true end\n\
+      if key == 'B' then require('plugin.herdr.sidebar').toggle() return true end\n\
       return false\n\
     end)\n";
 
@@ -606,7 +606,7 @@ fn a_terminal_too_short_for_a_header_draws_what_fits_and_raises_nothing() {
     assert_eq!(lines[1], "", "{lines:#?}");
     let said: Vec<String> = support::notified(&sub)
         .into_iter()
-        .filter(|t| t.contains("plugin.sidebar"))
+        .filter(|t| t.contains("plugin.herdr.sidebar"))
         .collect();
     assert!(said.is_empty(), "{said:?}");
 }
@@ -643,8 +643,8 @@ fn an_agent_row_names_the_ruleset_not_the_wrapper() {
 }
 
 /// Icons that name their state, so a line says which one it is drawn in.
-const LETTERS: &str = "require('plugin.sidebar').icons = { working = 'W', blocked = 'B', done = 'D', idle = 'I' }\n\
-    require('plugin.sidebar.spaces').rows = { { 'state_icon', 'name' } }\n";
+const LETTERS: &str = "require('plugin.herdr.sidebar').icons = { working = 'W', blocked = 'B', done = 'D', idle = 'I' }\n\
+    require('plugin.herdr.sidebar.spaces').rows = { { 'state_icon', 'name' } }\n";
 
 /// The shipped sidebar is herdr's: a `spaces` header over every session, each drawn as the most
 /// urgent of its panes, and the agents under them in herdr's rows — where on the first line,
@@ -712,7 +712,7 @@ fn an_agent_that_finishes_unwatched_is_done_until_it_is_looked_at() {
 fn navigate_moves_a_cursor_over_the_spaces_and_enter_goes_there() {
     let (_dir, sub) = built_herdr(
         "neotmux.on_key(function(key)\n\
-           if key == 'W' then require('plugin.sidebar.spaces').navigate() return true end\n\
+           if key == 'W' then require('plugin.herdr.sidebar.spaces').navigate() return true end\n\
            return false\n\
          end)\n",
     );
@@ -895,7 +895,8 @@ fn every_space_gets_its_branch_however_many_there_are() {
             JobChunk::Exited(0),
         ]]);
     }
-    let (_dir, sub) = built_herdr_running("require('plugin.sidebar').widths.max = 40\n", runner);
+    let (_dir, sub) =
+        built_herdr_running("require('plugin.herdr.sidebar').widths.max = 40\n", runner);
     let names = ["s0", "s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8", "s9"];
     let s: Vec<Sess> = names
         .iter()
@@ -1062,7 +1063,7 @@ fn folded_it_is_herdrs_rail() {
 fn navigate_says_so_along_the_bottom_and_paints_the_cursor() {
     let (_dir, sub) = built_herdr(
         "neotmux.on_key(function(key)\n\
-           if key == 'W' then require('plugin.sidebar.spaces').navigate() return true end\n\
+           if key == 'W' then require('plugin.herdr.sidebar.spaces').navigate() return true end\n\
            return false\n\
          end)\n",
     );
@@ -1086,7 +1087,7 @@ fn navigate_says_so_along_the_bottom_and_paints_the_cursor() {
 /// on, whatever the band is.
 #[test]
 fn a_band_colour_of_your_own_still_shows_the_rows_you_are_at() {
-    let (_dir, sub) = built_herdr("require('plugin.sidebar').colors.bar = '#181825'\n");
+    let (_dir, sub) = built_herdr("require('plugin.herdr.sidebar').colors.bar = '#181825'\n");
     let s = [Sess::new(1, "work", vec![vec![101]])];
     open(&sub, &s);
     settled(&sub, &s, 1);
@@ -1132,7 +1133,7 @@ fn the_space_you_are_in_shows_its_windows_and_panes() {
 
 #[test]
 fn the_tree_under_the_space_you_are_in_can_be_turned_off() {
-    let (_dir, sub) = built_herdr("require('plugin.sidebar.spaces').tree = false\n");
+    let (_dir, sub) = built_herdr("require('plugin.herdr.sidebar.spaces').tree = false\n");
     let s = [Sess::new(1, "work", vec![vec![101, 102]])];
     open(&sub, &s);
     let lines = settled(&sub, &s, 1);
@@ -1162,7 +1163,7 @@ fn a_tree_too_tall_for_the_half_keeps_the_names_and_the_pane_you_are_in() {
 fn navigate_moves_a_cursor_over_the_agents_and_enter_goes_to_that_pane() {
     let (_dir, sub) = built_herdr(&format!(
         "{AGENTS}neotmux.on_key(function(key)\n\
-           if key == 'A' then require('plugin.sidebar.agents').navigate() return true end\n\
+           if key == 'A' then require('plugin.herdr.sidebar.agents').navigate() return true end\n\
            return false\n\
          end)\n"
     ));
@@ -1213,8 +1214,8 @@ fn one_navigate_cursor_puts_the_other_away() {
     let (_dir, sub) = built_herdr(&format!(
         "{AGENTS}neotmux.on_key(function(key)\n\
            if key ~= 'X' then return false end\n\
-           local spaces = require('plugin.sidebar.spaces')\n\
-           local agents = require('plugin.sidebar.agents')\n\
+           local spaces = require('plugin.herdr.sidebar.spaces')\n\
+           local agents = require('plugin.herdr.sidebar.agents')\n\
            local function say() neotmux.log.info(tostring(spaces.cursor) .. ' ' .. tostring(agents.cursor)) end\n\
            spaces.navigate() say()\n\
            agents.navigate() say()\n\

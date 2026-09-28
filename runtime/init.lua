@@ -1,21 +1,18 @@
 -- What neotmux loads when it finds no reason not to. The search guard is what makes deleting
 -- `lua/plugin/` a way of turning the defaults off rather than a missing-file error; the
 -- defaults table is how a user turns one off without deleting anything.
+--
+-- What tmux also does — the prefix, the status bar, copy mode, the session picker, the borders,
+-- synchronized panes — is `plugin.tmux`, which loads its own. What follows agents the way herdr
+-- does — the sidebar, the chime, the watch rules — is `plugin.herdr`. The rest is neotmux's own.
 for _, name in ipairs({
-  "status",
-  "prefix",
-  "copy",
-  "sessions",
+  "tmux",
+  "herdr",
   "palette",
   "notify",
-  "borders",
   "guard",
-  "sync",
-  "watch",
-  "sidebar",
   "footer",
   "hints",
-  "chime",
   "costs",
   "stamps",
 }) do

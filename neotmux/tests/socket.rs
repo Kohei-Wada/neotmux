@@ -98,7 +98,7 @@ impl Client {
         Self::start_sized(runtime, shell, 24, 80)
     }
 
-    /// A client with the shipped plugins loaded, `plugin/prefix` among them — the only way
+    /// A client with the shipped plugins loaded, `plugin/tmux/prefix` among them — the only way
     /// for a test to reach `C-b` for real, since [`Client::start`] runs with no runtime
     /// layer at all and so binds no keys.
     fn start_with_prefix(runtime: &Path, shell: &str) -> Self {

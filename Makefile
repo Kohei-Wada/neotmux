@@ -48,7 +48,7 @@ install-runtime:
 	rm -rf $(PREFIX)/share/neotmux/lua
 	cp -R runtime/lua $(PREFIX)/share/neotmux/lua
 	chmod -R a+rX $(PREFIX)/share/neotmux/lua
-# The sounds go with the layer they are resolved against: `plugin.chime` finds them beside
+# The sounds go with the layer they are resolved against: `plugin.herdr.chime` finds them beside
 # the file `require` loaded it from, so an install that copied only the Lua would ship a
 # plugin that cannot play anything.
 	rm -rf $(PREFIX)/share/neotmux/sounds

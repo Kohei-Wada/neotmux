@@ -6,7 +6,7 @@
 -- named `neotmux.command`, so `commands` holds the name rather than the body, and the palette
 -- lists every one of these on a fresh install:
 --
---   local prefix = require('plugin.prefix')
+--   local prefix = require('plugin.tmux.prefix')
 --   prefix.key = 'C-a'
 --   prefix.commands['%'] = prefix.commands['v']   -- tmux's muscle memory, alongside v and -
 --   prefix.commands['"'] = prefix.commands['-']
@@ -37,7 +37,7 @@ local list = require("neotmux.list")
 local nav = require("neotmux.nav")
 local modes = require("neotmux.mode")
 local prompt = require("neotmux.prompt")
-local g = neotmux.group("plugin.prefix")
+local g = neotmux.group("plugin.tmux.prefix")
 
 -- Two modes, not one: the armed prefix and resize mode are different states, and a reader
 -- should be able to tell them apart. Each local holds the handle `neotmux.mode.raise` hands
@@ -199,7 +199,7 @@ local M = {
   -- How many cells one press moves the boundary.
   resize_step = 1,
   -- The key-to-name mapping: a key runs the command its entry names. An entry may also hold a
-  -- function directly, for a plugin like `plugin.sessions` that binds a key of its own without
+  -- function directly, for a plugin like `plugin.tmux.sessions` that binds a key of its own without
   -- registering one — `dispatch`, below, takes either.
   commands = {
     ["v"] = "split-vertical",

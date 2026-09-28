@@ -5,7 +5,14 @@
 --   require('neotmux.defaults').status = false
 --
 -- This is a Lua convention, not a host feature: the host has no idea these defaults exist.
+--
+-- `tmux` is the six that do what tmux does — `status`, `prefix`, `copy`, `sessions`,
+-- `borders`, `sync` — as one: off, none of them loads, whatever their own fields say.
+-- `herdr` is the same for the three that follow agents the way herdr does — `sidebar`,
+-- `chime`, `watch`.
 return {
+  tmux = true,
+  herdr = true,
   status = true,
   prefix = true,
   borders = true,

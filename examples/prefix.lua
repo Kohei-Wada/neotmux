@@ -6,7 +6,7 @@
 --
 -- The modal state is an ordinary Lua upvalue. neotmux has no idea what a prefix is.
 
-local g = neotmux.group("plugin.prefix")
+local g = neotmux.group("plugin.tmux.prefix")
 
 local M = { key = "C-a" }
 

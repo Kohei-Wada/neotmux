@@ -26,7 +26,7 @@ Apache-2.0 only:
 
   herdr's assets/sounds/done.mp3 and assets/sounds/request.mp3, byte for byte, last
   changed upstream in 0403775fd2a9458417c5349d5441125ab9b2553c. They are what
-  plugin.chime plays when a pane stops working or starts waiting for you.
+  plugin.herdr.chime plays when a pane stops working or starts waiting for you.
 
 - runtime/lua/neotmux/detect.lua
 

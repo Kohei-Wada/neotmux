@@ -1,4 +1,4 @@
-//! `plugin.sessions`: the session picker, pinned against the implementation as it stands
+//! `plugin.tmux.sessions`: the session picker, pinned against the implementation as it stands
 //! before it is rebuilt onto `neotmux.list`. Every assertion here is the contract the rebuild
 //! has to keep — this file is not touched by that work.
 
@@ -23,11 +23,11 @@ fn shipped_layer() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime")
 }
 
-/// A layer of the test's own in front of the shipped one, so `plugin.sessions` is the real
-/// file. The layer's whole job is opening the picker on `o`, since there is no `plugin.prefix`
+/// A layer of the test's own in front of the shipped one, so `plugin.tmux.sessions` is the real
+/// file. The layer's whole job is opening the picker on `o`, since there is no `plugin.tmux.prefix`
 /// here to bind `C-b s` to it.
 const OPEN_ON_O: &str = "
-local sessions = require('plugin.sessions')
+local sessions = require('plugin.tmux.sessions')
 neotmux.on_key(function(key)
   if key == 'o' then
     sessions.open()
@@ -37,12 +37,12 @@ neotmux.on_key(function(key)
 end)
 ";
 
-/// `plugin.prefix` itself, wired to `plugin.sessions` the way a real `init.lua` would: needed
+/// `plugin.tmux.prefix` itself, wired to `plugin.tmux.sessions` the way a real `init.lua` would: needed
 /// only by the test that pins what a real `C-b s` does, since every other test here opens the
 /// picker through its own stand-in key.
 const WITH_PREFIX: &str = "
-require('plugin.prefix')
-require('plugin.sessions')
+require('plugin.tmux.prefix')
+require('plugin.tmux.sessions')
 ";
 
 fn built(init: &str) -> (tempfile::TempDir, Built) {
@@ -294,7 +294,7 @@ fn d_is_refused_on_the_current_session() {
 }
 
 /// A second `C-b s` while the picker is up changes nothing: the picker is a float, and its own
-/// key handler is offered before `plugin.prefix`'s and swallows every key while it is up, `C-b`
+/// key handler is offered before `plugin.tmux.prefix`'s and swallows every key while it is up, `C-b`
 /// included — so `C-b` never re-arms the prefix and `s` never reaches it either. This is not a
 /// regression from the rebuild: the old picker was a float with the same all-consuming key
 /// handler and never closed on a second `C-b s` either. `Esc` is what leaves it, the same as

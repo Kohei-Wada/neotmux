@@ -162,7 +162,7 @@ fn line(cmds: &[DrawCmd]) -> String {
 /// two right-hand modules.
 #[test]
 fn the_bar_is_composed_of_the_runs_it_was_drawn_from() {
-    let (_dir, sub) = built("require('plugin.status').home = '/home/kohei'");
+    let (_dir, sub) = built("require('plugin.tmux.status').home = '/home/kohei'");
     let cmds = frame(&sub, &[(1, info("bash", "/home/kohei/life"))], 1, &[1], 1);
 
     assert_eq!(
@@ -200,7 +200,7 @@ fn the_whole_row_is_painted_in_the_bars_colour() {
 /// that the focus moved.
 #[test]
 fn the_bar_follows_the_focused_pane() {
-    let (_dir, sub) = built("require('plugin.status').home = '/home/kohei'");
+    let (_dir, sub) = built("require('plugin.tmux.status').home = '/home/kohei'");
     let panes = [
         (1, info("bash", "/home/kohei/life")),
         (2, info("nvim", "/etc")),
@@ -288,7 +288,7 @@ fn every_cap_is_its_blocks_colour_on_the_bar() {
 /// the screen and nothing else.
 #[test]
 fn a_colour_field_reaches_the_screen() {
-    let (_dir, sub) = built("require('plugin.status').colors.command = '#ff0000'");
+    let (_dir, sub) = built("require('plugin.tmux.status').colors.command = '#ff0000'");
     let cmds = frame(&sub, &[(1, info("bash", "/tmp"))], 1, &[1], 1);
     let icon = runs(&cmds)
         .into_iter()
@@ -301,7 +301,7 @@ fn a_colour_field_reaches_the_screen() {
 #[test]
 fn emptying_the_caps_takes_the_glyphs_off_the_bar() {
     let (_dir, sub) = built(
-        "local s = require('plugin.status')\n\
+        "local s = require('plugin.tmux.status')\n\
          s.caps = { left = '', right = '' }\n\
          s.icons = { command = '', directory = '' }",
     );
@@ -312,7 +312,7 @@ fn emptying_the_caps_takes_the_glyphs_off_the_bar() {
 /// `$HOME` is written the way a prompt writes it.
 #[test]
 fn the_home_directory_is_written_as_a_tilde() {
-    let (_dir, sub) = built("require('plugin.status').home = '/home/kohei'");
+    let (_dir, sub) = built("require('plugin.tmux.status').home = '/home/kohei'");
     let text = line(&frame(
         &sub,
         &[(1, info("bash", "/home/kohei"))],
@@ -327,7 +327,7 @@ fn the_home_directory_is_written_as_a_tilde() {
 /// the end — the part that says where you are.
 #[test]
 fn a_directory_that_does_not_fit_keeps_its_tail() {
-    let (_dir, sub) = built("require('plugin.status').home = '/home/kohei'");
+    let (_dir, sub) = built("require('plugin.tmux.status').home = '/home/kohei'");
     let deep = format!("/home/kohei/{}leaf", "middle/".repeat(12));
     let text = line(&frame(&sub, &[(1, info("bash", &deep))], 1, &[1], 1));
     assert!(
@@ -346,7 +346,7 @@ fn a_directory_that_does_not_fit_keeps_its_tail() {
 /// drawn over itself.
 #[test]
 fn a_directory_with_no_room_at_all_is_dropped() {
-    let (_dir, sub) = built("require('plugin.status').home = '/home/kohei'");
+    let (_dir, sub) = built("require('plugin.tmux.status').home = '/home/kohei'");
     let long = format!("/home/kohei/{}", "x".repeat(200));
     let text = line(&frame(&sub, &[(1, info("bash", &long))], 1, &[1], 1));
     assert!(!text.contains('x'), "{text}");

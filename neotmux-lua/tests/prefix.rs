@@ -1,6 +1,6 @@
-//! `plugin.prefix`'s own registration of its verbs as `neotmux.command`s: first-wins is the
+//! `plugin.tmux.prefix`'s own registration of its verbs as `neotmux.command`s: first-wins is the
 //! rule when another layer's `init.lua` claims a name first, and the loss is said out loud
-//! rather than only reaching the log — see `runtime/lua/plugin/prefix.lua`'s `register`.
+//! rather than only reaching the log — see `runtime/lua/plugin/tmux/prefix.lua`'s `register`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -36,8 +36,8 @@ fn notified(sub: &LuaSubsystem) -> Vec<String> {
         .collect()
 }
 
-/// A layer that claims `detach` ahead of `plugin.prefix` wins it, the same as any other
-/// `neotmux.command` conflict — first registration holds. `plugin.prefix` still loses the
+/// A layer that claims `detach` ahead of `plugin.tmux.prefix` wins it, the same as any other
+/// `neotmux.command` conflict — first registration holds. `plugin.tmux.prefix` still loses the
 /// name silently in its own log-only report from the host; what this test is after is that it
 /// *also* says so through `neotmux.notify`, naming both the key that lost its binding and the
 /// command name that was already taken.
@@ -46,7 +46,7 @@ fn a_refused_verb_is_notified_naming_the_key_and_the_name() {
     let (_dir, sub) = built(
         "
 neotmux.command.add('detach', function() end)
-require('plugin.prefix')
+require('plugin.tmux.prefix')
 ",
     );
     let errors = sub.run_init();
@@ -60,13 +60,13 @@ require('plugin.prefix')
 }
 
 /// The other verbs, none of which were contested, are registered as usual — a conflict on one
-/// name does not stop `plugin.prefix` from claiming the rest.
+/// name does not stop `plugin.tmux.prefix` from claiming the rest.
 #[test]
 fn an_uncontested_verb_still_registers() {
     let (_dir, sub) = built(
         "
 neotmux.command.add('detach', function() end)
-require('plugin.prefix')
+require('plugin.tmux.prefix')
 ",
     );
     let errors = sub.run_init();

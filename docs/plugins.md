@@ -153,7 +153,7 @@ and `command.add` follows it.
 
 A command is in-process only — nothing outside this VM can name one yet. What it buys you today
 is the palette below, and a plugin's own verbs being one definition two ways in: see
-[Changing what the prefix does](#changing-what-the-prefix-does), where `plugin.prefix` registers
+[Changing what the prefix does](#changing-what-the-prefix-does), where `plugin.tmux.prefix` registers
 each of its verbs this way and its key table calls them by name.
 
 `list()`'s `source` names the chunk the handler was *defined* in, not the one whose `add` call
@@ -217,7 +217,7 @@ nothing in between.
 `pane_gutter` is the same bargain as a reserved band, in the other direction: the host takes
 the cells away from the panes and has no idea what goes in them. With a gutter of `g`, a
 pane's right neighbour starts at `r.x + r.w + g` and the `g` columns from `r.x + r.w` belong
-to nobody — which is where `plugin.borders` puts its dividers. At `0`, the default, the panes
+to nobody — which is where `plugin.tmux.borders` puts its dividers. At `0`, the default, the panes
 tile the surface exactly.
 
 **`ctx:rect` with no colours clears the area.** It is not a no-op — default background is a
@@ -1390,26 +1390,44 @@ costs one plugin one frame instead of costing you the program.
 
 ## The shipped defaults
 
-neotmux ships fourteen plugins in the runtime layer an install puts on the search path:
+neotmux ships sixteen plugins in the runtime layer an install puts on the search path. Six
+do what tmux does and live under `plugin/tmux/`, loaded together by `plugin.tmux`:
 
 | plugin | what it does |
 |---|---|
-| `status` | the default status bar, on one reserved top row |
-| `prefix` | a `C-b` prefix over `v`, `-`, `o`, `h/j/k/l`, `r`, `c`, `n`, `p`, `,` and `[` |
-| `copy` | copy mode: read back over a pane's scrollback, select a region, yank it |
+| `tmux.status` | the default status bar, on one reserved top row |
+| `tmux.prefix` | a `C-b` prefix over `v`, `-`, `o`, `h/j/k/l`, `r`, `z`, `c`, `n`, `p`, `,`, `[` and `?` |
+| `tmux.copy` | copy mode: read back over a pane's scrollback, select a region, yank it |
+| `tmux.sessions` | the session picker on `C-b s`: every session and what it is running, `Enter` to go, `c` to make one, `r` to rename one, `d` to end one |
+| `tmux.borders` | a rule along every boundary between two panes |
+| `tmux.sync` | relays every key to every pane of the window — tmux's `synchronize-panes`, turned on and off with `:sync-panes` or `C-b S`; the plugin loads by default, the relaying starts off |
+
+Three follow agents the way [herdr](https://github.com/herdrdev/herdr) does and live under
+`plugin/herdr/`, loaded together by `plugin.herdr`:
+
+| plugin | what it does |
+|---|---|
+| `herdr.sidebar` | the sidebar down a reserved left band: every session with its state and git branch, and every agent in every session; `C-b w` moves a cursor over the sessions and `C-b a` over the agents, `C-b b` folds it — **off by default** |
+| `herdr.chime` | plays a sound when a pane you are not looking at starts waiting for you, or stops working — see [The chime](#the-chime) below |
+| `herdr.watch` | notifies you when a pane looks like it is waiting for you, on `neotmux.state`'s guess — **off by default** |
+
+The rest are neotmux's own:
+
+| plugin | what it does |
+|---|---|
 | `hints` | `C-b f` labels every url, path, hash (7–64 hex characters, taken whole) and ip on screen and copies the one you pick; `hint-send` and `hint-open` are the same pick, typed rather than copied |
 | `notify` | draws each notification in a frame of its own, stacked up from the bottom-right |
-| `sessions` | the session picker on `C-b s`: every session and what it is running, `Enter` to go, `c` to make one, `r` to rename one, `d` to end one |
 | `palette` | the command palette on `C-b :`: every registered command, fuzzy-filtered as you type, `Enter` to run the one under the cursor; `@` for the sessions, `#` for the agents, and `C-b g` opens it on `#` |
-| `borders` | a rule along every boundary between two panes |
-| `chime` | plays a sound when a pane you are not looking at starts waiting for you, or stops working — see [The chime](#the-chime) below |
-| `sync` | relays every key to every pane of the window — tmux's `synchronize-panes`, turned on and off with `:sync-panes` or `C-b S`; the plugin loads by default, the relaying starts off |
+| `costs` | the palette's `costs`: what each plugin's ticks have cost, most first |
+| `stamps` | `C-b t` shows when every line of every pane arrived, on a gutter coloured by how long it waited |
 | `guard` | holds back the Enter that would run a line `neotmux.guard`'s rules name, until you press it again — **off by default** |
-| `watch` | notifies you when a pane looks like it is waiting for you, on `neotmux.state`'s guess — **off by default** |
-| `sidebar` | herdr's sidebar down a reserved left band: every session with its state and git branch, and every agent in every session; `C-b w` moves a cursor over the sessions and `C-b a` over the agents, `C-b b` folds it — **off by default** |
 | `footer` | whichever mode is raised through `neotmux.mode`, on one reserved bottom row — **off by default** |
 
-None of them is a host feature — all fourteen are ordinary files making ordinary API calls, and
+Each is a field of `neotmux.defaults` by its own name — `defaults.copy = false` keeps copy mode
+out — and `defaults.tmux = false` keeps all six of tmux's out at once, whatever their own fields
+say; `defaults.herdr = false` does the same for herdr's three.
+
+None of them is a host feature — all sixteen are ordinary files making ordinary API calls, and
 the prefix is the only reason a fresh install can make a second pane at all. `C-b v` splits
 vertically (the panes end up side by side, because `pane.split('vertical')` divides the
 width), `C-b -` splits horizontally (one above the other), `C-b o` focuses the next pane,
@@ -1420,12 +1438,12 @@ command palette, `C-b c` opens a window and switches to it, and `C-b n` and `C-b
 walk to the next window and the one before, each wrapping around. `C-b ?` lists every one of
 them — the key, the command it runs, what that does — and Enter runs the one under the cursor.
 A plugin that binds a key to a function rather than a command's name says what it does in
-`require('plugin.prefix').descriptions[key]`, so the list has something to show for it.
+`require('plugin.tmux.prefix').descriptions[key]`, so the list has something to show for it.
 
-Every one of the prefix's own verbs is a `neotmux.command`, registered by `plugin.prefix`
+Every one of the prefix's own verbs is a `neotmux.command`, registered by `plugin.tmux.prefix`
 itself — the palette lists **commands, not keys**, so what it shows is whatever has been
 registered, from any plugin, and a plugin that calls `neotmux.command.add` gets a palette entry
-for free without doing anything else. `plugin.prefix`'s verbs are simply the first ones there,
+for free without doing anything else. `plugin.tmux.prefix`'s verbs are simply the first ones there,
 which is what gives a fresh install something to open the palette onto.
 
 Every mode moves with `j`/`k` (and `h`/`l` where sideways means anything): one spelling across
@@ -1437,11 +1455,11 @@ the same way — see [The hints convention](#the-hints-convention) below.
 
 The sidebar is herdr's (herdrdev/herdr), section for section, so a herdr user finds what they
 had, and drawn the way herdr draws it. A herdr **space** is a neotmux session and a herdr
-**tab** a window. It is herdr's 26 columns wide — `require('plugin.sidebar').widths.min` and
+**tab** a window. It is herdr's 26 columns wide — `require('plugin.herdr.sidebar').widths.min` and
 `.max`, the width taken from what there is to show between the two — and its last column is a
 rule, `│`, where the panes start. Nothing paints the band but the rows you are at; the rest is
 the terminal's own background. It is cut at half its height between the two sections
-(`require('plugin.sidebar').split = 0.5`), each headed in bold with a blank row under it, a line
+(`require('plugin.herdr.sidebar').split = 0.5`), each headed in bold with a blank row under it, a line
 across above the second, and the bottom row's corner is `«`, what `C-b b` does.
 
 **`spaces`**, on top, is every session: its state and name, then the git branch its focused
@@ -1449,12 +1467,12 @@ pane's directory is on and how far that is from its upstream (`↑` ahead in gre
 red). A session's state is its most urgent agent's, in herdr's order: blocked, done, working,
 idle; with no agent it is `·`. The session you are in is bold on a painted row, its branch in
 mauve, and under it are its windows and panes, drawn as the tree draws them (▸ the window being
-shown, • the pane you are in; `plugin.sidebar.sessions`' `markers`, `tree` and `tokens` apply)
+shown, • the pane you are in; `plugin.herdr.sidebar.sessions`' `markers`, `tree` and `tokens` apply)
 without what each pane runs — `spaces.tree_rows.panes.rows` puts `command` back.
-`require('plugin.sidebar.spaces').tree = false` leaves them out. When they do not fit, every
+`require('plugin.herdr.sidebar.spaces').tree = false` leaves them out. When they do not fit, every
 space keeps its name before any pane does, and the pane you are in is one of the ones kept.
 Git is asked as a job — the sandbox has no `io` — at most every
-`require('plugin.sidebar.spaces').refresh` ms (5000) per directory.
+`require('plugin.herdr.sidebar.spaces').refresh` ms (5000) per directory.
 
 **`C-b w`** is herdr's navigate: a cursor over the spaces, starting on the session you are in.
 `j`/`k` move it, Enter goes to the session under it, `1`-`9` go straight to that one, Esc
@@ -1471,7 +1489,7 @@ session — where it is on the first row, its state and what it is on the second
     ● work 2
       claude
 
-`require('plugin.sidebar.agents').sort` is `'grouped'` (session, window, pane — the default) or
+`require('plugin.herdr.sidebar.agents').sort` is `'grouped'` (session, window, pane — the default) or
 `'priority'` (blocked, done, working, idle), and the header says which. `rows` and `tokens`
 take `state_icon`, `state_text`, `session`, `window`, `agent`, `command`, `location` and `age`;
 `agent` is the ruleset that answered, where `command` is what the pane reports — for an agent
@@ -1482,27 +1500,27 @@ Folded (`C-b b`), the band is herdr's rail, four columns: every session numbered
 a line, every agent numbered with its state, and `»` at the bottom.
 
 **States and colours** are herdr's: working yellow, blocked red, done teal, idle green, each a
-`●` except idle's `○` (`require('plugin.sidebar').icons` and `.colors`; herdr's `symbols` are
+`●` except idle's `○` (`require('plugin.herdr.sidebar').icons` and `.colors`; herdr's `symbols` are
 `{ working = '◐', blocked = '×', done = '✓', idle = '○' }`). **Done** is an agent that went idle
 where nobody was looking — not in the current window of a session a client is attached to —
 and stays done until somebody looks. It is `neotmux.seen`'s, not `neotmux.state`'s, so the chime
 and the watcher do not see it.
 
 The tree the sidebar used to be — every session, and the windows and panes of the one you are
-in — is still shipped as `plugin.sidebar.sessions`, and is one assignment away:
+in — is still shipped as `plugin.herdr.sidebar.sessions`, and is one assignment away:
 
 ```lua
-local sidebar = require('plugin.sidebar')
-sidebar.sections = { require('plugin.sidebar.sessions'), require('plugin.sidebar.agents') }
+local sidebar = require('plugin.herdr.sidebar')
+sidebar.sections = { require('plugin.herdr.sidebar.sessions'), require('plugin.herdr.sidebar.agents') }
 sidebar.split = nil   -- shared out by what each has, so the tree has the rows no agent is using
 sidebar.widths = { min = 27, max = 36, closed = 1 }   -- as wide as its names, folded to its icons
-require('plugin.sidebar.agents').always = false      -- no header while there are no agents
+require('plugin.herdr.sidebar.agents').always = false      -- no header while there are no agents
 ```
 
 Its rows are tables too:
 
 ```lua
-local sessions = require('plugin.sidebar.sessions')
+local sessions = require('plugin.herdr.sidebar.sessions')
 sessions.sessions.rows = { { 'state_icon', 'name' }, { 'command', 'panes' } }
 sessions.panes.rows = { { 'marker', 'tree', 'number', 'command' } }
 sessions.tree.on = false          -- indent without the lines
@@ -1511,11 +1529,11 @@ sessions.tree.on = false          -- indent without the lines
 When the tree does not fit, it gives up the windows and panes of the session you are in before
 it gives up any session's name, and says `… n more` where it cut them.
 
-A section is a table, and `require('plugin.sidebar').sections` is the list of them, top to
+A section is a table, and `require('plugin.herdr.sidebar').sections` is the list of them, top to
 bottom:
 
 ```lua
-table.insert(require('plugin.sidebar').sections, {
+table.insert(require('plugin.herdr.sidebar').sections, {
   title = 'mine',     -- a header above it; nil for none
   aside = 'right',    -- optional: text, or a function, on the header's right
   share = 0.3,        -- the most of the band it takes when there is not room for everybody
@@ -1540,7 +1558,7 @@ for walking every pane in turn.
 
 Resize mode is a flag in the plugin and an `on_key`, like the prefix itself; the host has no
 idea it exists. In it, `h/j/k/l` move the boundary one cell at a time
-(`require('plugin.prefix').resize_step` sets how far), and the first key that is not one of
+(`require('plugin.tmux.prefix').resize_step` sets how far), and the first key that is not one of
 them leaves — `Esc` and `Enter` being the two that mean nothing else. Both the armed prefix and
 resize mode raise their own name in `neotmux.mode` for as long as they are up — see
 [The mode convention](#the-mode-convention) below — so `plugin.footer`, on, reads `prefix` or
@@ -1567,7 +1585,7 @@ host is already keeping whether or not anything ever looks at it. `footer` is of
 reason `status` would be if it were optional: a row is a row whether or not a mode is ever
 raised into it.
 
-The sidebar has two widths rather than an on and an off — `require('plugin.sidebar').widths`
+The sidebar has two widths rather than an on and an off — `require('plugin.herdr.sidebar').widths`
 is `{ min = 26, max = 26, closed = 4 }`, and `C-b b` swaps them. Closed is the rail: you can
 still see how many sessions and agents there are and what state each is in, you just cannot
 read their names. A band of nothing would be a band you have to remember is there.
@@ -1585,12 +1603,12 @@ the terminal going to the panes, because nothing is left to reserve one.
 
 ### Changing what the prefix does
 
-`plugin.prefix` returns its key and its command table, and reads both when a key arrives, so
+`plugin.tmux.prefix` returns its key and its command table, and reads both when a key arrives, so
 assigning to either from your own `init.lua` takes effect:
 
 ```lua
 -- ~/.config/neotmux/init.lua
-local prefix = require('plugin.prefix')
+local prefix = require('plugin.tmux.prefix')
 prefix.key = 'C-a'                            -- rebind the prefix itself
 prefix.commands['%'] = prefix.commands['v']   -- tmux's muscle memory, alongside v and -
 prefix.commands['"'] = prefix.commands['-']
@@ -1615,14 +1633,14 @@ like it turned something off.
 
 ### Changing what the status bar looks like
 
-`plugin.status` reserves the top row and draws the windows on the left, then the focused
+`plugin.tmux.status` reserves the top row and draws the windows on the left, then the focused
 pane's command and its working directory on the right. A window's block is numbered with its
 position, and the one being shown carries the focused pane's position after a dot — tmux's
 `window.pane`. Positions and not ids, for the reason the pane API gives. It returns four
 tables, all read every tick:
 
 ```lua
-local status = require('plugin.status')
+local status = require('plugin.tmux.status')
 status.colors.current = '#f5c2e7'   -- the cap on the window being shown
 status.caps = { left = '', right = '' }              -- no Nerd Font: no caps
 status.icons = { command = '', directory = '' }      -- and no icons
@@ -1648,7 +1666,7 @@ and is dropped along with its icon if not even its last component fits.
 
 ### Changing what copy mode does
 
-`plugin.copy` is `C-b [`, a cursor over a snapshot of the pane's history and screen, a
+`plugin.tmux.copy` is `C-b [`, a cursor over a snapshot of the pane's history and screen, a
 selection drawn with `ctx:tint`, and a yank. It reserves nothing and binds no key of its own:
 the mode is a local in the file and an `on_key`, exactly as the prefix's own two modes are.
 
@@ -1668,7 +1686,7 @@ nothing but look one up in the other. Rebinding is then an assignment, and a com
 nameable from outside the file:
 
 ```lua
-local copy = require('plugin.copy')
+local copy = require('plugin.tmux.copy')
 copy.keys['v'] = 'begin-selection'   -- vi muscle memory, alongside Space
 copy.keys['C-b'] = nil               -- and one taken away
 copy.colors.selection = '#45475a'    -- read every tick
@@ -1729,7 +1747,7 @@ lost, and a view that has left the selection behind draws nothing rather than fo
 
 #### Where a yank goes
 
-Into `require('plugin.copy').register`, and into the system clipboard if this host can reach
+Into `require('plugin.tmux.copy').register`, and into the system clipboard if this host can reach
 one — which today it cannot, so the notification says the register and does not claim
 otherwise.
 
@@ -1762,13 +1780,13 @@ measure a string in columns.
 
 ### Changing what the sidebar looks like
 
-`plugin.sidebar` takes the left of the screen and stacks its sections down it. In the tree, a ▸
+`plugin.herdr.sidebar` takes the left of the screen and stacks its sections down it. In the tree, a ▸
 marks the window being shown and a • the focused pane. Numbers are positions, the same way the
 status bar writes them, so a pane reads `2.1`.
 
 ```lua
-require('plugin.sidebar').colors.focused_pane = '#f9e2af'
-require('plugin.sidebar.sessions').markers =
+require('plugin.herdr.sidebar').colors.focused_pane = '#f9e2af'
+require('plugin.herdr.sidebar.sessions').markers =
   { current_window = '>', window = ' ', focused_pane = '*', pane = ' ' }
 ```
 
@@ -1878,7 +1896,7 @@ local handle = list.open({
 list of runs — `{ text =, fg =, bg = }` — drawn left to right and truncated to the row's width
 in columns, never bytes, the same shape `ctx:text` takes one of. `done` fires on `Enter` and is
 not itself a close: the handle is the caller's to close, so a rename or a kill can run one and
-leave the list open, which is why `plugin.sessions`'s own `done` calls `handle:close()` and its
+leave the list open, which is why `plugin.tmux.sessions`'s own `done` calls `handle:close()` and its
 `r` and `d` do not. `cancel` fires on `Esc` always, and `keys` adds more of them, keyed by spec
 and called with the item under the cursor and the handle, the same as `done`. **For the list
 itself, `Esc` is checked before any caller code runs at all** — it closes the list even when
@@ -1954,7 +1972,7 @@ hints.open({
 `find = function(pane, lines) return { { line =, col =, text = }, ... } end` replaces them
 outright with the caller's own; it is called once per pane, and `lines` is nil where that
 pane's content could not be read, since a finder need not work from `lines` at all. That is
-what `plugin.copy`'s own `f` does: its finder is
+what `plugin.tmux.copy`'s own `f` does: its finder is
 `neotmux.words` rather than the url/path/hash/ip set, because in copy mode the thing you want
 is a position to land the cursor on, not a token to act on — the same module, asked a
 different question. `done` and `cancel` are the caller's own code, called with
@@ -1971,7 +1989,7 @@ shortest labels: the focused pane's own first, then whichever sits closest to th
 screen.
 
 Every pane a target was found on is held still for the life of the session and let go on the
-way out, whichever way it leaves. A pane somebody else was holding already — `plugin.copy`'s
+way out, whichever way it leaves. A pane somebody else was holding already — `plugin.tmux.copy`'s
 own `[`, say — stays held by them: that is what lets `f` inside copy mode open a hint session
 over the very pane copy mode is holding, without either one undoing the other. The other
 direction — a copy mode entered over a live hint session — does not arise,
@@ -1985,7 +2003,7 @@ would — the caller hears its own `cancel` and the keyboard goes back where it 
 One session at a time, the same rule `neotmux.list` follows — but opening another *cancels*
 the first rather than closing it quietly, so the caller that opened it hears its own `cancel`
 and can put the keyboard back the way it found it. A caller that yields the keyboard while a
-pick is up, as `plugin.copy` does, would otherwise yield it forever the first time a prefix key
+pick is up, as `plugin.tmux.copy` does, would otherwise yield it forever the first time a prefix key
 opened a second session over the top. The one that is up is pre-empted only once there is a
 session to put in its place, so a pick is never cancelled for an `open` that turns out to have
 nothing to open. `open` returns a handle with a `close()`, idempotent, and nil when there was
@@ -2084,14 +2102,14 @@ you open a sidebar to find out.
 
 ### The chime
 
-`plugin.chime` is what the state convention above is *for*, and the one shipped plugin that
+`plugin.herdr.chime` is what the state convention above is *for*, and the one shipped plugin that
 makes a noise. On by default: it reads every pane the session owns on each tick — hidden
-windows included, like `plugin.watch`, because another window is exactly where you are when you
+windows included, like `plugin.herdr.watch`, because another window is exactly where you are when you
 have stopped watching the one an agent is in — and when one changes into a state it has a sound
 for, it plays it. Off with `require('neotmux.defaults').chime = false`.
 
 ```lua
-local chime = require('plugin.chime')
+local chime = require('plugin.herdr.chime')
 
 chime.sounds = { blocked = 'sounds/request.mp3', idle = 'sounds/done.mp3' }
 chime.only_when_away = true
@@ -2099,7 +2117,7 @@ chime.only_when_away = true
 
 `sounds` is a state name to a file. A relative path is resolved against the layer the plugin
 was loaded from — `package.searchpath` is how the file asks `require`'s loader which layer
-won, so your own copy of `plugin/chime.lua` gets your own sounds with it — and an absolute path
+won, so your own copy of `plugin/herdr/chime.lua` gets your own sounds with it — and an absolute path
 is taken as it stands. A state with no entry makes no sound, which is why `working` has none:
 it is what most panes are most of the time. `only_when_away` is why the pane in front of you is
 silent — you can already see that it has stopped.
@@ -2209,8 +2227,8 @@ A reader never learns who raised what it sees. That is what lets `plugin.footer`
 third-party plugin's mode with no knowledge of that plugin at all — it only ever calls
 `modes.current()`.
 
-`plugin.prefix` raises `'prefix'` while armed and `'resize'` in resize mode, and lowers each on
-the way out; `plugin.copy` raises `'copy'` on entry and lowers it on every exit — the explicit
+`plugin.tmux.prefix` raises `'prefix'` while armed and `'resize'` in resize mode, and lowers each on
+the way out; `plugin.tmux.copy` raises `'copy'` on entry and lowers it on every exit — the explicit
 `q`/`Esc`, the pane closing, and focus moving to another pane.
 
 Nothing catches a plugin that raises and forgets to lower. There is no host-side hook for it,
@@ -2230,16 +2248,16 @@ footer.colors.bar = '#181825'
 footer.colors.text = '#f9e2af'
 ```
 
-Both are Catppuccin Mocha, matching `plugin.status`, and both are read every tick. There are no
+Both are Catppuccin Mocha, matching `plugin.tmux.status`, and both are read every tick. There are no
 keys — the footer only reads the convention above, it does not raise a mode of its own.
 
 ### Changing what the borders look like
 
-`plugin.borders` returns `{ fg = 8, vertical = '│', horizontal = '─', cross = '┼', tee_up = '┴',
+`plugin.tmux.borders` returns `{ fg = 8, vertical = '│', horizontal = '─', cross = '┼', tee_up = '┴',
 tee_down = '┬', tee_left = '┤', tee_right = '├' }`, all read every tick:
 
 ```lua
-local borders = require('plugin.borders')
+local borders = require('plugin.tmux.borders')
 borders.fg = '#404040'
 borders.vertical = '|'      -- ASCII, if your font or terminal prefers it
 borders.horizontal = '-'

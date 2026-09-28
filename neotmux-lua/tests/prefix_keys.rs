@@ -1,5 +1,5 @@
 //! `C-b ?`: every prefix key, the command it runs and what that does, in a list Enter runs
-//! from — `plugin.prefix` on `neotmux.list`.
+//! from — `plugin.tmux.prefix` on `neotmux.list`.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -27,7 +27,7 @@ fn shipped_layer() -> PathBuf {
 /// A key of the test's own bound to a function, with the description a plugin binding one
 /// gives it. `!` sorts before every key the prefix ships, so it is the first row.
 const INIT: &str = "
-local prefix = require('plugin.prefix')
+local prefix = require('plugin.tmux.prefix')
 prefix.commands['!'] = function() neotmux.log.info('ran bang') end
 prefix.descriptions['!'] = 'say bang'
 ";

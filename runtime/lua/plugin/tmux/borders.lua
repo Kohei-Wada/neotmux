@@ -18,7 +18,7 @@
 -- such a cell; this file only decides what to put there, and draws it after the segments so
 -- the junction wins the cell.
 local junctions = require("neotmux.junctions")
-local g = neotmux.group("plugin.borders")
+local g = neotmux.group("plugin.tmux.borders")
 
 local GUTTER = 1
 

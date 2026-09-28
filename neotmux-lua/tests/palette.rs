@@ -25,14 +25,14 @@ fn shipped_layer() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime")
 }
 
-/// Three commands of the test's own, registered ahead of the real `plugin.prefix` and
+/// Three commands of the test's own, registered ahead of the real `plugin.tmux.prefix` and
 /// `plugin.palette` — one that only logs, one that logs under a name `alpha` does not share a
 /// prefix with, and one that answers a line for the palette to notify.
 const COMMANDS: &str = "
 neotmux.command.add('alpha', function() neotmux.log.info('ran alpha') end, { desc = 'the first one' })
 neotmux.command.add('bravo', function() neotmux.log.info('ran bravo') end, { desc = 'the second one' })
 neotmux.command.add('cascade', function() return 'a line back' end, { desc = 'answers a line' })
-require('plugin.prefix')
+require('plugin.tmux.prefix')
 require('plugin.palette')
 ";
 
@@ -66,7 +66,7 @@ fn built(init: &str) -> (tempfile::TempDir, Built) {
 }
 
 /// `C-b :`, the real key sequence — there is no stand-in key here, the way `tests/picker.rs`
-/// shows driving `plugin.prefix` for real.
+/// shows driving `plugin.tmux.prefix` for real.
 fn open(sub: &LuaSubsystem) {
     assert_eq!(
         sub.dispatch_key(support::one(), "C-b"),
@@ -195,11 +195,11 @@ fn a_command_that_answers_lines_has_them_notified() {
     assert!(lines.iter().any(|l| l == "a line back"), "{lines:?}");
 }
 
-/// `plugin.prefix`'s own verbs are registered commands, so a fresh install has something for
+/// `plugin.tmux.prefix`'s own verbs are registered commands, so a fresh install has something for
 /// the palette to list.
 #[test]
 fn the_prefix_verbs_are_registered_as_commands() {
-    let (_dir, sub) = built("require('plugin.prefix')");
+    let (_dir, sub) = built("require('plugin.tmux.prefix')");
 
     let names: Vec<String> = sub.commands().into_iter().map(|c| c.name).collect();
     assert!(names.iter().any(|n| n == "split-vertical"), "{names:?}");
@@ -211,7 +211,7 @@ fn the_prefix_verbs_are_registered_as_commands() {
 const GAP: &str = "
 neotmux.command.add('bravo', function() end)
 neotmux.command.add('vibrant', function() end)
-require('plugin.prefix')
+require('plugin.tmux.prefix')
 require('plugin.palette')
 ";
 
@@ -234,7 +234,7 @@ const RANKED: &str = "
 neotmux.command.add('abxyz', function() end)
 neotmux.command.add('aqqqqb', function() end)
 neotmux.command.add('Zzzab', function() end)
-require('plugin.prefix')
+require('plugin.tmux.prefix')
 require('plugin.palette')
 ";
 
@@ -262,7 +262,7 @@ fn typing_ranks_by_first_match_then_by_how_tightly_the_rest_followed() {
 const TIED: &str = "
 neotmux.command.add('bee', function() end)
 neotmux.command.add('cee', function() end)
-require('plugin.prefix')
+require('plugin.tmux.prefix')
 require('plugin.palette')
 ";
 
@@ -403,7 +403,7 @@ fn a_provider_can_be_added_and_one_that_raises_is_left_out() {
 }
 
 const SESSIONS: &str =
-    "require('plugin.prefix')\nrequire('plugin.sessions')\nrequire('plugin.palette')\n";
+    "require('plugin.tmux.prefix')\nrequire('plugin.tmux.sessions')\nrequire('plugin.palette')\n";
 
 fn session_ops(sub: &Built) -> Vec<Op> {
     sub.drain_ops(Some(support::one()))

@@ -1,16 +1,16 @@
--- The session tree, the first section of `plugin.sidebar`: every session with what it is doing,
--- then the windows and panes of the one you are in.
+-- The session tree, the first section of `plugin.herdr.sidebar`: every session with what it is
+-- doing, then the windows and panes of the one you are in.
 --
 -- The layout is a table, not a shape baked into this file. Each level draws one entry as a list
 -- of rows, and each row is a list of tokens:
 --
---   local sessions = require('plugin.sidebar.sessions')
+--   local sessions = require('plugin.herdr.sidebar.sessions')
 --   sessions.sessions.rows = { { 'state_icon', 'name' }, { 'command', 'panes' } }
 --   sessions.panes.rows = { { 'state_icon', 'number', 'command' } }
 --
 -- so moving what is on which line, or dropping a token you do not care about, is an assignment
 -- rather than a fork of this file. The colours are the sidebar's:
--- `require('plugin.sidebar').colors`.
+-- `require('plugin.herdr.sidebar').colors`.
 local state = require("neotmux.state")
 
 local M = {}
@@ -30,7 +30,7 @@ M.markers = {
 -- after the first column and never in it — that column is the whole of the band when it is
 -- folded, and a fold showing a run of `│` says nothing about where you are.
 --
---   require('plugin.sidebar.sessions').tree.on = false   -- indent without the lines
+--   require('plugin.herdr.sidebar.sessions').tree.on = false   -- indent without the lines
 M.tree = {
   on = true,
   -- Two columns each, so a level always costs the same and the labels line up whichever
@@ -79,7 +79,7 @@ M.panes = {
 -- What a token is worth, given what the row is about. Add one and it is available to every
 -- layout at that level:
 --
---   require('plugin.sidebar.sessions').tokens.sessions.age = function(it) ... end
+--   require('plugin.herdr.sidebar.sessions').tokens.sessions.age = function(it) ... end
 M.tokens = {
   sessions = {
     state_icon = function(it)
@@ -174,7 +174,7 @@ end
 
 -- The windows and panes of the session that is open, into `out`. Answers the row worth keeping
 -- on screen: the pane you are in, or failing that the window, or nil when there is neither.
--- `plugin.sidebar.spaces` hangs the same rows under the space you are in, laid out by its own
+-- `plugin.herdr.sidebar.spaces` hangs the same rows under the space you are in, laid out by its own
 -- `levels`: `{ windows = ..., panes = ... }`, shaped as `M.windows` and `M.panes` are.
 function M.subtree(sidebar, out, levels)
   colors = sidebar.colors

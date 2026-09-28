@@ -9,7 +9,7 @@
 --
 -- `pane.freeze` holds the pane's *cells* still; this holds its *text* still, and a mode wants
 -- both — the lines a cursor is dragged over and the screen it is dragged over have to be the
--- same instant. `plugin.copy` takes one of these and freezes the pane, and the two together
+-- same instant. `plugin.tmux.copy` takes one of these and freezes the pane, and the two together
 -- are what make a selection mean anything.
 --
 -- It registers nothing and draws nothing. Line 0 is the oldest line the pane held at the

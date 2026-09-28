@@ -97,8 +97,8 @@ either side and one in front of each module. Without such a font, two lines in y
 `init.lua` take them off and leave the colours:
 
 ```lua
-require('plugin.status').caps = { left = '', right = '' }
-require('plugin.status').icons = { command = '', directory = '' }
+require('plugin.tmux.status').caps = { left = '', right = '' }
+require('plugin.tmux.status').icons = { command = '', directory = '' }
 ```
 
 `docs/plugins.md` has the colours, and the `home` field the `~` comes from.

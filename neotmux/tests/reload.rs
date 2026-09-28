@@ -10,9 +10,9 @@ use harness::Neotmux;
 
 const PATIENCE: Duration = Duration::from_secs(10);
 const PANE_TOP: u16 = 1;
-/// `plugin/sidebar.lua`'s width, herdr's: 25 columns and the rule down its edge.
+/// `plugin/herdr/sidebar.lua`'s width, herdr's: 25 columns and the rule down its edge.
 const SIDEBAR_COLS: u16 = 26;
-/// `plugin/copy.lua`'s cursor colour, the one thing on screen that says copy mode is up.
+/// `plugin/tmux/copy.lua`'s cursor colour, the one thing on screen that says copy mode is up.
 const COPY_CURSOR: (u8, u8, u8) = (0xf9, 0xe2, 0xaf);
 /// `config-reload`'s description, which only a palette row shows: the query line holds the
 /// name, so the name alone cannot count rows.

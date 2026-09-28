@@ -15,7 +15,7 @@
 -- Nothing here is a host feature. It is `neotmux.window.panes` read from a tick, the shared
 -- guess, and `neotmux.notify`.
 local state = require("neotmux.state")
-local g = neotmux.group("plugin.watch")
+local g = neotmux.group("plugin.herdr.watch")
 
 local M = {}
 

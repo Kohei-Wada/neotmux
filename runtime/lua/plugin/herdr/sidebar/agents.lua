@@ -1,8 +1,8 @@
--- The agents in every session, the lower section of `plugin.sidebar`: each pane a ruleset in
+-- The agents in every session, the lower section of `plugin.herdr.sidebar`: each pane a ruleset in
 -- `neotmux.detect.agents` answered for, and what state it is in — herdr's agent list, row for
 -- row, so the one waiting for you is found without looking.
 --
---   local agents = require('plugin.sidebar.agents')
+--   local agents = require('plugin.herdr.sidebar.agents')
 --   agents.rows = { { 'state_icon', 'location', 'agent', 'age' } }
 --   agents.sort = 'priority'
 --   agents.tokens.cwd = function(it) ... end
@@ -19,7 +19,7 @@ local detect = require("neotmux.detect")
 local modes = require("neotmux.mode")
 local seen = require("neotmux.seen")
 local state = require("neotmux.state")
-local g = neotmux.group("plugin.sidebar.agents")
+local g = neotmux.group("plugin.herdr.sidebar.agents")
 
 local M = { title = "agents", share = 0.5, always = true }
 
@@ -241,7 +241,7 @@ function M.leave()
     mode:lower()
     mode = nil
   end
-  local bar = package.loaded["plugin.sidebar"]
+  local bar = package.loaded["plugin.herdr.sidebar"]
   if bar and bar.navigating_unfolded then
     bar.open, bar.navigating_unfolded = false, nil
   end
@@ -257,7 +257,7 @@ end
 
 function M.navigate()
   local all = M.collect()
-  local bar = package.loaded["plugin.sidebar"]
+  local bar = package.loaded["plugin.herdr.sidebar"]
   local shown = false
   for _, section in ipairs(bar and bar.sections or {}) do
     shown = shown or section == M
@@ -272,7 +272,7 @@ function M.navigate()
       M.cursor = at
     end
   end
-  local spaces = package.loaded["plugin.sidebar.spaces"]
+  local spaces = package.loaded["plugin.herdr.sidebar.spaces"]
   if spaces and spaces.cursor then
     spaces.leave()
   end
@@ -292,7 +292,7 @@ g.on_tick(function(ctx)
     M.leave()
   end
   if M.cursor then
-    require("plugin.sidebar.spaces").help_bar(ctx, "agent")
+    require("plugin.herdr.sidebar.spaces").help_bar(ctx, "agent")
   end
 end)
 

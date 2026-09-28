@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### What tmux does is `plugin.tmux`
+
+The six shipped plugins that do what tmux does — the status bar, the prefix, copy mode, the
+session picker, the borders and synchronized panes — moved to `plugin/tmux/` and are loaded
+together by `plugin.tmux`. `require('plugin.prefix')` is `require('plugin.tmux.prefix')` now, and
+the same for the other five; their sources are named `plugin/tmux/...` in logs and in `costs`.
+Each is still turned off by its own field in `neotmux.defaults`, and `defaults.tmux = false`
+turns off all six.
+
+The three that follow agents the way herdr does — the sidebar, the chime and the watch rules —
+moved to `plugin/herdr/` the same way: `require('plugin.herdr.sidebar')`, sources named
+`plugin/herdr/...`, and `defaults.herdr = false` turns off all three.
+
 ### When every line arrived
 
 `C-b t`, or the palette's `timestamps`, shows down each pane's left edge the time each line

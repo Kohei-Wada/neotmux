@@ -202,7 +202,7 @@ fn shipped_layer() -> PathBuf {
 
 fn with_prefix() -> (tempfile::TempDir, LuaSubsystem) {
     let dir = tempfile::tempdir().unwrap();
-    fs::write(dir.path().join("init.lua"), "require('plugin.prefix')").unwrap();
+    fs::write(dir.path().join("init.lua"), "require('plugin.tmux.prefix')").unwrap();
     let sub = LuaSubsystem::build(
         Layers::from_paths(vec![dir.path().to_path_buf(), shipped_layer()]),
         support::panes(),

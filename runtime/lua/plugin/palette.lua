@@ -7,10 +7,10 @@
 --   Enter       run the command under the cursor and close
 --   Esc         close
 --
--- A composition on `neotmux.list`, the same shape `plugin.sessions` is: the float, the cursor,
+-- A composition on `neotmux.list`, the same shape `plugin.tmux.sessions` is: the float, the cursor,
 -- the caret and the input line are that module's. What is here is what makes this list a
 -- palette rather than any other one — the fuzzy scorer, what a row says, and what Enter does.
--- It lists commands, not keys: `plugin.prefix` registers its own verbs this way (see its own
+-- It lists commands, not keys: `plugin.tmux.prefix` registers its own verbs this way (see its own
 -- file), and any other plugin that calls `neotmux.command.add` gets a palette entry for free,
 -- without this file knowing it exists.
 local list = require("neotmux.list")
@@ -101,7 +101,7 @@ end
 
 -- One row: the name, its description in a quieter colour, and where the row is wide enough
 -- to hold it, the source that registered it, quieter still and pushed to the right — the same
--- layout `plugin.sessions` draws its own row in.
+-- layout `plugin.tmux.sessions` draws its own row in.
 -- The name, split so the characters the query matched are in their own runs. A run per
 -- stretch rather than per character: adjacent letters read as a word that way, and the drawing
 -- does less work.
@@ -190,7 +190,7 @@ M.providers = {
     name = "agents",
     items = function()
       local out = {}
-      for _, it in ipairs(require("plugin.sidebar.agents").collect()) do
+      for _, it in ipairs(require("plugin.herdr.sidebar.agents").collect()) do
         local window = it.windows > 1 and (":" .. (it.window_name or it.window)) or ""
         -- The state is in the name, not a description beside it, so it is matched: typing
         -- `blocked` or `done` narrows to the agents in it.
@@ -203,7 +203,7 @@ M.providers = {
       return out
     end,
     run = function(item)
-      require("plugin.sidebar.agents").focus(item.agent)
+      require("plugin.herdr.sidebar.agents").focus(item.agent)
     end,
   },
   {
@@ -249,7 +249,7 @@ end
 -- `prefix` is typed in already: `open('#')` is the agents, which is what `C-b g` is.
 function M.open(prefix)
   -- Assigned once `list.open` has returned a handle, and read by `items` on every later
-  -- refresh: the same upvalue trick `plugin.sessions` uses for state that only exists once
+  -- refresh: the same upvalue trick `plugin.tmux.sessions` uses for state that only exists once
   -- the list is up. `list.open` calls `items` once on the way in, before `handle` exists,
   -- which `and` guards against.
   local handle
@@ -291,18 +291,22 @@ end
 -- The defaults table and not just `package.loaded`, because a user who rebinds the key above
 -- has to `require` this file from their own `init.lua`, which runs before the shipped layer's
 -- — so the prefix is not loaded yet and a plain probe would silently leave `C-b :` unbound.
--- Loading it here is what it was about to do anyway. The same shape `plugin.copy` binds `[`
+-- Loading it here is what it was about to do anyway. The same shape `plugin.tmux.copy` binds `[`
 -- with.
-if package.loaded["plugin.prefix"] or require("neotmux.defaults").prefix then
-  require("plugin.prefix").commands[":"] = function()
+if
+  package.loaded["plugin.tmux.prefix"]
+  or require("neotmux.defaults").tmux and require("neotmux.defaults").prefix
+then
+  require("plugin.tmux.prefix").commands[":"] = function()
     M.open()
   end
   -- herdr's goto: every agent, and Enter goes to it.
-  require("plugin.prefix").commands["g"] = function()
+  require("plugin.tmux.prefix").commands["g"] = function()
     M.open("#")
   end
-  require("plugin.prefix").descriptions[":"] = "open the command palette"
-  require("plugin.prefix").descriptions["g"] = "go to an agent, from the palette's list of them"
+  require("plugin.tmux.prefix").descriptions[":"] = "open the command palette"
+  require("plugin.tmux.prefix").descriptions["g"] =
+    "go to an agent, from the palette's list of them"
 end
 
 return M

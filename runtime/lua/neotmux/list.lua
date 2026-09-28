@@ -3,7 +3,7 @@
 --
 -- The session picker and the sidebar each grew their own cursor, their own scrolling and
 -- their own row drawing. This is those parts with the data taken out: a float, a cursor `j`
--- and `k` move and wrap, a window that follows the cursor the way `plugin.sidebar` scrolls,
+-- and `k` move and wrap, a window that follows the cursor the way `plugin.herdr.sidebar` scrolls,
 -- and — where the caller wants one — an input line for a filter or for `ask`. The host has
 -- never heard of any of this; it is `neotmux.float`, `neotmux.box`, `neotmux.mode` and an
 -- `on_key`/`on_tick` over a local, the same shape every convention module here is built from.
@@ -169,7 +169,7 @@ local function refresh()
 end
 
 -- Which rows are on screen, the window following the cursor as little as it can — the rule
--- `plugin.sidebar` scrolls by: the cursor never leaves the screen, and the top only moves
+-- `plugin.herdr.sidebar` scrolls by: the cursor never leaves the screen, and the top only moves
 -- exactly as far as it has to to keep it there.
 local function window_over(count, rows, at)
   if count <= rows then
@@ -186,8 +186,8 @@ local function window_over(count, rows, at)
 end
 
 -- `M.commands` is exported so `M.keys` can name an entry by string, the same shape
--- `plugin.copy` uses — but nothing stops it being called with no list open, so every entry is a
--- no-op then rather than indexing `state` when it is `nil`.
+-- `plugin.tmux.copy` uses — but nothing stops it being called with no list open, so every entry
+-- is a no-op then rather than indexing `state` when it is `nil`.
 M.commands = {
   ["down"] = function()
     if not state then

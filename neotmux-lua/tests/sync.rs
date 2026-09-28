@@ -1,4 +1,4 @@
-//! `plugin.sync`: every key relayed to every pane of the window, and the one piece of it that
+//! `plugin.tmux.sync`: every key relayed to every pane of the window, and the one piece of it that
 //! could not be Lua — `neotmux.pane.key`, which spells a keystroke the way the pane asked for.
 
 use std::fs;
@@ -52,7 +52,7 @@ fn built(init: &str) -> (tempfile::TempDir, LuaSubsystem) {
 }
 
 const ON: &str = "require('neotmux.defaults').sync = true
-     require('plugin.sync')";
+     require('plugin.tmux.sync')";
 
 fn keys_sent(sub: &LuaSubsystem) -> Vec<(u32, String)> {
     sub.drain_ops(Some(support::one()))

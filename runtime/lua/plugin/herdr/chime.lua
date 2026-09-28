@@ -1,8 +1,8 @@
 -- A sound when a pane starts waiting for you.
 --
 -- The point of the detector: a pane you are not looking at stops being a pane you have to keep
--- looking at. `plugin.watch` puts the same change on the screen; this one puts it in the room,
--- which is the only half that works while your eyes are somewhere else.
+-- looking at. `plugin.herdr.watch` puts the same change on the screen; this one puts it in the
+-- room, which is the only half that works while your eyes are somewhere else.
 --
 -- One sound per *entry* into a state. A pane that is still blocked on the next frame is the
 -- same wait, not a second one, so nothing sounds again until it has been something else in
@@ -10,19 +10,19 @@
 -- — nothing here forgets a pane to force a fresh look, because forgetting drops the hold that
 -- keeps a spinner's blink from reading as a finished turn.
 --
---   require('plugin.chime').only_when_away = false   -- chime for the pane you are in, too
---   require('plugin.chime').sounds.idle = nil        -- only the waiting, not the finishing
---   require('plugin.chime').players = { { 'aplay' } } -- and this is also "try again"
+--   require('plugin.herdr.chime').only_when_away = false   -- chime for the pane you are in, too
+--   require('plugin.herdr.chime').sounds.idle = nil        -- only the waiting, not the finishing
+--   require('plugin.herdr.chime').players = { { 'aplay' } } -- and this is also "try again"
 --
 -- Every pane the session owns is watched, hidden windows included — the same reach
--- `plugin.watch` has, and for the same reason: another window is exactly where you are when you
--- have stopped looking at the one an agent is in.
+-- `plugin.herdr.watch` has, and for the same reason: another window is exactly where you are
+-- when you have stopped looking at the one an agent is in.
 --
 -- Nothing here is a host feature: `neotmux.window.list`, `neotmux.job.start` and
 -- `neotmux.notify`, over the shared guess.
 local detect = require("neotmux.detect")
 local state = require("neotmux.state")
-local g = neotmux.group("plugin.chime")
+local g = neotmux.group("plugin.herdr.chime")
 
 local M = {}
 
@@ -30,8 +30,8 @@ local M = {}
 -- it rather than under `neotmux.home` — a user's own layer shadowing this file gets its own
 -- sounds with it. `require`'s loader is the only thing that knows which layer won, and
 -- `package.searchpath` is how to ask it.
-M.dir = (package.searchpath("plugin.chime", package.path) or ""):match(
-  "^(.*)/lua/plugin/chime%.lua$"
+M.dir = (package.searchpath("plugin.herdr.chime", package.path) or ""):match(
+  "^(.*)/lua/plugin/herdr/chime%.lua$"
 )
 
 -- Relative to `M.dir`; an absolute path is taken as it stands, which is how you point at a
@@ -133,7 +133,7 @@ local function play(path, from, trouble)
     -- `M.sounds` is what says "try again".
     neotmux.notify(
       "error",
-      "plugin.chime: no player could play "
+      "plugin.herdr.chime: no player could play "
         .. path
         .. " ("
         .. (trouble or "no players listed")
@@ -167,7 +167,7 @@ local function play(path, from, trouble)
       complained[spec] = true
       neotmux.notify(
         "error",
-        "plugin.chime: player " .. from .. " cannot be run (" .. why .. "); check .players"
+        "plugin.herdr.chime: player " .. from .. " cannot be run (" .. why .. "); check .players"
       )
     end
     play(path, from + 1, why)

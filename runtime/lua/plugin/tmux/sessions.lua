@@ -16,7 +16,7 @@
 local list = require("neotmux.list")
 local prompt = require("neotmux.prompt")
 local pane_state = require("neotmux.state")
-local g = neotmux.group("plugin.sessions")
+local g = neotmux.group("plugin.tmux.sessions")
 
 -- What a session made with no name is called, as the host calls one started that way: the
 -- lowest number no running session is.
@@ -199,11 +199,11 @@ g.command.add("session-rename", function()
   })
 end, { desc = "rename the session you are in" })
 
-if package.loaded["plugin.prefix"] then
-  require("plugin.prefix").commands["s"] = function()
+if package.loaded["plugin.tmux.prefix"] then
+  require("plugin.tmux.prefix").commands["s"] = function()
     M.open()
   end
-  require("plugin.prefix").descriptions["s"] = "pick a session to switch to, make or end one"
+  require("plugin.tmux.prefix").descriptions["s"] = "pick a session to switch to, make or end one"
 end
 
 return M
