@@ -577,11 +577,35 @@ fn an_idle_prompt_is_idle_and_a_finished_turn_is_not_a_running_one() {
     );
 }
 
-/// Picking a model is a menu over the top, not a state. Written from the manifest.
+/// Captured: picking a model is a menu over the top, not a state. It is drawn under a single
+/// rule, like a permission dialog.
 #[test]
 fn the_model_picker_is_not_a_state() {
-    let screen = "Select Model\n1. Default\nEnter to set as default, Esc to cancel\n";
-    assert_detects(screen, "", "nil", "model_picker_menu");
+    let screen = format!(
+        "❯ /model\n\
+         {BAR}\n\
+         \x20 Select model\n\
+         \x20 Switch between Claude models. Your pick becomes the default for new sessions.\n\
+         \x20 ❯ 1.  Default (recommended) ✔  Opus 5.5 · Best for everyday, complex tasks\n\
+         \x20   2.  Sonnet 5                 Most efficient for everyday tasks\n\
+         \n\
+         \x20 ◐ Medium effort (default) ←/→ to adjust\n\
+         \n\
+         \x20 Enter to set as default · s to use this session only · Esc to cancel\n"
+    );
+    assert_detects(&screen, "", "nil", "model_picker_menu");
+}
+
+/// The picker's words scrolled up above a dialog are not the picker, and must not hush it.
+#[test]
+fn the_model_picker_in_scrollback_does_not_hide_a_dialog_below_it() {
+    let screen = format!(
+        "Select model\n\
+         Enter to set as default · Esc to cancel\n\
+         {}",
+        write_approval_screen()
+    );
+    assert_detects(&screen, "", "blocked", "legacy_no_prompt_blocker");
 }
 
 /// Captured: a Bash approval. It is `bash_permission_prompt` and not `live_blocked_form`, which
@@ -643,9 +667,8 @@ fn the_words_without_a_dialog_around_them_are_not_a_question() {
 /// "Do you want to create note.txt?" — the manifest's `generic_permission_prompt` gates on the
 /// literal "do you want to proceed?" and so never fires here. Its diff separators are `╌`
 /// (U+254C) rather than `─`, so the screen has one rule and no prompt box.
-#[test]
-fn a_write_approval_is_caught_by_the_backstop_and_not_by_its_own_rule() {
-    let screen = format!(
+fn write_approval_screen() -> String {
+    format!(
         "● Write(note.txt)\n\
          \n\
          {BAR}\n\
@@ -661,7 +684,12 @@ fn a_write_approval_is_caught_by_the_backstop_and_not_by_its_own_rule() {
          \x20  3. No\n\
          \n\
          \x20Esc to cancel · Tab to amend\n"
-    );
+    )
+}
+
+#[test]
+fn a_write_approval_is_caught_by_the_backstop_and_not_by_its_own_rule() {
+    let screen = write_approval_screen();
     assert!(
         !screen.contains("proceed"),
         "the capture this test is built on has changed"

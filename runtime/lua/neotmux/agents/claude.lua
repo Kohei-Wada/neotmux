@@ -266,12 +266,14 @@ local claude = {
   },
 
   -- Picking a model is a menu over the top, not a state: the turn underneath it is whatever it
-  -- was. Told apart from a permission prompt, which is drawn the same way and is a state.
+  -- was. Told apart from a permission prompt, which is drawn the same way and is a state. Read
+  -- below the last rule only: this rule answers "not a state", so its words left in scrollback
+  -- would otherwise hush a dialog drawn under them.
   {
     id = "model_picker_menu",
     priority = 900,
     match = function(view)
-      local lines = lower(view.lines)
+      local lines = lower(view.after_rule())
       return holds(lines, "select model")
         and holds(lines, "enter to set as default")
         and holds(lines, "esc to cancel")
