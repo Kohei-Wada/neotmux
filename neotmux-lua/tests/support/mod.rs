@@ -81,7 +81,23 @@ pub fn built(extra: &str) -> (tempfile::TempDir, Built) {
 
 /// [`built`], with `runner` answering every `neotmux.job.start` instead of nothing.
 pub fn built_running(extra: &str, runner: Rc<dyn Runner>) -> (tempfile::TempDir, Built) {
+    built_with(extra, &[], runner)
+}
+
+/// [`built`], with extra files (`(relative path, body)`) written into the test's own layer
+/// dir before the subsystem is built — a theme, a plugin, anything `extra` wants to `require`
+/// that is not one of the shipped ones.
+pub fn built_with(
+    extra: &str,
+    files: &[(&str, &str)],
+    runner: Rc<dyn Runner>,
+) -> (tempfile::TempDir, Built) {
     let dir = tempfile::tempdir().unwrap();
+    for (rel, body) in files {
+        let path = dir.path().join(rel);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, body).unwrap();
+    }
     fs::write(
         dir.path().join("init.lua"),
         format!(

@@ -2401,6 +2401,12 @@ then `tokyonight-night`, `tokyonight-storm`, `gruvbox-dark`, `nord`, `dracula`, 
 that theme's and sets `theme.current`; an unknown name raises `unknown theme '<name>'`.
 `theme.current` starts as `'catppuccin-mocha'`.
 
+`catppuccin-latte` is the one light theme, made for a light terminal: parts drawn with no
+background of their own — `plugin.stamps`' time in a pane's left edge, `plugin.tmux.copy`'s
+selection tint under the pane's own text — sit on the terminal's own background either way, so
+Latte on a dark terminal leaves them unreadable. `require('neotmux.style').set('copy', {
+selection = '...' })` is the knob for the selection tint on a dark terminal.
+
 ```lua
 require('neotmux.theme').use('nord')
 ```
@@ -2409,7 +2415,9 @@ require('neotmux.theme').use('nord')
 the current one marked, Enter switches. Picking one from the palette is not saved — neotmux
 writes nothing to disk, and the theme lasts until `config-reload` or a restart puts Mocha back.
 To keep it, add the line the command's own notification gives you — `require('neotmux.theme')
-.use('<name>')` — to your `init.lua`.
+.use('<name>')` — to your `init.lua`. `use` replaces all 26 names, so call it before any
+`theme.set` of your own in `init.lua` — a theme picked from the palette drops your `theme.set`s
+until the next `config-reload`.
 
 ```lua
 local style = require('neotmux.style')
@@ -2462,7 +2470,9 @@ Selectors the shipped plugins declare:
 | `costs` | plugin/costs | source number label spark |
 | `theme` | plugin/theme | name current |
 
-`notify` draws a float, but its parts are not a list's or a prompt's, so it stays `notify`.
+`notify` draws a float, but its parts are not a list's or a prompt's, so it stays `notify`. Its
+fill is `notify.frame`, but its border is drawn in `float.box`'s `line`, not a part of its own —
+so `style.set('float', { frame = ... })` does not reach a notification's fill.
 `sidebar`'s sections (`spaces`, `agents`, `sessions`) read `style.get('sidebar')`, since they
 draw in the sidebar's colours.
 

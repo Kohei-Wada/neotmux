@@ -40,7 +40,7 @@ g.command.add("theme", function()
           .. name
           .. " — to keep it, add require('neotmux.theme').use('"
           .. name
-          .. "') to init.lua"
+          .. "') to init.lua, before any theme.set"
       )
     end,
   })

@@ -42,13 +42,14 @@ function M.set(t)
 end
 
 -- A whole shipped theme, by name — `theme.names`, `catppuccin-*` first. Raises for a name that
--- is not one of them.
+-- is not one of them; a theme file that is present but raises on its own lets that error
+-- through instead.
 function M.use(name)
-  local ok, colors = pcall(require, "neotmux.themes." .. name)
-  if not ok then
+  local modname = "neotmux.themes." .. name
+  if not package.searchpath(modname, package.path) then
     error("unknown theme '" .. tostring(name) .. "'")
   end
-  M.set(colors)
+  M.set(require(modname))
   M.current = name
 end
 

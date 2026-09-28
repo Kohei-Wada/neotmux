@@ -3,7 +3,9 @@
 
 mod support;
 
-use support::{built, keys, logged, notified, one};
+use std::rc::Rc;
+
+use support::{built, built_with, keys, logged, notified, one};
 
 const NAMES_26: &str = "
 local theme = require('neotmux.theme')
@@ -80,6 +82,29 @@ fn theme_use_raises_on_an_unknown_name() {
     assert!(said[0].contains("unknown theme 'nope'"), "{said:?}");
 }
 
+/// A theme file that is *present* but raises on its own — a syntax error or a bug in the file
+/// itself — lets that error through rather than being reported as an unknown theme.
+#[test]
+fn theme_use_lets_a_broken_theme_files_own_error_through() {
+    let (_dir, sub) = built_with(
+        "local theme = require('neotmux.theme')
+         neotmux.on_key(function(key)
+           if key ~= 'L' then return false end
+           local ok, err = pcall(theme.use, 'broken')
+           neotmux.log.info('ok=' .. tostring(ok) .. ' err=' .. tostring(err))
+           return true
+         end)",
+        &[("lua/neotmux/themes/broken.lua", "error('boom')")],
+        Rc::new(neotmux_lua::host::NoRunner),
+    );
+    keys(&sub, &["L"]);
+    let said = logged(&sub);
+    assert_eq!(said.len(), 1);
+    assert!(said[0].starts_with("ok=false"), "{said:?}");
+    assert!(said[0].contains("boom"), "{said:?}");
+    assert!(!said[0].contains("unknown theme"), "{said:?}");
+}
+
 /// `theme.current` starts as `'catppuccin-mocha'`.
 #[test]
 fn theme_current_starts_as_catppuccin_mocha() {
@@ -133,7 +158,7 @@ fn the_theme_command_opens_a_list_and_enter_applies_and_notifies() {
 
     keys(&sub, &["Enter"]);
     let notes = notified(&sub);
-    let wants_use = "neotmux.theme').use('catppuccin-latte')";
+    let wants_use = "neotmux.theme').use('catppuccin-latte') to init.lua, before any theme.set";
     assert!(
         notes
             .iter()
