@@ -612,11 +612,15 @@ neotmux.pane.marks(id, first, last)
 --   { line = 1204, col = 0, kind = 'output' }, { line = 1210, col = 0, kind = 'done', exit = 0 } }
 ```
 
-`line` counts the way `pane.history` does — the oldest line the pane still holds is `0`, and a
-mark goes with its line when the history drops it. `kind` is one of `prompt`, `input`, `output`
-or `done`; `exit` is only there for a `done` that carried a status. A shell that sends no marks
-answers `{}`, exactly as if OSC 133 did not exist — and a mark written to the alternate screen
-is dropped, because a TUI's rows are not the shell's lines.
+`line` is the absolute number `dropped + index` — history lines first, from the pane's very
+first one, then the screen's own rows on top of them — the same numbering a saved
+`pane.scrollback` position keeps across an eviction, not a count that resets to `0` at the
+oldest line the pane still holds. Turning one into the index `pane.scrollback`'s `from` takes
+is the same conversion a saved position needs: `from = mark.line - dropped`, with `dropped`
+read from `neotmux.pane.history(id)`. `kind` is one of `prompt`, `input`, `output` or `done`;
+`exit` is only there for a `done` that carried a status. A shell that sends no marks answers
+`{}`, exactly as if OSC 133 did not exist — and a mark written to the alternate screen is
+dropped, because a TUI's rows are not the shell's lines.
 
 A new `prompt` removes every mark on the lines below it — a shell redrawing its own prompt,
 after a resize or after `clear`, writes its `prompt` again where the old one was, and whatever

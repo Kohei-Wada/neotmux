@@ -856,6 +856,31 @@ mod tests {
         assert_eq!(marks(&s), vec![(0, 2, MarkKind::Input, None)]);
     }
 
+    /// A mark's `line` is the absolute number `dropped + index`, not a count that resets when
+    /// the history drops lines: it keeps naming the same row across an eviction, the same way
+    /// a saved scrollback position does.
+    #[test]
+    fn a_marks_line_is_absolute_across_an_eviction() {
+        let mut s = TermState::new(Size { rows: 2, cols: 10 }, 3);
+        let mut i = 0;
+        while s.history_extent().dropped == 0 {
+            s.feed(format!("{i}\r\n").as_bytes());
+            i += 1;
+        }
+        s.feed(b"\x1b]133;A\x07");
+        let extent = s.history_extent();
+        let (row, _) = s.cursor();
+        assert_eq!(
+            marks(&s),
+            vec![(
+                extent.dropped + extent.len + u64::from(row),
+                0,
+                MarkKind::Prompt,
+                None
+            )]
+        );
+    }
+
     #[test]
     fn a_range_answers_only_the_marks_inside_it() {
         let mut s = TermState::new(Size { rows: 4, cols: 10 }, 10);
