@@ -1111,6 +1111,7 @@ neotmux.opt.job_concurrency = 8    -- jobs at once, per source; >= 1
 neotmux.opt.job_output_bytes = 1048576 -- what one job may make the host hold; >= 1
 neotmux.resubscribe(name)          -- give a dropped source its tick back; returns handles
 neotmux.width(text)                -- how many columns `text` takes on a pane's grid
+neotmux.regex.is_match(pattern, text) -- Rust `regex` syntax; an invalid pattern raises
 neotmux.clipboard.set(text)        -- written? — true, or false and why not
 neotmux.home                       -- `$HOME` as the host read it, or nil; read-only
 ```
@@ -2003,6 +2004,21 @@ what answers when every ruleset that did claim it had nothing to say about what 
 `neotmux/agents/*.lua` and a line in `neotmux.detect.agents`; the shipped one, `claude`, is that
 file's own model.
 
+Every other shipped ruleset is herdr's manifest for that program — Codex, Gemini, Cursor,
+OpenCode, Copilot and sixteen more — run as it is written by `neotmux.manifest`, herdr's engine
+ported to Lua. `tools/herdr-manifests.py` makes them from a herdr checkout, so a newer herdr is
+taken by running it again. A manifest ruleset claims a pane by the name of the program in it,
+herdr's list of names: a pane that reports `codex` is Codex's, and the Claude ruleset steps back
+from it. One of your own in herdr's format is a table away:
+
+```lua
+require('neotmux.detect').agents.mine = require('neotmux.manifest').ruleset({
+  id = 'mine', names = { 'mine' },
+  rules = { { id = 'asking', state = 'blocked', priority = 10, region = 'bottom_non_empty_lines(3)',
+              contains = { 'continue?' }, regex = { [[\[y/N\]\s*\z]] } } },
+})
+```
+
 Which panes a ruleset speaks for is the ruleset's own answer, through an optional `claims(info)`
 asked with `neotmux.pane.info`. The shipped one names the shells and speaks for everything else:
 
@@ -2096,7 +2112,8 @@ refusal that is neither — an entry that cannot be run as a command at all — 
 rather than the player's, and is said once and stepped over.
 
 The two sounds in `runtime/sounds/` are herdr's (herdrdev/herdr), carried unchanged, as are
-the detection rules and the hold behind `neotmux.state`. Those files are Apache-2.0 only —
+the detection rules, the manifests and the hold behind `neotmux.state`. Those files are
+Apache-2.0 only —
 the repository's MIT option does not reach them — and `NOTICE` at the root says which files,
 from where, and at what version.
 

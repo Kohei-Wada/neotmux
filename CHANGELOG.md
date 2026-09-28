@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Twenty-one more agents, by herdr's own rules
+
+A pane running Codex, Gemini, Cursor, OpenCode, Copilot, Amp, Kiro, Qwen or any other agent herdr
+has a manifest for is read the way herdr reads it: `working`, `blocked` and `idle` come from
+herdr's rules for that program, run by `neotmux.manifest`, a port of herdr's engine. A pane is
+claimed by the name of the program in it; one started through `node` or a wrapper is not yet.
+The rules are written in Rust's regex syntax, which a plugin can use now too, as
+`neotmux.regex.is_match(pattern, text)`.
+
 ### Two plugins can hold the same pane still
 
 `neotmux.pane.freeze(id)` hands back a hold, and a pane is frozen while anyone holds it:

@@ -31,6 +31,7 @@ nix = { version = "0.28", features = ["term", "signal", "poll", "user", "fs", "p
 portable-pty = "0.9"
 libc = "0.2"
 ratatui = "0.30"
+regex = "1"
 signal-hook = "0.3.18"
 tempfile = "3"
 unicode-width = "0.2"

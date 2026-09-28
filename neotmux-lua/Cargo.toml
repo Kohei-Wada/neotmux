@@ -15,6 +15,7 @@ repository.workspace = true
 neotmux-proto.workspace = true
 anyhow.workspace = true
 mlua.workspace = true
+regex.workspace = true
 
 [dev-dependencies]
 neotmux-pty.workspace = true

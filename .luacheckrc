@@ -17,3 +17,7 @@ ignore = { "421/ok", "421/err" }
 -- These loop forever on purpose: they are the budget's test subjects.
 files["neotmux/tests/fixtures/lua/plugin/spinner.lua"] = { ignore = { "511" } }
 files["neotmux/tests/fixtures/lua/plugin/coroutine_spinner.lua"] = { ignore = { "511" } }
+
+-- herdr's manifests, generated: a pattern is as long as herdr wrote it.
+files["runtime/lua/neotmux/agents/*.lua"] = { max_line_length = false }
+files["runtime/lua/neotmux/agents/claude.lua"] = { max_line_length = 100 }

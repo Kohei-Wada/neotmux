@@ -26,6 +26,8 @@ fn shipped_layer() -> PathBuf {
 
 /// The shipped layer with every plugin off, so a frame holds nothing but the test's own
 /// timers. No runner: nothing here starts a process.
+/// The plugins that read a pane's state are off too: loading them loads every agent's ruleset,
+/// and a timer armed by `extra` is already running while the shipped layer loads after it.
 fn built(extra: &str) -> (tempfile::TempDir, Built) {
     let dir = tempfile::tempdir().unwrap();
     fs::write(
@@ -33,7 +35,7 @@ fn built(extra: &str) -> (tempfile::TempDir, Built) {
         format!(
             "local defaults = require('neotmux.defaults')\n\
              for _, name in ipairs({{ 'status', 'prefix', 'copy', 'sessions', 'palette',\n\
-               'notify', 'borders', 'sync', 'hints' }}) do\n\
+               'notify', 'borders', 'sync', 'hints', 'watch', 'sidebar', 'chime' }}) do\n\
                defaults[name] = false\n\
              end\n\
              {extra}"

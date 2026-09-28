@@ -44,6 +44,18 @@ Apache-2.0 only:
   that the two files can be read against each other, and are quoted as such in this
   repository's tests.
 
+- runtime/lua/neotmux/manifest.lua
+
+  A port of herdr's manifest engine, src/detect/manifest.rs, at herdr commit
+  0d5d6f1f317e238c8297076bc6ab5c3a0cd56283 (2026-09-27): the regions, the gate and the idle
+  fallback.
+
+- runtime/lua/neotmux/agents/*.lua, except claude.lua (above)
+
+  herdr's src/detect/manifests/*.toml at the same commit, rule for rule, turned into Lua by
+  tools/herdr-manifests.py. The list of names each claims is herdr's lookup_agent in
+  src/detect/mod.rs.
+
 The three words a pane's state is spelled in — working, blocked, idle — are herdr's too.
 
 The Cargo `license` field on every crate stays "MIT OR Apache-2.0": no crate

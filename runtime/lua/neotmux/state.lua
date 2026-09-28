@@ -34,6 +34,9 @@
 -- re-asked only when the screen moves, so a pane whose program changed and printed nothing is
 -- answered by the last look for as long as that lasts.
 local g = neotmux.group("neotmux.state")
+-- At load rather than at first use: it loads every agent's ruleset, which is more than a tick's
+-- budget has room for, and a module is loaded wherever it is first required.
+local detect = require("neotmux.detect")
 
 local M = {}
 
@@ -108,7 +111,7 @@ end
 
 function M.forget(pane)
   seen[pane] = nil
-  require("neotmux.detect").forget(pane)
+  detect.forget(pane)
   require("neotmux.jev").forget(pane)
 end
 
@@ -150,7 +153,7 @@ local function fallback(pane, lines)
 end
 
 function M.of(pane)
-  local detected, view = require("neotmux.detect").of(pane)
+  local detected, view = detect.of(pane)
   if detected ~= nil then
     return detected
   end

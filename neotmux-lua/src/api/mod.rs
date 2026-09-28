@@ -12,6 +12,7 @@ pub mod log;
 pub mod opt;
 pub mod pane;
 pub(crate) mod rect;
+mod regex;
 pub mod reserve;
 pub mod session;
 mod sweep;

@@ -389,6 +389,10 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
     let opt = super::opt::install(lua, opts.clone())?;
     neotmux.set("opt", opt)?;
 
+    let regex = super::regex::install(lua)?;
+    let regex = seal(lua, regex, "neotmux.regex")?;
+    neotmux.set("regex", regex)?;
+
     // A fact about the process, beside `pane.info`'s facts about a pane, rather than an
     // `opt`: nothing sets it, and the VM has no `os.getenv` to read it any other way (§5.2).
     // Absent, not "", where there was no `HOME` — the same answer the rest of the ABI gives.

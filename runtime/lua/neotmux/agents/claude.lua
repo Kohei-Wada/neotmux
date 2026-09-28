@@ -448,9 +448,25 @@ claude.shells = {
 -- which is Linux only and empty for a process that went away between the host asking and the
 -- answer coming back. There the screen is the only evidence there is, and refusing it would
 -- turn off the detector rather than narrow it.
+--
+-- And a program another ruleset names is that ruleset's: this one claims by elimination, so it
+-- would otherwise run first on every other agent's screen and answer out of the words the two
+-- programs happen to share.
 function claude.claims(info)
   local command = info and info.command
-  return command == nil or claude.shells[command] ~= true
+  if command == nil then
+    return true
+  end
+  if claude.shells[command] then
+    return false
+  end
+  local name = require("neotmux.manifest").lookup_name(command)
+  for _, rules in pairs(require("neotmux.detect").agents) do
+    if rules ~= claude and rules.names ~= nil and rules.names[name] then
+      return false
+    end
+  end
+  return true
 end
 
 return claude

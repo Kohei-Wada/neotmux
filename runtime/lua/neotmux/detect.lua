@@ -33,11 +33,9 @@
 -- that once ran an agent goes on being answered for out of what the agent left behind — a
 -- title nothing resets when the program exits.
 --
--- Asked once per *revision*, not once per call: it sits inside `of`'s cache, so a pane whose
--- program changed and printed nothing keeps the last look's verdict until the next byte. And
--- `pane.info` is itself the host's, refreshed on a 250 ms cadence, so even a fresh revision can
--- be judged against a command up to that old. Both windows are a fraction of a second wide in
--- the one case this exists for — quitting an agent redraws a prompt, and typing echoes.
+-- Asked again whenever the screen or the command changes: it sits inside `of`'s cache, which is
+-- keyed on both. `pane.info` is the host's, refreshed on a 250 ms cadence, so a changed program
+-- can be judged against the command it replaced for up to that long.
 --
 -- `priority` decides, not where the rule sits in the table. `state` is the answer, and a rule
 -- with none says "this screen is not a state" and stops the search. `visible` is the state the
@@ -71,8 +69,32 @@ local M = {}
 M.settle = 700
 
 -- Rulesets by name. One entry per program neotmux knows the screen of; teaching it another is
--- a file in `neotmux/agents/` and a line here.
-M.agents = { claude = require("neotmux.agents.claude") }
+-- a file in `neotmux/agents/` and a line here. Claude Code's is ported by hand; every other one
+-- is herdr's manifest for that program, run by `neotmux.manifest`.
+M.agents = {
+  claude = require("neotmux.agents.claude"),
+  agy = require("neotmux.agents.agy"),
+  amp = require("neotmux.agents.amp"),
+  cline = require("neotmux.agents.cline"),
+  codex = require("neotmux.agents.codex"),
+  copilot = require("neotmux.agents.copilot"),
+  cursor = require("neotmux.agents.cursor"),
+  devin = require("neotmux.agents.devin"),
+  droid = require("neotmux.agents.droid"),
+  gemini = require("neotmux.agents.gemini"),
+  grok = require("neotmux.agents.grok"),
+  hermes = require("neotmux.agents.hermes"),
+  kilo = require("neotmux.agents.kilo"),
+  kimi = require("neotmux.agents.kimi"),
+  kiro = require("neotmux.agents.kiro"),
+  letta = require("neotmux.agents.letta"),
+  maki = require("neotmux.agents.maki"),
+  muse = require("neotmux.agents.muse"),
+  opencode = require("neotmux.agents.opencode"),
+  pi = require("neotmux.agents.pi"),
+  qodercli = require("neotmux.agents.qodercli"),
+  qwen = require("neotmux.agents.qwen"),
+}
 
 local SPACE = { [0x20] = true, [0x09] = true }
 local RULE = 0x2500 -- ─
@@ -142,6 +164,23 @@ function M.view(pane)
       out[#out + 1] = full[i]
     end
     return out
+  end
+
+  -- The screen as herdr's manifests read it: one string, each row without its trailing blanks,
+  -- blank rows kept except at the bottom. The regions in `neotmux.manifest` are cut from it.
+  local text
+  function view.text()
+    if text == nil then
+      local rows = {}
+      for i, line in ipairs(lines) do
+        rows[i] = line:gsub("%s+$", "")
+      end
+      while #rows > 0 and rows[#rows] == "" do
+        rows[#rows] = nil
+      end
+      text = table.concat(rows, "\n")
+    end
+    return text
   end
 
   local after
@@ -332,8 +371,9 @@ end
 -- stale, so it stays stale rather than being adopted by whatever is running one look later.
 --
 -- It cannot see a program that sets the very same title its predecessor did, and it is judged
--- against a `pane.info` up to the host's 250 ms old — the same window `claims` is judged in. `pane.info` is `/proc`, so on anything but Linux the command is always nil
--- and this seam, like `claims` above it, is inert.
+-- against a `pane.info` up to the host's 250 ms old — the same window `claims` is judged in.
+-- `pane.info` is `/proc`, so on anything but Linux the command is always nil and this seam,
+-- like `claims` above it, is inert.
 local function title_is_the_running_program(pane, title)
   local command = command_of(pane)
   local was = titled[pane]

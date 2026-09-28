@@ -790,6 +790,7 @@ dependencies = [
  "mlua",
  "neotmux-proto",
  "neotmux-pty",
+ "regex",
  "tempfile",
 ]
 
