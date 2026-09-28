@@ -1,7 +1,7 @@
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 
-use neotmux_proto::screen::{Extent, Hold, Lines, PaneRead, Want};
+use neotmux_proto::screen::{Extent, Hold, Lines, Mark, PaneRead, Want};
 use neotmux_proto::{GridSnapshot, PaneId, PaneTty, Size};
 
 use crate::parse::Queries;
@@ -148,6 +148,15 @@ impl PaneTerminals {
             .and_then(|terminal| terminal.state.title().map(str::to_owned))
     }
 
+    /// The OSC 133 marks the pane's shell sent on lines `first..=last`, or `None` for a pane
+    /// that does not exist.
+    pub fn marks(&self, pane: PaneId, first: u64, last: u64) -> Option<Vec<Mark>> {
+        self.panes
+            .borrow()
+            .get(&pane)
+            .map(|terminal| terminal.state.marks(first, last))
+    }
+
     pub fn is_frozen(&self, pane: PaneId) -> Option<bool> {
         self.panes.borrow().get(&pane).map(|t| t.state.is_frozen())
     }
@@ -228,7 +237,7 @@ impl PaneTerminals {
     }
 }
 
-/// The read half, as a trait: the Lua layer asks these eight questions and nothing else, and
+/// The read half, as a trait: the Lua layer asks these nine questions and nothing else, and
 /// when it is in another process it asks them of a socket instead.
 impl PaneRead for PaneTerminals {
     fn revision(&self, pane: PaneId) -> Option<u64> {
@@ -249,6 +258,10 @@ impl PaneRead for PaneTerminals {
 
     fn history(&self, pane: PaneId, from: u64, count: u64, want: Want) -> Option<Lines> {
         PaneTerminals::history(self, pane, from as usize, count as usize, want)
+    }
+
+    fn marks(&self, pane: PaneId, first: u64, last: u64) -> Option<Vec<Mark>> {
+        PaneTerminals::marks(self, pane, first, last)
     }
 
     fn is_frozen(&self, pane: PaneId) -> Option<bool> {

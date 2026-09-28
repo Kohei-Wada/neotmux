@@ -13,6 +13,7 @@ use crate::PaneId;
 use crate::screen::Extent;
 use crate::screen::Hold;
 use crate::screen::Lines;
+use crate::screen::Mark;
 use crate::screen::Want;
 
 /// Reading a pane's text.
@@ -28,6 +29,9 @@ pub trait PaneRead {
     fn content(&self, pane: PaneId, last: Option<u64>, want: Want) -> Option<Lines>;
     fn history_extent(&self, pane: PaneId) -> Option<Extent>;
     fn history(&self, pane: PaneId, from: u64, count: u64, want: Want) -> Option<Lines>;
+    /// The OSC 133 marks the pane's shell sent on lines `first..=last`, in line order. Empty
+    /// for a shell that sends none; `None` for a pane that does not exist.
+    fn marks(&self, pane: PaneId, first: u64, last: u64) -> Option<Vec<Mark>>;
     fn is_frozen(&self, pane: PaneId) -> Option<bool>;
     /// Holds the pane still until the hold is released: it draws and reads as it was when
     /// the first hold on it was taken. `None` for a pane that does not exist.

@@ -1,8 +1,8 @@
-use neotmux_proto::screen::{Extent, Trailing};
+use neotmux_proto::screen::{Extent, Mark, Trailing};
 use neotmux_proto::{Color, GridSnapshot, Size, clamp_to_min_grid};
 
 pub struct TermState {
-    parser: vt100::Parser<Titles>,
+    parser: vt100::Parser<Said>,
     /// `ESC [ y ; x f` on the way in, which the parser does not implement. See [`crate::parse::Hvp`].
     hvp: crate::parse::Hvp,
     /// Lines that have fallen out of the front of the history, counted as they go: nothing
@@ -28,18 +28,38 @@ struct Frozen {
     dropped: usize,
 }
 
-/// What the program said its window is called. `vt100` parses OSC 0 and OSC 2 and then asks
-/// what to do with them; before this it was asked and answered nothing.
+/// What the program said about itself through the escapes `vt100` parses and then hands on:
+/// its title (OSC 0 and OSC 2), and its shell's marks (OSC 133).
 #[derive(Default)]
-pub(crate) struct Titles {
+pub(crate) struct Said {
     title: Option<String>,
+    marks: crate::screen::marks::Marks,
+    /// The line number of the screen's top row, set before each piece is fed
+    /// (`TermState::feed`), which is what a mark arriving in that piece is numbered against.
+    top: u64,
 }
 
-impl vt100::Callbacks for Titles {
+impl vt100::Callbacks for Said {
     fn set_window_title(&mut self, _: &mut vt100::Screen, title: &[u8]) {
         // A title is whatever bytes the program sent. Lossy rather than refused: a title that
         // is not UTF-8 is still a title, and the alternative is to forget it entirely.
         self.title = Some(String::from_utf8_lossy(title).into_owned());
+    }
+
+    fn unhandled_osc(&mut self, screen: &mut vt100::Screen, params: &[&[u8]]) {
+        if screen.alternate_screen() {
+            return;
+        }
+        let Some((kind, exit)) = crate::screen::marks::Marks::parse(params) else {
+            return;
+        };
+        let (row, col) = screen.cursor_position();
+        self.marks.add(Mark {
+            line: self.top + u64::from(row),
+            col,
+            kind,
+            exit,
+        });
     }
 }
 
@@ -51,6 +71,30 @@ fn color_from_vt100(c: vt100::Color) -> Color {
     }
 }
 
+/// One piece into the parser, with the offset pinned off zero so `vt100` counts the appends
+/// and put back before anything else can read it.
+fn feed_counted(parser: &mut vt100::Parser<Said>, dropped: &mut usize, bytes: &[u8]) {
+    let screen = parser.screen_mut();
+    let len_before = crate::screen::scrollback::len(screen);
+    let resting = screen.scrollback();
+    screen.set_scrollback(resting.max(1));
+    let offset_before = screen.scrollback();
+    parser.callbacks_mut().top = (*dropped + len_before) as u64;
+
+    parser.process(bytes);
+
+    let screen = parser.screen_mut();
+    let offset_after = screen.scrollback();
+    screen.set_scrollback(resting);
+    let len_after = crate::screen::scrollback::len(screen);
+    *dropped += crate::screen::evictions::dropped(crate::screen::evictions::Feed {
+        len_before,
+        len_after,
+        offset_before,
+        offset_after,
+    });
+}
+
 impl TermState {
     pub fn new(size: Size, scrollback: usize) -> Self {
         let size = clamp_to_min_grid(size);
@@ -59,7 +103,7 @@ impl TermState {
                 size.rows,
                 size.cols,
                 scrollback,
-                Titles::default(),
+                Said::default(),
             ),
             hvp: crate::parse::Hvp::new(),
             dropped: 0,
@@ -67,31 +111,21 @@ impl TermState {
         }
     }
 
-    /// Feeds one chunk to the terminal, counting the history lines it pushed out of the
-    /// front on the way through — the offset is pinned off zero so `vt100` counts the
-    /// appends, and put back before anything else can read it ([`crate::screen::evictions`]).
+    /// Feeds one chunk to the terminal. The history lines it pushes out of the front are
+    /// counted on the way through ([`crate::screen::evictions`]), and it is cut before every
+    /// OSC 133 so each mark is numbered against the history as it stands when the mark
+    /// arrives ([`crate::parse::marks`]).
     pub fn feed(&mut self, bytes: &[u8]) {
-        let screen = self.parser.screen_mut();
-        let len_before = crate::screen::scrollback::len(screen);
-        let resting = screen.scrollback();
-        screen.set_scrollback(resting.max(1));
-        let offset_before = screen.scrollback();
-
+        let (parser, dropped) = (&mut self.parser, &mut self.dropped);
         // The one rewrite on the way in, and the reason it is here rather than at the pipe:
         // it is about what the bytes mean to a terminal, which is this file's subject.
-        let parser = &mut self.parser;
-        self.hvp.rewrite(bytes, |piece| parser.process(piece));
-
-        let screen = self.parser.screen_mut();
-        let offset_after = screen.scrollback();
-        screen.set_scrollback(resting);
-        let len_after = crate::screen::scrollback::len(screen);
-        self.dropped += crate::screen::evictions::dropped(crate::screen::evictions::Feed {
-            len_before,
-            len_after,
-            offset_before,
-            offset_after,
+        self.hvp.rewrite(bytes, |piece| {
+            for part in crate::parse::marks::split(piece) {
+                feed_counted(parser, dropped, part);
+            }
         });
+        let first_held = self.dropped as u64;
+        self.parser.callbacks_mut().marks.prune(first_held);
     }
 
     /// Holds the pane still: from here until [`TermState::unfreeze`], every read answers
@@ -172,6 +206,12 @@ impl TermState {
     /// The last title the program set, or `None` for one that never set any.
     pub fn title(&self) -> Option<&str> {
         self.parser.callbacks().title.as_deref()
+    }
+
+    /// The shell's OSC 133 marks on lines `first..=last`, in line order. The live pane's,
+    /// frozen or not: a mark is numbered by line, and a frozen pane's lines keep their numbers.
+    pub fn marks(&self, first: u64, last: u64) -> Vec<Mark> {
+        self.parser.callbacks().marks.between(first, last)
     }
 
     /// What the pane is showing, as plain-text lines (`crate::screen::lines`). `last` bounds the work
@@ -682,5 +722,152 @@ mod tests {
         let ptr = out.cells.as_ptr();
         s.snapshot_into(&mut out);
         assert_eq!(out.cells.as_ptr(), ptr);
+    }
+
+    use neotmux_proto::screen::{Mark, MarkKind};
+
+    fn marks(state: &TermState) -> Vec<(u64, u16, MarkKind, Option<i32>)> {
+        state
+            .marks(0, u64::MAX)
+            .into_iter()
+            .map(
+                |Mark {
+                     line,
+                     col,
+                     kind,
+                     exit,
+                 }| (line, col, kind, exit),
+            )
+            .collect()
+    }
+
+    /// Each mark lands on the line and column the cursor was at when the shell sent it.
+    #[test]
+    fn a_mark_lands_where_the_cursor_was() {
+        let mut s = TermState::new(Size { rows: 4, cols: 20 }, 10);
+        s.feed(b"\x1b]133;A\x07$ \x1b]133;B\x07ls\r\n\x1b]133;C\x07out\r\n\x1b]133;D;0\x07");
+        assert_eq!(
+            marks(&s),
+            vec![
+                (0, 0, MarkKind::Prompt, None),
+                (0, 2, MarkKind::Input, None),
+                (1, 0, MarkKind::Output, None),
+                (2, 0, MarkKind::Done, Some(0)),
+            ]
+        );
+        assert!(
+            !s.lines(None, Trailing::Trim)
+                .iter()
+                .any(|l| l.contains("133")),
+            "a mark is not text"
+        );
+    }
+
+    /// Output that scrolled the screen earlier in the same chunk is counted before the mark is
+    /// numbered: five lines on a three-row screen put three into the history, so the cursor's
+    /// row is line 5.
+    #[test]
+    fn output_scrolled_away_earlier_in_the_chunk_is_counted() {
+        let mut s = TermState::new(Size { rows: 3, cols: 10 }, 10);
+        s.feed(b"a\r\nb\r\nc\r\nd\r\ne\r\n\x1b]133;A\x07");
+        assert_eq!(marks(&s), vec![(5, 0, MarkKind::Prompt, None)]);
+    }
+
+    #[test]
+    fn a_mark_split_across_two_chunks_still_lands() {
+        let mut s = TermState::new(Size { rows: 4, cols: 10 }, 10);
+        s.feed(b"x\r\n\x1b]13");
+        s.feed(b"3;A\x07");
+        assert_eq!(marks(&s), vec![(1, 0, MarkKind::Prompt, None)]);
+    }
+
+    #[test]
+    fn a_done_carries_its_exit_only_when_it_is_a_number() {
+        let mut s = TermState::new(Size { rows: 8, cols: 10 }, 10);
+        s.feed(b"\x1b]133;D;0\x07\r\n\x1b]133;D;1\x1b\\\r\n\x1b]133;D\x07\r\n\x1b]133;D;x\x07");
+        assert_eq!(
+            marks(&s),
+            vec![
+                (0, 0, MarkKind::Done, Some(0)),
+                (1, 0, MarkKind::Done, Some(1)),
+                (2, 0, MarkKind::Done, None),
+                (3, 0, MarkKind::Done, None),
+            ]
+        );
+    }
+
+    /// The history letting a line go takes its marks with it.
+    #[test]
+    fn marks_go_with_the_lines_the_history_drops() {
+        let mut s = TermState::new(Size { rows: 2, cols: 10 }, 3);
+        s.feed(b"\x1b]133;A\x07p\r\n");
+        for i in 0..8 {
+            s.feed(format!("{i}\r\n").as_bytes());
+        }
+        assert!(s.history_extent().dropped > 0);
+        assert_eq!(marks(&s), vec![]);
+    }
+
+    /// A full-screen program's rows are not the shell's lines, and one passing marks through
+    /// must not rewrite the shell's structure.
+    #[test]
+    fn the_alternate_screen_keeps_no_marks() {
+        let mut s = TermState::new(Size { rows: 4, cols: 10 }, 10);
+        s.feed(b"\x1b[?1049h\x1b]133;A\x07");
+        assert_eq!(marks(&s), vec![]);
+        s.feed(b"\x1b[?1049l\x1b]133;A\x07");
+        assert_eq!(marks(&s), vec![(0, 0, MarkKind::Prompt, None)]);
+    }
+
+    /// `clear`, or a prompt redrawn after a resize: the new prompt is written over what was
+    /// there, and the marks below it describe lines that are gone.
+    #[test]
+    fn a_prompt_replaces_every_mark_below_it() {
+        let mut s = TermState::new(Size { rows: 4, cols: 10 }, 10);
+        s.feed(b"\x1b]133;A\x07\r\n\x1b]133;C\x07\r\n\x1b]133;D;0\x07");
+        s.feed(b"\x1b[H\x1b[2J\x1b]133;A\x07");
+        assert_eq!(marks(&s), vec![(0, 0, MarkKind::Prompt, None)]);
+    }
+
+    /// `true` prints nothing, so bash sends its `C`, its `D` and the next prompt's `A` with the
+    /// cursor on one line. None of them is stale.
+    #[test]
+    fn a_command_that_printed_nothing_keeps_its_marks_beside_the_next_prompt() {
+        let mut s = TermState::new(Size { rows: 4, cols: 10 }, 10);
+        s.feed(
+            b"\x1b]133;A\x07$ \x1b]133;B\x07true\r\n\x1b]133;C\x07\x1b]133;D;0\x07\x1b]133;A\x07$ ",
+        );
+        assert_eq!(
+            marks(&s),
+            vec![
+                (0, 0, MarkKind::Prompt, None),
+                (0, 2, MarkKind::Input, None),
+                (1, 0, MarkKind::Output, None),
+                (1, 0, MarkKind::Done, Some(0)),
+                (1, 0, MarkKind::Prompt, None),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_second_mark_of_a_kind_on_one_line_replaces_the_first() {
+        let mut s = TermState::new(Size { rows: 4, cols: 10 }, 10);
+        s.feed(b"\x1b]133;B\x07ab\x1b]133;B\x07");
+        assert_eq!(marks(&s), vec![(0, 2, MarkKind::Input, None)]);
+    }
+
+    #[test]
+    fn a_range_answers_only_the_marks_inside_it() {
+        let mut s = TermState::new(Size { rows: 4, cols: 10 }, 10);
+        s.feed(b"\x1b]133;A\x07\r\n\x1b]133;C\x07\r\n\x1b]133;D;0\x07");
+        assert_eq!(
+            s.marks(1, 1),
+            vec![Mark {
+                line: 1,
+                col: 0,
+                kind: MarkKind::Output,
+                exit: None
+            }]
+        );
     }
 }
