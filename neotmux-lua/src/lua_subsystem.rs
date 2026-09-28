@@ -1202,6 +1202,7 @@ impl LuaSubsystem {
             registrations: self.registry.kinds(),
             commands: self.commands.list().into_iter().map(|c| c.name).collect(),
             reserved: self.reservations.totals(),
+            pane_band: self.pane_bands.total(),
             floats: self.floats.count(),
             jobs: self.jobs.len(),
             timers: self.timers.len(),

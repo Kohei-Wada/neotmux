@@ -239,6 +239,37 @@ fn a_reload_of_the_shipped_runtime_leaves_what_a_start_leaves() {
     );
 }
 
+const BANDED: &str = "local g = neotmux.group('plugin.banded')
+                      g.reserve_pane('left', 4)";
+
+/// A plugin holding a band whose `require` a reload drops: the band goes with it, on both
+/// faces that count it.
+#[test]
+fn a_reload_that_drops_the_plugin_gives_back_its_pane_band() {
+    let (dir, sub) = built(&[
+        ("lua/plugin/banded.lua", BANDED),
+        ("init.lua", "require('plugin.banded')"),
+    ]);
+    assert_eq!(sub.pane_band(), 4);
+    write(dir.path(), "init.lua", "");
+    assert!(sub.reload(None).is_empty());
+    assert_eq!(sub.pane_band(), 0);
+    assert_eq!(sub.census().pane_band, 0);
+}
+
+/// The same plugin, still required after a reload: its band is still 4, not 8 — the reload
+/// let go of the old reservation before the config ran again, so there is no double count.
+#[test]
+fn a_reload_that_keeps_the_plugin_keeps_one_pane_band_not_two() {
+    let (_dir, sub) = built(&[
+        ("lua/plugin/banded.lua", BANDED),
+        ("init.lua", "require('plugin.banded')"),
+    ]);
+    assert_eq!(sub.pane_band(), 4);
+    assert!(sub.reload(None).is_empty());
+    assert_eq!(sub.pane_band(), 4);
+}
+
 #[test]
 fn config_reload_is_a_command() {
     let (_dir, sub) = shipped_with_everything_on();

@@ -7,6 +7,7 @@ pub struct Census {
     pub registrations: Vec<String>,
     pub commands: Vec<String>,
     pub reserved: Reserved,
+    pub pane_band: u16,
     pub floats: usize,
     pub jobs: usize,
     pub timers: usize,

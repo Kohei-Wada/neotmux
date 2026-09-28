@@ -123,7 +123,13 @@ local function draw(ctx, pane)
       elseif waited >= M.stall.slow then
         fg = M.colors.slow
       end
-      ctx:text(nil, rect.x, rect.y + row, os.date("%H:%M:%S", at):sub(1, rect.w - 2), { fg = fg })
+      ctx:text(
+        nil,
+        rect.x,
+        rect.y + row,
+        os.date("%H:%M:%S", at):sub(1, math.max(0, rect.w - 2)),
+        { fg = fg }
+      )
     end
   end
 end
@@ -146,12 +152,25 @@ end)
 
 function M.toggle()
   M.shown = not M.shown
-  if M.shown then
-    band = g.reserve_pane("left", M.width)
-  elseif band then
-    band:remove()
-    band = nil
+  if not M.shown then
+    if band then
+      band:remove()
+      band = nil
+    end
+    return
   end
+  if M.width < 1 or M.width > 16 then
+    M.shown = false
+    neotmux.notify("warn", "plugin.stamps: width must be 1..16, got " .. tostring(M.width))
+    return
+  end
+  local handle, message = g.reserve_pane("left", M.width)
+  if handle == nil then
+    M.shown = false
+    neotmux.notify("warn", "plugin.stamps: " .. message)
+    return
+  end
+  band = handle
 end
 
 g.command.add("timestamps", M.toggle, {

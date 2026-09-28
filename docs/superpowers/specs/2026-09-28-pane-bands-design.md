@@ -51,8 +51,9 @@ It is `reserve` again, one level down, and follows it wherever it can:
 - Granted in load order, filled from the pane's edge inwards, and `resize_to` keeps a band's
   place in that order.
 - Takes effect on the next frame. The handle persists; the drawing does not.
-- Refused with `nil, message` past a cap on the edge: 16 columns, summed over every source.
-  A pane band is a gutter of text, and past that it is the pane.
+- Capped at 16 columns on the edge, summed over every source. A count over 16 from one call is
+  a typo rather than a lost race, so it raises; a request that would push the total over 16
+  answers `nil, message`. A pane band is a gutter of text, and past that it is the pane.
 - Held by the group, so `config-reload` takes it back like every other registration.
 
 `ctx:pane_band(pane)` answers the caller's own band in that pane. It is `nil` when the caller

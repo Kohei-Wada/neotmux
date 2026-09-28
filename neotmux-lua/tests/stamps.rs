@@ -2,14 +2,26 @@
 
 mod support;
 
+use neotmux_lua::CommandOutcome;
 use neotmux_proto::{Color, DrawCmd, Epoch, Geometry, Rect};
-use support::{Built, SIZE, built, feed, keys, one, pane};
+use support::{Built, SIZE, built, feed, keys, notified, one, pane};
 
 const SHOWN: &str = "require('plugin.stamps')\n\
     neotmux.on_key(function(key)\n\
       if key ~= 'T' then return false end\n\
       require('plugin.stamps').toggle()\n\
       return true\n\
+    end)\n";
+
+/// `SHOWN`, plus a command a test can run to read `M.shown` without reaching into the module.
+const SHOWN_WITH_PROBE: &str = "require('plugin.stamps')\n\
+    neotmux.on_key(function(key)\n\
+      if key ~= 'T' then return false end\n\
+      require('plugin.stamps').toggle()\n\
+      return true\n\
+    end)\n\
+    neotmux.command.add('stamps-shown', function()\n\
+      return { tostring(require('plugin.stamps').shown) }\n\
     end)\n";
 
 /// What the host publishes once it has taken the band off the pane: the pane's outer rect over
@@ -135,4 +147,25 @@ fn hiding_the_times_gives_the_columns_back() {
     assert_eq!(sub.pane_band(), 10);
     keys(&sub, &["T"]);
     assert_eq!(sub.pane_band(), 0);
+}
+
+/// Another source already holds the edge's whole cap: toggling on cannot take its 10 columns,
+/// so it stays hidden, the total is unmoved, and the plugin says why.
+#[test]
+fn toggling_on_past_the_cap_stays_hidden_and_says_why() {
+    let (_dir, sub) = built(&format!(
+        "neotmux.reserve_pane('left', 10)\n{SHOWN_WITH_PROBE}"
+    ));
+    assert_eq!(sub.pane_band(), 10);
+    keys(&sub, &["T"]);
+    assert_eq!(sub.pane_band(), 10, "no double reservation");
+    let CommandOutcome::Ran(lines) = sub.run_command(one(), "stamps-shown", &[]) else {
+        panic!("stamps-shown did not run");
+    };
+    assert_eq!(lines, vec!["false".to_string()], "stays hidden");
+    let notices = notified(&sub);
+    assert!(
+        notices.iter().any(|n| n.contains("plugin.stamps")),
+        "{notices:?}"
+    );
 }
