@@ -1,11 +1,20 @@
-use std::fs::{self, OpenOptions};
-use std::io::Write as _;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
+use std::time::Instant;
 
 use neotmux_proto::Level;
 
-static LOG_FILE: OnceLock<Mutex<fs::File>> = OnceLock::new();
+mod log_file;
+mod repeats;
+
+use log_file::{LogFile, MAX_BYTES};
+use repeats::Repeats;
+
+/// The file, and the last warning or error each tag wrote to it: one that only repeats is
+/// counted, not written, and the file is moved aside past its limit, so nothing a plugin does
+/// on every tick can fill the disk.
+static LOG_FILE: OnceLock<Mutex<(LogFile, Repeats)>> = OnceLock::new();
 
 fn non_empty_absolute(key: &str) -> Option<PathBuf> {
     std::env::var_os(key)
@@ -29,12 +38,9 @@ pub fn init(path: Option<&Path>) -> anyhow::Result<PathBuf> {
     if let Some(parent) = resolved.parent() {
         fs::create_dir_all(parent)?;
     }
-    let file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&resolved)?;
+    let file = LogFile::open(&resolved, MAX_BYTES)?;
     LOG_FILE
-        .set(Mutex::new(file))
+        .set(Mutex::new((file, Repeats::default())))
         .map_err(|_| anyhow::anyhow!("logging already initialised"))?;
     Ok(resolved)
 }
@@ -82,10 +88,23 @@ pub fn log(level: Level, tag: &str, text: &str) {
     let Some(mutex) = LOG_FILE.get() else {
         return;
     };
-    let Ok(mut file) = mutex.lock() else {
+    let Ok(mut guard) = mutex.lock() else {
         return;
     };
-    let _ = writeln!(file, "{} [{}] {tag}: {text}", timestamp(), level_tag(level));
+    let (file, repeats) = &mut *guard;
+    // Only what went wrong is counted: an info line is what a plugin chose to say, and one that
+    // says the same thing every second is saying it on purpose.
+    let lines = match level {
+        Level::Info => vec![text.to_string()],
+        Level::Warn | Level::Error => repeats.admit(tag, text, Instant::now()),
+    };
+    for line in lines {
+        let _ = file.write_line(&format!(
+            "{} [{}] {tag}: {line}",
+            timestamp(),
+            level_tag(level)
+        ));
+    }
 }
 
 #[cfg(test)]

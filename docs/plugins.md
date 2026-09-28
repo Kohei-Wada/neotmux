@@ -1316,6 +1316,12 @@ the log has it, and a terminal handed back covered in what a plugin said an hour
 The one exception is a session that ended before the client had a screen, which is said on
 stderr because there was nowhere else to say it.
 
+A warning or an error that only repeats the last one its source wrote is counted rather than
+written: a plugin failing the same way on every tick costs one line, then `the line before repeated N more times`
+when it says something else, or a minute on if it has not. What you write with `neotmux.log.info`
+is always written. Past 10 MB the log is moved to
+`neotmux.log.1`, replacing the one there, and started afresh.
+
 ## How your code is identified
 
 Every registration and every API call is attributed to **the chunk the calling code was written

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### The log cannot fill the disk
+
+A plugin that raised on every tick wrote its error, stack traceback and all, four times a
+second for as long as it ran — one day of that came to 200 MB. A warning or an error that only
+repeats the last one from the same source is now counted instead, and written again with the
+count when the source says something else or a minute has gone by. Past 10 MB the log is moved
+to `neotmux.log.1` and started afresh.
+
 ### `costs` lines up, and draws each source's last ticks
 
 The source column was 24 wide, so a name like `plugin/herdr/sidebar/spaces` pushed its row out
