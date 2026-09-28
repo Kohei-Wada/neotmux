@@ -380,35 +380,61 @@ accent = '#ff0000'` is now `require('neotmux.style').set('status', { accent = '#
 
 ---
 
-### Task 5: The four Catppuccin flavours, and a `theme` command in the palette
+### Task 5: Twelve themes, and a `theme` command in the palette
 
 Added at the user's request (2026-09-29): pick a theme from the palette; to keep it, the user
-writes it in `init.lua` — neotmux saves nothing.
+writes it in `init.lua` — neotmux saves nothing. Themes: the four Catppuccin flavours, and the
+popular ones the user asked for.
 
-**Files:** Modify `runtime/lua/neotmux/theme.lua`; create `runtime/lua/plugin/theme.lua`;
-modify `runtime/lua/neotmux/defaults.lua`, `runtime/init.lua` (load list), `docs/plugins.md`,
-`CHANGELOG.md`; test `neotmux-lua/tests/style.rs` (or a new `neotmux-lua/tests/theme.rs`).
+**Files:** create `runtime/lua/neotmux/themes/<name>.lua` (one per theme), create
+`runtime/lua/plugin/theme.lua`; modify `runtime/lua/neotmux/theme.lua`,
+`runtime/lua/neotmux/defaults.lua`, `runtime/init.lua` (load list), `docs/plugins.md`,
+`CHANGELOG.md`; test `neotmux-lua/tests/theme.rs` (new).
+
+**Themes and their sources** — every hex comes from the source, fetched, never from memory:
+
+| name | file | source |
+|---|---|---|
+| `catppuccin-latte`, `catppuccin-frappe`, `catppuccin-macchiato`, `catppuccin-mocha` | `themes/catppuccin-*.lua` | https://raw.githubusercontent.com/catppuccin/palette/main/palette.json (`<flavour>.colors.<name>.hex`) |
+| `tokyonight-night`, `tokyonight-storm` | | folke/tokyonight.nvim `extras/lua/tokyonight_night.lua` / `_storm.lua` (or `lua/tokyonight/colors/{night,storm}.lua` + `colors/storm.lua`) |
+| `gruvbox-dark` | | morhetz/gruvbox `colors/gruvbox.vim` (dark, medium contrast) |
+| `nord` | | https://www.nordtheme.com/docs/colors-and-palettes (nord0–nord15) |
+| `dracula` | | https://draculatheme.com/spec |
+| `rose-pine` | | rose-pine/palette (main variant) |
+| `kanagawa` | | rebelot/kanagawa.nvim `lua/kanagawa/colors.lua` (wave) |
+| `onedark` | | navarasu/onedark.nvim `lua/onedark/palette.lua` (dark) |
+| `everforest-dark` | | sainnhe/everforest `autoload/everforest.vim` (dark, medium) |
+
+Mocha's file must equal today's `theme.colors` exactly (it is where those values now live;
+`theme.colors` starts as a copy of it).
+
+**Mapping a non-Catppuccin theme onto the 26 names.** Every theme file sets all 26 names, with
+a one-line comment per name that is not the source's own name for it, saying what it is in the
+source:
+- neutrals, darkest to lightest: `crust` < `mantle` < `base` (the editor background) <
+  `surface0` < `surface1` < `surface2` (selection/line highlight shades) < `overlay0` <
+  `overlay1` < `overlay2` (comments, inactive) < `subtext0` < `subtext1` < `text` (foreground).
+  Where the source has fewer shades, reuse the nearest and say so.
+- accents: `red`, `maroon` (a second red or the red), `peach` (orange), `yellow`, `green`,
+  `teal`, `sky`, `sapphire` (cyans/blue-cyans; reuse the nearest), `blue`, `lavender` (a light
+  blue/violet), `mauve` (purple/magenta), `pink`, `flamingo`, `rosewater` (light pinks; reuse
+  the nearest).
 
 **Interfaces:**
-- `theme.flavours` — `{ latte = {...26}, frappe = {...}, macchiato = {...}, mocha = {...} }`, the
-  26 names each, values **from the official palette**, not from memory:
-  https://raw.githubusercontent.com/catppuccin/palette/main/palette.json (fetch it; each flavour's
-  `colors.<name>.hex`). Mocha's must equal today's `theme.colors` exactly.
-- `theme.use(name)` — `theme.set(theme.flavours[name])` and `theme.current = name`; an unknown
-  name raises `unknown theme '<name>'`. `theme.current` starts as `'mocha'`.
+- `theme.names` — the themes in the order above, `catppuccin-*` first.
+- `theme.use(name)` — `theme.set(require('neotmux.themes.' .. name))`, `theme.current = name`;
+  an unknown name raises `unknown theme '<name>'`. `theme.current` starts as `'catppuccin-mocha'`.
 - `plugin.theme` — on by default (`defaults.theme = true`, loaded from `runtime/init.lua`'s list):
-  registers the command `theme` (desc: "pick a theme; write require('neotmux.theme').use('<name>')
-  in init.lua to keep it"). Running it opens a `neotmux.list` of the flavour names in the order
-  latte, frappe, macchiato, mocha, the current one marked; Enter calls `theme.use(name)` and
-  `neotmux.notify('info', "theme " .. name .. " — to keep it, add require('neotmux.theme').use('"
-  .. name .. "') to init.lua")`. No prefix key.
+  the command `theme` (desc: "pick a theme; add require('neotmux.theme').use('<name>') to init.lua
+  to keep it") opens a `neotmux.list` of `theme.names`, the current one marked; Enter calls
+  `theme.use(name)` and `neotmux.notify('info', 'theme ' .. name .. " — to keep it, add
+  require('neotmux.theme').use('" .. name .. "') to init.lua")`. No prefix key.
 
-- [ ] Tests first: `theme.use('latte')` changes `style.get('status').accent` to Latte's blue
-  (`#1e66f5` if the fetched palette agrees — assert against the fetched value); `theme.use('nope')`
-  raises; the `theme` command exists and running it opens a list (drive it the way
-  `neotmux-lua/tests/palette.rs` or `tests/list.rs` drive a list: open, move, Enter) and Enter on
-  `latte` applies it and notifies.
-- [ ] Implement; `make check`; commit
-  `"four Catppuccin flavours in neotmux.theme, and a theme command that picks one"`.
-- [ ] Docs: the Styling section gets the flavours, `theme.use`, and the `theme` command; the
-  shipped-defaults table gets a `theme` row; CHANGELOG line added to the style entry.
+- [ ] Tests first (`neotmux-lua/tests/theme.rs`): every name in `theme.names` loads and sets all
+  26 names to a `#rrggbb`; `theme.use('catppuccin-latte')` changes `style.get('status').accent`
+  to Latte's blue from the fetched palette; `theme.use('nope')` raises; the `theme` command opens a
+  list (drive it as `tests/list.rs` does) and Enter on a theme applies it and notifies.
+- [ ] Implement; `make check`; commit `"twelve themes in neotmux.themes, and a theme command that
+  picks one"`.
+- [ ] Docs: the Styling section lists the themes, `theme.use`, and the `theme` command; the
+  shipped-defaults table gets a `theme` row; the CHANGELOG style entry gains a line.
