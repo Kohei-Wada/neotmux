@@ -16,6 +16,7 @@ for _, name in ipairs({
   "footer",
   "hints",
   "chime",
+  "costs",
 }) do
   local module = "plugin." .. name
   if package.searchpath(module, package.path) and require("neotmux.defaults")[name] then

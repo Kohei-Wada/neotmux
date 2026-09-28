@@ -49,6 +49,7 @@ pub(crate) struct Shared {
     pub(crate) ambient: Rc<crate::host::Ambient>,
     pub(crate) groups: Rc<Groups>,
     pub(crate) sweep: Sweep,
+    pub(crate) tick_costs: Rc<crate::sched::TickCosts>,
 }
 
 pub(crate) fn make_handle(
@@ -194,6 +195,7 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
         ambient,
         groups,
         sweep,
+        tick_costs,
     } = shared;
     let neotmux = lua.create_table()?;
 
@@ -419,6 +421,30 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
             Ok(neotmux_proto::screen::width::of_str(&text) as i64)
         })?;
         neotmux.set("width", width)?;
+    }
+
+    {
+        // What each source's ticks have cost since the VM was built, most first: the numbers
+        // to decide by whether drawing every frame is worth changing, rather than a guess.
+        let sources = sources.clone();
+        let costs = lua.create_function(move |lua, (): ()| {
+            let mut rows = tick_costs.snapshot();
+            rows.sort_by_key(|(_, cost)| std::cmp::Reverse(cost.total));
+            let out = lua.create_table()?;
+            for (i, (source, cost)) in rows.into_iter().enumerate() {
+                let row = lua.create_table()?;
+                row.set(
+                    "source",
+                    sources.name(source).unwrap_or_else(|| source.to_string()),
+                )?;
+                row.set("ticks", cost.ticks)?;
+                row.set("total_ms", cost.total.as_secs_f64() * 1000.0)?;
+                row.set("longest_ms", cost.longest.as_secs_f64() * 1000.0)?;
+                out.set(i + 1, row)?;
+            }
+            Ok(out)
+        })?;
+        neotmux.set("costs", costs)?;
     }
 
     {

@@ -37,6 +37,9 @@ return {
   -- waiting while you are looking somewhere else is the thing you would otherwise find out
   -- about ten minutes later.
   chime = true,
+  -- On, and nothing but a command in the palette: what each plugin's ticks cost, which the host
+  -- counts whether or not anyone asks.
+  costs = true,
   -- Off, unlike the four above: which command is worth stopping to ask about is an opinion
   -- about what you run, and one with no rules in it would stop nothing anyway.
   guard = false,

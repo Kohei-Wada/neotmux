@@ -1120,6 +1120,7 @@ neotmux.opt.job_output_bytes = 1048576 -- what one job may make the host hold; >
 neotmux.resubscribe(name)          -- give a dropped source its tick back; returns handles
 neotmux.width(text)                -- how many columns `text` takes on a pane's grid
 neotmux.regex.is_match(pattern, text) -- Rust `regex` syntax; an invalid pattern raises
+neotmux.costs()                    -- { { source =, ticks =, total_ms =, longest_ms = }, ... }, most first
 neotmux.clipboard.set(text)        -- written? — true, or false and why not
 neotmux.home                       -- `$HOME` as the host read it, or nil; read-only
 ```

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### What each plugin's ticks cost
+
+The palette's `costs` lists every source with how many ticks it has run since the config
+loaded, their time together, the mean and the longest, most expensive first, counting up while
+it is open. The host times each source's whole tick; `neotmux.costs()` reads the same numbers.
+
 ### Every text field takes the same keys
 
 A prompt — naming a window, a new session from the palette — a list's query and the question a

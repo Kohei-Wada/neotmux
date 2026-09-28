@@ -10,6 +10,7 @@ mod session_slot;
 mod strikes;
 mod sweep_flag;
 mod sweeping;
+mod tick_costs;
 pub mod timers;
 
 pub use budget::*;
@@ -24,3 +25,4 @@ pub use session_slot::*;
 pub use strikes::*;
 pub use sweep_flag::*;
 pub use sweeping::*;
+pub use tick_costs::*;

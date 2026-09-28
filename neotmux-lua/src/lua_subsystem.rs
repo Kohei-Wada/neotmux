@@ -65,6 +65,7 @@ pub struct LuaSubsystem {
     timers: Rc<Timers>,
     groups: Rc<Groups>,
     sweep: api::Sweep,
+    tick_costs: Rc<crate::sched::TickCosts>,
 }
 
 impl LuaSubsystem {
@@ -125,6 +126,7 @@ impl LuaSubsystem {
         let timers = Rc::new(Timers::default());
         let overrun = Rc::new(Overrun::new());
         let groups = Rc::new(Groups::default());
+        let tick_costs = Rc::new(crate::sched::TickCosts::default());
         let budget = Budget::new(opts.clone());
         Budget::seal(&lua, &budget).map_err(|err| anyhow::anyhow!("{err:#}"))?;
 
@@ -164,6 +166,7 @@ impl LuaSubsystem {
                 ambient: Rc::clone(&ambient),
                 groups: groups.clone(),
                 sweep: sweep.clone(),
+                tick_costs: tick_costs.clone(),
             },
         )
         .map_err(|err| anyhow::anyhow!("{err:#}"))?;
@@ -193,6 +196,7 @@ impl LuaSubsystem {
             timers,
             groups,
             sweep,
+            tick_costs,
         })
     }
 
@@ -558,6 +562,7 @@ impl LuaSubsystem {
             // has already spent its slice must not get a fresh one from its next callback.
             self.budget
                 .enter(Duration::from_millis(self.opts.borrow().tick_budget_ms));
+            let started = Instant::now();
             for id in ids {
                 let Some(callback) = self.registry.callback(id) else {
                     continue;
@@ -592,6 +597,7 @@ impl LuaSubsystem {
                 }
             }
             let outcome = self.budget.leave();
+            self.tick_costs.record(owner, started.elapsed());
             let (budget_ms, limit) = {
                 let opts = self.opts.borrow();
                 (opts.tick_budget_ms, opts.tick_overrun_limit)
