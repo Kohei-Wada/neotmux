@@ -175,7 +175,34 @@ impl TermState {
 
     pub fn resize(&mut self, size: Size) {
         let size = clamp_to_min_grid(size);
+        self.scroll_above_cursor_off(size.rows);
         self.parser.screen_mut().set_size(size.rows, size.cols);
+    }
+
+    /// A shrink that would leave the cursor below the new bottom scrolls the rows above it into
+    /// the history first, the way a terminal does, so the line being written and the output
+    /// just above it stay on the screen. `vt100` alone cuts the rows off the bottom, and they
+    /// are gone for good (#60).
+    ///
+    /// Done as output — linefeeds on the bottom row, then the cursor put back — so the history
+    /// grows by the ordinary path and every line keeps its number ([`crate::screen::evictions`]).
+    /// The alternate screen keeps no history and its program redraws on the resize, so it is
+    /// only cut, as before.
+    fn scroll_above_cursor_off(&mut self, rows: u16) {
+        let screen = self.parser.screen();
+        if screen.alternate_screen() {
+            return;
+        }
+        let (row, col) = screen.cursor_position();
+        let over = (row + 1).saturating_sub(rows);
+        if over == 0 {
+            return;
+        }
+        let (height, _) = screen.size();
+        let mut bytes = format!("\x1b[{height};1H").into_bytes();
+        bytes.extend(std::iter::repeat_n(b'\n', usize::from(over)));
+        bytes.extend(format!("\x1b[{};{}H", row - over + 1, col + 1).into_bytes());
+        self.feed(&bytes);
     }
 
     /// Where the cursor is, zero-based, which is what a cursor report is asked for.
@@ -894,5 +921,61 @@ mod tests {
                 exit: None
             }]
         );
+    }
+
+    /// Shrinking past the cursor scrolls the rows above it into the history, the way a
+    /// terminal does, so the line being written and the output just above it stay on screen
+    /// (#60). `vt100` alone cuts the bottom rows off, and they are gone for good.
+    #[test]
+    fn shrinking_past_the_cursor_scrolls_the_top_into_the_history() {
+        let mut s = TermState::new(Size { rows: 4, cols: 10 }, 10);
+        s.feed(b"a\r\nb\r\nc\r\nd");
+        s.resize(Size { rows: 2, cols: 10 });
+        assert_eq!(s.lines(None, Trailing::Trim), vec!["c", "d"]);
+        assert_eq!(s.history(0, 10, Trailing::Trim), vec!["a", "b"]);
+        assert_eq!(s.history_extent().len, 2);
+        assert_eq!(s.cursor(), (1, 1));
+
+        s.resize(Size { rows: 4, cols: 10 });
+        assert_eq!(s.lines(None, Trailing::Trim), vec!["c", "d", "", ""]);
+        assert_eq!(
+            s.history_extent().len,
+            2,
+            "growing back takes nothing out of the history"
+        );
+    }
+
+    /// Rows below the cursor are empty, and cutting them costs nothing: nothing is scrolled.
+    #[test]
+    fn shrinking_rows_below_the_cursor_scrolls_nothing() {
+        let mut s = TermState::new(Size { rows: 4, cols: 10 }, 10);
+        s.feed(b"a");
+        s.resize(Size { rows: 2, cols: 10 });
+        assert_eq!(s.lines(None, Trailing::Trim), vec!["a", ""]);
+        assert_eq!(s.history_extent().len, 0);
+        assert_eq!(s.cursor(), (0, 1));
+    }
+
+    /// A line keeps its number through the scroll, so what is kept against it — a shell's mark
+    /// here — is still on the same text afterwards.
+    #[test]
+    fn a_line_keeps_its_number_when_a_shrink_scrolls_it() {
+        let mut s = TermState::new(Size { rows: 4, cols: 10 }, 10);
+        s.feed(b"a\r\nb\r\nc\r\n\x1b]133;A\x07d");
+        s.resize(Size { rows: 2, cols: 10 });
+        assert_eq!(marks(&s), vec![(3, 0, MarkKind::Prompt, None)]);
+        let extent = s.history_extent();
+        assert_eq!(extent.dropped + extent.len + u64::from(s.cursor().0), 3);
+    }
+
+    /// A full-screen program keeps no history and redraws itself on a resize: its screen is
+    /// only cut, as before.
+    #[test]
+    fn shrinking_the_alternate_screen_scrolls_nothing_into_the_history() {
+        let mut s = TermState::new(Size { rows: 4, cols: 10 }, 10);
+        s.feed(b"\x1b[?1049ha\r\nb\r\nc\r\nd");
+        s.resize(Size { rows: 2, cols: 10 });
+        s.feed(b"\x1b[?1049l");
+        assert_eq!(s.history_extent().len, 0);
     }
 }

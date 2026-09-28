@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Shrinking the terminal keeps the bottom of every pane
+
+A shorter terminal used to cut rows off the bottom of every pane's screen, so the output you had
+just read was gone, and growing the terminal back did not bring it back. Now the rows above the
+cursor scroll into the history first, as they do in any terminal: the line being written stays
+on screen, and everything above it is still there to scroll back to. The times `C-b t` shows and
+a shell's marks stay on the lines they belong to.
+
 ### How each command ended, beside it
 
 `C-b e` (the palette's `exits`) shows a band down each pane's left edge with, on the line every
