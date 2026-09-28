@@ -262,6 +262,37 @@ pub(crate) fn install(
     }
 
     {
+        // The shell's own account of its structure (OSC 133): where it said its prompts,
+        // command lines and outputs start, and how each command ended. Empty for a shell that
+        // says nothing, which is most of them until they are set up to.
+        let terminals = terminals.clone();
+        let marks = lua.create_function(
+            move |lua, (pane, first, last): (u32, Option<u64>, Option<u64>)| {
+                let Some(marks) = terminals.marks(
+                    PaneId::from(pane),
+                    first.unwrap_or(0),
+                    last.unwrap_or(u64::MAX),
+                ) else {
+                    return Ok(Value::Nil);
+                };
+                let out = lua.create_table()?;
+                for (at, mark) in marks.iter().enumerate() {
+                    let one = lua.create_table()?;
+                    one.set("line", mark.line)?;
+                    one.set("col", mark.col)?;
+                    one.set("kind", mark.kind.name())?;
+                    if let Some(exit) = mark.exit {
+                        one.set("exit", exit)?;
+                    }
+                    out.set(at + 1, one)?;
+                }
+                Ok(Value::Table(out))
+            },
+        )?;
+        pane.set("marks", marks)?;
+    }
+
+    {
         // Lines, never bytes: the host has already reconstructed the terminal, so a plugin
         // matching a pattern must not be handed escape sequences to strip. `opts.lines` is
         // how many rows from the bottom to read, and it bounds the work rather than trimming
