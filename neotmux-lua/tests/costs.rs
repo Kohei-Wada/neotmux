@@ -20,7 +20,7 @@ fn every_source_is_counted_once_a_tick_most_expensive_first() {
            if key ~= 'J' then return false end\n\
            for _, c in ipairs(neotmux.costs()) do\n\
              if c.source == 'init' or c.source == 'plugin/tmux/status' then\n\
-               neotmux.log.info(c.source .. ' ' .. c.ticks .. ' ' .. tostring(c.total_ms >= c.longest_ms))\n\
+               neotmux.log.info(c.source .. ' ' .. c.ticks .. ' ' .. tostring(c.total_ms >= c.longest_ms) .. ' ' .. #c.recent_ms)\n\
              end\n\
            end\n\
            return true\n\
@@ -33,8 +33,8 @@ fn every_source_is_counted_once_a_tick_most_expensive_first() {
     assert_eq!(
         logged(&sub),
         vec![
-            "init 3 true".to_string(),
-            "plugin/tmux/status 3 true".to_string()
+            "init 3 true 3".to_string(),
+            "plugin/tmux/status 3 true 3".to_string()
         ]
     );
 }

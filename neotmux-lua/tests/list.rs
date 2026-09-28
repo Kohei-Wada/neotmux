@@ -905,6 +905,34 @@ fn a_centred_list_keeps_its_query_line_at_the_bottom() {
     );
 }
 
+/// A header is drawn above the items and is not one of them: Enter still chooses the first item.
+#[test]
+fn a_header_sits_above_the_items_and_the_cursor_skips_it() {
+    let (_dir, sub) = built(
+        "neotmux.on_key(function(key)
+           if key == 'o' then
+             require('neotmux.list').open({
+               rows = 4,
+               header = function() return { { text = 'NAME' } } end,
+               items = function() return { 'alpha', 'beta' } end,
+               row = function(item) return { { text = item } } end,
+               done = function(item) neotmux.log.info('chose ' .. item) end,
+             })
+             return true
+           end
+           return false
+         end)",
+    );
+    sub.dispatch_key(support::one(), "o");
+    let rows = rows_at(&frame(&sub));
+    assert!(
+        row_of(&rows, "NAME") < row_of(&rows, "alpha"),
+        "the header is not above the items: {rows:#?}"
+    );
+    keys(&sub, &["Enter"]);
+    assert_eq!(logged(&sub), vec!["chose alpha".to_string()]);
+}
+
 /// An empty frame says nothing about why it is empty, and the line that says so needs a row of
 /// its own rather than the frame's.
 #[test]

@@ -28,7 +28,8 @@
 -- what a picker wants, or `'top'`, which drops it from the top edge and moves the input line to
 -- the first row — a command palette, where what you type is what you look at. `empty` is a line
 -- to draw when nothing is left to show, so a query that matched nothing says so rather than
--- leaving a frame with nothing in it.
+-- leaving a frame with nothing in it. `header` is `function(width) return runs end`, a row
+-- drawn above the items that the cursor never lands on — the column names of a table.
 --
 -- An input line — a query or an `ask` — takes the editing keys a line of text takes anywhere,
 -- `neotmux.line`'s: `Backspace` and `C-h` take the last character back, `C-w` the last word,
@@ -49,7 +50,7 @@
 -- when there is no input line, since a filtered list needs the letter as text; and while `ask`
 -- is up it replaces and freezes the query line, so nothing typed then reaches `filter`.
 --
--- `items`, `row`, `filter`, `footer`, `done`, `cancel`, a `keys` entry, and `ask`'s own
+-- `items`, `row`, `header`, `filter`, `footer`, `done`, `cancel`, a `keys` entry, and `ask`'s own
 -- `accept`/`done`/`cancel` are all the caller's code, charged to this module's own tick budget
 -- — `neotmux/list` — so a slow one parks every list in the process until
 -- `neotmux.resubscribe('neotmux/list')` restores it. Every one of those calls is guarded: a
@@ -294,7 +295,7 @@ local function wanted()
   -- A list with nothing in it still needs the row its `empty` line is drawn on, or the line
   -- lands on the frame.
   local shown = math.max(#state.items, state.opts.empty and 1 or 0)
-  local rows = math.min(shown, state.opts.rows) + 3
+  local rows = math.min(shown, state.opts.rows) + 3 + (state.opts.header and 1 or 0)
   -- A width of one or less is a share of the pane area rather than a column count, so a list
   -- can ask to be most of the screen without knowing how wide the screen is. Where no pane has
   -- a rect yet — nothing has been laid out — there is no area to take a share of, so the share
@@ -444,6 +445,16 @@ local function arm()
 
     local room = inner.h - 1
     local first_row = input_first() and inner.y + 1 or inner.y
+    if state.opts.header then
+      local ok, runs = pcall(state.opts.header, inner.w)
+      if not ok then
+        fail("header", runs)
+        return
+      end
+      draw_runs(ctx, win, inner.x, first_row, inner.w, runs or {}, M.colors.frame)
+      room = room - 1
+      first_row = first_row + 1
+    end
     state.first = window_over(#state.items, room, state.at)
     for slot = 0, math.min(#state.items, room) - 1 do
       local at = state.first + slot
@@ -589,6 +600,7 @@ function M.open(opts)
       empty = opts.empty,
       items = opts.items,
       row = opts.row,
+      header = opts.header,
       footer = opts.footer,
       keys = opts.keys or {},
       done = opts.done,

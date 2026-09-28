@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### `costs` lines up, and draws each source's last ticks
+
+The source column was 24 wide, so a name like `plugin/herdr/sidebar/spaces` pushed its row out
+of line. It is now as wide as the longest name, the numbers sit under a heading instead of
+between labels, and the rest of the row is a sparkline of that source's last ticks, all drawn
+against one scale so a bar means the same time in every row. `neotmux.costs()` rows carry
+`recent_ms`, the last 120 ticks oldest first, and `neotmux.list` takes a `header`.
+
 ### A busy machine no longer parks the plugins
 
 The tick budget measured the wall clock, so a parallel build that took the CPU away from

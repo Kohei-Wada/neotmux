@@ -460,6 +460,10 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
                 row.set("ticks", cost.ticks)?;
                 row.set("total_ms", cost.total.as_secs_f64() * 1000.0)?;
                 row.set("longest_ms", cost.longest.as_secs_f64() * 1000.0)?;
+                row.set(
+                    "recent_ms",
+                    lua.create_sequence_from(cost.recent.iter().map(|d| d.as_secs_f64() * 1000.0))?,
+                )?;
                 out.set(i + 1, row)?;
             }
             Ok(out)

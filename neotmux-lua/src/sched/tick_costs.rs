@@ -1,18 +1,21 @@
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::time::Duration;
 
 use crate::plugin::SourceId;
 
 /// What one source's ticks have cost so far: how many ran, their time together, and the
 /// longest. Wall time around the source's whole group, host calls included, which is what a
-/// frame waits on.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// frame waits on. `recent` is the last [`RECENT`] of them, oldest first, for a trend.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TickCost {
     pub ticks: u64,
     pub total: Duration,
     pub longest: Duration,
+    pub recent: VecDeque<Duration>,
 }
+
+pub const RECENT: usize = 120;
 
 /// Every source's [`TickCost`], kept for the life of the VM, so that what a plugin spends on
 /// drawing every frame can be read rather than guessed at.
@@ -28,13 +31,17 @@ impl TickCosts {
         cost.ticks += 1;
         cost.total += elapsed;
         cost.longest = cost.longest.max(elapsed);
+        if cost.recent.len() == RECENT {
+            cost.recent.pop_front();
+        }
+        cost.recent.push_back(elapsed);
     }
 
     pub fn snapshot(&self) -> Vec<(SourceId, TickCost)> {
         self.by_source
             .borrow()
             .iter()
-            .map(|(source, cost)| (*source, *cost))
+            .map(|(source, cost)| (*source, cost.clone()))
             .collect()
     }
 }
@@ -60,6 +67,7 @@ mod tests {
                         ticks: 2,
                         total: Duration::from_millis(7),
                         longest: Duration::from_millis(5),
+                        recent: [2, 5].map(Duration::from_millis).into(),
                     }
                 ),
                 (
@@ -68,9 +76,23 @@ mod tests {
                         ticks: 1,
                         total: Duration::from_millis(1),
                         longest: Duration::from_millis(1),
+                        recent: [1].map(Duration::from_millis).into(),
                     }
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn only_the_last_ticks_are_kept_as_recent() {
+        let costs = TickCosts::default();
+        let a = SourceId(1);
+        for ms in 0..RECENT as u64 + 3 {
+            costs.record(a, Duration::from_millis(ms));
+        }
+        let (_, cost) = &costs.snapshot()[0];
+        assert_eq!(cost.recent.len(), RECENT);
+        assert_eq!(cost.recent.front(), Some(&Duration::from_millis(3)));
+        assert_eq!(cost.ticks, RECENT as u64 + 3);
     }
 }
