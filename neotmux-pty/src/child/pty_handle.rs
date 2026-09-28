@@ -164,8 +164,6 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
-    use portable_pty::CommandBuilder;
-
     use super::*;
 
     /// A child that never stops writing, counting how often it was read.
@@ -193,7 +191,9 @@ mod tests {
         thread::sleep(Duration::from_millis(200));
         let read = reads.load(Ordering::SeqCst);
         drop(rx);
-        reader.join().expect("the reader returns once nobody is listening");
+        reader
+            .join()
+            .expect("the reader returns once nobody is listening");
 
         assert_eq!(
             read,
