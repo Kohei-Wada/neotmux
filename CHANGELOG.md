@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### `C-b a` walks the agents
+
+`C-b a` puts a cursor on the sidebar's agents, as `C-b w` does on its sessions: `j` and `k`
+move it, Enter goes to the agent under it — its session, its window and its pane — `1`-`9` go
+straight to one, and Esc leaves. Only one of the two cursors is up at a time.
+
 ### The sidebar's rows are herdr's
 
 Every session in the sidebar is two rows, as in herdr: its name, then its branch, or nothing

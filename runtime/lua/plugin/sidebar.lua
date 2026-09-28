@@ -71,7 +71,7 @@ M.colors = {
   done = "#94e2d5", -- teal: finished while you were not looking (`neotmux.seen`)
   idle = "#a6e3a1", -- green
   unknown = "#6c7086", -- a session with no agent in it, which has no state to say
-  -- The navigate cursor (`C-b w`).
+  -- The navigate cursor (`C-b w`, `C-b a`).
   selection = "#313244", -- surface0
 }
 
@@ -424,10 +424,12 @@ M.sections = {
   require("plugin.sidebar.agents"),
 }
 
--- `C-b w`, herdr's navigate: a cursor over the spaces. Bound here rather than in the section, for
--- the reason `b` is: the prefix is the standard plugin and this one is optional.
+-- `C-b w`, herdr's navigate: a cursor over the spaces, and `C-b a` the same over the agents.
+-- Bound here rather than in the sections, for the reason `b` is: the prefix is the standard
+-- plugin and this one is optional.
 if prefix() then
   prefix().commands["w"] = require("plugin.sidebar.spaces").navigate
+  prefix().commands["a"] = require("plugin.sidebar.agents").navigate
 end
 
 return M

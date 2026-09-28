@@ -262,6 +262,8 @@ local function go(at)
   end
 end
 
+M.leave = leave
+
 function M.navigate()
   local names = neotmux.session.list()
   local bar = package.loaded["plugin.sidebar"]
@@ -280,6 +282,11 @@ function M.navigate()
       M.cursor = at
     end
   end
+  -- One cursor at a time: the agents' goes when this one comes.
+  local agents = package.loaded["plugin.sidebar.agents"]
+  if agents and agents.cursor then
+    agents.leave()
+  end
   if not bar.open then
     bar.open, bar.navigating_unfolded = true, true
   end
@@ -293,7 +300,8 @@ local MOVES = { j = 1, Down = 1, k = -1, Up = -1 }
 -- herdr's, along the bottom row while the cursor is up: that you are in it and what the keys do.
 M.bar_colors = { mode = "#89b4fa", on = "#181825", text = "#6c7086" }
 
-local function help_bar(ctx)
+-- `what` is what the arrows move between: `workspace` here, `agent` for the agents'.
+function M.help_bar(ctx, what)
   local area = ctx:area()
   local y = area.y + area.h - 1
   local c = M.bar_colors
@@ -302,7 +310,7 @@ local function help_bar(ctx)
     { text = " NAVIGATE ", fg = c.on, bg = c.mode, bold = true },
     { text = " esc back  ", fg = c.text, bg = c.on },
     { text = "\u{2191}/\u{2193}", fg = c.mode, bg = c.on, bold = true },
-    { text = " workspace", fg = c.text, bg = c.on },
+    { text = " " .. what, fg = c.text, bg = c.on },
   })
 end
 
@@ -314,7 +322,7 @@ g.on_tick(function(ctx)
     leave()
   end
   if M.cursor then
-    help_bar(ctx)
+    M.help_bar(ctx, "workspace")
   end
 end)
 

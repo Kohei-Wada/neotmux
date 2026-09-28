@@ -12,7 +12,11 @@
 --
 -- `collect()` is the list itself, in `sort` order, and is what the palette's agents and the
 -- `agent-next` / `agent-prev` commands walk, so all three agree about which agent is next.
+--
+-- `C-b a` (`navigate`) puts a cursor on it, as `C-b w` does on the spaces: `j`/`k` move it,
+-- Enter goes to the agent under it, `1`-`9` go straight to that one, Esc leaves.
 local detect = require("neotmux.detect")
+local modes = require("neotmux.mode")
 local seen = require("neotmux.seen")
 local state = require("neotmux.state")
 local g = neotmux.group("plugin.sidebar.agents")
@@ -188,18 +192,23 @@ g.command.add("agent-prev", function()
   step(-1)
 end, { desc = "go to the previous agent" })
 
+-- Where the navigate cursor is, by position in `collect()`, or nil when it is not up.
+M.cursor = nil
+
 function M.build(given)
   sidebar = given
   local rows, anchor = {}, nil
-  for _, it in ipairs(M.collect()) do
-    if it.focused then
+  for index, it in ipairs(M.collect()) do
+    local selected = M.cursor == index
+    if (it.focused and not M.cursor) or selected then
       anchor = #rows + 1
     end
+    local fill = selected and sidebar.colors.selection or it.focused and sidebar.colors.here or nil
     for at, names in ipairs(M.rows) do
       local runs = sidebar.row(M.tokens, names, it)
       if #runs > 0 then
         table.insert(runs, 1, { text = at == 1 and " " or "   " })
-        runs.fill = it.focused and sidebar.colors.here or nil
+        runs.fill = fill
         rows[#rows + 1] = runs
       end
     end
@@ -207,7 +216,7 @@ function M.build(given)
   return { rows = rows, anchor = anchor }
 end
 
--- Folded: `1 ●`, an agent a row.
+-- Folded: `1 ●`, an agent a row, numbered as `1`-`9` in navigate go to them.
 function M.rail(given)
   sidebar = given
   local rows = {}
@@ -221,5 +230,93 @@ function M.rail(given)
   end
   return rows
 end
+
+-- Navigate: the spaces' cursor, over the agents. The list is taken again on every key rather
+-- than kept, since an agent can close or change places while the cursor is up.
+local mode
+
+function M.leave()
+  M.cursor = nil
+  if mode then
+    mode:lower()
+    mode = nil
+  end
+  local bar = package.loaded["plugin.sidebar"]
+  if bar and bar.navigating_unfolded then
+    bar.open, bar.navigating_unfolded = false, nil
+  end
+end
+
+local function go(at)
+  local it = M.collect()[at]
+  M.leave()
+  if it then
+    M.focus(it)
+  end
+end
+
+function M.navigate()
+  local all = M.collect()
+  local bar = package.loaded["plugin.sidebar"]
+  local shown = false
+  for _, section in ipairs(bar and bar.sections or {}) do
+    shown = shown or section == M
+  end
+  -- A cursor over a section that is not drawn would swallow keys you cannot see it take.
+  if #all == 0 or not shown then
+    return
+  end
+  M.cursor = 1
+  for at, it in ipairs(all) do
+    if it.focused then
+      M.cursor = at
+    end
+  end
+  local spaces = package.loaded["plugin.sidebar.spaces"]
+  if spaces and spaces.cursor then
+    spaces.leave()
+  end
+  if not bar.open then
+    bar.open, bar.navigating_unfolded = true, true
+  end
+  if not mode then
+    mode = modes.raise("navigate")
+  end
+end
+
+local MOVES = { j = 1, Down = 1, k = -1, Up = -1 }
+
+-- The prefix leaves the cursor, as it does the spaces': see there.
+g.on_tick(function(ctx)
+  if M.cursor and modes.current() == "prefix" then
+    M.leave()
+  end
+  if M.cursor then
+    require("plugin.sidebar.spaces").help_bar(ctx, "agent")
+  end
+end)
+
+g.on_key(function(key)
+  if not M.cursor then
+    return false
+  end
+  local count = #M.collect()
+  if count == 0 then
+    M.leave()
+    return true
+  end
+  -- An agent that went away while the cursor was up can leave it past the end.
+  M.cursor = math.min(M.cursor, count)
+  if MOVES[key] then
+    M.cursor = (M.cursor - 1 + MOVES[key]) % count + 1
+  elseif key == "Enter" then
+    go(M.cursor)
+  elseif key:match("^[1-9]$") then
+    go(tonumber(key))
+  elseif key == "Esc" then
+    M.leave()
+  end
+  return true
+end)
 
 return M

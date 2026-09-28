@@ -1385,7 +1385,7 @@ neotmux ships fourteen plugins in the runtime layer an install puts on the searc
 | `sync` | relays every key to every pane of the window — tmux's `synchronize-panes`, turned on and off with `:sync-panes` or `C-b S`; the plugin loads by default, the relaying starts off |
 | `guard` | holds back the Enter that would run a line `neotmux.guard`'s rules name, until you press it again — **off by default** |
 | `watch` | notifies you when a pane looks like it is waiting for you, on `neotmux.state`'s guess — **off by default** |
-| `sidebar` | herdr's sidebar down a reserved left band: every session with its state and git branch, and every agent in every session; `C-b w` moves a cursor over the sessions, `C-b b` folds it — **off by default** |
+| `sidebar` | herdr's sidebar down a reserved left band: every session with its state and git branch, and every agent in every session; `C-b w` moves a cursor over the sessions and `C-b a` over the agents, `C-b b` folds it — **off by default** |
 | `footer` | whichever mode is raised through `neotmux.mode`, on one reserved bottom row — **off by default** |
 
 None of them is a host feature — all fourteen are ordinary files making ordinary API calls, and
@@ -1437,8 +1437,12 @@ Git is asked as a job — the sandbox has no `io` — at most every
 leaves. The sidebar unfolds while it is up if it was folded, and the panes' bottom row says
 `NAVIGATE` and what the keys do, over whatever is there, as herdr's does.
 
+**`C-b a`** is the same cursor over the agents below, starting on the one you are at: Enter
+goes to the agent under it — its session, its window, its pane. Only one of the two cursors is
+up at a time.
+
 **`agents`**, under it, is every pane a ruleset in `neotmux.detect.agents` answered for, in every
-session — where it is on the first row, what it is on the second:
+session — where it is on the first row, its state and what it is on the second:
 
     ● work 2
       claude

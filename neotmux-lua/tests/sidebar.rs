@@ -1154,3 +1154,87 @@ fn a_tree_too_tall_for_the_half_keeps_the_names_and_the_pane_you_are_in() {
     line_with(&lines, " work");
     line_with(&lines, "8.1");
 }
+
+/// `C-b a`: the spaces' navigate, over the agents. The cursor starts on the agent you are at,
+/// `j` moves it, and Enter goes to the one under it — its window and pane in its own session,
+/// then that session.
+#[test]
+fn navigate_moves_a_cursor_over_the_agents_and_enter_goes_to_that_pane() {
+    let (_dir, sub) = built_herdr(&format!(
+        "{AGENTS}neotmux.on_key(function(key)\n\
+           if key == 'A' then require('plugin.sidebar.agents').navigate() return true end\n\
+           return false\n\
+         end)\n"
+    ));
+    let s = [
+        Sess::new(1, "work", vec![vec![101]]).agents(&[101]),
+        Sess::new(2, "home", vec![vec![201], vec![202]]).agents(&[201, 202]),
+    ];
+    open(&sub, &s);
+    show(&sub, 101, "BUSY");
+    show(&sub, 201, "BUSY");
+    show(&sub, 202, "ASK");
+    settled(&sub, &s, 1);
+    support::keys(&sub, &["A", "j", "j"]);
+    let lines = settled(&sub, &s, 1);
+    line_with(&lines, "NAVIGATE");
+    assert!(lines.iter().any(|l| l.ends_with(" agent")), "{lines:#?}");
+    sub.drain_ops(Some(support::one()));
+    sub.drain_ops(Some(SessionId::from(2)));
+
+    support::keys(&sub, &["Enter"]);
+    let here = sub.drain_ops(Some(support::one()));
+    let there = sub.drain_ops(Some(SessionId::from(2)));
+    use neotmux_lua::host::Op;
+    assert!(
+        there.iter().any(|(_, op)| *op
+            == Op::PaneFocus {
+                pane: PaneId::from(202)
+            }),
+        "{there:?}"
+    );
+    assert!(
+        here.iter().chain(there.iter()).any(|(_, op)| *op
+            == Op::SessionSwitch {
+                name: "home".to_string()
+            }),
+        "{here:?} {there:?}"
+    );
+    assert_eq!(
+        sub.dispatch_key(support::one(), "j"),
+        neotmux_lua::KeyOutcome::Fallthrough,
+        "the cursor stayed up after Enter"
+    );
+}
+
+/// One cursor at a time: opening the agents' puts the spaces' away, and the other way round.
+#[test]
+fn one_navigate_cursor_puts_the_other_away() {
+    let (_dir, sub) = built_herdr(&format!(
+        "{AGENTS}neotmux.on_key(function(key)\n\
+           if key ~= 'X' then return false end\n\
+           local spaces = require('plugin.sidebar.spaces')\n\
+           local agents = require('plugin.sidebar.agents')\n\
+           local function say() neotmux.log.info(tostring(spaces.cursor) .. ' ' .. tostring(agents.cursor)) end\n\
+           spaces.navigate() say()\n\
+           agents.navigate() say()\n\
+           spaces.navigate() say()\n\
+           return true\n\
+         end)\n"
+    ));
+    let s = [Sess::new(1, "work", vec![vec![101]]).agents(&[101])];
+    open(&sub, &s);
+    show(&sub, 101, "BUSY");
+    settled(&sub, &s, 1);
+    sub.drain_ops(Some(support::one()));
+    support::keys(&sub, &["X"]);
+    let said: Vec<String> = sub
+        .drain_ops(Some(support::one()))
+        .into_iter()
+        .filter_map(|(_, op)| match op {
+            neotmux_lua::host::Op::Log { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(said, vec!["1 nil", "nil 1", "1 nil"]);
+}
