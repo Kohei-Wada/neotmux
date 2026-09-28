@@ -332,9 +332,7 @@ end
 -- stale, so it stays stale rather than being adopted by whatever is running one look later.
 --
 -- It cannot see a program that sets the very same title its predecessor did, and it is judged
--- against a `pane.info` up to the host's 250 ms old — the same window `claims` is judged in, and
--- for the same reason: both are read once per revision, and a program that has just started
--- prints something. `pane.info` is `/proc`, so on anything but Linux the command is always nil
+-- against a `pane.info` up to the host's 250 ms old — the same window `claims` is judged in. `pane.info` is `/proc`, so on anything but Linux the command is always nil
 -- and this seam, like `claims` above it, is inert.
 local function title_is_the_running_program(pane, title)
   local command = command_of(pane)
@@ -409,18 +407,21 @@ local function hold(pane, state, visible, matched)
 end
 
 -- The same cost control as `neotmux.state`: the screen is read only for a pane that has been
--- fed since it was last looked at. The hold runs on every call regardless, because a pane
--- that has stopped changing is exactly the one whose settle has to expire. The view built here
--- is kept on `it` rather than thrown away, so a cache hit still has one to hand back.
+-- fed since it was last looked at, or whose program has changed since — an agent quit back to
+-- a shell that has drawn nothing yet is a different pane to `claims`, on the same screen. The
+-- hold runs on every call regardless, because a pane that has stopped changing is exactly the
+-- one whose settle has to expire. The view built here is kept on `it` rather than thrown away,
+-- so a cache hit still has one to hand back.
 function M.of(pane)
   local revision = neotmux.pane.revision(pane)
   if revision == nil then
     M.forget(pane)
     return nil
   end
+  local command = command_of(pane)
   local it = seen[pane]
-  if it == nil or it.revision ~= revision then
-    it = { revision = revision, view = M.view(pane) }
+  if it == nil or it.revision ~= revision or it.command ~= command then
+    it = { revision = revision, command = command, view = M.view(pane) }
     if it.view ~= nil then
       if not title_is_the_running_program(pane, it.view.title) then
         it.view.title = ""

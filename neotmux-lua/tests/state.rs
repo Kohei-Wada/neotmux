@@ -279,3 +279,41 @@ fn a_title_whose_owner_was_never_readable_is_believed_until_something_writes_ano
          the question at the fourth look is the price of that"
     );
 }
+
+/// A program that changes without printing is noticed all the same. The look is cached against
+/// the screen's revision, so a pane whose agent is quit — back at a shell that has drawn nothing
+/// yet — used to go on being answered for by the agent's ruleset until the shell next printed.
+#[test]
+fn a_pane_whose_agent_quit_without_a_new_screen_is_asked_again() {
+    let (_dir, sub) = built(
+        "local state = require('neotmux.state')\n\
+         local detect = require('neotmux.detect')\n\
+         neotmux.on_key(function(key)\n\
+           if key == 'J' then\n\
+             state.of(1)\n\
+             neotmux.log.info('agent=' .. tostring(detect.agent(1)))\n\
+             return true\n\
+           end\n\
+           return false\n\
+         end)\n",
+    );
+    running(&sub, "claude");
+    feed(
+        &sub,
+        "\u{273b} Herding… (12s \u{00b7} esc to interrupt)".as_bytes(),
+    );
+    keys(&sub, &["J"]);
+    assert_eq!(
+        logged(&sub).last().map(String::as_str),
+        Some("agent=claude"),
+        "the turn was not Claude Code's in the first place"
+    );
+
+    running(&sub, "bash");
+    keys(&sub, &["J"]);
+    assert_eq!(
+        logged(&sub).last().map(String::as_str),
+        Some("agent=nil"),
+        "the quit agent's ruleset still answered for a screen nobody redrew"
+    );
+}
