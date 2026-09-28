@@ -1521,7 +1521,7 @@ The rest are neotmux's own:
 | `hints` | `C-b f` labels every url, path, hash (7–64 hex characters, taken whole) and ip on screen and copies the one you pick; `hint-send` and `hint-open` are the same pick, typed rather than copied |
 | `notify` | draws each notification in a frame of its own, stacked up from the bottom-right |
 | `palette` | the command palette on `C-b :`: every registered command, fuzzy-filtered as you type, `Enter` to run the one under the cursor; `@` for the sessions, `#` for the agents, and `C-b g` opens it on `#` |
-| `theme` | the palette's `theme`: a list of the twelve shipped themes, the current one marked, Enter to switch — see [Styling](#styling) |
+| `theme` | the palette's `theme`: a list of the thirteen shipped themes, the current one marked, Enter to switch — see [Styling](#styling) |
 | `costs` | the palette's `costs`: what each plugin's ticks have cost, most first |
 | `stamps` | `C-b t` shows when every line of every pane arrived, in a band down each pane's left edge that the pane gives up while it is shown |
 | `exits` | `C-b e` shows how each command in every pane ended — `✔`, `✘` and its status, `⋯` while it runs — and how long it took, in a band down each pane's left edge; it needs a shell that sends OSC 133 marks (see [The commands convention](#the-commands-convention)) |
@@ -2394,7 +2394,7 @@ theme.resolve('blue')        --> '#89b4fa'; a '#rrggbb' is itself; an unknown na
 starts as Catppuccin Mocha, which every colour every plugin ships with is one of. `theme.set(t)`
 replaces the named ones and leaves the rest.
 
-**Twelve themes** ship in `neotmux.themes`, `theme.names` in this order: the four Catppuccin
+**Thirteen themes** ship in `neotmux.themes`, `theme.names` in this order: the four Catppuccin
 flavours (`catppuccin-latte`, `catppuccin-frappe`, `catppuccin-macchiato`, `catppuccin-mocha`),
 then `tokyonight-night`, `tokyonight-storm`, `gruvbox-dark`, `nord`, `dracula`, `rose-pine`,
 `kanagawa`, `onedark`, `everforest-dark`. `theme.use(name)` sets every one of the 26 names to

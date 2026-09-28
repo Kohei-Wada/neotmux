@@ -10,7 +10,7 @@ float, one plugin, or one part of it with `require('neotmux.style').set('float',
 'crust' })`; recolour everything at once with `require('neotmux.theme').set({ blue =
 '#7aa2f7' })`. **`require('plugin.x').colors` is gone**: `require('plugin.tmux.status').colors.
 accent = '#ff0000'` is now `require('neotmux.style').set('status', { accent = '#ff0000' })`, and
-`docs/plugins.md` lists every selector and its parts. Twelve themes ship in `neotmux.themes` —
+`docs/plugins.md` lists every selector and its parts. Thirteen themes ship in `neotmux.themes` —
 the four Catppuccin flavours, tokyonight, gruvbox, nord, dracula, rose-pine, kanagawa, onedark
 and everforest — switched with `require('neotmux.theme').use('<name>')`, and a new `theme`
 command in the palette picks one from a list; nothing is written to disk, so keeping a pick
