@@ -19,9 +19,11 @@
 -- timeout.
 local M = {}
 
-function M.of(pane)
+-- `first`, when given, is the line to start reading at: a caller drawing the screen asks from
+-- its top row, and a pane that has kept thousands of commands is not read whole every tick.
+function M.of(pane, first)
   local out, current = {}, nil
-  for _, mark in ipairs(neotmux.pane.marks(pane) or {}) do
+  for _, mark in ipairs(neotmux.pane.marks(pane, first) or {}) do
     if mark.kind == "prompt" then
       if current and current.state == nil then
         current.state = "unknown"

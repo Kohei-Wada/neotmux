@@ -163,3 +163,58 @@ fn hiding_the_band_gives_the_columns_back() {
     keys(&sub, &["E"]);
     assert_eq!(sub.pane_band(), 0);
 }
+
+/// The cursor and mode the host would publish for the pane every frame; the harness has no host.
+fn publish(sub: &Built) {
+    let tty = sub.terminals().screen_tty(pane()).expect("the pane");
+    sub.publish_pane_tty(one(), std::collections::BTreeMap::from([(pane(), tty)]));
+}
+
+/// A full-screen program has no history, so the screen's top is the oldest line the pane holds
+/// and every old command would land beside the program's rows. Nothing is drawn beside it.
+#[test]
+fn nothing_is_marked_beside_a_full_screen_program() {
+    let (_dir, sub) = built(SHOWN);
+    feed(
+        &sub,
+        b"\x1b]133;A\x07$ \x1b]133;B\x07true\r\n\x1b]133;C\x07\x1b]133;D;0\x07\
+          \x1b]133;A\x07$ \x1b]133;B\x07vim\r\n\x1b]133;C\x07\x1b[?1049h",
+    );
+    publish(&sub);
+    shown(&sub);
+    assert_eq!(drawn(&sub), vec![]);
+}
+
+/// A prompt of two lines puts its `input` mark on the second, which is the line the command
+/// was typed on.
+#[test]
+fn a_two_line_prompt_is_marked_on_the_line_the_command_was_typed_on() {
+    let (_dir, sub) = built(SHOWN);
+    feed(
+        &sub,
+        b"\x1b]133;A\x07~/src main\r\n$ \x1b]133;B\x07true\r\n\x1b]133;C\x07\x1b]133;D;0\x07\
+          \x1b]133;A\x07",
+    );
+    shown(&sub);
+    let texts = drawn(&sub);
+    assert!(texts.contains(&(0, 1, "✔".to_string(), OK)), "{texts:?}");
+}
+
+/// A `done` that carried no status says the command ended, not that it succeeded.
+#[test]
+fn a_done_with_no_status_is_not_shown_as_a_success() {
+    let (_dir, sub) = built(SHOWN);
+    feed(
+        &sub,
+        b"\x1b]133;A\x07$ \x1b]133;B\x07true\r\n\x1b]133;C\x07\x1b]133;D\x07\x1b]133;A\x07$ ",
+    );
+    shown(&sub);
+    let texts = drawn(&sub);
+    assert!(
+        texts
+            .iter()
+            .any(|(x, y, t, _)| (*x, *y) == (0, 0) && t == "?"),
+        "{texts:?}"
+    );
+    assert!(!texts.iter().any(|(_, _, t, _)| t == "✔"), "{texts:?}");
+}

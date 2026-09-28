@@ -1,12 +1,13 @@
 -- How each command in every pane ended, and how long it took.
 --
 -- `C-b e` (or the palette's `exits`) shows it in a band down each pane's left edge, on the line
--- each command was typed on: `✔` for a zero exit, `✘` and the status otherwise, `⋯` while it
--- runs, then how long it took or has been running.
+-- each command was typed on: `✔` for a zero exit, `✘` and the status otherwise, `?` for an
+-- end that carried no status, `⋯` while it runs, then how long it took or has been running.
 --
 -- It reads `neotmux.commands`, so it needs a shell that sends OSC 133 marks — the lines to add
--- to bash or zsh are in docs/plugins.md. A pane whose shell sends none has an empty band. A
--- command whose end nobody saw (`unknown`) and the prompt being typed at are left blank.
+-- to bash or zsh are in docs/plugins.md. A pane whose shell sends none has an empty band, and
+-- so does one with a full-screen program up. A command whose end nobody saw (`unknown`) and
+-- the prompt being typed at are left blank.
 --
 -- The time is when this plugin first saw the command's output start and its end, to the tick,
 -- so a command that had already finished when it first looked has no time.
@@ -28,25 +29,42 @@ local M = {
 
 local band
 
--- Per pane, when each of its marks was first seen, in `neotmux.now()` milliseconds, keyed by
--- line and kind; `false` for the marks already there the first time the pane was looked at.
+-- Per pane, when each of its `output` and `done` marks on the screen was first seen, in
+-- `neotmux.now()` milliseconds, keyed by line and kind; `false` for the marks already there the
+-- first time the pane was looked at. Only the screen is read: a command whose prompt has
+-- scrolled above it is not drawn, so its marks are not worth a read every tick.
 local seen = {}
 
+-- The line number of the pane's top row, or nil for a pane with no marks worth reading: none
+-- at all, or a full-screen program up, whose rows are not the shell's lines and whose screen
+-- keeps no history to count from.
+local function top_of(pane)
+  local mode = neotmux.pane.mode(pane)
+  if mode and mode.alternate then
+    return nil
+  end
+  local len, dropped = neotmux.pane.history(pane)
+  return len and dropped + len
+end
+
 local function note(pane, now)
-  local marks = neotmux.pane.marks(pane)
+  local top = top_of(pane)
+  local marks = top and neotmux.pane.marks(pane, top)
   if marks == nil then
     return
   end
   local was = seen[pane]
   local now_seen = {}
   for _, mark in ipairs(marks) do
-    local key = mark.line .. ":" .. mark.kind
-    if was == nil then
-      now_seen[key] = false
-    elseif was[key] ~= nil then
-      now_seen[key] = was[key]
-    else
-      now_seen[key] = now
+    if mark.kind == "output" or mark.kind == "done" then
+      local key = mark.line .. ":" .. mark.kind
+      if was == nil then
+        now_seen[key] = false
+      elseif was[key] ~= nil then
+        now_seen[key] = was[key]
+      else
+        now_seen[key] = now
+      end
     end
   end
   seen[pane] = now_seen
@@ -78,30 +96,32 @@ local function draw(ctx, pane, now)
   for row = 0, rect.h - 1 do
     ctx:text(nil, rule, rect.y + row, "│", { fg = M.colors.rule })
   end
-  local len, dropped = neotmux.pane.history(pane)
-  if len == nil then
+  local top = top_of(pane)
+  if top == nil then
     return
   end
-  local top = dropped + len
-  for _, command in ipairs(commands.of(pane)) do
-    local row = command.prompt - top
+  for _, command in ipairs(commands.of(pane, top)) do
+    local row = (command.input or command.prompt) - top
     if row >= 0 and row < rect.h and (command.state == "done" or command.state == "running") then
       local y = rect.y + row
       local started = when(pane, command.output, "output")
       local ended
-      if command.state == "done" then
-        local failed = command.exit ~= nil and command.exit ~= 0
+      if command.state == "running" then
+        ctx:text(nil, rect.x, y, "⋯", { fg = M.colors.running })
+        ended = now
+      elseif command.exit == nil then
+        ctx:text(nil, rect.x, y, "?", { fg = M.colors.time })
+        ended = when(pane, command.done, "done")
+      else
+        local failed = command.exit ~= 0
         local colour = failed and M.colors.failed or M.colors.ok
         ctx:text(nil, rect.x, y, failed and "✘" or "✔", { fg = colour })
-        if failed then
+        if failed and rect.w >= 5 then
           ctx:text(nil, rect.x + 1, y, string.format("%3s", tostring(command.exit):sub(-3)), {
             fg = colour,
           })
         end
         ended = when(pane, command.done, "done")
-      else
-        ctx:text(nil, rect.x, y, "⋯", { fg = M.colors.running })
-        ended = now
       end
       if started and ended and rect.w >= 9 then
         ctx:text(nil, rect.x + 5, y, string.format("%3s", span(ended - started)), {

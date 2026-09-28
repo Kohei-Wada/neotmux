@@ -53,7 +53,7 @@ return {
   -- On, and nothing on screen until `C-b e`: when each command's output started and ended is
   -- noted from the start, for the same reason, and a shell that sends no marks costs nothing.
   exits = true,
-  -- Off, unlike the four above: which command is worth stopping to ask about is an opinion
+  -- Off, unlike the ones above: which command is worth stopping to ask about is an opinion
   -- about what you run, and one with no rules in it would stop nothing anyway.
   guard = false,
   -- Off, for the same kind of reason: which output means a pane is waiting for a human is an
