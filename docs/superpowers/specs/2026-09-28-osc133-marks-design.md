@@ -167,7 +167,7 @@ of another hook. The first `D` a shell sends has no command before it, and §4 s
   - `D;0`, a bare `D`, and a malformed exit
   - history overflow dropping marks with their lines
   - the alternate screen keeping none
-  - a new `A` replacing what is at or below it
+  - a new `A` replacing what is below it, and keeping the marks on its own line
   - both `ST` forms, `BEL` and `ESC \`
 - **`neotmux-lua`.** `neotmux.pane.marks` answers with the spellings and the range. It answers
   nil for an unknown pane and `{}` for a pane with no marks. `neotmux.commands.of` returns
