@@ -85,11 +85,13 @@ own shell's marks through must not rewrite the outer shell's structure.
 
 Each pane's `TermState` holds its marks in line order, and they obey four rules:
 
-- **A prompt replaces what is at or below it.** A new `A` at line `L` removes every mark at line
-  `L` or later before it is added. A shell redrawing its prompt, whether after a resize or
-  after `clear`, writes its `A` again where the old one was, and whatever was below it has
-  been overwritten.
-- **One mark of a kind per line.** A second `B`, `C` or `D` on the same line replaces the first.
+- **A prompt replaces what is below it.** A new `A` at line `L` removes every mark on a line after
+  `L` before it is added. A shell redrawing its prompt, whether after a resize or after `clear`,
+  writes its `A` again where the old one was, and whatever was below it has been overwritten.
+  Marks on line `L` itself stay: a command that printed nothing leaves its `C` and `D` on the
+  very line the next prompt is drawn on.
+- **One mark of a kind per line.** A second mark of the same kind on the same line replaces the
+  first, which is what takes an old `A` or `B` off a line a prompt was redrawn on.
 - **Marks go with their lines.** When the history drops lines, the marks on them go too, as
   `plugin.stamps`' times do.
 - **Bounded.** Marks are pruned to the lines the pane still holds, so a pane never holds more
