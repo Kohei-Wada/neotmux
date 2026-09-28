@@ -100,13 +100,13 @@ through it.
 
 The field chain `reserved` and `gutter` already travel, with one more field:
 
-- `Tock` and `Setup` carry `pane_reserved` (columns on the left, summed over every source).
+- `Tock` and `Setup` carry `pane_band` (columns on the left, summed over every source).
 - `Surface` carries it into `Windows` and `PaneLayout`.
 - `Session::apply` compares it with the last one it saw, the way `reserved_changed` does, and a
   change runs `apply_geometry`: resurface, lay out, fit, `resized`.
-- The host sends back which panes got their bands, with `Step::Bands`, and the Lua side cuts
-  each source's band out of each of those panes' outer rects, filled from the edge inwards in
-  grant order.
+- `Geometry` carries `outer`, every shown pane's outer rect, beside `panes`. A pane whose outer
+  rect is wider than its content got its bands this frame; the Lua side cuts each source's band
+  out of the outer rect, filled from the edge inwards in grant order.
 
 ## 5. `plugin.stamps`
 
