@@ -40,6 +40,7 @@ fn built(init: &str) -> (tempfile::TempDir, Built) {
         Geometry {
             area: Rect::new(0, 0, SIZE.cols, SIZE.rows),
             panes: vec![(pane(), Rect::new(0, 0, SIZE.cols, SIZE.rows))],
+            outer: Vec::new(),
             focus: Some(pane()),
             windows: vec![Window {
                 id: WindowId::from(1),

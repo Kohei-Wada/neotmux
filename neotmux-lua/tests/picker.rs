@@ -80,6 +80,7 @@ fn make(sub: &Built, id: SessionId, name: &str, command: &str) {
         Geometry {
             area: Rect::new(0, 0, SIZE.cols, SIZE.rows),
             panes: vec![(pane, Rect::new(0, 0, SIZE.cols, SIZE.rows))],
+            outer: Vec::new(),
             focus: Some(pane),
             windows: vec![Window {
                 id: WindowId::from(1),

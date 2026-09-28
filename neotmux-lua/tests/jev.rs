@@ -62,6 +62,7 @@ fn built(extra: impl AsRef<str>, runner: Rc<FakeRunner>) -> (TempDir, Built) {
         Geometry {
             area: Rect::new(0, 0, SIZE.cols, SIZE.rows),
             panes: vec![(pane(), Rect::new(0, 0, SIZE.cols, SIZE.rows))],
+            outer: Vec::new(),
             focus: Some(pane()),
             windows: vec![Window {
                 id: window_id(),

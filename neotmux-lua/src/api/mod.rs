@@ -14,6 +14,7 @@ pub mod pane;
 pub(crate) mod rect;
 mod regex;
 pub mod reserve;
+mod reserve_pane;
 pub mod session;
 mod sweep;
 pub mod timer;

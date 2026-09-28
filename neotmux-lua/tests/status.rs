@@ -81,6 +81,7 @@ fn frame(
         Geometry {
             area: Rect::new(0, reserved.top, cols, content.rows),
             panes: vec![(pane, Rect::new(0, reserved.top, cols, content.rows))],
+            outer: Vec::new(),
             focus: Some(pane),
             windows: windows
                 .iter()

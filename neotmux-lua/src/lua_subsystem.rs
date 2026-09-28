@@ -8,6 +8,7 @@ use crate::api::ctx::Ctx;
 use crate::api::{self, Opts, keymap};
 use crate::draw::Buffers;
 use crate::draw::Floats;
+use crate::draw::PaneBands;
 use crate::draw::Reservations;
 use crate::host::Ambient;
 use crate::host::Clipboard;
@@ -59,6 +60,7 @@ pub struct LuaSubsystem {
     budget: Rc<Budget>,
     overrun: Rc<Overrun>,
     reservations: Rc<Reservations>,
+    pane_bands: Rc<PaneBands>,
     window_ids: Rc<WindowIds>,
     floats: Rc<Floats>,
     jobs: Rc<Jobs>,
@@ -118,6 +120,7 @@ impl LuaSubsystem {
         ));
         let ops = Rc::new(OpBuffer::new(Rc::clone(&ambient)));
         let reservations = Rc::new(Reservations::new());
+        let pane_bands = Rc::new(PaneBands::new());
         let window_ids = Rc::new(WindowIds::new());
         let floats = Rc::new(Floats::new());
         let buffers = Rc::new(Buffers::new());
@@ -134,6 +137,7 @@ impl LuaSubsystem {
             registry: registry.clone(),
             buffers: buffers.clone(),
             reservations: reservations.clone(),
+            pane_bands: pane_bands.clone(),
             floats: floats.clone(),
             jobs: jobs.clone(),
             timers: timers.clone(),
@@ -160,6 +164,7 @@ impl LuaSubsystem {
                 timers: timers.clone(),
                 overrun: overrun.clone(),
                 reservations: reservations.clone(),
+                pane_bands: pane_bands.clone(),
                 window_ids: window_ids.clone(),
                 floats: floats.clone(),
                 home,
@@ -190,6 +195,7 @@ impl LuaSubsystem {
             budget,
             overrun,
             reservations,
+            pane_bands,
             window_ids,
             floats,
             jobs,
@@ -578,12 +584,24 @@ impl LuaSubsystem {
 
                 let ctx = {
                     let geometry = self.geometry.borrow();
+                    let pane_bands = geometry
+                        .outer
+                        .iter()
+                        .filter_map(|(pane, outer)| {
+                            let (_, content) = geometry.panes.iter().find(|(p, _)| p == pane)?;
+                            self.pane_bands
+                                .band(owner, *outer, *content)
+                                .map(|band| (*pane, band))
+                        })
+                        .collect();
                     Ctx::new(
                         owner,
                         self.buffers.clone(),
                         geometry.area,
                         geometry.panes.clone(),
+                        geometry.outer.clone(),
                         self.reservations.band(owner),
+                        pane_bands,
                         self.floats.by_owner(owner),
                     )
                 };
@@ -1015,6 +1033,12 @@ impl LuaSubsystem {
     /// the host's judgement, not this layer's.
     pub fn reserved(&self) -> Reserved {
         self.reservations.totals()
+    }
+
+    /// The columns every source has asked every pane for, summed. Which panes can spare them
+    /// is the host's judgement.
+    pub fn pane_band(&self) -> u16 {
+        self.pane_bands.total()
     }
 
     /// The host has settled the surface: hand every granted reservation its band, out of the

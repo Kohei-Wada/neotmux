@@ -16,6 +16,9 @@ pub struct Geometry {
     /// those same coordinates, so this — not a bare size — is what a plugin anchors to.
     pub area: Rect,
     pub panes: Vec<(PaneId, Rect)>,
+    /// Every shown pane's outer rect: its rect in `panes` with the pane bands put back. A pane
+    /// whose outer rect is wider than its content got its bands this frame.
+    pub outer: Vec<(PaneId, Rect)>,
     pub focus: Option<PaneId>,
     /// Every window, in creation order, with the panes it holds.
     pub windows: Vec<Window>,

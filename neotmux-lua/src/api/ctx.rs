@@ -19,9 +19,14 @@ pub struct Ctx {
     /// reserved band moves the edge without changing the size.
     area: Rect,
     panes: Vec<(PaneId, Rect)>,
+    /// Every shown pane's outer rect, bands and all. Empty from a host that has none to give,
+    /// and then a pane's outer rect is its content.
+    outer: Vec<(PaneId, Rect)>,
     /// This source's own band, in surface coordinates. Per source: two sources reserving the
     /// same edge get different bands, and a source that reserved nothing gets none.
     band: Option<Rect>,
+    /// This source's own columns of each pane that got its bands this frame.
+    pane_bands: BTreeMap<PaneId, Rect>,
     /// This source's live floats, as of this tick. Captured per callback, not per frame:
     /// a `move_to`/`resize_to` issued inside a tick takes effect on the next frame, so the
     /// draws this tick saw clip against the rect they started with (matches `band`).
@@ -29,12 +34,17 @@ pub struct Ctx {
 }
 
 impl Ctx {
+    /// Every argument is a distinct fact of the frame `dispatch_tick` builds this from, not a
+    /// group that would make a struct clearer.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         owner: SourceId,
         buffers: Rc<Buffers>,
         area: Rect,
         panes: Vec<(PaneId, Rect)>,
+        outer: Vec<(PaneId, Rect)>,
         band: Option<Rect>,
+        pane_bands: BTreeMap<PaneId, Rect>,
         floats: BTreeMap<FloatId, Rect>,
     ) -> Self {
         Self {
@@ -42,7 +52,9 @@ impl Ctx {
             buffers,
             area,
             panes,
+            outer,
             band,
+            pane_bands,
             floats,
         }
     }
@@ -235,6 +247,27 @@ impl UserData for Ctx {
         methods.add_method("reserved", |lua, this, ()| match this.band {
             Some(band) => Ok(Value::Table(rect::to_table(lua, band)?)),
             None => Ok(Value::Nil),
+        });
+
+        methods.add_method("pane_band", |lua, this, pane: u32| {
+            match this.pane_bands.get(&PaneId::from(pane)) {
+                Some(band) => Ok(Value::Table(rect::to_table(lua, *band)?)),
+                None => Ok(Value::Nil),
+            }
+        });
+
+        methods.add_method("pane_outer", |lua, this, pane: u32| {
+            let id = PaneId::from(pane);
+            let found = this
+                .outer
+                .iter()
+                .find(|(pane, _)| *pane == id)
+                .map(|(_, rect)| *rect)
+                .or_else(|| this.pane_rect(id));
+            match found {
+                Some(found) => Ok(Value::Table(rect::to_table(lua, found)?)),
+                None => Ok(Value::Nil),
+            }
         });
 
         methods.add_method(

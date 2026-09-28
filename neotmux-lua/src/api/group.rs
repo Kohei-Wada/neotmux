@@ -7,8 +7,14 @@ use mlua::{Function, Lua, MultiValue, Table};
 use crate::api::Sweep;
 use crate::plugin::{GroupId, Groups};
 
-const TOP: [&str; 6] = [
-    "on_tick", "on_event", "on_key", "on_write", "float", "reserve",
+const TOP: [&str; 7] = [
+    "on_tick",
+    "on_event",
+    "on_key",
+    "on_write",
+    "float",
+    "reserve",
+    "reserve_pane",
 ];
 const NESTED: [(&str, &[&str]); 5] = [
     ("keymap", &["set"]),

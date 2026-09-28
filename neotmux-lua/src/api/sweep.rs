@@ -3,7 +3,7 @@ use std::rc::Rc;
 use neotmux_proto::screen::PaneRead;
 
 use crate::api::forget_if_no_longer_drawing;
-use crate::draw::{Buffers, Floats, Reservations};
+use crate::draw::{Buffers, Floats, PaneBands, Reservations};
 use crate::plugin::{Commands, Held, Registry, SourceId};
 use crate::sched::Jobs;
 use crate::sched::timers::Timers;
@@ -15,6 +15,7 @@ pub(crate) struct Sweep {
     pub(crate) registry: Rc<Registry>,
     pub(crate) buffers: Rc<Buffers>,
     pub(crate) reservations: Rc<Reservations>,
+    pub(crate) pane_bands: Rc<PaneBands>,
     pub(crate) floats: Rc<Floats>,
     pub(crate) jobs: Rc<Jobs>,
     pub(crate) timers: Rc<Timers>,
@@ -29,6 +30,7 @@ impl Sweep {
     pub(crate) fn remove_all_of(&self, id: SourceId) {
         self.registry.remove_all_of(id);
         self.reservations.remove_all_of(id);
+        self.pane_bands.remove_all_of(id);
         self.floats.remove_all_of(id);
         self.jobs.remove_all_of(id);
         self.timers.remove_all_of(id);
@@ -49,6 +51,9 @@ impl Sweep {
                 }
                 Held::Reservation(id) => {
                     self.reservations.remove(id);
+                }
+                Held::PaneBand(id) => {
+                    self.pane_bands.remove(id);
                 }
                 Held::Float(id) => self.floats.remove(id),
                 Held::Job(id) => self.jobs.remove(id),

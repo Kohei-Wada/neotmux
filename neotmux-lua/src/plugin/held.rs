@@ -12,6 +12,7 @@ use crate::sched::timers::TimerId;
 pub enum Held {
     Registration(RegistrationId),
     Reservation(ReservationId),
+    PaneBand(ReservationId),
     Float(FloatId),
     Job(JobId),
     Timer(TimerId),

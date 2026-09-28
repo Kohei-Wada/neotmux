@@ -148,6 +148,7 @@ fn frame_in(sub: &Built, surface: Size, sessions: &[Sess], current: u32) -> Vec<
             Geometry {
                 area,
                 panes: shown.iter().map(|p| (*p, area)).collect(),
+                outer: Vec::new(),
                 focus: Some(focus),
                 windows,
                 window: Some(WindowId::from(s.id * 100 + at as u32)),

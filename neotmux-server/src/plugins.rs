@@ -494,6 +494,7 @@ mod tests {
             Geometry {
                 area: Rect::new(0, 0, size.cols, size.rows),
                 panes: vec![(pane, Rect::new(0, 0, size.cols, size.rows))],
+                outer: Vec::new(),
                 focus: Some(pane),
                 ..Default::default()
             },
@@ -566,6 +567,7 @@ mod tests {
                 }],
                 window: Some(WindowId::from(1)),
                 panes: vec![(pane, Rect::new(0, 0, size.cols, size.rows))],
+                outer: Vec::new(),
                 focus: Some(pane),
                 zoomed: None,
             },

@@ -38,6 +38,7 @@ fn built(init: &str) -> (tempfile::TempDir, LuaSubsystem) {
                 (PaneId::from(1), Rect::new(0, 0, 40, 24)),
                 (PaneId::from(2), Rect::new(40, 0, 40, 24)),
             ],
+            outer: Vec::new(),
             focus: Some(PaneId::from(1)),
             windows: vec![Window {
                 id: WindowId::from(1),

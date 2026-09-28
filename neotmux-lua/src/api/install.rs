@@ -9,6 +9,7 @@ use crate::LoadFailure;
 use crate::api::Sweep;
 use crate::draw::Buffers;
 use crate::draw::Floats;
+use crate::draw::PaneBands;
 use crate::draw::Reservations;
 use crate::host::WindowIds;
 use crate::host::{Op, OpBuffer};
@@ -39,6 +40,7 @@ pub(crate) struct Shared {
     pub(crate) timers: Rc<crate::sched::timers::Timers>,
     pub(crate) overrun: Rc<Overrun>,
     pub(crate) reservations: Rc<Reservations>,
+    pub(crate) pane_bands: Rc<PaneBands>,
     pub(crate) window_ids: Rc<WindowIds>,
     pub(crate) floats: Rc<Floats>,
     /// `$HOME` as the host read it, absent where the process had none.
@@ -189,6 +191,7 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
         timers,
         overrun,
         reservations,
+        pane_bands,
         window_ids,
         floats,
         home,
@@ -551,6 +554,12 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
         let reserve =
             super::reserve::install(lua, sources.clone(), reservations.clone(), groups.clone())?;
         neotmux.set("reserve", reserve)?;
+    }
+
+    {
+        let reserve_pane =
+            super::reserve_pane::install(lua, sources.clone(), pane_bands.clone(), groups.clone())?;
+        neotmux.set("reserve_pane", reserve_pane)?;
     }
 
     {

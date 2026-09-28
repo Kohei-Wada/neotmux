@@ -42,6 +42,7 @@ fn publish(sub: &LuaSubsystem, session: SessionId, panes: Vec<(PaneId, Rect)>, f
             }],
             window: Some(WindowId::from(1)),
             panes,
+            outer: Vec::new(),
             focus: Some(focus),
             zoomed: None,
         },
@@ -428,6 +429,7 @@ fn a_send_reaches_a_pane_in_a_window_that_is_not_shown() {
         Geometry {
             area: Rect::new(0, 0, size.cols, size.rows),
             panes: vec![(shown, Rect::new(0, 0, 80, 24))],
+            outer: Vec::new(),
             focus: Some(shown),
             windows: vec![
                 Window {

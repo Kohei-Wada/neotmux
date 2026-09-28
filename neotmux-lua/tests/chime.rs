@@ -79,6 +79,7 @@ fn built(init: &str, runner: Rc<FakeRunner>) -> (tempfile::TempDir, Built) {
                     Rect::new(SIZE.cols / 2, 0, SIZE.cols / 2, SIZE.rows),
                 ),
             ],
+            outer: Vec::new(),
             focus: Some(PaneId::from(ONE)),
             // Two windows, only one of them shown: `pane.list` is the shown one's panes, and a
             // plugin that watched only those would never hear from `THREE`.

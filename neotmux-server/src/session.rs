@@ -682,6 +682,7 @@ impl Session {
         Geometry {
             area: layout.area(),
             panes: layout.panes(),
+            outer: layout.outer_panes(),
             focus: layout.focus(),
             windows: self
                 .windows

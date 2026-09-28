@@ -58,6 +58,7 @@ fn publish(sub: &LuaSubsystem) {
         Geometry {
             area: Rect::new(0, 0, SIZE.cols, SIZE.rows),
             panes: vec![(pane(1), Rect::new(0, 0, 40, 4))],
+            outer: Vec::new(),
             focus: Some(pane(1)),
             windows: vec![
                 Window {
