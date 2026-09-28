@@ -93,6 +93,7 @@ Each of these returns a handle with one method, `handle:remove()`, which is idem
 | `neotmux.float({ x =, y =, w =, h = })` | nothing runs; the grant is two-valued — a handle, or `nil` plus a message (below) |
 | `neotmux.keymap.set(spec, fn)` | for that one key; return `true` to consume it |
 | `neotmux.reserve(edge, cells)` | nothing runs; it takes a band of the surface (below) |
+| `neotmux.reserve_pane(edge, cells)` | nothing runs; it takes columns down the left of every pane (below) |
 | `neotmux.command.add(name, fn, { desc = })` | when `neotmux.command.run(name)` names it; answers `true`, or `nil` plus a message — not a handle, and `neotmux.command.remove(name)` takes one away (below) |
 | `neotmux.group(name)` | nothing runs; answers a table of the calls above that files what they register under `name`, emptied first (see [Reloading](#reloading)) |
 
@@ -188,6 +189,8 @@ neotmux.on_tick(function(ctx)
   ctx:text(win, x, y, 'text')               -- win = a float: its own coordinates, not the surface's
   local r = ctx:pane_rect(pane_id)             -- { x = , y = , w = , h = } or nil
   local band = ctx:reserved()                  -- your own band, or nil (below)
+  local pane_band = ctx:pane_band(pane_id)     -- your own band of that pane, or nil (below)
+  local outer = ctx:pane_outer(pane_id)        -- the pane with every pane band, or nil (below)
   local float = ctx:float_rect(win)           -- your own float, or nil (below)
   ctx:view(pane, 12)                          -- draw that pane 12 lines back in its own history
 end)
@@ -307,6 +310,51 @@ past that a band is not a margin on the panes but the layout. Asking for more th
 own bound, for zero, or for a name no edge has *raises* — those are typos. Losing the cells to
 a plugin that asked first returns `nil` plus a message instead, exactly as `keymap.set` does
 when it loses a key: you wrote a legal call and lost a race.
+
+### Reserving columns of every pane
+
+```lua
+local g = neotmux.group('plugin.stamps')
+local handle, message = g.reserve_pane('left', 10)   -- also neotmux.reserve_pane
+handle:remove()
+handle:resize_to(12)
+
+g.on_tick(function(ctx)
+  for _, pane in ipairs(neotmux.pane.list()) do
+    local band = ctx:pane_band(pane)      -- { x, y, w, h } in surface coordinates, or nil
+    local outer = ctx:pane_outer(pane)    -- the pane with every band, or nil
+  end
+end)
+```
+
+This is `reserve` again, one level down: instead of a band of the surface, it is columns down
+the left of *every* pane, meant for something that wants to sit beside every pane's own rows —
+a time down its left edge, say — rather than in one place on the terminal. `edge` is `'left'`
+only; anything else raises, because there is nowhere else to put one yet.
+
+Each source gets one band; a second `reserve_pane` from the same source is refused until the
+first is removed, the same distinction `reserve` and `keymap.set` draw between a typo and a
+lost race. Bands are filled from the pane's edge inwards in the order they were granted, and
+`resize_to(cells) -> true | nil, message` keeps a band's place in that order the way it does on
+the surface. Every source's bands share one cap: **16 columns**, summed across all of them —
+past that a pane band is not a gutter of text but the pane. The reservation is held by the
+group it was made through, so `config-reload` takes it back like every other registration.
+
+`ctx:pane_band(pane)` answers the caller's own columns of that pane, in surface coordinates,
+the same as `ctx:reserved()` does for a surface band. It is `nil` when the caller holds none,
+when the pane is not shown, or when the pane is too narrow to have its bands this frame — draw
+nothing in that pane this tick. Draw into it with `ctx:text(nil, ...)` at the coordinates it
+gives you, the same as any other surface-coordinate draw.
+
+A pane whose outer width would leave less than the minimum pane width once its bands are cut
+out keeps all of its columns that frame — the decision is per pane, so one narrow pane does not
+take the band off every other. Splitting or resizing a pane below the minimum plus the bands is
+refused, the way it already is against the bare minimum.
+
+`ctx:pane_rect` and `neotmux.pane.rect` keep meaning what they always have: the part of the
+pane a shell writes into, less any bands. `ctx:pane_outer(pane)` is new, and is the pane with
+its bands included — what `plugin.tmux.borders` draws its rules around and what `neotmux.prompt`
+bounds itself to, so a band never gets a rule or a border that stops short of it.
 
 ### Floating a window
 
@@ -1420,7 +1468,7 @@ The rest are neotmux's own:
 | `notify` | draws each notification in a frame of its own, stacked up from the bottom-right |
 | `palette` | the command palette on `C-b :`: every registered command, fuzzy-filtered as you type, `Enter` to run the one under the cursor; `@` for the sessions, `#` for the agents, and `C-b g` opens it on `#` |
 | `costs` | the palette's `costs`: what each plugin's ticks have cost, most first |
-| `stamps` | `C-b t` shows when every line of every pane arrived, on a gutter coloured by how long it waited |
+| `stamps` | `C-b t` shows when every line of every pane arrived, in a band down each pane's left edge that the pane gives up while it is shown |
 | `guard` | holds back the Enter that would run a line `neotmux.guard`'s rules name, until you press it again — **off by default** |
 | `footer` | whichever mode is raised through `neotmux.mode`, on one reserved bottom row — **off by default** |
 

@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### The times have a band of their own
+
+`C-b t` no longer paints over the first nine columns of every pane. While the times are shown,
+every pane's shell is ten columns narrower and the times sit in the columns it gave up, their
+text yellow or red after a wait rather than the cell behind them. Hiding them gives the columns
+back. `require('plugin.stamps').colors.gutter` is gone and `rule` is new.
+
+The band is `neotmux.reserve_pane('left', cells)`, which any plugin can hold: `ctx:pane_band(pane)`
+answers where a source's columns of a pane are, and `ctx:pane_outer(pane)` the pane with its
+bands, which the borders and the prompt now draw around. `ctx:pane_rect` and
+`neotmux.pane.rect` are what they were — the part of the pane the shell writes in.
+
 ### Closing a window or a session from the prefix
 
 `C-b x` ends the window you are in and every shell in it, and ending the last one ends the
