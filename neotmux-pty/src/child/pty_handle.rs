@@ -160,32 +160,45 @@ impl PtyHandle {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
     use portable_pty::CommandBuilder;
 
     use super::*;
 
+    /// A child that never stops writing, counting how often it was read.
+    struct Flood(Arc<AtomicUsize>);
+
+    impl Read for Flood {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            buf.fill(b'y');
+            Ok(buf.len())
+        }
+    }
+
+    /// With nobody draining, the reader fills the channel and then waits in `send` with one
+    /// more read in hand, rather than reading on. Counted in reads rather than by draining,
+    /// which lets it read again while the count is taken.
     #[test]
     fn output_channel_stays_bounded_under_a_flooding_child() {
-        let mut cmd = CommandBuilder::new("sh");
-        cmd.args(["-c", "yes"]);
+        let reads = Arc::new(AtomicUsize::new(0));
+        let (tx, rx) = sync_channel(OUTPUT_CHANNEL_BOUND);
         let (_wakeup, waker) = crate::child::wakeup().expect("wakeup");
-        let mut pty = PtyHandle::spawn(cmd, Size { rows: 24, cols: 80 }, waker).expect("spawn pty");
+        let flood = Flood(reads.clone());
+        let reader = thread::spawn(move || read_loop(flood, tx, waker));
 
-        std::thread::sleep(Duration::from_millis(500));
+        thread::sleep(Duration::from_millis(200));
+        let read = reads.load(Ordering::SeqCst);
+        drop(rx);
+        reader.join().expect("the reader returns once nobody is listening");
 
-        pty.child.kill().ok();
-        pty.child.wait().ok();
-
-        let mut drained = 0;
-        while pty.output().try_recv().is_ok() {
-            drained += 1;
-        }
-
-        assert!(
-            drained <= OUTPUT_CHANNEL_BOUND + 1,
-            "reader thread buffered {drained} messages, channel bound is {OUTPUT_CHANNEL_BOUND}"
+        assert_eq!(
+            read,
+            OUTPUT_CHANNEL_BOUND + 1,
+            "the reader read {read} times into a channel bounded at {OUTPUT_CHANNEL_BOUND}"
         );
     }
 
