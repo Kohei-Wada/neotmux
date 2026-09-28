@@ -279,3 +279,50 @@ fn a_command_keeps_its_time_after_scrolling_into_the_history() {
         .collect();
     assert_eq!(times, vec![" 1s".to_string()], "{texts:?}");
 }
+
+/// The pane only in a window nobody is looking at, as the host publishes it then: in the
+/// window's list, and not among the panes on the screen.
+fn hidden(sub: &Built) {
+    sub.begin_frame(
+        one(),
+        Epoch::new(SIZE, vec![], None),
+        Geometry {
+            area: Rect::new(0, 0, SIZE.cols, SIZE.rows),
+            windows: vec![neotmux_proto::geom::Window {
+                id: neotmux_proto::WindowId::from(1),
+                panes: vec![pane()],
+                name: None,
+            }],
+            window: Some(neotmux_proto::WindowId::from(2)),
+            ..Default::default()
+        },
+    );
+}
+
+/// `clear` in a pane nobody is looking at writes over a command's marks, and the command that
+/// follows does not inherit the old one's time.
+#[test]
+fn a_hidden_pane_forgets_the_marks_written_over() {
+    let (_dir, sub) = built(SHOWN);
+    feed(&sub, b"\x1b]133;A\x07$ \x1b]133;B\x07c1\r\n");
+    sub.dispatch_tick(one());
+    more(&sub, b"\x1b]133;C\x07");
+    sub.dispatch_tick(one());
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    hidden(&sub);
+    more(
+        &sub,
+        b"\x1b]133;D;0\x07\x1b[H\x1b[2J\x1b]133;A\x07$ \x1b]133;B\x07c2\r\n",
+    );
+    sub.dispatch_tick(one());
+    more(&sub, b"\x1b]133;C\x07\x1b]133;D;0\x07\r\n\x1b]133;A\x07$ ");
+    sub.dispatch_tick(one());
+    shown(&sub);
+    let texts = drawn(&sub);
+    let times: Vec<(u16, String)> = texts
+        .iter()
+        .filter(|(x, _, _, _)| *x == 5)
+        .map(|(_, y, t, _)| (*y, t.clone()))
+        .collect();
+    assert_eq!(times, vec![(0, " 0s".to_string())], "{texts:?}");
+}

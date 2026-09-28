@@ -137,3 +137,45 @@ fn a_done_with_no_output_before_it_closes_nothing() {
         vec!["unknown 0 nil nil", "done 1 2 0", "last done"]
     );
 }
+
+/// A caller that only needs the next few marks — how the command at the bottom of what it drew
+/// ended — asks for a few, and is not handed every mark to the end of the pane.
+#[test]
+fn a_read_can_stop_after_a_few_marks() {
+    let (_dir, sub) = built(
+        "neotmux.on_key(function(key)
+           if key ~= 'L' then return false end
+           neotmux.log.info('limited ' .. #neotmux.pane.marks(1, 0, nil, 2))
+           return true
+         end)",
+    );
+    feed(
+        &sub,
+        b"\x1b]133;A\x07$ \x1b]133;B\x07true\r\n\x1b]133;C\x07\x1b]133;D;0\x07\x1b]133;A\x07$ ",
+    );
+    keys(&sub, &["L"]);
+    assert_eq!(logged(&sub), vec!["limited 2"]);
+}
+
+/// Commands read from a range of lines: one whose prompt is in the range is settled by reading
+/// on past it, as far as its own end and the prompt after that, and no further.
+#[test]
+fn commands_read_from_a_range_are_settled_past_its_end() {
+    let (_dir, sub) = built(
+        "local commands = require('neotmux.commands')
+         neotmux.on_key(function(key)
+           if key ~= 'R' then return false end
+           for _, c in ipairs(commands.of(1, 0, 1)) do
+             neotmux.log.info(c.state .. ' ' .. c.prompt .. ' ' .. tostring(c.exit))
+           end
+           return true
+         end)",
+    );
+    feed(
+        &sub,
+        b"\x1b]133;A\x07$ \x1b]133;B\x07make\r\n\x1b]133;C\x07a\r\nb\r\nc\r\n\x1b]133;D;2\x07\
+          \x1b]133;A\x07$ \x1b]133;B\x07true\r\n\x1b]133;C\x07\x1b]133;D;0\x07\x1b]133;A\x07$ ",
+    );
+    keys(&sub, &["R"]);
+    assert_eq!(logged(&sub), vec!["done 0 2"]);
+}

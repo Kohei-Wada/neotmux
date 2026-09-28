@@ -19,11 +19,13 @@
 -- timeout.
 local M = {}
 
--- `first`, when given, is the line to start reading at: a caller drawing the screen asks from
--- its top row, and a pane that has kept thousands of commands is not read whole every tick.
-function M.of(pane, first)
+-- `first` and `last`, when given, are the lines to read: a caller drawing a screen asks for its
+-- rows, and a pane that has kept thousands of commands is not read whole every tick. The last
+-- command in them is settled by reading on past `last`, as far as its own end and the prompt
+-- after it — a few marks, never the rest of the pane.
+function M.of(pane, first, last)
   local out, current = {}, nil
-  for _, mark in ipairs(neotmux.pane.marks(pane, first) or {}) do
+  local function take(mark)
     if mark.kind == "prompt" then
       if current and current.state == nil then
         current.state = "unknown"
@@ -39,6 +41,22 @@ function M.of(pane, first)
         current.done = mark.line
         current.exit = mark.exit
         current.state = "done"
+      end
+    end
+  end
+  for _, mark in ipairs(neotmux.pane.marks(pane, first, last) or {}) do
+    take(mark)
+  end
+  if last and current and current.state == nil then
+    -- Its input, output and done, and the next prompt: four marks settle it.
+    for _, mark in ipairs(neotmux.pane.marks(pane, last + 1, nil, 4) or {}) do
+      if mark.kind == "prompt" then
+        current.state = "unknown"
+        break
+      end
+      take(mark)
+      if current.state then
+        break
       end
     end
   end

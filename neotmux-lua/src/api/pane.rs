@@ -266,29 +266,38 @@ pub(crate) fn install(
         // command lines and outputs start, and how each command ended. Empty for a shell that
         // says nothing, which is most of them until they are set up to.
         let terminals = terminals.clone();
-        let marks = lua.create_function(
-            move |lua, (pane, first, last): (u32, Option<u64>, Option<u64>)| {
-                let Some(marks) = terminals.marks(
-                    PaneId::from(pane),
-                    first.unwrap_or(0),
-                    last.unwrap_or(u64::MAX),
-                ) else {
-                    return Ok(Value::Nil);
-                };
-                let out = lua.create_table()?;
-                for (at, mark) in marks.iter().enumerate() {
-                    let one = lua.create_table()?;
-                    one.set("line", mark.line)?;
-                    one.set("col", mark.col)?;
-                    one.set("kind", mark.kind.name())?;
-                    if let Some(exit) = mark.exit {
-                        one.set("exit", exit)?;
+        let marks =
+            lua.create_function(
+                move |lua,
+                      (pane, first, last, limit): (
+                    u32,
+                    Option<u64>,
+                    Option<u64>,
+                    Option<usize>,
+                )| {
+                    let Some(marks) = terminals.marks(
+                        PaneId::from(pane),
+                        first.unwrap_or(0),
+                        last.unwrap_or(u64::MAX),
+                    ) else {
+                        return Ok(Value::Nil);
+                    };
+                    // A table per mark is what a read costs, so a caller after the next few is
+                    // not handed every mark to the end of the pane.
+                    let out = lua.create_table()?;
+                    for (at, mark) in marks.iter().take(limit.unwrap_or(usize::MAX)).enumerate() {
+                        let one = lua.create_table()?;
+                        one.set("line", mark.line)?;
+                        one.set("col", mark.col)?;
+                        one.set("kind", mark.kind.name())?;
+                        if let Some(exit) = mark.exit {
+                            one.set("exit", exit)?;
+                        }
+                        out.set(at + 1, one)?;
                     }
-                    out.set(at + 1, one)?;
-                }
-                Ok(Value::Table(out))
-            },
-        )?;
+                    Ok(Value::Table(out))
+                },
+            )?;
         pane.set("marks", marks)?;
     }
 

@@ -31,13 +31,14 @@ local band
 
 -- Per pane: `at`, when each `output` and `done` mark was first seen, in `neotmux.now()`
 -- milliseconds, as `at[line][kind]`; `false` for a mark whose time nobody knows, because it was
--- already there, or already in the history, when it was first seen. `dropped` is how many lines
--- had fallen off the history when it was last looked at.
+-- already on the screen the first time the pane was looked at. `dropped` is how many lines had
+-- fallen off the history then, and `last` the lowest line anything is kept for.
 --
--- A line in the history cannot be written again, so what is known about its marks is kept until
--- the history drops it: copy mode winds back to it later, and a command watched on the screen
--- still says how long it took. Only the screen is read again every tick, since that is where
--- marks arrive and where a redrawn prompt writes over old ones.
+-- Only the screen is read, since that is where marks arrive and where a redrawn prompt writes
+-- over old ones. A line in the history cannot be written again, so what is known about its
+-- marks is kept until the history drops it: copy mode winds back to it later, and a command
+-- watched on the screen still says how long it took. A mark that went into the history before
+-- it was ever read has no time.
 local seen = {}
 
 -- The pane's live top row and the row drawn at its top, which is the live one wound back by
@@ -57,33 +58,28 @@ local function tops(pane)
 end
 
 local function note(pane, now)
-  local live, drawn, dropped = tops(pane)
+  local live, _, dropped = tops(pane)
   if live == nil then
     return
   end
   local it = seen[pane]
   local first = it == nil
-  if first then
-    it = { at = {}, dropped = dropped }
-    seen[pane] = it
-  end
-  local from = first and 0 or math.min(live, drawn)
-  local marks = neotmux.pane.marks(pane, from) or {}
+  it = it or { at = {}, dropped = dropped, last = live }
   local present = {}
-  for _, mark in ipairs(marks) do
+  for _, mark in ipairs(neotmux.pane.marks(pane, live) or {}) do
     if mark.kind == "output" or mark.kind == "done" then
       local line = it.at[mark.line] or {}
       it.at[mark.line] = line
       if line[mark.kind] == nil then
-        line[mark.kind] = not first and mark.line >= live and now or false
+        line[mark.kind] = not first and now or false
       end
       present[mark.line] = present[mark.line] or {}
       present[mark.line][mark.kind] = true
+      it.last = math.max(it.last, mark.line)
     end
   end
   -- A mark on the screen that is no longer there was written over: `clear`, or a redrawn prompt.
-  local rect = neotmux.pane.rect(pane)
-  for line = live, live + (rect and rect.h or 0) do
+  for line = live, it.last do
     local kinds = it.at[line]
     if kinds then
       for kind in pairs(kinds) do
@@ -91,12 +87,16 @@ local function note(pane, now)
           kinds[kind] = nil
         end
       end
+      if next(kinds) == nil then
+        it.at[line] = nil
+      end
     end
   end
   for line = it.dropped, dropped - 1 do
     it.at[line] = nil
   end
   it.dropped = dropped
+  seen[pane] = it
 end
 
 local function when(pane, line, kind)
@@ -130,7 +130,7 @@ local function draw(ctx, pane, now)
   if top == nil then
     return
   end
-  for _, command in ipairs(commands.of(pane, top)) do
+  for _, command in ipairs(commands.of(pane, top, top + rect.h - 1)) do
     local row = (command.input or command.prompt) - top
     if row >= 0 and row < rect.h and (command.state == "done" or command.state == "running") then
       local y = rect.y + row
@@ -153,7 +153,7 @@ local function draw(ctx, pane, now)
         end
         ended = when(pane, command.done, "done")
       end
-      if started and ended and ended >= started and rect.w >= 9 then
+      if started and ended and rect.w >= 9 then
         ctx:text(nil, rect.x + 5, y, string.format("%3s", span(ended - started)), {
           fg = M.colors.time,
         })

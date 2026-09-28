@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### `C-b e` stays cheap however far copy mode winds back
+
+The exits band read every mark from the top of the view to the end of the pane on every tick,
+and with a few thousand commands in the history copy mode wound back far enough to stop it.
+It now reads only the rows it draws, and the marks just past them that settle the last command.
+`neotmux.pane.marks` takes a fourth argument, the most marks to return, and
+`neotmux.commands.of(id, first, last)` reads a range of lines.
+
 ### The times and the exits follow copy mode
 
 `C-b t`'s times and `C-b e`'s marks stayed where the live screen's lines were while copy mode

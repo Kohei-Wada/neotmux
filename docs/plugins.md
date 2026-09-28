@@ -432,7 +432,7 @@ neotmux.pane.cursor(id)  -- { x = , y = , visible = }, or nil
 neotmux.pane.mode(id)    -- { canonical = , echo = , alternate = , application_cursor = }, or nil
 neotmux.pane.revision(id)     -- a number that moves when the pane is fed, or nil
 neotmux.pane.title(id)        -- what the program itself last set as its title, or nil
-neotmux.pane.marks(id, first, last)  -- the shell's OSC 133 marks on those lines, or nil
+neotmux.pane.marks(id, first, last, limit)  -- the shell's OSC 133 marks on those lines, at most limit, or nil
 neotmux.pane.content(id, opts) -- { line, ... }, revision, wrapped — or nil, nil, nil
 neotmux.pane.history(id)      -- how many lines are above the screen, how many fell off
 neotmux.pane.view(id)         -- how many lines back `ctx:view` has it drawn this frame, 0 for none
@@ -611,6 +611,7 @@ lines they landed on:
 ```lua
 neotmux.pane.marks(id)            -- every mark, oldest first, or nil for no such pane
 neotmux.pane.marks(id, first, last)
+neotmux.pane.marks(id, first, nil, 4)   -- the first four from `first` on
 -- { { line = 1203, col = 0, kind = 'prompt' }, { line = 1203, col = 28, kind = 'input' },
 --   { line = 1204, col = 0, kind = 'output' }, { line = 1210, col = 0, kind = 'done', exit = 0 } }
 ```
@@ -1934,6 +1935,10 @@ how far back the pane is drawn as the frame stands — what a source that ticked
 this frame, else what was asked last frame — and `0` when nothing is winding it back. The row at
 the top of the pane is then line `dropped + len - view`, in the numbering `neotmux.pane.history`
 gives; that is how `plugin.stamps` and `plugin.exits` keep their bands beside copy mode's lines.
+"As the frame stands" depends on who ticked first: sources tick in the order they were loaded,
+and the shipped runtime loads `plugin.tmux.copy` before either of those. A plugin of yours that
+is loaded before the one winding a pane back reads last frame's view, and so follows it a frame
+late.
 
 ### The notification surface
 
