@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### No flicker under a build
+
+A frame is written as one synchronized update (DEC mode 2026) with the cursor hidden while its
+cells are written. Under a pane pouring out a build, a terminal used to paint a frame as it
+arrived, half over the last one, with the cursor racing across every cell being written. A
+terminal that does not know the mode ignores it, and still gets the cursor hidden.
+
 ### `C-b ?` lists the keys
 
 `C-b ?` opens every prefix key in a list, as tmux's `list-keys` does: the key, the command it

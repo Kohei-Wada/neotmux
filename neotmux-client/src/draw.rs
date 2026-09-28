@@ -9,7 +9,26 @@ use neotmux_proto::screen::Frame;
 
 /// Puts a frame on this process's terminal. The one place a produced frame meets a screen:
 /// everything above it is what to show, and everything here is the showing.
+///
+/// Inside a synchronized update (DEC mode 2026), with the cursor hidden until the frame puts it
+/// back: under a pane pouring out a build, a frame is many cells, and a terminal that painted
+/// it as it arrived showed half of one frame over the last, with the cursor racing across every
+/// cell being written. A terminal that does not know the mode ignores it, and still gets the
+/// cursor hidden while the cells are written.
 pub fn show(terminal: &mut DefaultTerminal, frame: &Frame) -> anyhow::Result<()> {
+    use ratatui::crossterm::{cursor, execute, queue, terminal as term};
+    queue!(
+        terminal.backend_mut(),
+        term::BeginSynchronizedUpdate,
+        cursor::Hide
+    )
+    .context("begin the frame")?;
+    draw(terminal, frame)?;
+    execute!(terminal.backend_mut(), term::EndSynchronizedUpdate).context("end the frame")?;
+    Ok(())
+}
+
+fn draw(terminal: &mut DefaultTerminal, frame: &Frame) -> anyhow::Result<()> {
     terminal
         .draw(|tui| {
             let area = tui.area();

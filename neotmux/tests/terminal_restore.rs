@@ -471,3 +471,31 @@ fn burns_no_cpu_once_the_terminal_is_gone() {
         after - before
     );
 }
+
+/// Every frame is one synchronized update with the cursor hidden while its cells are written:
+/// a pane pouring out a build otherwise showed half-painted frames and a cursor racing across
+/// the screen, which is flicker.
+#[test]
+fn every_frame_is_one_synchronized_update_with_the_cursor_hidden() {
+    let (out, ok, _termios) = run_in_pty(
+        &[("SHELL", "/bin/sh")],
+        b"for i in 1 2 3 4 5 6 7 8 9 10; do echo line-$i; done\rexit\r",
+    );
+    assert!(ok, "expected a clean exit");
+    let begin = "\x1b[?2026h";
+    let frames: Vec<&str> = out.split(begin).skip(1).collect();
+    assert!(
+        !frames.is_empty(),
+        "no frame was a synchronized update: {out:?}"
+    );
+    for frame in &frames {
+        assert!(
+            frame.starts_with("\x1b[?25l"),
+            "a frame wrote before hiding the cursor: {frame:?}"
+        );
+        assert!(
+            frame.contains("\x1b[?2026l"),
+            "a frame never ended its update: {frame:?}"
+        );
+    }
+}
