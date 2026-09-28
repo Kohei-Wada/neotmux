@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Zoom
+
+`C-b z` gives the focused pane the whole window, as tmux's does, and pressing it again puts
+the window back. The other panes are hidden rather than closed: their shells run and their
+terminals keep their size. The bar writes `Z` after the pane's number while it is zoomed, and
+moving to another pane, splitting or resizing unzooms first. For a plugin, it is
+`neotmux.pane.zoom()` and `neotmux.pane.zoomed()`.
+
 ### Twenty-one more agents, by herdr's own rules
 
 A pane running Codex, Gemini, Cursor, OpenCode, Copilot, Amp, Kiro, Qwen or any other agent herdr

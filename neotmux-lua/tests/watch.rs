@@ -72,6 +72,7 @@ fn publish(sub: &LuaSubsystem) {
                 },
             ],
             window: Some(WindowId::from(1)),
+            zoomed: None,
         },
     );
 }

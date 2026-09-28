@@ -95,6 +95,7 @@ fn built(init: &str, runner: Rc<FakeRunner>) -> (tempfile::TempDir, Built) {
                 },
             ],
             window: Some(WindowId::from(1)),
+            zoomed: None,
         },
     );
     for pane in [PaneId::from(ONE), PaneId::from(TWO), PaneId::from(THREE)] {

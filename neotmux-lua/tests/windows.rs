@@ -66,6 +66,7 @@ fn publish(sub: &LuaSubsystem) {
             focus: Some(pane(1)),
             windows: vec![window(1, &[1, 3]), window(2, &[2, 4])],
             window: Some(WindowId::from(1)),
+            zoomed: None,
         },
     );
 }
@@ -131,6 +132,7 @@ fn a_published_geometry_moves_the_window_id_counter_past_what_it_names() {
             focus: Some(pane(1)),
             windows: vec![window(4, &[1])],
             window: Some(WindowId::from(4)),
+            zoomed: None,
         },
     );
     assert_eq!(sub.reserve_window_id(), WindowId::from(5));
@@ -167,6 +169,7 @@ fn a_window_can_be_named_and_the_name_is_read_back() {
                 window(2, &[2, 4]),
             ],
             window: Some(WindowId::from(1)),
+            zoomed: None,
         },
     );
     assert_eq!(ticked(&sub), vec!["one=編集 two=nil"]);

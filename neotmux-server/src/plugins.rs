@@ -167,6 +167,7 @@ impl Plugins {
                 Op::PaneSplit { dir } => SessionOp::PaneSplit { dir },
                 Op::PaneFocus { pane } => SessionOp::PaneFocus { pane },
                 Op::PaneResize { dir, cells } => SessionOp::PaneResize { dir, cells },
+                Op::PaneZoom => SessionOp::PaneZoom,
                 Op::PaneSend { pane, text } => {
                     // After the tick has returned, so the VM is idle: a handler is never
                     // re-entered from inside the tick that queued this. With no session yet
@@ -306,6 +307,11 @@ impl Plugins {
                 SessionOp::PaneResize { dir, cells } => refuse(
                     &tag,
                     &format!("pane.resize('{dir}', {cells})"),
+                    "no panes exist until the session starts",
+                ),
+                SessionOp::PaneZoom => refuse(
+                    &tag,
+                    "pane.zoom()",
                     "no panes exist until the session starts",
                 ),
                 SessionOp::PaneFocus { pane } => refuse(
@@ -514,6 +520,7 @@ mod tests {
                 window: Some(WindowId::from(1)),
                 panes: vec![(pane, Rect::new(0, 0, size.cols, size.rows))],
                 focus: Some(pane),
+                zoomed: None,
             },
         );
         plugins.lua.dispatch_tick(session);

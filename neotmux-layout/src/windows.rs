@@ -79,14 +79,15 @@ impl Windows {
         }
     }
 
-    /// Every window in creation order, with its panes in layout order. A hidden window's
+    /// Every window in creation order, with its panes in layout order — a pane the zoom is
+    /// hiding among them, since it is still the window's. A hidden window's
     /// order is the one it was last assigned, so it is the arrangement it will be shown in
     /// and not a different answer from the one `pane.list` gives once it is.
     pub fn panes(&self) -> Vec<(WindowId, Vec<PaneId>)> {
         self.entries
             .iter()
             .map(|entry| {
-                let panes = entry.layout.panes().into_iter().map(|(id, _)| id).collect();
+                let panes = entry.layout.arranged();
                 (entry.id, panes)
             })
             .collect()
@@ -98,7 +99,7 @@ impl Windows {
         self.entries
             .iter()
             .map(|entry| {
-                let panes = entry.layout.panes().into_iter().map(|(id, _)| id).collect();
+                let panes = entry.layout.arranged();
                 (entry.id, panes, entry.name.clone())
             })
             .collect()

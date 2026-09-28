@@ -366,8 +366,9 @@ is idempotent, the way every `remove` in this API is.
 ### Panes
 
 ```lua
-neotmux.pane.list()      -- { id, ... }, in layout order
+neotmux.pane.list()      -- { id, ... }, in layout order; the zoomed pane alone while one is
 neotmux.pane.current()   -- id, or nil
+neotmux.pane.zoomed()    -- the zoomed pane's id, or nil
 neotmux.pane.rect(id)    -- { x = , y = , w = , h = }, or nil
 neotmux.pane.info(id)    -- { command = ..., cwd = ..., job = { group =, processes = { { pid =, name =, argv = }, ... } } }, or nil
 neotmux.pane.cursor(id)  -- { x = , y = , visible = }, or nil
@@ -382,6 +383,7 @@ neotmux.pane.frozen(id)       -- true while anyone holds it, false, or nil for n
 neotmux.pane.split('horizontal' | 'vertical')
 neotmux.pane.focus(id)
 neotmux.pane.resize('left' | 'right' | 'up' | 'down', cells)
+neotmux.pane.zoom()           -- the focused pane over the whole window, or back
 neotmux.pane.send(id, text)   -- true, or false and why
 neotmux.pane.key(id, spec)    -- one keystroke, spelled the way that pane asked for
 ```
@@ -397,6 +399,12 @@ now, which closes the gap when a neighbour goes. `list()` is in layout order, so
 is the index in it, and finding it is a loop over the list you already have. The shipped bar
 does exactly that in `status/position.lua`. Use an id for anything you look a pane up by, and
 a position for anything you print.
+
+**A zoomed pane** is tmux's: the focused pane gets the whole window and the others are hidden
+rather than gone — their shells run, their terminals keep the size they had, and
+`window.panes(id)` still lists them, so count a position there rather than in `pane.list()`,
+which is the zoomed pane alone. Focusing a hidden pane, splitting and resizing each unzoom
+first, and so does the zoomed pane closing.
 
 `cursor` and `mode` are what a plugin on the input side needs and could only guess at before:
 where the program put the cursor, and what it has told the tty to do with a line as it is
@@ -1384,7 +1392,8 @@ None of them is a host feature — all fourteen are ordinary files making ordina
 the prefix is the only reason a fresh install can make a second pane at all. `C-b v` splits
 vertically (the panes end up side by side, because `pane.split('vertical')` divides the
 width), `C-b -` splits horizontally (one above the other), `C-b o` focuses the next pane,
-`C-b h/j/k/l` focuses the pane to the left, below, above or to the right, `C-b r` enters
+`C-b h/j/k/l` focuses the pane to the left, below, above or to the right (from a zoomed pane,
+the first press unzooms), `C-b z` zooms the focused pane and back, `C-b r` enters
 resize mode, `C-b [` enters copy mode, `C-b s` opens the session picker, `C-b :` opens the
 command palette, `C-b c` opens a window and switches to it, and `C-b n` and `C-b p`
 walk to the next window and the one before, each wrapping around.

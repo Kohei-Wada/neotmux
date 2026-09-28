@@ -50,6 +50,7 @@ fn built(init: &str) -> (tempfile::TempDir, Built) {
                 name: None,
             }],
             window: Some(WindowId::from(1)),
+            zoomed: None,
         },
     );
     (dir, Built::new(sub, terminals))

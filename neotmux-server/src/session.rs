@@ -351,7 +351,7 @@ impl Session {
                     spawned += 1;
                     self.apply_split(tag, *dir)?;
                 }
-                SessionOp::PaneFocus { pane } => self.apply_focus(tag, *pane),
+                SessionOp::PaneFocus { pane } => self.apply_focus(tag, *pane)?,
                 SessionOp::PaneSend { pane, text } => {
                     // The pane was there when the tick asked; between then and here a shell
                     // can have exited, and a plugin answering a pane that has just closed is
@@ -365,6 +365,7 @@ impl Session {
                     }
                 }
                 SessionOp::PaneResize { dir, cells } => self.apply_resize(tag, *dir, *cells)?,
+                SessionOp::PaneZoom => self.apply_zoom()?,
                 SessionOp::WindowCreate { .. } if spawned >= MAX_NEW_SHELLS_PER_FRAME => {
                     logging::log(
                         Level::Error,
@@ -526,18 +527,35 @@ impl Session {
         Ok(())
     }
 
-    fn apply_focus(&mut self, tag: &str, pane: PaneId) {
+    fn apply_focus(&mut self, tag: &str, pane: PaneId) -> anyhow::Result<()> {
+        let zoomed = self.windows.current().zoomed();
         if !self.windows.current_mut().set_focus(pane) {
             logging::log(
                 Level::Error,
                 tag,
                 &format!("pane.focus({pane}) refused: no such pane"),
             );
-            return;
+            return Ok(());
+        }
+        // Focusing a pane the zoom hid unzoomed it, and the panes have their sizes back.
+        if self.windows.current().zoomed() != zoomed {
+            self.fit()?;
         }
         self.republish_geometry();
         self.steps.push(Step::Event(Event::FocusChanged { pane }));
         self.dirty = true;
+        Ok(())
+    }
+
+    /// The focused pane over the whole area, or the window as it was. Only the zoomed pane is
+    /// resized: the ones it hides keep their size, as a pane too small to show does, so
+    /// unzooming gives each back the grid it had.
+    fn apply_zoom(&mut self) -> anyhow::Result<()> {
+        self.windows.current_mut().toggle_zoom();
+        self.fit()?;
+        self.republish_geometry();
+        self.dirty = true;
+        Ok(())
     }
 
     /// Samples what each pane is running, if the cadence says it is time, and hands the
@@ -636,6 +654,7 @@ impl Session {
                 .map(|(id, panes, name)| LuaWindow { id, panes, name })
                 .collect(),
             window: Some(self.windows.current_id()),
+            zoomed: layout.zoomed(),
         }
     }
 
@@ -669,7 +688,7 @@ impl Session {
     /// place in their own history — a copy mode is one — and how far back; the rest are shown
     /// as they are.
     fn snapshot(&mut self, views: &BTreeMap<PaneId, usize>) {
-        let shown: Vec<PaneId> = self.windows.current().rects.keys().copied().collect();
+        let shown: Vec<PaneId> = self.windows.current().shown.keys().copied().collect();
         self.shells.snapshot(shown.into_iter(), views);
         self.dirty = false;
     }
@@ -691,7 +710,7 @@ impl Session {
                     })
                 })
                 .collect(),
-            rects: &layout.rects,
+            rects: &layout.shown,
             cursor: layout.focus(),
             overlay,
         }

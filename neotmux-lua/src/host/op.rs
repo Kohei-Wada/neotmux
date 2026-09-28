@@ -25,6 +25,8 @@ pub enum Op {
         dir: Dir,
         cells: u16,
     },
+    /// Zoom the focused pane, or unzoom.
+    PaneZoom,
     PaneSend {
         pane: PaneId,
         text: String,

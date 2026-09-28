@@ -17,6 +17,8 @@ pub enum SessionOp {
         dir: Dir,
         cells: u16,
     },
+    /// Zoom the focused pane over the whole area, or unzoom.
+    PaneZoom,
     /// Text into a pane's shell, as though it had been typed there. The pane is named rather
     /// than taken from the focus: a plugin sends to the pane it is answering, which is not
     /// usually the one under the cursor.

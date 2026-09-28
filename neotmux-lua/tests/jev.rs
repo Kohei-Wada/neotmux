@@ -69,6 +69,7 @@ fn built(extra: impl AsRef<str>, runner: Rc<FakeRunner>) -> (TempDir, Built) {
                 name: None,
             }],
             window: Some(window_id()),
+            zoomed: None,
         },
     );
     (dir, Built::new(sub, terminals))

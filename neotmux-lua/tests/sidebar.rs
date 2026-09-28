@@ -151,6 +151,7 @@ fn frame_in(sub: &Built, surface: Size, sessions: &[Sess], current: u32) -> Vec<
                 focus: Some(focus),
                 windows,
                 window: Some(WindowId::from(s.id * 100 + at as u32)),
+                zoomed: None,
             },
         );
         let info: BTreeMap<PaneId, PaneInfo> = s

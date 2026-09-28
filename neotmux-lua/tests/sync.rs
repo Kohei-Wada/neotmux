@@ -45,6 +45,7 @@ fn built(init: &str) -> (tempfile::TempDir, LuaSubsystem) {
                 name: None,
             }],
             window: Some(WindowId::from(1)),
+            zoomed: None,
         },
     );
     (dir, sub)

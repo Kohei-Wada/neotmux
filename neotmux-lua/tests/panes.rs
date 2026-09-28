@@ -43,6 +43,7 @@ fn publish(sub: &LuaSubsystem, session: SessionId, panes: Vec<(PaneId, Rect)>, f
             window: Some(WindowId::from(1)),
             panes,
             focus: Some(focus),
+            zoomed: None,
         },
     );
 }
@@ -441,6 +442,7 @@ fn a_send_reaches_a_pane_in_a_window_that_is_not_shown() {
                 },
             ],
             window: Some(WindowId::from(1)),
+            zoomed: None,
         },
     );
     sub.dispatch_tick(support::one());

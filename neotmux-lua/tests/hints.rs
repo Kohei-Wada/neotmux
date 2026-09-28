@@ -744,6 +744,7 @@ fn built_plugin(extra: &str, clipboard: Rc<dyn Clipboard>) -> (tempfile::TempDir
             window: Some(neotmux_proto::WindowId::from(1)),
             panes: vec![(pane(), Rect::new(0, 0, SIZE.cols, SIZE.rows))],
             focus: Some(pane()),
+            zoomed: None,
         },
     );
     (dir, Built::new(sub, terminals))

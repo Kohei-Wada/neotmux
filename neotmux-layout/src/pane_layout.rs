@@ -22,6 +22,13 @@ pub struct PaneLayout {
     tree: Tree,
     order: Vec<(PaneId, PRect)>,
     focus: Option<PaneId>,
+    /// The pane given the whole area while the others are hidden, tmux's zoom. The tree and
+    /// `rects` are left as they are, so every other pane keeps its place and its shell, and
+    /// unzooming puts them back where they were.
+    zoomed: Option<PaneId>,
+    /// The rects of the panes being shown: `rects` while nothing is zoomed, the zoomed pane
+    /// over the whole area while one is. What a frame is drawn against.
+    pub shown: PaneRects,
 }
 
 /// The one place a reserved band costs the panes anything, and the one place it is decided
@@ -68,6 +75,8 @@ impl PaneLayout {
             tree: Tree::new(first),
             order: Vec::new(),
             focus: Some(first),
+            zoomed: None,
+            shown: PaneRects::new(),
         };
         layout.resurface(full, reserved, gutter);
         layout
@@ -106,6 +115,11 @@ impl PaneLayout {
     fn reassign(&mut self) {
         self.order = assign(&self.tree, self.area(), self.gutter);
         self.rects = self.order.iter().copied().collect();
+        self.reshow();
+    }
+
+    fn reshow(&mut self) {
+        self.shown = self.panes().into_iter().collect();
     }
 
     /// Splits the focused pane, and focuses the new one — a split is made to be typed into.
@@ -114,6 +128,8 @@ impl PaneLayout {
         let surface = self.area();
         self.tree
             .split(target, dir, new, surface, self.minimum, self.gutter)?;
+        // The new pane has to be seen; a refused split changes nothing, the zoom included.
+        self.zoomed = None;
         self.reassign();
         self.focus = Some(new);
         Ok(())
@@ -125,6 +141,8 @@ impl PaneLayout {
         let surface = self.area();
         self.tree
             .resize(target, dir, cells, surface, self.minimum, self.gutter)?;
+        // The boundary moved is one nobody could see while a pane filled the area.
+        self.zoomed = None;
         self.reassign();
         Ok(())
     }
@@ -132,6 +150,9 @@ impl PaneLayout {
     /// Removes `pane`; its sibling takes the space. Returns the focus afterwards, which is
     /// `None` only when that was the last pane.
     pub fn close(&mut self, pane: PaneId) -> Option<PaneId> {
+        if self.zoomed == Some(pane) {
+            self.zoomed = None;
+        }
         let heir = self.tree.close(pane);
         self.reassign();
         if self.focus == Some(pane) {
@@ -148,26 +169,58 @@ impl PaneLayout {
     }
 
     /// `false` when no such pane exists, which the caller reports rather than acting on.
+    /// Focusing a pane the zoom is hiding unzooms, as tmux does: a pane you cannot see is not
+    /// one to type into.
     pub fn set_focus(&mut self, pane: PaneId) -> bool {
         if !self.rects.contains_key(&pane) {
             return false;
+        }
+        if self.zoomed.is_some_and(|zoomed| zoomed != pane) {
+            self.zoomed = None;
+            self.reshow();
         }
         self.focus = Some(pane);
         true
     }
 
-    /// Every pane and its rect, left to right and top to bottom, as `begin_frame` wants them.
+    /// Zooms the focused pane, or unzooms. A window of one pane has nothing to hide, and stays
+    /// as it is. Answers whether a pane is zoomed afterwards.
+    pub fn toggle_zoom(&mut self) -> bool {
+        self.zoomed = match self.zoomed {
+            Some(_) => None,
+            None if self.order.len() > 1 => self.focus,
+            None => None,
+        };
+        self.reshow();
+        self.zoomed.is_some()
+    }
+
+    pub fn zoomed(&self) -> Option<PaneId> {
+        self.zoomed
+    }
+
+    /// Every pane being shown and its rect, left to right and top to bottom, as `begin_frame`
+    /// wants them: the zoomed pane alone, over the whole area, while one is.
     pub fn panes(&self) -> Vec<(PaneId, PRect)> {
-        self.order.clone()
+        match self.zoomed {
+            Some(zoomed) => vec![(zoomed, self.area())],
+            None => self.order.clone(),
+        }
+    }
+
+    /// Every pane in the window, in layout order, zoomed or not: what the window holds rather
+    /// than what it shows.
+    pub fn arranged(&self) -> Vec<PaneId> {
+        self.order.iter().map(|(id, _)| *id).collect()
     }
 
     /// The panes big enough to show this frame: the ones that get drawn and the ones whose
-    /// PTY is resized. The others keep the size they last had.
+    /// PTY is resized. The others keep the size they last had — which is what a pane the
+    /// zoom hides does too.
     pub fn showable(&self) -> impl Iterator<Item = (PaneId, PRect)> + '_ {
         let minimum = self.minimum;
-        self.order
-            .iter()
-            .copied()
+        self.panes()
+            .into_iter()
             .filter(move |(_, r)| showable(*r, minimum))
     }
 
@@ -644,5 +697,108 @@ mod tests {
             reserved,
             "the same terminal holds the band when the caller asks for less"
         );
+    }
+
+    fn two_side_by_side() -> PaneLayout {
+        let mut layout = layout(24, 80);
+        layout.split(SplitDir::Vertical, pane(2)).expect("fits");
+        layout
+    }
+
+    /// Zooming gives the focused pane the whole area and shows nothing else, while the tree
+    /// and every pane in it stay: unzooming puts the rects back exactly as they were.
+    #[test]
+    fn a_zoomed_pane_is_shown_alone_over_the_whole_area_and_comes_back_where_it_was() {
+        let mut layout = two_side_by_side();
+        let before = layout.panes();
+
+        assert!(layout.toggle_zoom());
+        assert_eq!(layout.zoomed(), Some(pane(2)));
+        assert_eq!(layout.panes(), vec![(pane(2), layout.area())]);
+        assert_eq!(
+            layout.showable().collect::<Vec<_>>(),
+            vec![(pane(2), layout.area())]
+        );
+        assert_eq!(layout.shown.len(), 1);
+        assert_eq!(
+            layout.arranged(),
+            vec![pane(1), pane(2)],
+            "the hidden pane is still the window's"
+        );
+        assert_eq!(layout.rects.len(), 2);
+
+        assert!(!layout.toggle_zoom());
+        assert_eq!(layout.panes(), before);
+        assert_eq!(layout.shown, layout.rects);
+    }
+
+    #[test]
+    fn a_window_of_one_pane_has_nothing_to_zoom() {
+        let mut layout = layout(24, 80);
+        assert!(!layout.toggle_zoom());
+        assert_eq!(layout.zoomed(), None);
+    }
+
+    /// tmux's rules: anything that needs the other panes seen — focusing one, splitting,
+    /// moving a boundary — unzooms first.
+    #[test]
+    fn focusing_a_hidden_pane_splitting_or_resizing_unzooms() {
+        let mut layout = two_side_by_side();
+        layout.toggle_zoom();
+        assert!(layout.set_focus(pane(2)), "the zoomed pane itself");
+        assert_eq!(layout.zoomed(), Some(pane(2)));
+        assert!(layout.set_focus(pane(1)));
+        assert_eq!(layout.zoomed(), None);
+        assert_eq!(layout.shown.len(), 2);
+
+        layout.toggle_zoom();
+        layout.split(SplitDir::Horizontal, pane(3)).expect("fits");
+        assert_eq!(layout.zoomed(), None);
+
+        layout.toggle_zoom();
+        assert!(
+            layout.resize(Dir::Left, 1).is_err(),
+            "the left column has nothing to its left"
+        );
+        assert_eq!(
+            layout.zoomed(),
+            Some(pane(3)),
+            "a refused resize changes nothing"
+        );
+        layout.resize(Dir::Right, 1).expect("room");
+        assert_eq!(layout.zoomed(), None);
+    }
+
+    /// The zoomed pane closing takes the zoom with it; another one closing behind it does not.
+    #[test]
+    fn a_closed_pane_ends_the_zoom_only_if_it_was_the_zoomed_one() {
+        let mut layout = two_side_by_side();
+        layout.split(SplitDir::Horizontal, pane(3)).expect("fits");
+        layout.toggle_zoom();
+        assert_eq!(layout.zoomed(), Some(pane(3)));
+
+        layout.close(pane(1));
+        assert_eq!(layout.zoomed(), Some(pane(3)));
+        assert_eq!(layout.panes(), vec![(pane(3), layout.area())]);
+
+        layout.close(pane(3));
+        assert_eq!(layout.zoomed(), None);
+        assert_eq!(layout.panes().len(), 1);
+    }
+
+    /// A terminal resize keeps the zoom, over the new area.
+    #[test]
+    fn a_zoom_survives_the_surface_changing() {
+        let mut layout = two_side_by_side();
+        layout.toggle_zoom();
+        layout.resurface(
+            Size {
+                rows: 30,
+                cols: 100,
+            },
+            Reserved::default(),
+            0,
+        );
+        assert_eq!(layout.panes(), vec![(pane(2), PRect::new(0, 0, 100, 30))]);
     }
 }

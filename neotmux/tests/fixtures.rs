@@ -3020,3 +3020,45 @@ fn a_notification_is_drawn_on_a_ground_of_its_own() {
         "the notification was drawn straight onto the pane's cells:\n{screen}"
     );
 }
+
+/// `C-b z`, tmux's zoom: the focused pane takes the whole window, its terminal grows to match,
+/// the divider goes, and the bar says so. Pressed again, the window is as it was.
+#[test]
+fn zoom_gives_the_focused_pane_the_window_and_gives_it_back() {
+    let (mut nt, _init) = start_shipped("", "sh");
+    nt.send("\x02v"); // C-b v: pane 2 on the right, focused
+    nt.wait_for_status("1.2 ", PATIENCE);
+    nt.wait_for_cell(PANE_TOP, DIVIDER_COL, VERTICAL_DIVIDER, PATIENCE);
+
+    nt.send("\x02z"); // C-b z
+    nt.wait_for_status("1.2Z", PATIENCE);
+    nt.wait_until("the divider stayed on a zoomed window", PATIENCE, |nt| {
+        nt.cell(PANE_TOP, DIVIDER_COL) != VERTICAL_DIVIDER
+    });
+    nt.send("stty size\r");
+    nt.wait_for_screen("23 80", PATIENCE);
+
+    nt.send("\x02z");
+    nt.wait_until("the bar kept saying zoomed", PATIENCE, |nt| {
+        !nt.status().contains("1.2Z")
+    });
+    nt.wait_for_cell(PANE_TOP, DIVIDER_COL, VERTICAL_DIVIDER, PATIENCE);
+    nt.send("clear; stty size\r");
+    nt.wait_for_screen("23 39", PATIENCE);
+}
+
+/// Moving to a pane the zoom is hiding unzooms, as tmux's does: `C-b o` from a zoomed pane
+/// lands on the next one with the window back.
+#[test]
+fn focusing_another_pane_ends_the_zoom() {
+    let (mut nt, _init) = start_shipped("", "cat");
+    nt.send("\x02v");
+    nt.wait_for_status(SECOND_PANE, PATIENCE);
+    nt.send("\x02z");
+    nt.wait_for_status("1.2Z", PATIENCE);
+
+    nt.send("\x02o"); // C-b o
+    nt.wait_for_status(FIRST_PANE, PATIENCE);
+    assert!(!nt.status().contains('Z'), "{}", nt.status());
+    nt.wait_for_cell(PANE_TOP, DIVIDER_COL, VERTICAL_DIVIDER, PATIENCE);
+}

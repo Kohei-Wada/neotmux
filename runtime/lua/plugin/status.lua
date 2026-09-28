@@ -60,9 +60,11 @@ end
 -- What a block is numbered: the window's position, and for the one being shown the focused
 -- pane's position after it, the way tmux writes `window.pane`. Positions and not ids, because
 -- an id is never reused and so climbs past the number of things there are.
+--
+-- A zoomed pane gets tmux's `Z` after it: the other panes are there, only hidden.
 local function number(window_at, pane_at)
   if pane_at then
-    return window_at .. "." .. pane_at
+    return window_at .. "." .. pane_at .. (neotmux.pane.zoomed() and "Z" or "")
   end
   return tostring(window_at)
 end
@@ -127,7 +129,9 @@ g.on_tick(function(ctx)
   -- has gone away answers nothing at all. Neither is an error worth a bar with a hole in it.
   local info = (focused and neotmux.pane.info(focused)) or {}
 
-  local left = window_runs(info.command, focused and position.of(neotmux.pane.list(), focused))
+  -- Counted in the window's panes rather than `pane.list()`, which a zoom leaves one long.
+  local panes = neotmux.window.panes(neotmux.window.current()) or neotmux.pane.list()
+  local left = window_runs(info.command, focused and position.of(panes, focused))
   local right = {}
   if info.command then
     append(right, module_runs(M.icons.command, M.colors.command, info.command))

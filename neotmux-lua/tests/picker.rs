@@ -87,6 +87,7 @@ fn make(sub: &Built, id: SessionId, name: &str, command: &str) {
                 name: None,
             }],
             window: Some(WindowId::from(1)),
+            zoomed: None,
         },
     );
 }

@@ -63,6 +63,7 @@ fn publish(sub: &LuaSubsystem, session: SessionId, panes: Vec<(PaneId, Rect)>, f
             window: Some(WindowId::from(1)),
             panes,
             focus: Some(focus),
+            zoomed: None,
         },
     );
 }

@@ -21,6 +21,7 @@
 --   v  -        split the focused pane, side by side or stacked
 --   o           the next pane in layout order
 --   h j k l     the pane to the left, below, above, to the right
+--   z           zoom the pane over the whole window, and back
 --   r           resize mode: h/j/k/l move the boundary, anything else leaves
 --   c  n  p     a new window, the next one, the one before
 --   ,           name the window you are in; an empty name leaves it its number
@@ -37,10 +38,12 @@ local g = neotmux.group("plugin.prefix")
 local armed = nil
 local resizing = nil
 
--- "The next pane" out of what the ABI offers: `list()` is in layout order and `current()`
--- says where we are, so the successor is an index step with a wrap.
+-- "The next pane" out of what the ABI offers: `window.panes` is in layout order and `current()`
+-- says where we are, so the successor is an index step with a wrap. The window's panes rather
+-- than `pane.list()`, which is only the zoomed pane while one is: focusing a pane the zoom
+-- hides unzooms, and `o` walks every pane either way.
 local function focus_next()
-  local ids = neotmux.pane.list()
+  local ids = neotmux.window.panes(neotmux.window.current()) or neotmux.pane.list()
   local current = neotmux.pane.current()
   for index, id in ipairs(ids) do
     if id == current then
@@ -82,8 +85,15 @@ local DIRECTIONS = {
 -- than wrapping round to the far side. A wrap is a jump across the whole window, and the
 -- reason to press `h` is that you are looking at what is to your left; `o` is still there
 -- for walking every pane in order.
+--
+-- While a pane is zoomed nothing is that way on screen, so the first press unzooms and the
+-- next one moves.
 local function focus_toward(dir)
   return function()
+    if neotmux.pane.zoomed() then
+      neotmux.pane.zoom()
+      return
+    end
     local id = nav.toward(dir)
     if id then
       neotmux.pane.focus(id)
@@ -99,6 +109,10 @@ end
 
 local function split_horizontal()
   neotmux.pane.split("horizontal")
+end
+
+local function zoom()
+  neotmux.pane.zoom()
 end
 
 local function begin_resize()
@@ -155,6 +169,7 @@ register("focus-left", focus_toward("left"), "focus the pane to the left")
 register("focus-down", focus_toward("down"), "focus the pane below")
 register("focus-up", focus_toward("up"), "focus the pane above")
 register("focus-right", focus_toward("right"), "focus the pane to the right")
+register("zoom", zoom, "zoom the focused pane over the whole window, or unzoom")
 register(
   "resize",
   begin_resize,
@@ -182,6 +197,7 @@ local M = {
     ["k"] = "focus-up",
     ["l"] = "focus-right",
     ["r"] = "resize",
+    ["z"] = "zoom",
     ["c"] = "window-new",
     ["n"] = "window-next",
     ["p"] = "window-prev",

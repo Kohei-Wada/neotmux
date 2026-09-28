@@ -136,6 +136,7 @@ fn frame(
                 })
                 .collect(),
             window: Some(WindowId::from(current)),
+            zoomed: None,
         },
     );
     sub.dispatch_tick(support::one());

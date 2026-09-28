@@ -102,6 +102,17 @@ pub(crate) fn install(
     }
 
     {
+        let geometry = geometry.clone();
+        let zoomed = lua.create_function(move |_, ()| {
+            Ok(match geometry.borrow().zoomed {
+                Some(pane) => Value::Integer(i64::from(pane.get())),
+                None => Value::Nil,
+            })
+        })?;
+        pane.set("zoomed", zoomed)?;
+    }
+
+    {
         // The same rects `ctx:pane_rect` answers with, out of the same published geometry.
         // Geometry is a question a plugin can have without drawing — which pane is to my
         // left is asked from a key handler, where there is no `ctx`.
@@ -304,6 +315,18 @@ pub(crate) fn install(
             Ok(())
         })?;
         pane.set("resize", resize)?;
+    }
+
+    {
+        // The focused pane, as `split` and `resize` act on it: zoom is something done to the
+        // pane in front of you.
+        let sources = sources.clone();
+        let ops = ops.clone();
+        let zoom = lua.create_function(move |lua, ()| {
+            ops.push(plugin::caller(lua, &sources), Op::PaneZoom);
+            Ok(())
+        })?;
+        pane.set("zoom", zoom)?;
     }
 
     {

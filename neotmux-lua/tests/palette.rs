@@ -59,6 +59,7 @@ fn built(init: &str) -> (tempfile::TempDir, Built) {
                 name: None,
             }],
             window: Some(WindowId::from(1)),
+            zoomed: None,
         },
     );
     (dir, Built::new(sub, terminals))
@@ -296,6 +297,7 @@ fn with_home(sub: &Built) {
                 name: None,
             }],
             window: Some(WindowId::from(2)),
+            zoomed: None,
         },
     );
 }

@@ -21,4 +21,7 @@ pub struct Geometry {
     pub windows: Vec<Window>,
     /// The one being shown. `None` only before the host has published anything.
     pub window: Option<WindowId>,
+    /// The pane zoomed over the whole area, if one is. `panes` is that pane alone while it
+    /// is; the window's others are still in `windows`.
+    pub zoomed: Option<PaneId>,
 }
