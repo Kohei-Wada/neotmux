@@ -618,6 +618,13 @@ or `done`; `exit` is only there for a `done` that carried a status. A shell that
 answers `{}`, exactly as if OSC 133 did not exist — and a mark written to the alternate screen
 is dropped, because a TUI's rows are not the shell's lines.
 
+A new `prompt` removes every mark on the lines below it — a shell redrawing its own prompt,
+after a resize or after `clear`, writes its `prompt` again where the old one was, and whatever
+was below it is gone. Marks on the prompt's own line stay: a command that printed nothing leaves
+its `output` and `done` on the very line the next prompt is drawn on. A second mark of the same
+kind on the same line replaces the first, which is what takes an old `prompt` or `input` off a
+line a redrawn prompt lands on.
+
 `opts.lines` bounds the work as well as the answer: the rows above it are never built. Ask for
 the few at the bottom if a prompt is what you are after.
 
@@ -2194,6 +2201,9 @@ missing. `state` is one of four words:
   partway — `ssh` or a `bash --norc` run inside a shell that marks, whose own `D` never
   arrives because the prompt that follows is the outer shell's, not a hang this convention
   guesses at.
+
+A `done` mark with no `prompt` before it starts no command and is skipped — the first `D` a
+shell sends has nothing before it, and so does one whose `prompt` fell off the history.
 
 #### Setting up your shell
 
