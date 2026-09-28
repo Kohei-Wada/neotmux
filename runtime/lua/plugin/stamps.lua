@@ -15,6 +15,7 @@
 -- time with it.
 local g = neotmux.group("plugin.stamps")
 local gutter = require("neotmux.gutter")
+local style = require("neotmux.style")
 
 local M = {
   shown = false,
@@ -22,13 +23,14 @@ local M = {
   stall = { slow = 2, stuck = 10 },
   -- `HH:MM:SS`, a space, and the rule.
   width = 10,
-  colors = {
-    time = "#6c7086",
-    rule = "#45475a",
-    slow = "#f9e2af",
-    stuck = "#f38ba8",
-  },
 }
+
+style.default("stamps", {
+  time = "overlay0",
+  rule = "surface1",
+  slow = "yellow",
+  stuck = "red",
+})
 
 -- Per pane: `next`, the line number the pane will write next, and `at`, each line's arrival
 -- in `os.time()` seconds, keyed by line number. A line number counts every line the pane has
@@ -81,6 +83,7 @@ local function record(pane, now)
 end
 
 local function draw(ctx, pane)
+  local c = style.get("stamps")
   local it = panes[pane]
   local rect = ctx:pane_band(pane)
   if it == nil or rect == nil or it.top == nil then
@@ -88,18 +91,18 @@ local function draw(ctx, pane)
   end
   -- Wound back with the pane when copy mode, or anything else, draws it into its history.
   local top = it.top - neotmux.pane.view(pane)
-  gutter.rule(ctx, rect, M.colors.rule)
+  gutter.rule(ctx, rect, c.rule)
   for row = 0, rect.h - 1 do
     local line = top + row
     local at = it.at[line]
     local before = it.at[line - 1]
     if at and before ~= at then
       local waited = before and at - before or 0
-      local fg = M.colors.time
+      local fg = c.time
       if waited >= M.stall.stuck then
-        fg = M.colors.stuck
+        fg = c.stuck
       elseif waited >= M.stall.slow then
-        fg = M.colors.slow
+        fg = c.slow
       end
       ctx:text(
         nil,

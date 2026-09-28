@@ -11,22 +11,23 @@
 --
 -- A port of herdr's src/client/shell/tabs.rs, less the mouse's buttons; NOTICE says which.
 local segments = require("status.segments")
+local style = require("neotmux.style")
 local g = neotmux.group("plugin.tmux.status")
 
 local M = {}
 
--- herdr's palette, which is Catppuccin Mocha. Every field is read on the tick, so assigning to
--- one from your own init.lua takes effect.
-M.colors = {
-  bar = "#181825", -- panel_bg: the band everything else sits on
-  accent = "#89b4fa", -- blue: the window being shown
-  on_accent = "#181825",
-  tab = "#313244", -- surface0: every other window
-  tab_text = "#6c7086", -- overlay0
-  named_text = "#7f849c", -- overlay1: a window with a name you gave it
-  right_text = "#7f849c", -- overlay1
-  dim = "#6c7086", -- overlay0: the separators and the ellipses
-}
+-- herdr's palette, which is Catppuccin Mocha. Restyle it with `neotmux.style.set('status', ...)`,
+-- which takes effect on the next tick.
+style.default("status", {
+  bar = "mantle", -- panel_bg: the band everything else sits on
+  accent = "blue", -- the window being shown
+  on_accent = "mantle",
+  tab = "surface0", -- every other window
+  tab_text = "overlay0",
+  named_text = "overlay1", -- a window with a name you gave it
+  right_text = "overlay1",
+  dim = "overlay0", -- the separators and the ellipses
+})
 
 -- What goes on the right, in order: each a function answering its text, and `true` after it for
 -- the accent, or nil to be left out this tick. Empty, as herdr ships it.
@@ -100,40 +101,40 @@ local function max_scroll(list, available)
   return start
 end
 
-local function right_runs()
+local function right_runs(c)
   local runs = {}
   for _, entry in ipairs(M.right) do
     local text, accent = entry()
     if text and text ~= "" then
       if #runs > 0 and M.separator ~= "" then
-        runs[#runs + 1] = { text = M.separator, fg = M.colors.dim, bg = M.colors.bar }
+        runs[#runs + 1] = { text = M.separator, fg = c.dim, bg = c.bar }
       end
-      runs[#runs + 1] = accent
-          and { text = text, fg = M.colors.on_accent, bg = M.colors.accent, bold = true }
-        or { text = text, fg = M.colors.right_text, bg = M.colors.bar }
+      runs[#runs + 1] = accent and { text = text, fg = c.on_accent, bg = c.accent, bold = true }
+        or { text = text, fg = c.right_text, bg = c.bar }
     end
   end
   return runs
 end
 
-local function tab_style(tab)
+local function tab_style(c, tab)
   if tab.focused then
-    return M.colors.on_accent, M.colors.accent, tab.named
+    return c.on_accent, c.accent, tab.named
   end
-  return tab.named and M.colors.named_text or M.colors.tab_text, M.colors.tab, false
+  return tab.named and c.named_text or c.tab_text, c.tab, false
 end
 
 g.on_tick(function(ctx)
+  local c = style.get("status")
   local row = ctx:reserved()
   -- Nil while the terminal is too small to spare the row. The panes have it back, so there
   -- is nowhere to draw and nothing to draw over.
   if not row then
     return
   end
-  ctx:rect(nil, row.x, row.y, row.w, row.h, { bg = M.colors.bar })
+  ctx:rect(nil, row.x, row.y, row.w, row.h, { bg = c.bar })
 
   local strip = row.w
-  local right = right_runs()
+  local right = right_runs(c)
   local right_width = segments.width(right)
   if right_width > 0 and row.w - (right_width + 1) >= MIN_TAB_STRIP_WIDTH then
     segments.draw(ctx, row.x + row.w - right_width, row.y, right_width, right)
@@ -164,7 +165,7 @@ g.on_tick(function(ctx)
     end
     local padding = width - columns(tab.label)
     local left = padding // 2
-    local fg, bg, bold = tab_style(tab)
+    local fg, bg, bold = tab_style(c, tab)
     segments.draw(ctx, x, row.y, width, {
       {
         text = (" "):rep(left) .. tab.label .. (" "):rep(math.max(padding - left, 0)),
@@ -182,10 +183,10 @@ g.on_tick(function(ctx)
   end
 
   if first > 1 then
-    ctx:text(nil, row.x, row.y, "…", { fg = M.colors.dim, bg = first_bg })
+    ctx:text(nil, row.x, row.y, "…", { fg = c.dim, bg = first_bg })
   end
   if last and last < #list then
-    ctx:text(nil, stop - 1, row.y, "…", { fg = M.colors.dim, bg = last_bg })
+    ctx:text(nil, stop - 1, row.y, "…", { fg = c.dim, bg = last_bg })
   end
 end)
 

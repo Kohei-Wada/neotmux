@@ -15,10 +15,11 @@
 -- A composition on `neotmux.list`: the float, the cursor, the scrolling and the caret are
 -- that module's. What is left here is what makes this list a session picker rather than any
 -- other one — what a row says, and what `Enter`, `c`, `r` and `d` do. The frame, the cursor row
--- and the caret are coloured through `require('neotmux.list').colors`, not this file's.
+-- and the caret are coloured through `style.get('float.list')`, not this file's.
 local list = require("neotmux.list")
 local prompt = require("neotmux.prompt")
 local pane_state = require("neotmux.state")
+local style = require("neotmux.style")
 local g = neotmux.group("plugin.tmux.sessions")
 
 -- What a session made with no name is called, as the host calls one started that way: the
@@ -37,15 +38,14 @@ end
 
 local M = {}
 
--- Read every tick, so assigning to one from your own `init.lua` takes effect.
-M.colors = {
-  name = "#cdd6f4",
-  current = "#a6e3a1", -- green: the session you are in
-  working = "#a6e3a1", -- green
-  blocked = "#f9e2af", -- yellow: the one that wants you
-  idle = "#585b70", -- surface2
-  doing = "#6c7086", -- overlay0: what it is running, quieter than its name
-}
+style.default("sessions", {
+  name = "text",
+  current = "green", -- the session you are in
+  working = "green",
+  blocked = "yellow", -- the one that wants you
+  idle = "surface2",
+  doing = "overlay0", -- what it is running, quieter than its name
+})
 
 -- How wide the window is, and the most rows of it the list may take. Both are read on the way
 -- in, so setting them from your own `init.lua` takes effect at the next open.
@@ -80,14 +80,15 @@ end
 -- keeps the row: the right column is dropped instead, because it is the one you can do
 -- without.
 local function row(name)
+  local c = style.get("sessions")
   local panes, command, worst = doing(name)
   local said = (command or "-") .. "  " .. panes .. "p"
   local runs = {
-    { text = pane_state.icon(worst), fg = M.colors[worst] },
+    { text = pane_state.icon(worst), fg = c[worst] },
     { text = " " },
     {
       text = name,
-      fg = name == neotmux.session.current() and M.colors.current or M.colors.name,
+      fg = name == neotmux.session.current() and c.current or c.name,
     },
   }
   -- The inner width a row has to work with is `neotmux.list`'s own placement to know, not
@@ -97,7 +98,7 @@ local function row(name)
   local room = M.width - 2 - 2 - neotmux.width(name) - neotmux.width(said) - 1
   if room > 1 then
     runs[#runs + 1] = { text = string.rep(" ", room) }
-    runs[#runs + 1] = { text = said, fg = M.colors.doing }
+    runs[#runs + 1] = { text = said, fg = c.doing }
   end
   return runs
 end

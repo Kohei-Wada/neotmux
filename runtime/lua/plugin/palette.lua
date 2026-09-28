@@ -14,17 +14,18 @@
 -- file), and any other plugin that calls `neotmux.command.add` gets a palette entry for free,
 -- without this file knowing it exists.
 local list = require("neotmux.list")
+local style = require("neotmux.style")
 -- Required for its tick: `#` shows `done`, and done is only known to what watched it happen.
 require("neotmux.seen")
 
 local M = {}
 
-M.colors = {
-  name = "#cdd6f4",
-  match = "#89b4fa", -- blue: the letters you actually typed, lit in the name
-  desc = "#a6adc8", -- subtext0: quieter than the name
-  source = "#585b70", -- surface2: quieter still
-}
+style.default("palette", {
+  name = "text",
+  match = "blue", -- the letters you actually typed, lit in the name
+  desc = "subtext0", -- quieter than the name
+  source = "surface2", -- quieter still
+})
 
 -- Wide and shallow, hanging from the top: what you are doing here is reading a line you typed
 -- and the handful of things it left, not surveying a list. A width of one or less is a share
@@ -105,10 +106,10 @@ end
 -- The name, split so the characters the query matched are in their own runs. A run per
 -- stretch rather than per character: adjacent letters read as a word that way, and the drawing
 -- does less work.
-local function name_runs(item)
+local function name_runs(c, item)
   local lit = item.lit
   if not lit or #lit == 0 then
-    return { { text = item.name, fg = M.colors.name } }
+    return { { text = item.name, fg = c.name } }
   end
   local runs = {}
   local at = 1
@@ -126,22 +127,23 @@ local function name_runs(item)
     end
     runs[#runs + 1] = {
       text = item.name:sub(start, at - 1),
-      fg = matched and M.colors.match or M.colors.name,
+      fg = matched and c.match or c.name,
     }
   end
   return runs
 end
 
 local function row(item, _chosen, width)
+  local c = style.get("palette")
   local desc = item.desc and ("  " .. item.desc) or ""
-  local runs = name_runs(item)
-  runs[#runs + 1] = { text = desc, fg = M.colors.desc }
+  local runs = name_runs(c, item)
+  runs[#runs + 1] = { text = desc, fg = c.desc }
   local source = item.source or ""
   local used = neotmux.width(item.name) + neotmux.width(desc)
   local room = (width or 60) - 2 - used - neotmux.width(source) - 1
   if source ~= "" and room > 1 then
     runs[#runs + 1] = { text = string.rep(" ", room) }
-    runs[#runs + 1] = { text = source, fg = M.colors.source }
+    runs[#runs + 1] = { text = source, fg = c.source }
   end
   return runs
 end

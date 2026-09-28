@@ -33,21 +33,21 @@ local selection = require("neotmux.selection")
 local words = require("neotmux.words")
 local modes = require("neotmux.mode")
 local hints = require("neotmux.hints")
+local style = require("neotmux.style")
 local g = neotmux.group("plugin.tmux.copy")
 
 local M = {}
 
--- Read every tick, so assigning to one from your own `init.lua` takes effect.
-M.colors = {
-  -- Catppuccin Mocha surface1: a background dark enough that the pane's own text is still
-  -- readable through it, which is the whole reason the selection is a tint and not a rect.
-  selection = "#45475a",
-  cursor = "#f9e2af", -- yellow
+style.default("copy", {
+  -- A background dark enough that the pane's own text is still readable through it, which is
+  -- the whole reason the selection is a tint and not a rect.
+  selection = "surface1",
+  cursor = "yellow",
   -- The cursor names both channels. A tint that changed only the background would leave a
   -- cell whose text happened to be yellow invisible, and the cursor is the one cell that must
   -- never be hard to find.
-  cursor_text = "#1e1e2e",
-}
+  cursor_text = "base",
+})
 
 -- How far a half-page key goes, as a fraction of the pane's height.
 M.page = 0.5
@@ -451,6 +451,7 @@ g.on_tick(function(ctx)
   if state == nil then
     return
   end
+  local c = style.get("copy")
   local rect = ctx:pane_rect(state.pane)
   if rect == nil then
     return
@@ -481,14 +482,14 @@ g.on_tick(function(ctx)
       if x then
         -- Tint and not rect: the selection has to be visible over the pane's real content,
         -- and rect would paint the text out of it.
-        ctx:tint(state.pane, x, row, width, 1, { bg = M.colors.selection })
+        ctx:tint(state.pane, x, row, width, 1, { bg = c.selection })
       end
     end
   end
 
   ctx:tint(state.pane, state.cursor.col, state.cursor.line - state.top, 1, 1, {
-    fg = M.colors.cursor_text,
-    bg = M.colors.cursor,
+    fg = c.cursor_text,
+    bg = c.cursor,
   })
 end)
 

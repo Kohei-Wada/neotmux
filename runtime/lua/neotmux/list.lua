@@ -64,17 +64,18 @@
 local modes = require("neotmux.mode")
 local box = require("neotmux.box")
 local line = require("neotmux.line")
+local style = require("neotmux.style")
 local g = neotmux.group("neotmux.list")
 
 local M = {}
 
-M.colors = {
-  frame = "#181825", -- mantle
-  text = "#cdd6f4",
-  cursor = "#313244", -- surface0: the row under the caret
-  caret = "#f9e2af", -- yellow, for the block in an input line
-  hint = "#585b70", -- surface2
-}
+style.default("float.list", {
+  frame = "mantle",
+  text = "text",
+  cursor = "surface0", -- the row under the caret
+  caret = "yellow", -- the block in an input line
+  hint = "surface2",
+})
 
 -- The state of the one list that may be open, and nil the rest of the time. `state.generation`
 -- names which `open()` this state belongs to, so a handle from an earlier open can tell that
@@ -425,6 +426,7 @@ local function arm()
     if state == nil or win == nil then
       return
     end
+    local c = style.get("float.list")
     local ok, err = pcall(refresh)
     if not ok then
       fail("items", err)
@@ -441,7 +443,7 @@ local function arm()
     if rect.x ~= want.x or rect.y ~= want.y then
       win:move_to(want.x, want.y)
     end
-    local inner = box.draw(ctx, win, rect, { title = state.opts.title, bg = M.colors.frame })
+    local inner = box.draw(ctx, win, rect, { title = state.opts.title, bg = c.frame })
 
     local room = inner.h - 1
     local first_row = input_first() and inner.y + 1 or inner.y
@@ -451,7 +453,7 @@ local function arm()
         fail("header", runs)
         return
       end
-      draw_runs(ctx, win, inner.x, first_row, inner.w, runs or {}, M.colors.frame)
+      draw_runs(ctx, win, inner.x, first_row, inner.w, runs or {}, c.frame)
       room = room - 1
       first_row = first_row + 1
     end
@@ -461,9 +463,9 @@ local function arm()
       local item = state.items[at]
       local row = first_row + slot
       local chosen = at == state.at
-      local background = chosen and M.colors.cursor or M.colors.frame
+      local background = chosen and c.cursor or c.frame
       if chosen then
-        ctx:rect(win, inner.x, row, inner.w, 1, { bg = M.colors.cursor })
+        ctx:rect(win, inner.x, row, inner.w, 1, { bg = c.cursor })
       end
       local ok, runs = pcall(state.opts.row, item, chosen, inner.w)
       if not ok then
@@ -477,8 +479,8 @@ local function arm()
     if state.input then
       local label = (state.input.label and state.input.label .. "  ") or ""
       ctx:text(win, inner.x, last, label .. state.input.value, {
-        fg = M.colors.text,
-        bg = M.colors.frame,
+        fg = c.text,
+        bg = c.frame,
       })
       -- The caret, drawn rather than placed: the terminal's own cursor belongs to the focused
       -- pane, and a float cannot take it.
@@ -488,12 +490,12 @@ local function arm()
         last,
         1,
         1,
-        { bg = M.colors.caret }
+        { bg = c.caret }
       )
     elseif state.opts.input then
       ctx:text(win, inner.x, last, M.prompt .. (state.query or ""), {
-        fg = M.colors.text,
-        bg = M.colors.frame,
+        fg = c.text,
+        bg = c.frame,
       })
       ctx:rect(
         win,
@@ -501,7 +503,7 @@ local function arm()
         last,
         1,
         1,
-        { bg = M.colors.caret }
+        { bg = c.caret }
       )
     elseif state.opts.footer then
       local ok, text = pcall(state.opts.footer)
@@ -510,20 +512,14 @@ local function arm()
         return
       end
       if text then
-        ctx:text(win, inner.x, last, text, { fg = M.colors.hint, bg = M.colors.frame })
+        ctx:text(win, inner.x, last, text, { fg = c.hint, bg = c.frame })
       end
     end
 
     -- An empty frame says nothing about why it is empty. A query that matched none of them is
     -- the only way a list with items behind it can be empty, so that is what it says.
     if #state.items == 0 and state.opts.empty then
-      ctx:text(
-        win,
-        inner.x,
-        first_row,
-        state.opts.empty,
-        { fg = M.colors.hint, bg = M.colors.frame }
-      )
+      ctx:text(win, inner.x, first_row, state.opts.empty, { fg = c.hint, bg = c.frame })
     end
   end)
 end

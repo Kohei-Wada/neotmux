@@ -41,14 +41,15 @@
 -- targets there are no labels left to give out; the farthest ones are left unlabelled rather
 -- than handed a label that collides with another's.
 local modes = require("neotmux.mode")
+local style = require("neotmux.style")
 local g = neotmux.group("neotmux.hints")
 
 local M = {}
 
-M.colors = {
-  bg = "#f9e2af", -- yellow
-  fg = "#1e1e2e", -- mantle: readable on the yellow above
-}
+style.default("hints", {
+  bg = "yellow",
+  fg = "base", -- readable on the yellow above
+})
 
 -- Read on every open, not cached here, so replacing it from an `init.lua` takes effect on the
 -- next `hints.open()` without requiring this file to be reloaded.
@@ -407,6 +408,7 @@ local function arm()
     if state == nil then
       return
     end
+    local c = style.get("hints")
     for _, hit in ipairs(state.targets) do
       local rect = ctx:pane_rect(hit.pane)
       if rect then
@@ -417,8 +419,8 @@ local function arm()
         local col = math.max(0, math.min(hit.col, room))
         local line = math.max(0, math.min(hit.line, rect.h - 1))
         ctx:text(nil, rect.x + col, rect.y + line, hit.label, {
-          fg = M.colors.fg,
-          bg = M.colors.bg,
+          fg = c.fg,
+          bg = c.bg,
         })
       end
     end

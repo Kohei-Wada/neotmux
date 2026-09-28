@@ -6,11 +6,12 @@
 -- config loaded — its drawing, its reads of panes, everything it did that frame. They are the
 -- thing to look at before deciding a plugin draws too often, rather than a guess.
 local list = require("neotmux.list")
+local style = require("neotmux.style")
 local g = neotmux.group("plugin.costs")
 
 local M = {}
 
-M.colors = { source = "#cba6f7", number = "#cdd6f4", label = "#6c7086", spark = "#89b4fa" }
+style.default("costs", { source = "mauve", number = "text", label = "overlay0", spark = "blue" })
 
 local BARS = { "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█" }
 
@@ -81,26 +82,28 @@ local function spark(samples, room)
 end
 
 local function header()
+  local c = style.get("costs")
   local text = pad("source", name_width)
   for _, column in ipairs(COLUMNS) do
     text = text .. right(column[1], column[2])
   end
   return {
-    { text = text, fg = M.colors.label },
-    { text = string.format("  last ticks, top %.2f ms", spark_top), fg = M.colors.label },
+    { text = text, fg = c.label },
+    { text = string.format("  last ticks, top %.2f ms", spark_top), fg = c.label },
   }
 end
 
 local function row(it, _, width)
+  local c = style.get("costs")
   local numbers = ""
   for _, column in ipairs(COLUMNS) do
     numbers = numbers .. right(column[3](it), column[2])
   end
   return {
-    { text = pad(it.source, name_width), fg = M.colors.source },
-    { text = numbers, fg = M.colors.number },
+    { text = pad(it.source, name_width), fg = c.source },
+    { text = numbers, fg = c.number },
     { text = "  " },
-    { text = spark(it.recent_ms, width - numbers_width()), fg = M.colors.spark },
+    { text = spark(it.recent_ms, width - numbers_width()), fg = c.spark },
   }
 end
 

@@ -15,17 +15,18 @@
 -- is the corner to put them in — the pane area, so a sidebar or a footer moves them rather
 -- than being drawn over — and `neotmux.width` is what keeps the lines inside the frame.
 local box = require("neotmux.box")
+local style = require("neotmux.style")
 local g = neotmux.group("plugin.notify")
 
 local M = {}
 
-M.colors = {
-  frame = "#181825", -- mantle
-  tag = "#585b70", -- surface2: who raised it, quieter than what it says
-  info = "#89b4fa", -- blue
-  warn = "#f9e2af", -- yellow
-  error = "#f38ba8", -- red
-}
+style.default("notify", {
+  frame = "mantle",
+  tag = "surface2", -- who raised it, quieter than what it says
+  info = "blue",
+  warn = "yellow",
+  error = "red",
+})
 
 -- The most one takes of the surface, in columns and rows, and how many are shown at once. A
 -- notification is an interruption, and one that covers what you were reading is a worse
@@ -39,8 +40,8 @@ M.gap = 1
 
 M.band = nil
 
-local function palette(level)
-  return M.colors[level] or M.colors.info
+local function palette(c, level)
+  return c[level] or c.info
 end
 
 -- One notification as the lines it takes: the text cut to the width, in columns, and broken
@@ -67,11 +68,11 @@ end
 -- One box, on the surface, at a place this file worked out. Not `neotmux.box`: that draws
 -- into a float's own coordinates, and a notification is a corner of the surface that only
 -- exists while something is showing — not a claim on a handle and a place.
-local function draw(ctx, x, y, w, h)
-  ctx:rect(nil, x, y, w, h, { bg = M.colors.frame })
+local function draw(ctx, c, x, y, w, h)
+  ctx:rect(nil, x, y, w, h, { bg = c.frame })
   local glyphs = box.glyphs
   local across = string.rep(glyphs.horizontal, w - 2)
-  local edge = { fg = box.colors.line, bg = M.colors.frame }
+  local edge = { fg = style.get("float.box").line, bg = c.frame }
   ctx:text(nil, x, y, glyphs.top_left .. across .. glyphs.top_right, edge)
   ctx:text(nil, x, y + h - 1, glyphs.bottom_left .. across .. glyphs.bottom_right, edge)
   for row = 1, h - 2 do
@@ -89,6 +90,7 @@ g.on_tick(function(ctx)
   if #list == 0 then
     return
   end
+  local c = style.get("notify")
   local area = ctx:area()
   local width = math.min(M.width, area.w)
   local x = area.x + area.w - width
@@ -106,9 +108,9 @@ g.on_tick(function(ctx)
     if y < area.y or x < area.x then
       return
     end
-    draw(ctx, x, y, width, h)
+    draw(ctx, c, x, y, width, h)
     for row, text in ipairs(lines) do
-      ctx:text(nil, x + 2, y + row, text, { fg = palette(one.level), bg = M.colors.frame })
+      ctx:text(nil, x + 2, y + row, text, { fg = palette(c, one.level), bg = c.frame })
     end
     bottom = y - M.gap
   end

@@ -18,16 +18,17 @@
 local modes = require("neotmux.mode")
 local box = require("neotmux.box")
 local line = require("neotmux.line")
+local style = require("neotmux.style")
 local g = neotmux.group("neotmux.prompt")
 
 local M = {}
 
-M.colors = {
-  frame = "#181825", -- mantle
-  text = "#cdd6f4",
-  caret = "#f9e2af", -- yellow
-  hint = "#585b70", -- surface2
-}
+style.default("float.prompt", {
+  frame = "mantle",
+  text = "text",
+  caret = "yellow",
+  hint = "surface2",
+})
 
 M.width = 40
 
@@ -124,12 +125,13 @@ g.on_tick(function(ctx)
     win:move_to(want.x, want.y)
   end
 
-  local inner = box.draw(ctx, win, rect, { title = state.title, bg = M.colors.frame })
+  local c = style.get("float.prompt")
+  local inner = box.draw(ctx, win, rect, { title = state.title, bg = c.frame })
   ctx:text(win, inner.x + 1, inner.y, state.value, {
-    fg = M.colors.text,
-    bg = M.colors.frame,
+    fg = c.text,
+    bg = c.frame,
   })
-  ctx:rect(win, inner.x + 1 + neotmux.width(state.value), inner.y, 1, 1, { bg = M.colors.caret })
+  ctx:rect(win, inner.x + 1 + neotmux.width(state.value), inner.y, 1, 1, { bg = c.caret })
 end)
 
 return M

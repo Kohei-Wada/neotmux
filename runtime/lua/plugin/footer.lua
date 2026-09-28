@@ -8,20 +8,22 @@
 -- Off by default, for the same kind of reason `watch` and `sidebar` are: it spends a row,
 -- whether or not a mode is ever raised into it.
 local modes = require("neotmux.mode")
+local style = require("neotmux.style")
 local g = neotmux.group("plugin.footer")
 
 local M = {}
 
--- Catppuccin Mocha, matching `plugin.tmux.status`. Read every tick, so assigning to one from your
--- own `init.lua` takes effect.
-M.colors = {
-  bar = "#181825", -- mantle: the same band colour the status bar sits on
-  text = "#f9e2af", -- yellow: a mode is a thing to notice, not to blend in
-}
+-- Catppuccin Mocha, matching `plugin.tmux.status`. Restyle it with
+-- `neotmux.style.set('footer', ...)`, which takes effect on the next tick.
+style.default("footer", {
+  bar = "mantle", -- the same band colour the status bar sits on
+  text = "yellow", -- a mode is a thing to notice, not to blend in
+})
 
 M.band = g.reserve("bottom", 1)
 
 g.on_tick(function(ctx)
+  local c = style.get("footer")
   local row = ctx:reserved()
   if not row then
     return
@@ -29,12 +31,12 @@ g.on_tick(function(ctx)
   -- The band is painted whether or not there is a mode to name. A row nobody reserved belongs
   -- to the panes; a row this plugin reserved and left alone is a strip of bare terminal under
   -- everything else, which reads as a hole rather than as an empty bar.
-  ctx:rect(nil, row.x, row.y, row.w, row.h, { bg = M.colors.bar })
+  ctx:rect(nil, row.x, row.y, row.w, row.h, { bg = c.bar })
   local name = modes.current()
   if not name then
     return
   end
-  ctx:text(nil, row.x, row.y, " " .. name .. " ", { fg = M.colors.text, bg = M.colors.bar })
+  ctx:text(nil, row.x, row.y, " " .. name .. " ", { fg = c.text, bg = c.bar })
 end)
 
 return M

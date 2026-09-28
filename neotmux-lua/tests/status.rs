@@ -259,10 +259,10 @@ fn a_right_side_with_no_room_is_left_off() {
     assert!(!text.contains('x'), "{text}");
 }
 
-/// A colour is a field, and the field is read on the tick.
+/// A colour is a style part, and it is read on the tick.
 #[test]
 fn a_colour_field_reaches_the_screen() {
-    let (_dir, sub) = built("require('plugin.tmux.status').colors.accent = '#ff0000'");
+    let (_dir, sub) = built("require('neotmux.style').set('status', { accent = '#ff0000' })");
     let cmds = frame(&sub, COLS, &unnamed(&[1]), 1, false);
     assert_eq!(runs(&cmds)[0].2, rgb("#ff0000"));
 }

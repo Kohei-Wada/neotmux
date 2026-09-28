@@ -14,19 +14,21 @@
 local g = neotmux.group("plugin.exits")
 local gutter = require("neotmux.gutter")
 local commands = require("neotmux.commands")
+local style = require("neotmux.style")
 
 local M = {
   shown = false,
   -- The mark, the status in three, a space, the time in three, and the rule.
   width = 9,
-  colors = {
-    ok = "#a6e3a1",
-    failed = "#f38ba8",
-    running = "#f9e2af",
-    time = "#6c7086",
-    rule = "#45475a",
-  },
 }
+
+style.default("exits", {
+  ok = "green",
+  failed = "red",
+  running = "yellow",
+  time = "overlay0",
+  rule = "surface1",
+})
 
 -- Per pane: `at`, when each `output` and `done` mark was first seen, in `neotmux.now()`
 -- milliseconds, as `at[line][kind]`; `false` for a mark whose time nobody knows, because it was
@@ -117,11 +119,12 @@ local function span(ms)
 end
 
 local function draw(ctx, pane, now)
+  local c = style.get("exits")
   local rect = ctx:pane_band(pane)
   if rect == nil then
     return
   end
-  gutter.rule(ctx, rect, M.colors.rule)
+  gutter.rule(ctx, rect, c.rule)
   local _, top = tops(pane)
   if top == nil then
     return
@@ -133,14 +136,14 @@ local function draw(ctx, pane, now)
       local started = when(pane, command.output, "output")
       local ended
       if command.state == "running" then
-        ctx:text(nil, rect.x, y, "⋯", { fg = M.colors.running })
+        ctx:text(nil, rect.x, y, "⋯", { fg = c.running })
         ended = now
       elseif command.exit == nil then
-        ctx:text(nil, rect.x, y, "?", { fg = M.colors.time })
+        ctx:text(nil, rect.x, y, "?", { fg = c.time })
         ended = when(pane, command.done, "done")
       else
         local failed = command.exit ~= 0
-        local colour = failed and M.colors.failed or M.colors.ok
+        local colour = failed and c.failed or c.ok
         ctx:text(nil, rect.x, y, failed and "✘" or "✔", { fg = colour })
         if failed and rect.w >= 5 then
           ctx:text(nil, rect.x + 1, y, string.format("%3s", tostring(command.exit):sub(-3)), {
@@ -151,7 +154,7 @@ local function draw(ctx, pane, now)
       end
       if started and ended and rect.w >= 9 then
         ctx:text(nil, rect.x + 5, y, string.format("%3s", span(ended - started)), {
-          fg = M.colors.time,
+          fg = c.time,
         })
       end
     end

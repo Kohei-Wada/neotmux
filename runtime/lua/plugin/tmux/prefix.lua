@@ -38,7 +38,10 @@ local list = require("neotmux.list")
 local nav = require("neotmux.nav")
 local modes = require("neotmux.mode")
 local prompt = require("neotmux.prompt")
+local style = require("neotmux.style")
 local g = neotmux.group("plugin.tmux.prefix")
+
+style.default("prefix", { key = "blue", name = "mauve", desc = "subtext0" })
 
 -- Two modes, not one: the armed prefix and resize mode are different states, and a reader
 -- should be able to tell them apart. Each local holds the handle `neotmux.mode.raise` hands
@@ -289,8 +292,6 @@ local function key_rows()
   return rows
 end
 
-local KEY_COLOURS = { key = "#89b4fa", name = "#cba6f7", desc = "#a6adc8" }
-
 function show_keys()
   local rows = key_rows()
   local key_width, name_width = 0, 0
@@ -308,15 +309,16 @@ function show_keys()
       return rows
     end,
     row = function(it)
+      local c = style.get("prefix")
       local key = M.key .. " " .. it.key
       local name = it.name or ""
       return {
-        { text = key .. string.rep(" ", key_width - neotmux.width(key) + 2), fg = KEY_COLOURS.key },
+        { text = key .. string.rep(" ", key_width - neotmux.width(key) + 2), fg = c.key },
         {
           text = name .. string.rep(" ", name_width - neotmux.width(name) + 2),
-          fg = KEY_COLOURS.name,
+          fg = c.name,
         },
-        { text = it.desc, fg = KEY_COLOURS.desc },
+        { text = it.desc, fg = c.desc },
       }
     end,
     footer = function()

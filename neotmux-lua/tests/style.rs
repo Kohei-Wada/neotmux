@@ -65,13 +65,13 @@ fn a_more_specific_selector_wins_and_a_users_general_one_beats_a_specific_defaul
 fn a_second_default_replaces_the_first() {
     let (_dir, sub) = built(&format!(
         "local style = require('neotmux.style')
-         style.default('stamps', {{ time = 'blue', rule = 'red' }})
-         style.default('stamps', {{ time = 'green' }})
+         style.default('sample', {{ time = 'blue', rule = 'red' }})
+         style.default('sample', {{ time = 'green' }})
          {}",
-        probe(&[("stamps", "time"), ("stamps", "rule")])
+        probe(&[("sample", "time"), ("sample", "rule")])
     ));
     keys(&sub, &["P"]);
-    assert_eq!(logged(&sub), vec!["stamps.time=#a6e3a1", "stamps.rule=nil"]);
+    assert_eq!(logged(&sub), vec!["sample.time=#a6e3a1", "sample.rule=nil"]);
 }
 
 #[test]
