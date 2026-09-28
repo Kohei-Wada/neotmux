@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### The sidebar's rows are herdr's
+
+Every session in the sidebar is two rows, as in herdr: its name, then its branch, or nothing
+where there is no branch, so the sessions below do not move when one leaves git. A band too
+short to show the pane you are in gives up those empty rows first. An agent's second row says
+what state it is in before what it is: `working claude`.
+
 ### Zoom
 
 `C-b z` gives the focused pane the whole window, as tmux's does, and pressing it again puts

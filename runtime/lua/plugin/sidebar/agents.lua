@@ -19,10 +19,10 @@ local g = neotmux.group("plugin.sidebar.agents")
 
 local M = { title = "agents", share = 0.5, always = true }
 
--- herdr's rows: where it is on the first, what it is on the second. `window` says nothing for a
--- session with one window, as herdr's `tab` does. `location`, `command`, `state_text` and `age`
--- are there to swap in.
-M.rows = { { "state_icon", "session", "window" }, { "agent" } }
+-- herdr's rows: where it is on the first, what state it is in and what it is on the second.
+-- `window` says nothing for a session with one window, as herdr's `tab` does. `location`,
+-- `command` and `age` are there to swap in.
+M.rows = { { "state_icon", "session", "window" }, { "state_text", "agent" } }
 
 -- `'grouped'`: session, then window, then pane, herdr's default. `'priority'`: blocked, done,
 -- working, idle, and session order within each.

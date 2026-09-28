@@ -4,6 +4,8 @@
 --
 --   local spaces = require('plugin.sidebar.spaces')
 --   spaces.rows = { { 'state_icon', 'name' } }       -- one row, no git
+--
+-- Each space takes every row in `rows`, with or without a branch to put on the second.
 --   spaces.refresh = 10000                           -- ask git every ten seconds, not five
 --
 -- `C-b w` (`navigate`) puts a cursor on it: `j`/`k` move it, Enter goes to the session under it,
@@ -182,15 +184,17 @@ function M.build(given)
     if (it.here and not M.cursor) or selected then
       anchor = #rows + 1
     end
+    -- Every row, the empty ones too: a space is as tall as `M.rows` whatever it has to say,
+    -- as herdr's are, so a session with no branch does not pull the ones below it up a row. An
+    -- empty one is marked, so a band too short for everything gives it up before a pane.
     local own = {}
     for line, names in ipairs(M.rows) do
       local runs = sidebar.row(M.tokens, names, it)
-      if #runs > 0 then
-        table.insert(runs, 1, { text = line == 1 and " " or "   " })
-        runs.fill = fill
-        own[#own + 1] = runs
-        rows[#rows + 1] = runs
-      end
+      runs.blank = #runs == 0
+      table.insert(runs, 1, { text = line == 1 and " " or "   " })
+      runs.fill = fill
+      own[#own + 1] = runs
+      rows[#rows + 1] = runs
     end
     spaces[#spaces + 1] = { rows = own, here = it.here }
     if it.here and M.tree then

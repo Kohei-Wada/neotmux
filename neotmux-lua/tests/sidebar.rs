@@ -678,7 +678,7 @@ fn the_shipped_sidebar_is_herdrs_spaces_over_its_agents() {
         agents < first && first < second && second < third,
         "{lines:#?}"
     );
-    assert_eq!(lines[first + 1].trim(), "fake", "{lines:#?}");
+    assert_eq!(lines[first + 1].trim(), "blocked fake", "{lines:#?}");
 }
 
 /// herdr's `done`: an agent that finishes where nobody is looking is done until it is looked at,
@@ -960,9 +960,11 @@ fn fill_on(sub: &Built, y: u16) -> Option<neotmux_proto::Color> {
     })
 }
 
-/// Row for row what herdr draws: ` spaces` and a blank, the sessions, then at half the band a
-/// rule across it, ` agents` with the order on its right and a blank, the agents one column in
-/// with what they are three columns in, and the fold's `«` in the corner.
+/// Row for row what herdr draws: ` spaces` and a blank, the sessions two rows each — the second
+/// empty where there is no branch — with the tree of the one you are in under it, then at half
+/// the band a rule across it, ` agents` with the
+/// order on its right and a blank, the agents one column in with their state and what they are
+/// three columns in, and the fold's `«` in the corner.
 #[test]
 fn the_sidebar_is_laid_out_row_for_row_as_herdrs() {
     let (_dir, sub) = built_herdr(AGENTS);
@@ -972,20 +974,25 @@ fn the_sidebar_is_laid_out_row_for_row_as_herdrs() {
     ];
     open(&sub, &s);
     show(&sub, 101, "BUSY");
-    let lines = settled(&sub, &s, 1);
+    let tall = Size { rows: 20, cols: 80 };
+    frame_in(&sub, tall, &s, 1);
+    let lines = frame_in(&sub, tall, &s, 1);
     assert_eq!(lines[0], " spaces", "{lines:#?}");
     assert_eq!(lines[1], "", "{lines:#?}");
     assert_eq!(lines[2], " \u{b7} home", "{lines:#?}");
-    assert_eq!(lines[3], " \u{25cf} work", "{lines:#?}");
-    assert_eq!(lines[6], "\u{2500}".repeat(25), "{lines:#?}");
+    assert_eq!(lines[3], "", "{lines:#?}");
+    assert_eq!(lines[4], " \u{25cf} work", "{lines:#?}");
+    assert_eq!(lines[5], "", "{lines:#?}");
+    assert_eq!(lines[6], "   \u{25b8} \u{2514}\u{2500} 1", "{lines:#?}");
+    assert_eq!(lines[10], "\u{2500}".repeat(25), "{lines:#?}");
     assert!(
-        lines[7].starts_with(" agents") && lines[7].ends_with("grouped"),
+        lines[11].starts_with(" agents") && lines[11].ends_with("grouped"),
         "{lines:#?}"
     );
-    assert_eq!(lines[8], "", "{lines:#?}");
-    assert_eq!(lines[9], " \u{25cf} work", "{lines:#?}");
-    assert_eq!(lines[10], "   fake", "{lines:#?}");
-    assert_eq!(lines[11].trim(), "\u{ab}", "{lines:#?}");
+    assert_eq!(lines[12], "", "{lines:#?}");
+    assert_eq!(lines[13], " \u{25cf} work", "{lines:#?}");
+    assert_eq!(lines[14], "   working fake", "{lines:#?}");
+    assert_eq!(lines[19].trim(), "\u{ab}", "{lines:#?}");
 }
 
 /// Nothing paints the band but the rows you are in: herdr leaves the terminal's own background
@@ -999,11 +1006,19 @@ fn only_the_rows_you_are_in_are_painted_and_names_are_herdrs_colours() {
     ];
     open(&sub, &s);
     show(&sub, 101, "BUSY");
-    settled(&sub, &s, 1);
+    let tall = Size { rows: 20, cols: 80 };
+    frame_in(&sub, tall, &s, 1);
+    frame_in(&sub, tall, &s, 1);
     assert_eq!(fill_on(&sub, 2), None, "home is not where you are");
-    assert_eq!(fill_on(&sub, 3), Some(HERE), "work is");
-    assert_eq!(fill_on(&sub, 9), Some(HERE), "the agent you are at");
-    assert_eq!(fill_on(&sub, 10), Some(HERE), "both of its rows");
+    assert_eq!(fill_on(&sub, 3), None, "nor its second row");
+    assert_eq!(fill_on(&sub, 4), Some(HERE), "work is");
+    assert_eq!(
+        fill_on(&sub, 5),
+        Some(HERE),
+        "both of its rows, the empty one too"
+    );
+    assert_eq!(fill_on(&sub, 13), Some(HERE), "the agent you are at");
+    assert_eq!(fill_on(&sub, 14), Some(HERE), "both of its rows");
     assert_eq!(style_of(&sub, "spaces"), (OVERLAY, true));
     assert_eq!(style_of(&sub, "home"), (SUBTEXT, false));
     assert_eq!(style_of(&sub, "work"), (TEXT, true));

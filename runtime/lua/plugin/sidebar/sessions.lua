@@ -269,6 +269,22 @@ function M.fit(model, height, sidebar)
   for _, it in ipairs(model.entries) do
     heads = heads + #it.rows
   end
+  -- A row that is only there to keep the entries even goes before any of the tree does.
+  if #model.tree.rows > 0 and heads >= height then
+    local entries = {}
+    heads = 0
+    for _, it in ipairs(model.entries) do
+      local rows = {}
+      for _, runs in ipairs(it.rows) do
+        if not runs.blank then
+          rows[#rows + 1] = runs
+        end
+      end
+      entries[#entries + 1] = { rows = rows, here = it.here }
+      heads = heads + #rows
+    end
+    model = { rows = model.rows, entries = entries, tree = model.tree }
+  end
   if heads <= height then
     local cut = sidebar.scroll(model.tree, height - heads, { above = more, below = more })
     local out = {}
