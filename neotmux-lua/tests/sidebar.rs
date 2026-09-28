@@ -1103,6 +1103,42 @@ fn a_band_colour_of_your_own_still_shows_the_rows_you_are_at() {
     assert_eq!(bg, HERE);
 }
 
+/// `style.set('sidebar', ...)` is not only read by a row's own fill: the band itself, painted
+/// first every tick with `c.bar`, is the user's colour too.
+#[test]
+fn a_style_set_recolours_the_band_itself() {
+    let (_dir, sub) = built_herdr("require('neotmux.style').set('sidebar', { bar = '#123456' })\n");
+    let s = [Sess::new(1, "work", vec![vec![101]])];
+    open(&sub, &s);
+    settled(&sub, &s, 1);
+    let bg = sub
+        .frame_output()
+        .into_iter()
+        .find_map(|cmd| match cmd {
+            DrawCmd::Rect { rect, bg, .. } if rect.h > 1 => Some(bg),
+            _ => None,
+        })
+        .expect("the band itself is painted");
+    assert_eq!(bg, neotmux_proto::Color::Rgb(0x12, 0x34, 0x56));
+}
+
+/// The theme, not only a plugin's own `style.set`, reaches the sidebar: `header` is `overlay0`
+/// by default, and renaming what `overlay0` means recolours it with no `sidebar` selector touched
+/// at all.
+#[test]
+fn a_theme_change_reaches_the_sidebar_too() {
+    let (_dir, sub) = built_herdr("require('neotmux.theme').set({ overlay0 = '#010203' })\n");
+    let s = [Sess::new(1, "work", vec![vec![101]])];
+    open(&sub, &s);
+    let tall = Size { rows: 20, cols: 80 };
+    frame_in(&sub, tall, &s, 1);
+    frame_in(&sub, tall, &s, 1);
+    assert_eq!(
+        style_of(&sub, "spaces"),
+        (neotmux_proto::Color::Rgb(0x01, 0x02, 0x03), true)
+    );
+}
+
 /// The session you are in is opened out under its space: its windows and panes, as the tree
 /// draws them, so where you are inside it is on screen too. The others stay one entry each.
 #[test]
