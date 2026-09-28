@@ -12,6 +12,7 @@
 -- The time is when this plugin first saw the command's output start and its end, to the tick,
 -- so a command that had already finished when it first looked has no time.
 local g = neotmux.group("plugin.exits")
+local gutter = require("neotmux.gutter")
 local commands = require("neotmux.commands")
 
 local M = {
@@ -26,8 +27,6 @@ local M = {
     rule = "#45475a",
   },
 }
-
-local band
 
 -- Per pane: `at`, when each `output` and `done` mark was first seen, in `neotmux.now()`
 -- milliseconds, as `at[line][kind]`; `false` for a mark whose time nobody knows, because it was
@@ -122,10 +121,7 @@ local function draw(ctx, pane, now)
   if rect == nil then
     return
   end
-  local rule = rect.x + rect.w - 1
-  for row = 0, rect.h - 1 do
-    ctx:text(nil, rule, rect.y + row, "│", { fg = M.colors.rule })
-  end
+  gutter.rule(ctx, rect, M.colors.rule)
   local _, top = tops(pane)
   if top == nil then
     return
@@ -162,30 +158,9 @@ local function draw(ctx, pane, now)
   end
 end
 
--- Every window's panes, the hidden ones too: the build in a window you are not looking at is
--- the one whose time you will want when you come back to it.
-local function every_pane()
-  local out, listed = {}, {}
-  local function add(pane)
-    if not listed[pane] then
-      listed[pane] = true
-      out[#out + 1] = pane
-    end
-  end
-  for _, window in ipairs(neotmux.window.list()) do
-    for _, pane in ipairs(neotmux.window.panes(window) or {}) do
-      add(pane)
-    end
-  end
-  for _, pane in ipairs(neotmux.pane.list()) do
-    add(pane)
-  end
-  return out
-end
-
 g.on_tick(function(ctx)
   local now = neotmux.now()
-  for _, pane in ipairs(every_pane()) do
+  for _, pane in ipairs(gutter.every_pane()) do
     note(pane, now)
   end
   if M.shown then
@@ -199,28 +174,9 @@ g.on_event("pane_closed", function(event)
   seen[event.pane] = nil
 end)
 
-function M.toggle()
-  M.shown = not M.shown
-  if not M.shown then
-    if band then
-      band:remove()
-      band = nil
-    end
-    return
-  end
-  if M.width < 1 or M.width > 24 then
-    M.shown = false
-    neotmux.notify("warn", "plugin.exits: width must be 1..24, got " .. tostring(M.width))
-    return
-  end
-  local handle, message = g.reserve_pane("left", M.width)
-  if handle == nil then
-    M.shown = false
-    neotmux.notify("warn", "plugin.exits: " .. message)
-    return
-  end
-  band = handle
-end
+M.toggle = gutter.toggler(M, "plugin.exits", function(width)
+  return g.reserve_pane("left", width)
+end)
 
 g.command.add("exits", M.toggle, {
   desc = "show how each command in every pane ended and how long it took",

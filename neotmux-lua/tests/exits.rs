@@ -326,3 +326,20 @@ fn a_hidden_pane_forgets_the_marks_written_over() {
         .collect();
     assert_eq!(times, vec![(0, " 0s".to_string())], "{texts:?}");
 }
+
+/// The times and the exits fit side by side under the pane bands' cap, and neither is refused.
+#[test]
+fn the_times_and_the_exits_fit_side_by_side() {
+    let (_dir, sub) = built(&format!(
+        "{SHOWN}\n\
+         require('plugin.stamps')\n\
+         neotmux.on_key(function(key)\n\
+           if key ~= 'T' then return false end\n\
+           require('plugin.stamps').toggle()\n\
+           return true\n\
+         end)\n"
+    ));
+    keys(&sub, &["T", "E"]);
+    assert_eq!(sub.pane_band(), 19);
+    assert!(support::notified(&sub).is_empty());
+}

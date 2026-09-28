@@ -14,6 +14,7 @@
 -- while a pane is on its alternate screen. A line that falls off the pane's history takes its
 -- time with it.
 local g = neotmux.group("plugin.stamps")
+local gutter = require("neotmux.gutter")
 
 local M = {
   shown = false,
@@ -29,35 +30,11 @@ local M = {
   },
 }
 
-local band
-
 -- Per pane: `next`, the line number the pane will write next, and `at`, each line's arrival
 -- in `os.time()` seconds, keyed by line number. A line number counts every line the pane has
 -- ever had — those fallen off its history, those in it, then the screen's rows — so it names
 -- the same line however far the screen has scrolled since.
 local panes = {}
-
--- Every window's panes, the hidden ones too: a build in a window you are not looking at is
--- the one whose times you will want. The shown panes as well, for a host that has published
--- panes but no windows.
-local function every_pane()
-  local out, seen = {}, {}
-  local function add(pane)
-    if not seen[pane] then
-      seen[pane] = true
-      out[#out + 1] = pane
-    end
-  end
-  for _, window in ipairs(neotmux.window.list()) do
-    for _, pane in ipairs(neotmux.window.panes(window) or {}) do
-      add(pane)
-    end
-  end
-  for _, pane in ipairs(neotmux.pane.list()) do
-    add(pane)
-  end
-  return out
-end
 
 -- The line number of the screen's top row, and the one the cursor is on.
 local function numbers(pane)
@@ -111,9 +88,8 @@ local function draw(ctx, pane)
   end
   -- Wound back with the pane when copy mode, or anything else, draws it into its history.
   local top = it.top - neotmux.pane.view(pane)
-  local rule = rect.x + rect.w - 1
+  gutter.rule(ctx, rect, M.colors.rule)
   for row = 0, rect.h - 1 do
-    ctx:text(nil, rule, rect.y + row, "│", { fg = M.colors.rule })
     local line = top + row
     local at = it.at[line]
     local before = it.at[line - 1]
@@ -138,7 +114,7 @@ end
 
 g.on_tick(function(ctx)
   local now = os.time()
-  for _, pane in ipairs(every_pane()) do
+  for _, pane in ipairs(gutter.every_pane()) do
     record(pane, now)
   end
   if M.shown then
@@ -152,28 +128,9 @@ g.on_event("pane_closed", function(event)
   panes[event.pane] = nil
 end)
 
-function M.toggle()
-  M.shown = not M.shown
-  if not M.shown then
-    if band then
-      band:remove()
-      band = nil
-    end
-    return
-  end
-  if M.width < 1 or M.width > 24 then
-    M.shown = false
-    neotmux.notify("warn", "plugin.stamps: width must be 1..24, got " .. tostring(M.width))
-    return
-  end
-  local handle, message = g.reserve_pane("left", M.width)
-  if handle == nil then
-    M.shown = false
-    neotmux.notify("warn", "plugin.stamps: " .. message)
-    return
-  end
-  band = handle
-end
+M.toggle = gutter.toggler(M, "plugin.stamps", function(width)
+  return g.reserve_pane("left", width)
+end)
 
 g.command.add("timestamps", M.toggle, {
   desc = "show when each line of every pane arrived, and how long it waited",
