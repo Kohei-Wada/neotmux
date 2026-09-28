@@ -36,10 +36,17 @@ impl Marks {
 
     pub fn add(&mut self, mark: Mark) {
         if mark.kind == MarkKind::Prompt {
-            self.held.retain(|held| held.line <= mark.line);
+            self.held
+                .truncate(self.held.partition_point(|held| held.line <= mark.line));
         }
-        self.held
-            .retain(|held| !(held.line == mark.line && held.kind == mark.kind));
+        let start = self.held.partition_point(|held| held.line < mark.line);
+        let end = self.held.partition_point(|held| held.line <= mark.line);
+        if let Some(i) = self.held[start..end]
+            .iter()
+            .position(|held| held.kind == mark.kind)
+        {
+            self.held.remove(start + i);
+        }
         let at = self.held.partition_point(|held| held.line <= mark.line);
         self.held.insert(at, mark);
     }
@@ -51,10 +58,8 @@ impl Marks {
     }
 
     pub fn between(&self, first: u64, last: u64) -> Vec<Mark> {
-        self.held
-            .iter()
-            .filter(|held| (first..=last).contains(&held.line))
-            .copied()
-            .collect()
+        let start = self.held.partition_point(|held| held.line < first);
+        let end = self.held.partition_point(|held| held.line <= last);
+        self.held[start..end].to_vec()
     }
 }
