@@ -37,7 +37,7 @@ fn built(extra: &str) -> (tempfile::TempDir, Built) {
 struct WorkingClipboard;
 
 impl neotmux_lua::host::Clipboard for WorkingClipboard {
-    fn set(&self, _text: &str) -> std::io::Result<()> {
+    fn set(&self, _session: Option<neotmux_proto::SessionId>, _text: &str) -> std::io::Result<()> {
         Ok(())
     }
 }

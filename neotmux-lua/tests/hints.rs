@@ -701,7 +701,7 @@ fn a_label_is_clipped_to_the_pane_it_belongs_to() {
 struct Recording(RefCell<Vec<String>>);
 
 impl Clipboard for Recording {
-    fn set(&self, text: &str) -> std::io::Result<()> {
+    fn set(&self, _session: Option<neotmux_proto::SessionId>, text: &str) -> std::io::Result<()> {
         self.0.borrow_mut().push(text.to_string());
         Ok(())
     }

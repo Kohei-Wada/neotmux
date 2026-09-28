@@ -10,10 +10,16 @@
 //! both its consumer and every one of its implementors can see, and for this one that is
 //! here. Nothing puts it on the wire; the client writes to its own terminal.
 
+use neotmux_proto::SessionId;
+
 /// Somewhere to put text a plugin has yanked.
 pub trait Clipboard {
     /// Hands `text` over. `Ok` means the host did what it does — for the client that is
     /// writing the sequence to its terminal and flushing it — and never that a clipboard now
     /// holds the text, which nothing in this direction can know.
-    fn set(&self, text: &str) -> std::io::Result<()>;
+    ///
+    /// `session` is the one the yank was raised for — the session whose tick, key or event
+    /// the plugin was answering — so that it reaches the terminals looking at that session and
+    /// no other. `None` is a yank from outside any of them, a config load.
+    fn set(&self, session: Option<SessionId>, text: &str) -> std::io::Result<()>;
 }

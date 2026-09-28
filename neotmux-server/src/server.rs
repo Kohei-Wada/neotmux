@@ -417,7 +417,12 @@ fn frame(
     // arrived while the previous frame was still running is adopted here, before the tick,
     // so it is in the frame it arrived in.
     door(pending, clients, plugins, sessions, serving)?;
-    clip.attached(clients.len());
+    clip.attached(
+        clients
+            .iter()
+            .filter(|client| !client.gone)
+            .map(|client| client.session),
+    );
 
     if sessions.live.is_empty() {
         clients.retain(|client| !client.gone);
@@ -457,10 +462,10 @@ fn frame(
         });
         drop(frame);
 
-        // Taken after this session's tick, so a yank belongs to the session whose plugin
-        // raised it and reaches the clients looking at that one.
+        // This session's own yanks, whenever in the frame its plugins raised them: each is kept
+        // with the session it was raised for, so another session's frame never takes it.
         let yanked: Vec<Vec<u8>> = clip
-            .take()
+            .take(id)
             .iter()
             .map(|text| wire::encode_to_client(&ToClient::Clip(text)))
             .collect();

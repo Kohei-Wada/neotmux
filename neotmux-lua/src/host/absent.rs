@@ -5,7 +5,7 @@ use crate::host::Clipboard;
 pub struct Absent;
 
 impl Clipboard for Absent {
-    fn set(&self, _text: &str) -> std::io::Result<()> {
+    fn set(&self, _session: Option<neotmux_proto::SessionId>, _text: &str) -> std::io::Result<()> {
         Err(std::io::Error::other("this host has no clipboard"))
     }
 }

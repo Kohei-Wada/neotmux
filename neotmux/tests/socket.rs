@@ -122,6 +122,18 @@ impl Client {
         cols: u16,
         runtime_layers: &[&Path],
     ) -> Self {
+        Self::start_on(runtime, shell, rows, cols, runtime_layers, "0")
+    }
+
+    /// The same, attached to the session called `session`.
+    fn start_on(
+        runtime: &Path,
+        shell: &str,
+        rows: u16,
+        cols: u16,
+        runtime_layers: &[&Path],
+        session: &str,
+    ) -> Self {
         let pair = native_pty_system()
             .openpty(PtySize {
                 rows,
@@ -147,9 +159,9 @@ impl Client {
         }
         cmd.arg("--log");
         cmd.arg(runtime.join("neotmux.log"));
-        // Session `0` by name: these clients are about one session seen more than once, and
-        // `neotmux` with no name makes a new session every time.
-        cmd.arg("0");
+        // By name, `0` unless the test says: these clients are about a session seen more than
+        // once, and `neotmux` with no name makes a new session every time.
+        cmd.arg(session);
         let child = pair.slave.spawn_command(cmd).expect("spawn");
         drop(pair.slave);
 
@@ -2128,4 +2140,40 @@ fn an_attach_with_no_name_is_a_new_session_under_the_next_number() {
             "no session {name}: {names:?}"
         );
     }
+}
+
+/// #56: with a client on each of two sessions, a yank reaches the terminal looking at the
+/// session it was made in, and not the other. It went to whichever session's frame came first.
+#[test]
+fn a_yank_reaches_the_client_of_the_session_it_was_made_in() {
+    let runtime = TestRuntime::new();
+    let layer = layer_with(&[(
+        "init.lua",
+        "neotmux.keymap.set('C-y', function()\n\
+           neotmux.clipboard.set('yanked-in-' .. neotmux.session_name())\n\
+           return true\n\
+         end)\n",
+    )]);
+    let layers = [layer.path(), &shipped_layer()];
+    let mut first = Client::start_on(runtime.path(), "/bin/cat", 24, 80, &layers, "0");
+    wait_for_socket(&socket_in(runtime.path()));
+    first.send("first-ready\r");
+    first.wait_for_output("first-ready");
+    let mut second = Client::start_on(runtime.path(), "/bin/cat", 24, 80, &layers, "other");
+    second.send("second-ready\r");
+    second.wait_for_output("second-ready");
+
+    // `yanked-in-other`, base64: what OSC 52 carries.
+    let other = "eWFua2VkLWluLW90aGVy";
+    for _ in 0..5 {
+        second.send("\x19"); // C-y
+    }
+    second.wait_for_output(&format!("\x1b]52;c;{other}"));
+    // Given the other client every frame the yank could have gone out in.
+    std::thread::sleep(Duration::from_millis(300));
+    let seen = first.screen.lock().unwrap().clone();
+    assert!(
+        !seen.contains("\x1b]52;"),
+        "the first session's client was sent another session's yank: {seen:?}"
+    );
 }

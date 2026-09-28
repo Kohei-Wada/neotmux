@@ -50,7 +50,11 @@ fn a_write_reaches_the_clipboard_the_host_gave() {
 
     struct Recording(RefCell<Vec<String>>);
     impl neotmux_lua::host::Clipboard for Recording {
-        fn set(&self, text: &str) -> std::io::Result<()> {
+        fn set(
+            &self,
+            _session: Option<neotmux_proto::SessionId>,
+            text: &str,
+        ) -> std::io::Result<()> {
             self.0.borrow_mut().push(text.to_string());
             Ok(())
         }

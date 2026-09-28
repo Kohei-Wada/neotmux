@@ -26,7 +26,11 @@ use mlua::{Lua, Table};
 
 use crate::host::Clipboard;
 
-pub(crate) fn install(lua: &Lua, clipboard: Rc<dyn Clipboard>) -> mlua::Result<Table> {
+pub(crate) fn install(
+    lua: &Lua,
+    clipboard: Rc<dyn Clipboard>,
+    ambient: Rc<crate::host::Ambient>,
+) -> mlua::Result<Table> {
     let table = lua.create_table()?;
 
     {
@@ -34,7 +38,7 @@ pub(crate) fn install(lua: &Lua, clipboard: Rc<dyn Clipboard>) -> mlua::Result<T
         // Called from a tick, between frames, so whatever the host does with it cannot land
         // inside a frame's own output.
         let set = lua.create_function(move |_, text: String| {
-            Ok(match clipboard.set(&text) {
+            Ok(match clipboard.set(ambient.current(), &text) {
                 Ok(()) => (true, None),
                 Err(err) => (false, Some(err.to_string())),
             })

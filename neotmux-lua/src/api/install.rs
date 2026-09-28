@@ -377,7 +377,7 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
     }
 
     {
-        let clipboard = super::clipboard::install(lua, clipboard)?;
+        let clipboard = super::clipboard::install(lua, clipboard, ambient.clone())?;
         let clipboard = seal(lua, clipboard, "neotmux.clipboard")?;
         neotmux.set("clipboard", clipboard)?;
     }

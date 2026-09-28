@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### A yank reaches the session it was made in
+
+With a client on each of two sessions, a yank in copy mode went to the terminal of whichever
+session's frame came first, and the client that yanked got nothing. A yank is kept with the
+session it was made in now, and only that session's clients are sent it. A yank in a session
+nobody is looking at says so rather than claiming a write.
+
 ### No flicker under a build
 
 A frame is written as one synchronized update (DEC mode 2026) with the cursor hidden while its
