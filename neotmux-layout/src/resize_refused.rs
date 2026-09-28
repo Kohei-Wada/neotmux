@@ -6,7 +6,7 @@ use std::fmt;
 pub enum ResizeRefused {
     /// The target pane is not in this tree.
     UnknownPane,
-    /// Nothing is on that side of the pane, so there is no boundary to move.
+    /// No other pane shares the axis, so there is no boundary to move that way.
     NoNeighbour,
     /// One of the two sides would be smaller than the caller's minimum.
     TooSmall,

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Resize moves the boundary the way the key points
+
+`h` and `l` in resize mode grew the pane at whichever end was named, so the middle of three
+columns widened on both sides and never narrowed. `neotmux.pane.resize` now moves the pane's
+right (or bottom) boundary in the direction given, and its left (or top) one only when the pane
+is against the far edge — tmux's rule. `left` then `right` puts the line back where it was.
+
 ### The log cannot fill the disk
 
 A plugin that raised on every tick wrote its error, stack traceback and all, four times a

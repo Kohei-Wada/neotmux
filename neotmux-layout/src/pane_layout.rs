@@ -596,10 +596,7 @@ mod tests {
     fn a_resize_with_no_neighbour_that_way_is_refused_and_changes_nothing() {
         let mut layout = layout(24, 80);
         layout.split(SplitDir::Vertical, pane(2)).expect("fits");
-        assert_eq!(
-            layout.resize(Dir::Right, 1),
-            Err(ResizeRefused::NoNeighbour)
-        );
+        assert_eq!(layout.resize(Dir::Up, 1), Err(ResizeRefused::NoNeighbour));
         assert_eq!(
             layout.resize(Dir::Left, 80),
             Err(ResizeRefused::TooSmall),
@@ -820,8 +817,8 @@ mod tests {
 
         layout.toggle_zoom();
         assert!(
-            layout.resize(Dir::Left, 1).is_err(),
-            "the left column has nothing to its left"
+            layout.resize(Dir::Left, 80).is_err(),
+            "the left column would be gone"
         );
         assert_eq!(
             layout.zoomed(),

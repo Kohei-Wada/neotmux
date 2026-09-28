@@ -442,7 +442,7 @@ neotmux.pane.frozen(id)       -- true while anyone holds it, false, or nil for n
 neotmux.pane.split('horizontal' | 'vertical')
 neotmux.pane.focus(id)
 neotmux.pane.kill(id)         -- end its shell; the last pane there is ends the session
-neotmux.pane.resize('left' | 'right' | 'up' | 'down', cells)
+neotmux.pane.resize('left' | 'right' | 'up' | 'down', cells) -- move its right/bottom boundary that way, or left/top at the far edge
 neotmux.pane.zoom()           -- the focused pane over the whole window, or back
 neotmux.pane.send(id, text)   -- true, or false and why
 neotmux.pane.key(id, spec)    -- one keystroke, spelled the way that pane asked for

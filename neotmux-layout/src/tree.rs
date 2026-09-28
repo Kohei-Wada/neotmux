@@ -74,13 +74,14 @@ impl Tree {
         Ok(())
     }
 
-    /// Moves the boundary between `pane` and its neighbour in `dir` by `cells` cells, in
-    /// that direction — so the pane grows by exactly that many and its neighbour loses
-    /// them. There is no second rule for a pane at the edge of the window: with no
-    /// neighbour that way there is no boundary, and the resize is refused.
+    /// Moves one of `pane`'s boundaries `cells` cells in `dir`, tmux's way: the boundary on
+    /// its right (or bottom) when it has one, and the one on its left (or top) when the pane
+    /// is against that edge of the window. So `left` and `right` move the same line back and
+    /// forth, rather than growing the pane at whichever end was named. With no boundary
+    /// across that axis at all, the resize is refused.
     ///
     /// The boundary is the *nearest* ancestor split with the right orientation and the pane
-    /// on the right side of it. A nested pane can have several matching splits above it, and
+    /// on the chosen side of it. A nested pane can have several matching splits above it, and
     /// the nearest is the one whose boundary is against the pane itself.
     ///
     /// `surface`, `min` and `gutter` are [`assign()`]'s, for the same reason [`split`] takes
@@ -102,11 +103,13 @@ impl Tree {
         if !descend(root, pane, surface, gutter, &mut steps) {
             return Err(ResizeRefused::UnknownPane);
         }
-        let at = steps
-            .iter()
-            .rposition(|step| {
-                step.dir == dir.orientation() && step.into_first == dir.from_first_child()
-            })
+        let across = |into_first: bool| {
+            steps
+                .iter()
+                .rposition(|step| step.dir == dir.orientation() && step.into_first == into_first)
+        };
+        let at = across(true)
+            .or_else(|| across(false))
             .ok_or(ResizeRefused::NoNeighbour)?;
         if cells == 0 {
             return Ok(());
@@ -394,8 +397,8 @@ mod tests {
             .unwrap_or_else(|| panic!("{id} has no rect"))
     }
 
-    /// The whole of what a resize promises: the pane grows by the cells asked for, along the
-    /// axis the direction names, and its neighbour pays for them.
+    /// The whole of what a resize promises: the boundary moves by the cells asked for, along
+    /// the axis the direction names, and what one side gains the other pays.
     #[test]
     fn a_resize_moves_the_boundary_by_exactly_the_cells_asked() {
         let surface = Rect::new(0, 0, 80, 24);
@@ -537,12 +540,50 @@ mod tests {
         assert_eq!(assign(&tree, surface, 1), before);
     }
 
+    /// The middle of three columns: `left` then `right` move its right boundary and back,
+    /// and its left boundary never moves.
+    #[test]
+    fn left_and_right_move_the_same_boundary_back_and_forth() {
+        let surface = Rect::new(0, 0, 90, 24);
+        let mut tree = Tree::new(pane(1));
+        tree.split(pane(1), SplitDir::Vertical, pane(2), surface, MIN, 0)
+            .expect("fits");
+        tree.split(pane(2), SplitDir::Vertical, pane(3), surface, MIN, 0)
+            .expect("fits");
+        let before = rect_of(&tree, pane(2), surface, 0);
+
+        tree.resize(pane(2), Dir::Left, 4, surface, MIN, 0)
+            .expect("there is room");
+        let after = rect_of(&tree, pane(2), surface, 0);
+        assert_eq!(after.x, before.x, "the left boundary moved");
+        assert_eq!(after.w, before.w - 4);
+
+        tree.resize(pane(2), Dir::Right, 4, surface, MIN, 0)
+            .expect("there is room");
+        assert_eq!(rect_of(&tree, pane(2), surface, 0), before);
+    }
+
+    /// A pane against the right edge has only its left boundary, and it goes where it is told.
+    #[test]
+    fn a_pane_against_the_far_edge_moves_its_near_boundary() {
+        let surface = Rect::new(0, 0, 80, 24);
+        let mut tree = Tree::new(pane(1));
+        tree.split(pane(1), SplitDir::Vertical, pane(2), surface, MIN, 0)
+            .expect("fits");
+        let before = rect_of(&tree, pane(2), surface, 0);
+        tree.resize(pane(2), Dir::Right, 5, surface, MIN, 0)
+            .expect("there is room");
+        let after = rect_of(&tree, pane(2), surface, 0);
+        assert_eq!(after.x, before.x + 5);
+        assert_eq!(after.w, before.w - 5);
+    }
+
     #[test]
     fn a_pane_with_no_neighbour_that_way_is_refused() {
         let surface = Rect::new(0, 0, 80, 24);
         let mut tree = nested(surface, 0);
-        // Pane 1 is the whole left column: nothing is above it, below it, or to its left.
-        for dir in [Dir::Left, Dir::Up, Dir::Down] {
+        // Pane 1 is the whole left column: nothing is above it or below it.
+        for dir in [Dir::Up, Dir::Down] {
             assert_eq!(
                 tree.resize(pane(1), dir, 1, surface, MIN, 0),
                 Err(ResizeRefused::NoNeighbour),
