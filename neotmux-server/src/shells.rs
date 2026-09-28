@@ -277,6 +277,7 @@ mod tests {
             Size { rows: 24, cols: 80 },
             Reserved::default(),
             0,
+            0,
             pane(1),
             Size { rows: 2, cols: 2 },
         );
@@ -298,6 +299,7 @@ mod tests {
             Size { rows: 24, cols: 80 },
             Reserved::default(),
             0,
+            0,
             pane(1),
             Size { rows: 2, cols: 2 },
         );
@@ -305,7 +307,7 @@ mod tests {
         let (_wakeup, mut shells) = two_panes(&layout);
         shells.fit(layout.showable()).expect("fit");
 
-        layout.resurface(Size { rows: 24, cols: 3 }, Reserved::default(), 0);
+        layout.resurface(Size { rows: 24, cols: 3 }, Reserved::default(), 0, 0);
         shells.fit(layout.showable()).expect("fit");
 
         assert_eq!(
@@ -319,7 +321,7 @@ mod tests {
             "the hidden pane keeps the size it last had"
         );
 
-        layout.resurface(Size { rows: 24, cols: 80 }, Reserved::default(), 0);
+        layout.resurface(Size { rows: 24, cols: 80 }, Reserved::default(), 0, 0);
         shells.fit(layout.showable()).expect("fit");
         assert_eq!(shells.size(pane(2)), Some(Size { rows: 24, cols: 40 }));
     }

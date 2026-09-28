@@ -47,6 +47,7 @@ impl Windows {
                 surface.size,
                 surface.reserved,
                 surface.gutter,
+                surface.pane_band,
                 pane,
                 surface.minimum,
             ),
@@ -150,9 +151,12 @@ impl Windows {
 
     /// The current window only: the hidden ones are caught up when they are next shown.
     pub fn resurface(&mut self, surface: Surface) {
-        self.entries[self.current]
-            .layout
-            .resurface(surface.size, surface.reserved, surface.gutter);
+        self.entries[self.current].layout.resurface(
+            surface.size,
+            surface.reserved,
+            surface.gutter,
+            surface.pane_band,
+        );
     }
 
     /// Closes `pane` wherever it lives, hidden windows included. `None` for a pane no
@@ -219,6 +223,7 @@ mod tests {
             size: Size { rows: 24, cols: 80 },
             reserved: Reserved::default(),
             gutter: 0,
+            pane_band: 0,
             minimum: Size { rows: 2, cols: 2 },
         }
     }

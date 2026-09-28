@@ -15,6 +15,9 @@ pub struct PaneLayout {
     /// How many cells to leave between panes. The host reserves them and has no idea what
     /// anyone puts there — the same deal as a band at the edge.
     gutter: u16,
+    /// The columns taken off the left of every pane's content, which the pane's outer rect
+    /// still covers. A pane too narrow to spare them keeps its outer rect as its content.
+    pane_band: u16,
     /// The smallest a pane may be, as the caller gave it. Not a constant here: this file does
     /// not know a terminal exists, so it takes the minimum on trust from whoever does and
     /// passes it in.
@@ -64,13 +67,31 @@ fn showable(rect: PRect, minimum: Size) -> bool {
     rect.w >= minimum.cols && rect.h >= minimum.rows
 }
 
+/// The one place a pane band costs a pane anything: its content is its outer rect less the
+/// band, or the whole outer rect for a pane too narrow to spare it. Per pane, unlike
+/// `applied()`, so that one small pane does not take every other pane's band away with it.
+fn inset(outer: PRect, band: u16, minimum: Size) -> PRect {
+    if band == 0 || outer.w < minimum.cols.saturating_add(band) {
+        return outer;
+    }
+    PRect::new(outer.x + band, outer.y, outer.w - band, outer.h)
+}
+
 impl PaneLayout {
-    pub fn new(full: Size, reserved: Reserved, gutter: u16, first: PaneId, minimum: Size) -> Self {
+    pub fn new(
+        full: Size,
+        reserved: Reserved,
+        gutter: u16,
+        pane_band: u16,
+        first: PaneId,
+        minimum: Size,
+    ) -> Self {
         let mut layout = Self {
             content: Size::default(),
             rects: PaneRects::new(),
             applied: Reserved::default(),
             gutter: 0,
+            pane_band: 0,
             minimum,
             tree: Tree::new(first),
             order: Vec::new(),
@@ -78,19 +99,20 @@ impl PaneLayout {
             zoomed: None,
             shown: PaneRects::new(),
         };
-        layout.resurface(full, reserved, gutter);
+        layout.resurface(full, reserved, gutter, pane_band);
         layout
     }
 
     /// The surface changed, whether from a terminal resize, a band being reserved or
-    /// released, or the gutter between panes changing.
-    pub fn resurface(&mut self, full: Size, reserved: Reserved, gutter: u16) {
+    /// released, the gutter between panes changing, or the pane band changing.
+    pub fn resurface(&mut self, full: Size, reserved: Reserved, gutter: u16, pane_band: u16) {
         self.applied = applied(full, reserved, self.minimum);
         self.content = Size {
             rows: full.rows - self.applied.rows(),
             cols: full.cols - self.applied.cols(),
         };
         self.gutter = gutter;
+        self.pane_band = pane_band;
         self.reassign();
     }
 
@@ -114,8 +136,21 @@ impl PaneLayout {
 
     fn reassign(&mut self) {
         self.order = assign(&self.tree, self.area(), self.gutter);
-        self.rects = self.order.iter().copied().collect();
+        self.rects = self
+            .order
+            .iter()
+            .map(|(id, outer)| (*id, inset(*outer, self.pane_band, self.minimum)))
+            .collect();
         self.reshow();
+    }
+
+    /// The smallest a pane may be cut to: the minimum its shell needs, plus the band it gives
+    /// up, so a split cannot leave a pane that is only a band.
+    fn cut_minimum(&self) -> Size {
+        Size {
+            rows: self.minimum.rows,
+            cols: self.minimum.cols.saturating_add(self.pane_band),
+        }
     }
 
     fn reshow(&mut self) {
@@ -127,7 +162,7 @@ impl PaneLayout {
         let target = self.focus.ok_or(SplitRefused::UnknownPane)?;
         let surface = self.area();
         self.tree
-            .split(target, dir, new, surface, self.minimum, self.gutter)?;
+            .split(target, dir, new, surface, self.cut_minimum(), self.gutter)?;
         // The new pane has to be seen; a refused split changes nothing, the zoom included.
         self.zoomed = None;
         self.reassign();
@@ -140,7 +175,7 @@ impl PaneLayout {
         let target = self.focus.ok_or(ResizeRefused::UnknownPane)?;
         let surface = self.area();
         self.tree
-            .resize(target, dir, cells, surface, self.minimum, self.gutter)?;
+            .resize(target, dir, cells, surface, self.cut_minimum(), self.gutter)?;
         // The boundary moved is one nobody could see while a pane filled the area.
         self.zoomed = None;
         self.reassign();
@@ -199,13 +234,22 @@ impl PaneLayout {
         self.zoomed
     }
 
-    /// Every pane being shown and its rect, left to right and top to bottom, as `begin_frame`
-    /// wants them: the zoomed pane alone, over the whole area, while one is.
-    pub fn panes(&self) -> Vec<(PaneId, PRect)> {
+    /// Every pane being shown and its outer rect — what the tree cut, bands and all — left to
+    /// right and top to bottom: the zoomed pane alone, over the whole area, while one is.
+    pub fn outer_panes(&self) -> Vec<(PaneId, PRect)> {
         match self.zoomed {
             Some(zoomed) => vec![(zoomed, self.area())],
             None => self.order.clone(),
         }
+    }
+
+    /// The same panes with their content rects, as `begin_frame` wants them: what each pane's
+    /// shell is sized to and where its grid is drawn.
+    pub fn panes(&self) -> Vec<(PaneId, PRect)> {
+        self.outer_panes()
+            .into_iter()
+            .map(|(id, outer)| (id, inset(outer, self.pane_band, self.minimum)))
+            .collect()
     }
 
     /// Every pane in the window, in layout order, zoomed or not: what the window holds rather
@@ -246,6 +290,7 @@ mod tests {
             Size { rows, cols },
             Reserved::default(),
             0,
+            0,
             pane(1),
             Size { rows: 2, cols: 2 },
         )
@@ -262,6 +307,7 @@ mod tests {
             full,
             Reserved::default(),
             0,
+            0,
             pane(1),
             Size { rows: 2, cols: 2 },
         );
@@ -274,6 +320,7 @@ mod tests {
         let layout = PaneLayout::new(
             Size { rows: 24, cols: 80 },
             bottom(2),
+            0,
             0,
             pane(1),
             Size { rows: 2, cols: 2 },
@@ -290,6 +337,7 @@ mod tests {
             Size { rows: 24, cols: 80 },
             Reserved::horizontal(1, 0),
             0,
+            0,
             pane(1),
             Size { rows: 2, cols: 2 },
         );
@@ -302,6 +350,7 @@ mod tests {
         let layout = PaneLayout::new(
             Size { rows: 24, cols: 80 },
             Reserved::horizontal(1, 2),
+            0,
             0,
             pane(1),
             Size { rows: 2, cols: 2 },
@@ -316,6 +365,7 @@ mod tests {
             Size { rows: 24, cols: 80 },
             Reserved::vertical(20, 0),
             0,
+            0,
             pane(1),
             Size { rows: 2, cols: 2 },
         );
@@ -329,6 +379,7 @@ mod tests {
             Size { rows: 24, cols: 80 },
             Reserved::vertical(0, 20),
             0,
+            0,
             pane(1),
             Size { rows: 2, cols: 2 },
         );
@@ -341,6 +392,7 @@ mod tests {
         let layout = PaneLayout::new(
             Size { rows: 24, cols: 80 },
             Reserved::vertical(20, 10),
+            0,
             0,
             pane(1),
             Size { rows: 2, cols: 2 },
@@ -359,6 +411,7 @@ mod tests {
             Size { rows: 24, cols: 80 },
             reserved,
             0,
+            0,
             pane(1),
             Size { rows: 2, cols: 2 },
         );
@@ -372,11 +425,12 @@ mod tests {
             Size { rows: 24, cols: 80 },
             Reserved::vertical(20, 0),
             0,
+            0,
             pane(1),
             Size { rows: 2, cols: 2 },
         );
         assert_eq!(layout.panes(), vec![(pane(1), PRect::new(20, 0, 60, 24))]);
-        layout.resurface(Size { rows: 24, cols: 80 }, Reserved::default(), 0);
+        layout.resurface(Size { rows: 24, cols: 80 }, Reserved::default(), 0, 0);
         assert_eq!(layout.panes(), vec![(pane(1), PRect::new(0, 0, 80, 24))]);
     }
 
@@ -388,13 +442,14 @@ mod tests {
             Size { rows: 24, cols: 21 },
             reserved,
             0,
+            0,
             pane(1),
             Size { rows: 2, cols: 2 },
         );
         assert_eq!(layout.applied_bands(), Reserved::default());
         assert_eq!(layout.content, Size { rows: 24, cols: 21 });
 
-        layout.resurface(Size { rows: 24, cols: 22 }, reserved, 0);
+        layout.resurface(Size { rows: 24, cols: 22 }, reserved, 0, 0);
         assert_eq!(layout.applied_bands(), reserved);
         assert_eq!(layout.content, Size { rows: 24, cols: 2 });
     }
@@ -409,6 +464,7 @@ mod tests {
             Size { rows: 5, cols: 80 },
             reserved,
             0,
+            0,
             pane(1),
             Size { rows: 2, cols: 2 },
         );
@@ -422,6 +478,7 @@ mod tests {
         let layout = PaneLayout::new(
             Size { rows: 24, cols: 21 },
             reserved,
+            0,
             0,
             pane(1),
             Size { rows: 2, cols: 2 },
@@ -441,7 +498,7 @@ mod tests {
     fn a_terminal_too_small_for_the_bands_applies_none_of_them() {
         let reserved = bottom(1);
         let min = Size { rows: 2, cols: 2 };
-        let mut layout = PaneLayout::new(min, reserved, 0, pane(1), min);
+        let mut layout = PaneLayout::new(min, reserved, 0, 0, pane(1), min);
         assert_eq!(layout.content, min);
         assert_eq!(layout.applied_bands(), Reserved::default());
 
@@ -451,6 +508,7 @@ mod tests {
                 cols: min.cols,
             },
             reserved,
+            0,
             0,
         );
         assert_eq!(layout.content, min, "growing back brings the band back");
@@ -463,11 +521,12 @@ mod tests {
             Size { rows: 24, cols: 80 },
             bottom(1),
             0,
+            0,
             pane(1),
             Size { rows: 2, cols: 2 },
         );
         assert_eq!(layout.panes(), vec![(pane(1), PRect::new(0, 0, 80, 23))]);
-        layout.resurface(Size { rows: 24, cols: 80 }, Reserved::default(), 0);
+        layout.resurface(Size { rows: 24, cols: 80 }, Reserved::default(), 0, 0);
         assert_eq!(layout.panes(), vec![(pane(1), PRect::new(0, 0, 80, 24))]);
     }
 
@@ -477,6 +536,7 @@ mod tests {
         let mut layout = PaneLayout::new(
             Size { rows: 24, cols: 80 },
             Reserved::horizontal(1, 1),
+            0,
             0,
             pane(1),
             Size { rows: 2, cols: 2 },
@@ -591,7 +651,7 @@ mod tests {
     fn a_pane_below_the_minimum_is_hidden_rather_than_shown_at_that_size() {
         let mut layout = layout(24, 80);
         layout.split(SplitDir::Vertical, pane(2)).expect("fits");
-        layout.resurface(Size { rows: 24, cols: 3 }, Reserved::default(), 0);
+        layout.resurface(Size { rows: 24, cols: 3 }, Reserved::default(), 0, 0);
 
         assert_eq!(
             layout.panes(),
@@ -607,7 +667,7 @@ mod tests {
             "the one-column pane is hidden for this frame"
         );
 
-        layout.resurface(Size { rows: 24, cols: 80 }, Reserved::default(), 0);
+        layout.resurface(Size { rows: 24, cols: 80 }, Reserved::default(), 0, 0);
         assert_eq!(layout.showable().count(), 2, "growing back brings it back");
     }
 
@@ -619,6 +679,7 @@ mod tests {
             Size { rows: 24, cols: 80 },
             Reserved::default(),
             1,
+            0,
             pane(1),
             Size { rows: 2, cols: 2 },
         );
@@ -631,7 +692,7 @@ mod tests {
             ]
         );
 
-        layout.resurface(Size { rows: 24, cols: 80 }, Reserved::default(), 0);
+        layout.resurface(Size { rows: 24, cols: 80 }, Reserved::default(), 0, 0);
         assert_eq!(
             layout.panes(),
             vec![
@@ -648,6 +709,7 @@ mod tests {
             Size { rows: 24, cols: 4 },
             Reserved::default(),
             1,
+            0,
             pane(1),
             Size { rows: 2, cols: 2 },
         );
@@ -664,6 +726,7 @@ mod tests {
         let mut layout = PaneLayout::new(
             Size { rows: 24, cols: 80 },
             bottom(1),
+            0,
             0,
             pane(1),
             Size { rows: 2, cols: 2 },
@@ -683,7 +746,7 @@ mod tests {
     fn the_minimum_a_caller_gives_is_the_minimum_that_is_used() {
         let big = Size { rows: 10, cols: 10 };
         let reserved = bottom(1);
-        let layout = PaneLayout::new(Size { rows: 10, cols: 80 }, reserved, 0, pane(1), big);
+        let layout = PaneLayout::new(Size { rows: 10, cols: 80 }, reserved, 0, 0, pane(1), big);
         assert_eq!(
             layout.applied_bands(),
             Reserved::default(),
@@ -691,7 +754,7 @@ mod tests {
         );
 
         let small = Size { rows: 2, cols: 2 };
-        let layout = PaneLayout::new(Size { rows: 10, cols: 80 }, reserved, 0, pane(1), small);
+        let layout = PaneLayout::new(Size { rows: 10, cols: 80 }, reserved, 0, 0, pane(1), small);
         assert_eq!(
             layout.applied_bands(),
             reserved,
@@ -798,7 +861,109 @@ mod tests {
             },
             Reserved::default(),
             0,
+            0,
         );
         assert_eq!(layout.panes(), vec![(pane(2), PRect::new(0, 0, 100, 30))]);
+    }
+
+    fn banded(rows: u16, cols: u16, band: u16) -> PaneLayout {
+        PaneLayout::new(
+            Size { rows, cols },
+            Reserved::default(),
+            0,
+            band,
+            pane(1),
+            Size { rows: 2, cols: 2 },
+        )
+    }
+
+    /// The band is taken off what the pane's shell gets, and not off where the pane sits: the
+    /// outer rect is what the tree cut, and the content rect is the outer one less the band.
+    #[test]
+    fn a_pane_band_takes_its_columns_off_the_content_and_not_the_outer_rect() {
+        let layout = banded(24, 80, 10);
+        assert_eq!(
+            layout.outer_panes(),
+            vec![(pane(1), PRect::new(0, 0, 80, 24))]
+        );
+        assert_eq!(layout.panes(), vec![(pane(1), PRect::new(10, 0, 70, 24))]);
+        assert_eq!(layout.rects[&pane(1)], PRect::new(10, 0, 70, 24));
+        assert_eq!(
+            layout.showable().collect::<Vec<_>>(),
+            vec![(pane(1), PRect::new(10, 0, 70, 24))]
+        );
+    }
+
+    #[test]
+    fn every_pane_of_a_split_gets_its_own_band() {
+        let mut layout = banded(24, 80, 10);
+        layout.split(SplitDir::Vertical, pane(2)).expect("fits");
+        assert_eq!(
+            layout.outer_panes(),
+            vec![
+                (pane(1), PRect::new(0, 0, 40, 24)),
+                (pane(2), PRect::new(40, 0, 40, 24)),
+            ]
+        );
+        assert_eq!(
+            layout.panes(),
+            vec![
+                (pane(1), PRect::new(10, 0, 30, 24)),
+                (pane(2), PRect::new(50, 0, 30, 24)),
+            ]
+        );
+    }
+
+    /// One pane the terminal has shrunk below the minimum plus the band loses its band for the
+    /// frame; the panes that still have room keep theirs.
+    #[test]
+    fn a_pane_too_narrow_for_its_band_keeps_its_outer_rect_and_the_others_keep_theirs() {
+        let mut layout = banded(24, 80, 10);
+        layout.split(SplitDir::Vertical, pane(2)).expect("fits");
+        layout.split(SplitDir::Vertical, pane(3)).expect("fits");
+        layout.resurface(Size { rows: 24, cols: 40 }, Reserved::default(), 0, 10);
+        assert_eq!(
+            layout.outer_panes(),
+            vec![
+                (pane(1), PRect::new(0, 0, 20, 24)),
+                (pane(2), PRect::new(20, 0, 10, 24)),
+                (pane(3), PRect::new(30, 0, 10, 24)),
+            ]
+        );
+        assert_eq!(
+            layout.panes(),
+            vec![
+                (pane(1), PRect::new(10, 0, 10, 24)),
+                (pane(2), PRect::new(20, 0, 10, 24)),
+                (pane(3), PRect::new(30, 0, 10, 24)),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_split_that_would_leave_a_pane_no_room_for_its_band_is_refused() {
+        let mut with_band = banded(24, 20, 10);
+        assert!(with_band.split(SplitDir::Vertical, pane(2)).is_err());
+        assert_eq!(with_band.panes().len(), 1);
+
+        let mut plain = layout(24, 20);
+        assert!(
+            plain.split(SplitDir::Vertical, pane(2)).is_ok(),
+            "the same split fits with no band"
+        );
+    }
+
+    #[test]
+    fn a_zoomed_pane_has_its_band_over_the_whole_area() {
+        let mut layout = banded(24, 80, 10);
+        layout.split(SplitDir::Vertical, pane(2)).expect("fits");
+        layout.toggle_zoom();
+        assert_eq!(layout.outer_panes(), vec![(pane(2), layout.area())]);
+        assert_eq!(layout.panes(), vec![(pane(2), PRect::new(10, 0, 70, 24))]);
+
+        layout.resurface(Size { rows: 24, cols: 80 }, Reserved::default(), 0, 0);
+        assert_eq!(layout.panes(), vec![(pane(2), layout.area())]);
+        layout.toggle_zoom();
+        assert_eq!(layout.panes(), layout.outer_panes());
     }
 }

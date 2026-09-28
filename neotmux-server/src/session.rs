@@ -103,6 +103,7 @@ impl Session {
             size: clamp_to_min_grid(setup.size),
             reserved: setup.reserved,
             gutter: setup.gutter,
+            pane_band: 0,
             minimum: neotmux_proto::MIN_GRID,
         };
         let (windows, first) = Windows::new(setup.first_window, surface, pane_ids);
@@ -941,6 +942,7 @@ mod tests {
             size,
             reserved: Reserved::default(),
             gutter: 0,
+            pane_band: 0,
             minimum: neotmux_proto::MIN_GRID,
         };
         let (windows, first) = Windows::new(WindowId::from(1), surface, PaneIds::new());
