@@ -62,8 +62,8 @@ pub fn fixture_layer() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
 }
 
-const ROWS: u16 = 24;
-const COLS: u16 = 80;
+pub const ROWS: u16 = 24;
+pub const COLS: u16 = 80;
 
 /// portable-pty's SHELL resolution requires an executable path (it calls
 /// `access(2)`, not a `$PATH` search), so a bare name like "cat" needs
@@ -313,7 +313,7 @@ impl Neotmux {
         self.writer.flush().expect("flush pty");
     }
 
-    fn screen_contents(&self) -> String {
+    pub fn screen_contents(&self) -> String {
         self.parser.lock().unwrap().screen().contents()
     }
 
@@ -399,6 +399,20 @@ impl Neotmux {
             assert!(
                 Instant::now() < deadline,
                 "cell ({row}, {col}) never held {expected:?}:\n{}",
+                self.screen_contents()
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// Blocks until `ready` holds, for what no `wait_for_*` names — a colour, a count, a
+    /// marker going away — and fails with `what` and the screen if it never does.
+    pub fn wait_until(&self, what: &str, timeout: Duration, ready: impl Fn(&Self) -> bool) {
+        let deadline = Instant::now() + timeout;
+        while !ready(self) {
+            assert!(
+                Instant::now() < deadline,
+                "{what}:\n{}",
                 self.screen_contents()
             );
             std::thread::sleep(Duration::from_millis(20));

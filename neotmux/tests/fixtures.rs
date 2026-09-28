@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 mod harness;
 mod session;
-use harness::Neotmux;
+use harness::{COLS, Neotmux, ROWS};
 
 const PATIENCE: Duration = Duration::from_secs(10);
 
@@ -186,6 +186,7 @@ fn remover_removes_twice_without_raising_and_its_callback_never_runs() {
         "/bin/cat",
     );
     nt.wait_for_screen("CLOCK 80x23", PATIENCE);
+    // Long enough for a removed callback to have run, if it were going to: nothing to wait for.
     nt.settle(Duration::from_secs(1));
 
     let log = nt.log_text();
@@ -260,6 +261,7 @@ fn painter_draws_over_the_pane() {
 fn nothing_is_written_while_nothing_happens() {
     let dir = harness::runtime(&[("init.lua", "")]);
     let mut nt = Neotmux::start(&dir);
+    // Startup's own frames have no last one to wait for; they are over by the time this is.
     nt.settle(Duration::from_secs(1));
     assert_eq!(nt.bytes_in(Duration::from_secs(1)), 0);
 }
@@ -301,9 +303,9 @@ fn each_pane_has_its_own_shell_and_its_own_grid() {
     nt.wait_for_log("splitter pane_opened 2", PATIENCE);
 
     nt.send("RIGHT");
-    nt.settle(Duration::from_millis(500));
+    nt.wait_for_screen("RIGHT", PATIENCE);
     nt.send("\x0f"); // C-o: focus the other pane
-    nt.settle(Duration::from_millis(500));
+    nt.wait_for_log("splitter focus_changed 1", PATIENCE);
     nt.send("LEFT");
 
     nt.wait_for_screen("LEFT", PATIENCE);
@@ -332,7 +334,6 @@ fn an_unconsumed_key_reaches_only_the_focused_panes_pty() {
     let (mut nt, _init) = start("require('plugin.splitter')", "cat");
     nt.send("\x02");
     nt.wait_for_log("splitter pane_opened 2", PATIENCE);
-    nt.settle(Duration::from_millis(500));
 
     nt.send("MARK");
     nt.wait_for_screen("MARK", PATIENCE);
@@ -378,7 +379,9 @@ fn focusing_an_unknown_pane_is_reported_and_does_not_stop_the_session() {
     assert!(refusal.contains("no such pane"), "{refusal}");
 
     nt.send("\x07");
-    nt.settle(Duration::from_millis(500));
+    nt.wait_until("the second report never came", PATIENCE, |nt| {
+        nt.log_text().matches("splitter panes=").count() >= 2
+    });
     let log = nt.log_text();
     assert!(
         line_with(&log, "splitter panes=").contains("panes=1 current=1"),
@@ -393,7 +396,6 @@ fn a_pane_whose_shell_exits_is_closed_and_its_sibling_takes_over() {
     let (mut nt, _init) = start("require('plugin.splitter')", "cat");
     nt.send("\x02");
     nt.wait_for_log("splitter pane_opened 2", PATIENCE);
-    nt.settle(Duration::from_millis(500));
 
     nt.send("\x04"); // C-d: EOF for the focused pane's cat
     nt.wait_for_log("splitter pane_closed 2", PATIENCE);
@@ -474,12 +476,11 @@ fn the_prefix_splits_vertically_and_walks_to_the_next_pane() {
     let (mut nt, _init) = start_shipped("", "cat");
     nt.send("\x02v"); // C-b v
     nt.wait_for_cell(PANE_TOP, DIVIDER_COL, VERTICAL_DIVIDER, PATIENCE);
-    nt.settle(Duration::from_millis(500));
 
     nt.send("RIGHT");
-    nt.settle(Duration::from_millis(500));
+    nt.wait_for_screen("RIGHT", PATIENCE);
     nt.send("\x02o"); // C-b o
-    nt.settle(Duration::from_millis(500));
+    nt.wait_for_status(FIRST_PANE, PATIENCE);
     nt.send("LEFT");
 
     nt.wait_for_screen("LEFT", PATIENCE);
@@ -506,12 +507,11 @@ fn the_prefix_splits_horizontally() {
     let (mut nt, _init) = start_shipped("", "cat");
     nt.send("\x02-"); // C-b -
     nt.wait_for_cell(DIVIDER_ROW, 0, HORIZONTAL_DIVIDER, PATIENCE);
-    nt.settle(Duration::from_millis(500));
 
     nt.send("BELOW");
-    nt.settle(Duration::from_millis(500));
+    nt.wait_for_screen("BELOW", PATIENCE);
     nt.send("\x02o");
-    nt.settle(Duration::from_millis(500));
+    nt.wait_for_status(FIRST_PANE, PATIENCE);
     nt.send("ABOVE");
 
     nt.wait_for_screen("ABOVE", PATIENCE);
@@ -546,6 +546,7 @@ const SECOND_WINDOW: &str = "2.1  cat";
 const THIRD_WINDOW: &str = "3.1  cat";
 /// The same once a split has landed and left the new pane focused. The bar now says both of
 /// the things a test has to wait for after a split, so it is what they wait on.
+const FIRST_PANE: &str = "1.1  cat";
 const SECOND_PANE: &str = "1.2  cat";
 const THIRD_PANE: &str = "1.3  cat";
 
@@ -594,12 +595,11 @@ fn a_vertical_split_draws_a_divider_column_between_the_panes() {
     let (mut nt, _init) = start_shipped("", "cat");
     nt.send("\x02v"); // C-b v
     nt.wait_for_cell(PANE_TOP, DIVIDER_COL, VERTICAL_DIVIDER, PATIENCE);
-    nt.settle(Duration::from_millis(500));
 
     nt.send("RIGHT");
-    nt.settle(Duration::from_millis(500));
+    nt.wait_for_screen("RIGHT", PATIENCE);
     nt.send("\x02o"); // C-b o
-    nt.settle(Duration::from_millis(500));
+    nt.wait_for_status(FIRST_PANE, PATIENCE);
     nt.send("LEFT");
     nt.wait_for_screen("LEFT", PATIENCE);
 
@@ -632,12 +632,11 @@ fn a_horizontal_split_draws_a_divider_row_between_the_panes() {
     let (mut nt, _init) = start_shipped("", "cat");
     nt.send("\x02-"); // C-b -
     nt.wait_for_cell(DIVIDER_ROW, 0, HORIZONTAL_DIVIDER, PATIENCE);
-    nt.settle(Duration::from_millis(500));
 
     nt.send("BELOW");
-    nt.settle(Duration::from_millis(500));
+    nt.wait_for_screen("BELOW", PATIENCE);
     nt.send("\x02o"); // C-b o
-    nt.settle(Duration::from_millis(500));
+    nt.wait_for_status(FIRST_PANE, PATIENCE);
     nt.send("ABOVE");
     nt.wait_for_screen("ABOVE", PATIENCE);
 
@@ -668,10 +667,6 @@ const TEE_RIGHT: &str = "\u{251c}";
 const TEE_LEFT: &str = "\u{2524}";
 const TEE_DOWN: &str = "\u{252c}";
 
-/// A short wait for a keystroke that changes nothing on screen — moving the focus — before
-/// the next one is sent.
-const FOCUS_SETTLE: Duration = Duration::from_millis(500);
-
 /// The crossing cell of a 2x2 grid is in the vertical gutter and in the horizontal one, so
 /// it is inside neither pane's extent and no pane draws it. It used to be left blank: a
 /// cross with a hole in the middle.
@@ -683,7 +678,7 @@ fn a_two_by_two_grid_meets_in_a_cross() {
     nt.send("\x02-"); // C-b -: the right one, split
     nt.wait_for_cell(DIVIDER_ROW, DIVIDER_COL + 1, HORIZONTAL_DIVIDER, PATIENCE);
     nt.send("\x02h"); // C-b h: back to the left pane
-    nt.settle(FOCUS_SETTLE);
+    nt.wait_for_status(FIRST_PANE, PATIENCE);
     nt.send("\x02-"); // C-b -: and split that one too
     nt.wait_for_cell(DIVIDER_ROW, 0, HORIZONTAL_DIVIDER, PATIENCE);
 
@@ -734,7 +729,7 @@ fn a_divider_running_into_another_from_the_left_is_the_mirror_tee() {
     nt.send("\x02v");
     nt.wait_for_cell(PANE_TOP, DIVIDER_COL, VERTICAL_DIVIDER, PATIENCE);
     nt.send("\x02h"); // C-b h: onto the left-hand column
-    nt.settle(FOCUS_SETTLE);
+    nt.wait_for_status(FIRST_PANE, PATIENCE);
     nt.send("\x02-");
     nt.wait_for_cell(DIVIDER_ROW, 0, HORIZONTAL_DIVIDER, PATIENCE);
 
@@ -799,20 +794,15 @@ fn resize_mode_moves_the_divider_five_columns_and_gives_the_keys_back() {
     let (mut nt, _init) = start_shipped("", "cat");
     nt.send("\x02v"); // C-b v: the new pane on the right is the focused one
     nt.wait_for_status(SECOND_PANE, PATIENCE);
-    nt.settle(Duration::from_millis(500));
-    assert_eq!(
-        nt.cell(PANE_TOP, DIVIDER_COL),
-        VERTICAL_DIVIDER.to_string(),
-        "the split did not draw its divider in the first place"
-    );
+    nt.wait_for_cell(PANE_TOP, DIVIDER_COL, VERTICAL_DIVIDER, PATIENCE);
 
     nt.send("\x02r"); // C-b r: into resize mode
     for _ in 0..5 {
         nt.send("h"); // one cell each, the way every mode neotmux ships moves
     }
-    nt.settle(Duration::from_millis(500));
 
     let moved = DIVIDER_COL - 5;
+    nt.wait_for_cell(PANE_TOP, moved, VERTICAL_DIVIDER, PATIENCE);
     let screen = nt.screen_after(Duration::from_millis(200));
     assert_eq!(
         nt.cell(PANE_TOP, moved),
@@ -855,19 +845,17 @@ fn directional_focus_lands_on_the_pane_a_person_would_point_at() {
     let (mut nt, _init) = start_shipped("", "cat");
     nt.send("\x02v"); // C-b v: pane 2, the right-hand column, is focused
     nt.wait_for_status(SECOND_PANE, PATIENCE);
-    nt.settle(Duration::from_millis(500));
     nt.send("\x02-"); // C-b -: pane 3, the bottom of that column, is focused
     nt.wait_for_status(THIRD_PANE, PATIENCE);
-    nt.settle(Duration::from_millis(500));
 
     nt.send("CCC");
-    nt.settle(Duration::from_millis(500));
+    nt.wait_for_screen("CCC", PATIENCE);
     nt.send("\x02k"); // C-b k: up, to the top of the right-hand column
-    nt.settle(Duration::from_millis(500));
+    nt.wait_for_status(SECOND_PANE, PATIENCE);
     nt.send("BBB");
-    nt.settle(Duration::from_millis(500));
+    nt.wait_for_screen("BBB", PATIENCE);
     nt.send("\x02h"); // C-b h: left, to the tall pane beside it
-    nt.settle(Duration::from_millis(500));
+    nt.wait_for_status(FIRST_PANE, PATIENCE);
     nt.send("AAA");
     nt.wait_for_screen("AAA", PATIENCE);
 
@@ -1190,6 +1178,7 @@ fn a_flooding_shell_cannot_reach_a_reserved_band() {
     for _ in 0..30 {
         nt.send("ZZZZZZZZ\r");
     }
+    // Every line of the flood is the same, so none of them says the flood is over.
     nt.settle(Duration::from_millis(500));
 
     let screen = nt.screen_after(Duration::from_millis(300));
@@ -1249,11 +1238,13 @@ fn reserving_a_band_costs_one_layout_recompute() {
         "cat",
     );
     nt.wait_for_status("cat", PATIENCE);
+    // Startup's own resizes have to be over before counting, and none of them is the last.
     nt.settle(Duration::from_millis(500));
     let before = resizes(&nt.log_text()).len();
 
     nt.send("\x12"); // C-r: reserve a second bottom row
     nt.wait_for_screen("BAND", PATIENCE);
+    // A second recompute, the bug, would come after the one the wait saw: it has no marker.
     nt.settle(Duration::from_millis(500));
 
     let log = nt.log_text();
@@ -1455,11 +1446,13 @@ fn resize_probe() -> (Neotmux, tempfile::TempDir) {
 fn a_split_does_not_resize_every_pane() {
     let (mut nt, _init) = resize_probe();
     nt.wait_for_status("cat", PATIENCE);
+    // Startup's own resizes have to be over before counting, and none of them is the last.
     nt.settle(Duration::from_millis(500));
     let before = resizes(&nt.log_text()).len();
 
     nt.send("\x02"); // C-b: split, focusing the new pane
     nt.wait_for_log("splitter pane_opened 2", PATIENCE);
+    // A resize, the bug, would come after the split the wait saw, and has no marker of its own.
     nt.settle(Duration::from_millis(500));
 
     let log = nt.log_text();
@@ -1485,7 +1478,6 @@ fn a_split_does_not_resize_every_pane() {
 fn a_terminal_resize_reaches_the_panes() {
     let (mut nt, _init) = resize_probe();
     nt.wait_for_status("cat", PATIENCE);
-    nt.settle(Duration::from_millis(500));
 
     nt.resize(30, 100);
 
@@ -1501,11 +1493,13 @@ fn a_focus_change_does_not_resize_every_pane() {
     nt.wait_for_status("cat", PATIENCE);
     nt.send("\x02"); // C-b: split
     nt.wait_for_log("splitter pane_opened 2", PATIENCE);
+    // The split's own resizes have to be over before counting, and none of them is the last.
     nt.settle(Duration::from_millis(500));
     let before = resizes(&nt.log_text()).len();
 
     nt.send("\x0f"); // C-o: focus the other pane
     nt.wait_for_log("splitter focus_changed 1", PATIENCE);
+    // A resize, the bug, would come after the focus change the wait saw, and has no marker.
     nt.settle(Duration::from_millis(500));
 
     let log = nt.log_text();
@@ -1685,6 +1679,7 @@ fn a_pane_whose_child_exited_does_not_raise() {
 
     nt.send("exit\n");
     nt.wait_for_log("splitter pane_closed 2", PATIENCE);
+    // Room for the ticks after the close to raise, if they were going to: nothing to wait for.
     nt.settle(Duration::from_millis(500));
 
     let log = nt.log_text();
@@ -1701,6 +1696,7 @@ fn a_pane_whose_child_exited_does_not_raise() {
 fn a_plugin_asking_every_tick_does_not_make_an_idle_session_redraw() {
     let (mut nt, _init) = start("require('plugin.paneinfo')", "/bin/cat");
     nt.wait_for_log("paneinfo 1 command=cat", PATIENCE);
+    // Startup's own frames have no last one to wait for; they are over by the time this is.
     nt.settle(Duration::from_millis(700));
 
     let bytes = nt.bytes_in(Duration::from_secs(1));
@@ -1724,11 +1720,10 @@ fn a_second_window_shows_its_own_pane_and_the_first_keeps_its_content() {
 
     nt.send("\x17"); // C-w: open a window and show it
     nt.wait_for_log("windows window_changed 2", PATIENCE);
-    nt.settle(Duration::from_millis(500));
-    let screen = nt.screen_after(Duration::from_millis(300));
-    assert!(
-        !screen.contains("FIRST"),
-        "the new window is showing the old window's pane:\n{screen}"
+    nt.wait_until(
+        "the new window is showing the old window's pane",
+        PATIENCE,
+        |nt| !nt.screen_contents().contains("FIRST"),
     );
 
     nt.send("SECOND");
@@ -1757,7 +1752,6 @@ fn a_command_run_in_a_hidden_window_has_produced_its_output_by_the_time_you_swit
     nt.wait_for_screen("UP", PATIENCE);
     nt.send("\x17"); // C-w: a second window, shown
     nt.wait_for_log("windows window_changed 2", PATIENCE);
-    nt.settle(Duration::from_millis(500));
 
     nt.send("sleep 1; echo LATE$((6*7))\r");
     nt.send("\x0e"); // C-n: away before the sleep is over
@@ -1813,7 +1807,9 @@ fn pane_ids_do_not_collide_across_windows() {
     nt.send("\x0e"); // C-n: back to the first
     nt.wait_for_log("windows window_changed 1", PATIENCE);
     nt.send("\x12");
-    nt.settle(Duration::from_millis(500));
+    nt.wait_until("the second report never came", PATIENCE, |nt| {
+        nt.log_text().matches("windows report").count() >= 2
+    });
     let log = nt.log_text();
     let reports: Vec<&str> = log
         .lines()
@@ -1840,6 +1836,8 @@ fn a_hidden_windows_pane_is_in_no_list_but_still_reports_what_it_is_running() {
     nt.send("\x17"); // C-w: a second window, shown; the first window's pane is now hidden
     nt.wait_for_log("windows window_changed 2", PATIENCE);
     nt.send("\x12"); // C-r: what the shown window's `pane.list` holds
+    nt.wait_for_log("windows report", PATIENCE);
+    // Past the host's sampling cadence, so a sample that dropped the hidden pane has been taken.
     nt.settle(Duration::from_millis(700));
 
     let log = nt.log_text();
@@ -1938,7 +1936,6 @@ fn closing_the_last_pane_of_a_window_closes_it_and_shows_another() {
     nt.wait_for_screen("UP", PATIENCE);
     nt.send("\x17"); // C-w
     nt.wait_for_log("windows window_changed 2", PATIENCE);
-    nt.settle(Duration::from_millis(500));
 
     nt.send("\x04"); // C-d: EOF for the shown pane's cat
     let log = nt.wait_for_log("windows window_closed 2", PATIENCE);
@@ -1961,11 +1958,9 @@ fn closing_the_last_window_exits_cleanly() {
     nt.wait_for_screen("UP", PATIENCE);
     nt.send("\x17");
     nt.wait_for_log("windows window_changed 2", PATIENCE);
-    nt.settle(Duration::from_millis(500));
 
     nt.send("\x04"); // the second window's only pane
     nt.wait_for_log("windows window_closed 2", PATIENCE);
-    nt.settle(Duration::from_millis(500));
 
     nt.send("\x04"); // and the first window's, which is the last pane there is
     assert!(nt.exited_cleanly(PATIENCE));
@@ -1994,7 +1989,6 @@ fn focusing_an_unknown_window_is_reported_and_does_not_stop_the_session() {
 fn the_shipped_status_band_survives_a_switch() {
     let (mut nt, _init) = start_shipped("", "cat");
     nt.wait_for_status(FIRST_WINDOW, PATIENCE);
-    nt.settle(Duration::from_millis(300));
 
     nt.send("\x02c"); // C-b c: a window, shown
     nt.wait_for_status(SECOND_WINDOW, PATIENCE);
@@ -2025,7 +2019,6 @@ fn the_prefix_walks_back_to_the_window_before() {
     nt.wait_for_status(SECOND_WINDOW, PATIENCE);
     nt.send("\x02c"); // C-b c
     nt.wait_for_status(THIRD_WINDOW, PATIENCE);
-    nt.settle(Duration::from_millis(500));
 
     nt.send("\x02p"); // C-b p
     nt.wait_for_status(SECOND_WINDOW, PATIENCE);
@@ -2053,7 +2046,6 @@ fn the_prefix_opens_a_window_and_walks_to_the_next_one() {
 
     nt.send("\x02c"); // C-b c
     nt.wait_for_status(SECOND_WINDOW, PATIENCE);
-    nt.settle(Duration::from_millis(500));
     nt.send("TWO");
     nt.wait_for_screen("TWO", PATIENCE);
     let screen = nt.screen_after(Duration::from_millis(300));
@@ -2186,6 +2178,7 @@ fn a_pane_that_closes_while_being_read_does_not_raise() {
         line_with(&log, "content 2 closed=").contains("closed=nil"),
         "a dead pane was still showing something:\n{log}"
     );
+    // Room for the ticks after the close to raise, if they were going to: nothing to wait for.
     nt.settle(Duration::from_millis(500));
     assert!(!nt.log_text().contains("[ERROR]"), "{}", nt.log_text());
 
@@ -2252,12 +2245,12 @@ fn the_shipped_watcher_says_when_a_hidden_pane_is_waiting_for_you() {
     nt.wait_for_screen("1.1", PATIENCE);
     nt.send("\x02c"); // C-b c: a second window, shown; pane 1 is now hidden
     nt.wait_for_screen("2.1", PATIENCE);
-    nt.settle(Duration::from_millis(300));
 
     // Both panes run the same shell, so both say the same thing at the same moment.
     std::fs::write(&trigger, "").expect("trigger the shells");
 
     nt.wait_for_log("pane 1 looks like it is waiting for you", PATIENCE);
+    // Room for a notification about pane 2 to arrive, if it were going to: nothing to wait for.
     nt.settle(Duration::from_millis(500));
     assert!(
         !nt.log_text().contains("pane 2 looks like"),
@@ -2282,6 +2275,7 @@ fn the_shipped_watcher_is_off_by_default() {
     nt.wait_for_screen("1.1", PATIENCE);
     std::fs::write(&trigger, "").expect("trigger the shell");
     nt.wait_for_screen("Do you want to proceed?", PATIENCE);
+    // Room for a notification to arrive, if it were going to: nothing to wait for.
     nt.settle(Duration::from_millis(500));
     assert!(
         !nt.log_text().contains("looks like it is waiting"),
@@ -2386,6 +2380,10 @@ fn the_shipped_sidebar_folds_to_a_rail_and_back() {
 
     nt.send("\x02b"); // C-b b
     nt.wait_for_cell(PANE_TOP, SIDEBAR_RAIL_COLS, "X", PATIENCE);
+    // The pane moves on the frame the layout changes; the rail can be drawn a frame later.
+    nt.wait_until("the fold took the markers column too", PATIENCE, |nt| {
+        is_a_state_icon(&nt.cell(PANE_TOP, 0))
+    });
     let folded = nt.screen_after(Duration::ZERO);
     // Below the status bar, which names the focused pane whatever the sidebar is doing.
     assert!(
@@ -2394,10 +2392,6 @@ fn the_shipped_sidebar_folds_to_a_rail_and_back() {
             .skip(PANE_TOP as usize)
             .any(|line| line.contains("1.1")),
         "the rail is too narrow to read and still had the names on it:\n{folded}"
-    );
-    assert!(
-        is_a_state_icon(&nt.cell(PANE_TOP, 0)),
-        "the fold took the markers column too:\n{folded}"
     );
 
     nt.send("\x02b");
@@ -2420,9 +2414,9 @@ fn the_shipped_sidebar_keeps_the_pane_you_are_in_on_screen() {
     let mut nt = Neotmux::start_sized(&[init.path(), &shipped_layer()], "cat", 10, 80);
     nt.wait_for_cell(PANE_TOP, 0, IDLE_SESSION_ICON, PATIENCE);
 
-    for _ in 0..4 {
+    for window in 2..=5 {
         nt.send("\x02c"); // C-b c
-        nt.settle(Duration::from_millis(300));
+        nt.wait_for_status(&format!("{window}.1  cat"), PATIENCE);
     }
 
     // The window is the fifth, and its marker is on screen somewhere in the band.
@@ -2470,14 +2464,22 @@ fn the_shipped_sidebar_is_off_by_default() {
 const COPY_CURSOR: (u8, u8, u8) = (0xf9, 0xe2, 0xaf);
 const COPY_SELECTION: (u8, u8, u8) = (0x45, 0x47, 0x5a);
 
+/// Types a line at `cat` and waits for both copies of it: the one the tty echoes, which is on
+/// screen before `cat` has even started, and the one `cat` writes back.
+fn type_into_cat(nt: &mut Neotmux, line: &str) {
+    nt.send(&format!("{line}\r"));
+    nt.wait_until(&format!("cat never wrote {line:?} back"), PATIENCE, |nt| {
+        nt.screen_contents().matches(line).count() >= 2
+    });
+}
+
 /// The mode is entered on the pane you are in and changes nothing about it: the screen after
 /// `C-b [` is the screen before it, its keys never reach the shell, and `q` hands the
 /// keyboard back.
 #[test]
 fn copy_mode_leaves_the_pane_alone_and_gives_the_keys_back() {
     let (mut nt, _init) = start_shipped("", "cat");
-    nt.send("ABCDEFGH\r");
-    nt.wait_for_screen("ABCDEFGH", PATIENCE);
+    type_into_cat(&mut nt, "ABCDEFGH");
     // Both sides are read once the pane has settled: the mode snapshots the lines on the way
     // in, so a byte still in flight would legitimately make two frames differ.
     let before = settled_pane_area(&mut nt, PATIENCE);
@@ -2506,8 +2508,7 @@ fn a_user_config_can_switch_off_copy_mode() {
     let shipped = shipped_layer();
     let mut nt = Neotmux::start_layered(&[init.path(), &shipped], "cat");
 
-    nt.send("ABCDEFGH\r");
-    nt.wait_for_screen("ABCDEFGH", PATIENCE);
+    type_into_cat(&mut nt, "ABCDEFGH");
 
     nt.send("\x02["); // C-b [: nothing left to claim the bracket
     // Reaching the shell at all is the assertion: in copy mode these keys are motions.
@@ -2525,27 +2526,22 @@ fn a_user_config_can_switch_off_copy_mode() {
 #[test]
 fn the_copy_cursor_is_visible_and_moves() {
     let (mut nt, _init) = start_shipped("", "cat");
-    nt.send("ABCDEFGH\r");
-    nt.wait_for_screen("ABCDEFGH", PATIENCE);
+    type_into_cat(&mut nt, "ABCDEFGH");
 
     nt.send("\x02["); // C-b [
-    nt.settle(Duration::from_millis(400));
     // The line the tty echoed and the line `cat` wrote back, and the pane's cursor under them.
-    assert_eq!(
-        nt.cell_bg(PANE_TOP + 2, 0),
-        Some(COPY_CURSOR),
-        "the cursor is not where the pane's cursor was:\n{}",
-        nt.screen_after(Duration::ZERO)
+    nt.wait_until(
+        "the cursor is not where the pane's cursor was",
+        PATIENCE,
+        |nt| nt.cell_bg(PANE_TOP + 2, 0) == Some(COPY_CURSOR),
     );
 
     nt.send("lll");
     nt.send("k");
-    nt.settle(Duration::from_millis(400));
-    assert_eq!(
-        nt.cell_bg(PANE_TOP + 1, 3),
-        Some(COPY_CURSOR),
-        "the cursor did not move three right and one up:\n{}",
-        nt.screen_after(Duration::ZERO)
+    nt.wait_until(
+        "the cursor did not move three right and one up",
+        PATIENCE,
+        |nt| nt.cell_bg(PANE_TOP + 1, 3) == Some(COPY_CURSOR),
     );
     assert_ne!(
         nt.cell_bg(PANE_TOP + 2, 0),
@@ -2596,7 +2592,9 @@ fn copy_mode_scrolls_as_the_cursor_walks_off_the_top() {
     nt.send("\x02["); // C-b [
     // Onto the top row first, on its own frame, so the keys after it move nothing but the view.
     nt.send(&"k".repeat(30));
-    nt.settle(Duration::from_millis(400));
+    nt.wait_until("the cursor never reached the top row", PATIENCE, |nt| {
+        (0..COLS).any(|col| nt.cell_bg(PANE_TOP, col) == Some(COPY_CURSOR))
+    });
     nt.send(&"k".repeat(10));
     nt.wait_for_screen("LINE-055", PATIENCE);
 }
@@ -2607,15 +2605,18 @@ fn copy_mode_scrolls_as_the_cursor_walks_off_the_top() {
 #[test]
 fn a_selection_is_visible_over_text_that_is_still_readable() {
     let (mut nt, _init) = start_shipped("", "cat");
-    nt.send("ABCDEFGH\r");
-    nt.wait_for_screen("ABCDEFGH", PATIENCE);
+    type_into_cat(&mut nt, "ABCDEFGH");
     assert_eq!(nt.cell(PANE_TOP, 1), "B", "the pane is not where expected");
 
     nt.send("\x02["); // C-b [
     nt.send("kk"); // up from the pane's cursor to the echoed line
     nt.send("v"); // start the selection under the cursor
     nt.send("lll");
-    nt.settle(Duration::from_millis(400));
+    nt.wait_until(
+        "the selection never covered three columns",
+        PATIENCE,
+        |nt| (0..3).all(|col| nt.cell_bg(PANE_TOP, col) == Some(COPY_SELECTION)),
+    );
 
     let screen = nt.screen_after(Duration::ZERO);
     for col in 0..3 {
@@ -2646,8 +2647,7 @@ fn a_selection_is_visible_over_text_that_is_still_readable() {
 #[test]
 fn yanking_reports_the_register_it_put_the_text_in() {
     let (mut nt, _init) = start_shipped("", "cat");
-    nt.send("ABCDEFGH\r");
-    nt.wait_for_screen("ABCDEFGH", PATIENCE);
+    type_into_cat(&mut nt, "ABCDEFGH");
 
     nt.send("\x02["); // C-b [
     nt.send("vlll");
@@ -2695,14 +2695,13 @@ fn the_footer_paints_the_row_it_reserved_with_no_mode_raised() {
     let init = harness::runtime(&[("init.lua", "require('neotmux.defaults').footer = true")]);
     let mut nt = Neotmux::start_layered(&[init.path(), &shipped_layer()], "cat");
     nt.wait_for_status("cat", PATIENCE);
-    nt.settle(Duration::from_millis(400));
 
     // The harness starts a 24-row terminal and the footer's band is the last row of it. A
     // screen dump would not answer this: it is trimmed of the very blank line in question.
-    assert!(
-        nt.cell_bg(23, 0).is_some(),
-        "the footer reserved the bottom row and did not paint it:\n{}",
-        nt.screen_after(Duration::ZERO)
+    nt.wait_until(
+        "the footer reserved the bottom row and did not paint it",
+        PATIENCE,
+        |nt| nt.cell_bg(23, 0).is_some(),
     );
 }
 
@@ -2735,11 +2734,13 @@ fn the_footer_shows_the_armed_prefix_and_clears_when_it_fires() {
     nt.wait_for_screen(" prefix ", PATIENCE);
 
     nt.send("o"); // any command fires and disarms
-    nt.settle(Duration::from_millis(300));
-    let screen = nt.screen_after(Duration::from_millis(200));
-    assert!(
-        !screen.contains(" prefix "),
-        "the footer kept showing the armed prefix after it fired:\n{screen}"
+    nt.wait_until(
+        "the footer kept showing the armed prefix after it fired",
+        PATIENCE,
+        |nt| {
+            let screen = nt.screen_contents();
+            !screen.contains(" prefix ")
+        },
     );
 }
 
@@ -2755,11 +2756,13 @@ fn the_footer_shows_resize_mode_and_clears_when_it_leaves() {
     nt.wait_for_screen(" resize ", PATIENCE);
 
     nt.send("\r"); // anything that is not an adjustment leaves the mode
-    nt.settle(Duration::from_millis(300));
-    let screen = nt.screen_after(Duration::from_millis(200));
-    assert!(
-        !screen.contains(" resize "),
-        "the footer kept showing resize mode after it was left:\n{screen}"
+    nt.wait_until(
+        "the footer kept showing resize mode after it was left",
+        PATIENCE,
+        |nt| {
+            let screen = nt.screen_contents();
+            !screen.contains(" resize ")
+        },
     );
 }
 
@@ -2774,11 +2777,13 @@ fn the_footer_shows_copy_mode_and_clears_when_it_leaves() {
     nt.wait_for_screen(" copy ", PATIENCE);
 
     nt.send("q"); // leave
-    nt.settle(Duration::from_millis(300));
-    let screen = nt.screen_after(Duration::from_millis(200));
-    assert!(
-        !screen.contains(" copy "),
-        "the footer kept showing copy mode after it was left:\n{screen}"
+    nt.wait_until(
+        "the footer kept showing copy mode after it was left",
+        PATIENCE,
+        |nt| {
+            let screen = nt.screen_contents();
+            !screen.contains(" copy ")
+        },
     );
 }
 
@@ -2817,11 +2822,13 @@ end)
     nt.wait_for_screen(" thirdparty ", PATIENCE);
 
     nt.send("\x07"); // C-g again: it lowers it
-    nt.settle(Duration::from_millis(300));
-    let screen = nt.screen_after(Duration::from_millis(200));
-    assert!(
-        !screen.contains(" thirdparty "),
-        "the footer kept showing a mode after the plugin that raised it lowered it:\n{screen}"
+    nt.wait_until(
+        "the footer kept showing a mode after the plugin that raised it lowered it",
+        PATIENCE,
+        |nt| {
+            let screen = nt.screen_contents();
+            !screen.contains(" thirdparty ")
+        },
     );
     assert!(
         nt.log_text().is_empty(),
@@ -2881,11 +2888,13 @@ end)
     );
 
     nt.send("\x07"); // C-g: thirdparty lowers its own, nothing left to show
-    nt.settle(Duration::from_millis(300));
-    let screen = nt.screen_after(Duration::from_millis(200));
-    assert!(
-        !screen.contains(" thirdparty ") && !screen.contains(" prefix "),
-        "something was still raised after both sides lowered their own:\n{screen}"
+    nt.wait_until(
+        "something was still raised after both sides lowered their own",
+        PATIENCE,
+        |nt| {
+            let screen = nt.screen_contents();
+            !screen.contains(" thirdparty ") && !screen.contains(" prefix ")
+        },
     );
 }
 
@@ -2898,7 +2907,7 @@ end)
 #[test]
 fn a_pane_positioned_with_hvp_draws_where_it_meant_to() {
     let (mut nt, _init) = start("", "/bin/sh");
-    nt.settle(Duration::from_millis(600));
+    nt.wait_for_screen("$", PATIENCE);
     nt.send("printf '\\033[2J\\033[3;5fLEFT\\033[3;40fRIGHT\\033[6;5fBELOW'\r");
 
     // Each run on its own row, at the column it asked for — the pane is the whole terminal
@@ -2916,27 +2925,37 @@ fn a_pane_positioned_with_hvp_draws_where_it_meant_to() {
 #[test]
 fn copy_mode_keeps_the_colours_the_pane_was_written_in() {
     let (mut nt, _init) = start_shipped("", "/bin/sh");
-    nt.settle(Duration::from_millis(600));
+    nt.wait_for_screen("$", PATIENCE);
     // More lines than the screen holds, each in a colour of its own.
     nt.send(
         "i=1; while [ $i -le 40 ]; do printf '\\033[3%dmline %s\\033[0m\\n' $((i % 8)) $i; \
          i=$((i+1)); done\r",
     );
     nt.wait_for_screen("line 40", PATIENCE);
-    nt.settle(Duration::from_millis(400));
-
-    let live: Vec<Option<u8>> = (1..8).map(|row| nt.cell_fg_idx(row, 2)).collect();
-    assert!(
-        live.iter().filter(|fg| fg.is_some()).count() >= 6,
-        "the fixture did not colour its lines: {live:?}"
-    );
+    let coloured = |nt: &Neotmux| {
+        (1..8)
+            .filter(|&row| nt.cell_fg_idx(row, 2).is_some())
+            .count()
+    };
+    nt.wait_until("the fixture did not colour its lines", PATIENCE, |nt| {
+        coloured(nt) >= 6
+    });
 
     nt.send("\x02["); // C-b [
-    nt.settle(Duration::from_millis(300));
+    let cursor_row = |nt: &Neotmux| {
+        (0..ROWS).find(|&row| (0..COLS).any(|col| nt.cell_bg(row, col) == Some(COPY_CURSOR)))
+    };
+    nt.wait_until("copy mode never drew its cursor", PATIENCE, |nt| {
+        cursor_row(nt).is_some()
+    });
+    let from = cursor_row(&nt).expect("a cursor");
     for _ in 0..12 {
         nt.send("k");
     }
-    nt.settle(Duration::from_millis(600));
+    let to = from.saturating_sub(12).max(PANE_TOP);
+    nt.wait_until("the cursor never walked twelve lines up", PATIENCE, |nt| {
+        cursor_row(nt) == Some(to)
+    });
 
     let scrolled: Vec<Option<u8>> = (1..8).map(|row| nt.cell_fg_idx(row, 2)).collect();
     assert!(

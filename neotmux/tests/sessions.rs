@@ -136,7 +136,6 @@ fn a_second_client_of_the_same_name_gets_the_first_client_s_pane() {
     let layer = harness::runtime(&[("init.lua", "")]);
 
     let mut first = Neotmux::start_named_on(rt.dir.path(), "work", &layer, "/bin/cat");
-    first.settle(Duration::from_millis(300));
     first.send("hello-two\r");
     first.wait_for_screen("hello-two", Duration::from_secs(10));
     first.kill(); // the client goes; the pane stays, the way a detach already proves, with a name on it
@@ -298,7 +297,6 @@ fn kill_work_with_two_clients_attached_ends_both() {
     let layer = harness::runtime(&[("init.lua", "")]);
 
     let mut first = Neotmux::start_named_on(rt.dir.path(), "work", &layer, "/bin/cat");
-    first.settle(Duration::from_millis(300));
     first.send("two-are-looking\r");
     first.wait_for_screen("two-are-looking", Duration::from_secs(10));
 

@@ -99,7 +99,6 @@ fn csi_u_character_and_modified_reach_the_pane_program() {
     nt.send("\x1b[97u"); // plain a
     nt.wait_for_screen("61", Duration::from_secs(5));
 
-    nt.settle(Duration::from_millis(100));
     nt.send("\x1b[97;2u"); // alt-a: the 0x1b prefix must also arrive
     nt.wait_for_screen("1b 61", Duration::from_secs(5));
 }
