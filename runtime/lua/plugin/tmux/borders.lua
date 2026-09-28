@@ -63,7 +63,7 @@ g.on_tick(function(ctx)
   local panes = neotmux.pane.list()
   local right, bottom = 0, 0
   for _, id in ipairs(panes) do
-    local r = ctx:pane_rect(id)
+    local r = ctx:pane_outer(id)
     if r then
       right = math.max(right, r.x + r.w)
       bottom = math.max(bottom, r.y + r.h)
@@ -72,7 +72,7 @@ g.on_tick(function(ctx)
 
   local segments = {}
   for _, id in ipairs(panes) do
-    local r = ctx:pane_rect(id)
+    local r = ctx:pane_outer(id)
     -- A pane the terminal has shrunk to nothing has no neighbour worth a divider.
     if r and r.w > 0 and r.h > 0 then
       if r.x + r.w < right then

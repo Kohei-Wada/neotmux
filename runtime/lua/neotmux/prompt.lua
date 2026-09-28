@@ -97,7 +97,7 @@ end)
 g.on_tick(function(ctx)
   local left, top, right, bottom
   for _, pane in ipairs(neotmux.pane.list()) do
-    local r = ctx:pane_rect(pane)
+    local r = ctx:pane_outer(pane)
     if r then
       left = math.min(left or r.x, r.x)
       top = math.min(top or r.y, r.y)
