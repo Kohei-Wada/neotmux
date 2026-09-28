@@ -18,6 +18,20 @@ local prompt = require("neotmux.prompt")
 local pane_state = require("neotmux.state")
 local g = neotmux.group("plugin.sessions")
 
+-- What a session made with no name is called, as the host calls one started that way: the
+-- lowest number no running session is.
+local function next_number()
+  local taken = {}
+  for _, name in ipairs(neotmux.session.list()) do
+    taken[name] = true
+  end
+  local n = 0
+  while taken[tostring(n)] do
+    n = n + 1
+  end
+  return tostring(n)
+end
+
 local M = {}
 
 -- Read every tick, so assigning to one from your own `init.lua` takes effect.
@@ -121,11 +135,9 @@ function M.open()
           label = "name",
           accept = nameable,
           done = function(text)
-            if text == "" then
-              return
-            end
-            neotmux.session.create(text)
-            neotmux.session.switch(text)
+            local name = text ~= "" and text or next_number()
+            neotmux.session.create(name)
+            neotmux.session.switch(name)
             ask_handle:close()
           end,
         })
@@ -163,10 +175,9 @@ g.command.add("session-new", function()
     title = "new session",
     mode = "rename",
     done = function(text)
-      if text ~= "" then
-        neotmux.session.create(text)
-        neotmux.session.switch(text)
-      end
+      local name = text ~= "" and text or next_number()
+      neotmux.session.create(name)
+      neotmux.session.switch(name)
     end,
   })
 end, { desc = "make a session and go there" })

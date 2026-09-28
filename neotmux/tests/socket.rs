@@ -147,6 +147,9 @@ impl Client {
         }
         cmd.arg("--log");
         cmd.arg(runtime.join("neotmux.log"));
+        // Session `0` by name: these clients are about one session seen more than once, and
+        // `neotmux` with no name makes a new session every time.
+        cmd.arg("0");
         let child = pair.slave.spawn_command(cmd).expect("spawn");
         drop(pair.slave);
 
@@ -466,7 +469,7 @@ fn greet_and_send_message(socket: &Path, payload: &[u8]) {
 fn an_attach() -> neotmux_proto::wire::Attach {
     neotmux_proto::wire::Attach {
         size: neotmux_proto::Size { rows: 24, cols: 80 },
-        session: neotmux_sys::sock::DEFAULT_SESSION.to_string(),
+        session: Some("0".to_string()),
     }
 }
 
@@ -695,7 +698,7 @@ fn kill_ends_a_session_nobody_is_attached_to() {
     drop(client);
 
     let status = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
-        .arg("kill")
+        .args(["kill", "0"])
         .env("XDG_RUNTIME_DIR", runtime.path())
         .env("HOME", runtime.path())
         .status()
@@ -733,7 +736,7 @@ fn a_detach_leaves_the_client_and_keeps_the_session() {
 fn kill_with_nothing_running_says_so_and_fails() {
     let runtime = TestRuntime::new();
     let out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
-        .arg("kill")
+        .args(["kill", "0"])
         .env("XDG_RUNTIME_DIR", runtime.path())
         .env("HOME", runtime.path())
         .output()
@@ -741,9 +744,25 @@ fn kill_with_nothing_running_says_so_and_fails() {
     assert!(!out.status.success());
     let said = String::from_utf8_lossy(&out.stderr);
     assert!(
-        said.contains("neotmux session 'default' is not running"),
+        said.contains("neotmux session '0' is not running"),
         "{said}"
     );
+}
+
+/// No session is `kill`'s to guess at: an unnamed `neotmux` makes a new one each time, so there
+/// is no one session a bare `kill` could mean.
+#[test]
+fn kill_with_no_name_is_refused() {
+    let runtime = TestRuntime::new();
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .arg("kill")
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run kill");
+    assert!(!out.status.success());
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(said.contains("kill needs the session's name"), "{said}");
 }
 
 /// What an agent asks before it sends anything: which pane is which.
@@ -1022,7 +1041,7 @@ fn a_plugin_can_make_a_session_and_move_into_it() {
 
     let mut client = Client::start_with_prefix_and_layer(runtime.path(), "/bin/cat", layer.path());
     wait_for_socket(&socket_in(runtime.path()));
-    wait_for_log(runtime.path(), "tick in default");
+    wait_for_log(runtime.path(), "tick in 0");
 
     client.send("\x19"); // C-y
     wait_for_log(runtime.path(), "tick in made");
@@ -1053,15 +1072,15 @@ fn the_sidebar_knows_every_session_and_c_b_s_moves_between_them() {
 
     let mut client = Client::start_with_prefix_and_layer(runtime.path(), "/bin/cat", layer.path());
     wait_for_socket(&socket_in(runtime.path()));
-    wait_for_log(runtime.path(), "default sees default");
+    wait_for_log(runtime.path(), "0 sees 0");
 
     client.send("\x19"); // C-y: a second session nobody is looking at
-    wait_for_log(runtime.path(), "default sees default,second");
+    wait_for_log(runtime.path(), "0 sees 0,second");
 
     // `C-b s` is the sidebar's, and it moves this client to the one it is not in.
     client.send("\x02"); // C-b
     client.send("s");
-    wait_for_log(runtime.path(), "second sees default,second");
+    wait_for_log(runtime.path(), "second sees 0,second");
 }
 
 /// The session picker, end to end: `C-b s` opens it, `c` names a session and Enter makes it
@@ -1084,16 +1103,16 @@ fn the_picker_makes_a_session_switches_to_it_and_ends_one() {
 
     let mut client = Client::start_with_prefix_and_layer(runtime.path(), "/bin/cat", layer.path());
     wait_for_socket(&socket_in(runtime.path()));
-    wait_for_log(runtime.path(), "default sees default");
+    wait_for_log(runtime.path(), "0 sees 0");
 
     // C-b s, then `c`, a name, and Enter: made and moved into.
     client.send("\x02s");
     client.send("cbuild\r");
-    wait_for_log(runtime.path(), "build sees build,default");
+    wait_for_log(runtime.path(), "build sees 0,build");
 
-    // And from there, `d` on the row above ends the one this client is not in.
+    // And from there, `d` on the top row, `0`, ends the one this client is not in.
     client.send("\x02s");
-    client.send("kd");
+    client.send("d");
     wait_for_log(runtime.path(), "build sees build");
 }
 
@@ -1128,7 +1147,7 @@ fn ending_one_session_leaves_the_other_typing_into_its_own_shell() {
            return true\n\
          end)\n\
          neotmux.keymap.set('C-g', function()\n\
-           neotmux.session.kill('default')\n\
+           neotmux.session.kill('0')\n\
            return true\n\
          end)\n",
     )]);
@@ -1182,7 +1201,7 @@ fn what_is_typed_straight_after_a_switch_goes_to_the_session_switched_to() {
     client.send("\x19typed\r");
     let log = wait_for_log(runtime.path(), "typed into");
     assert!(
-        log.contains("typed into second") && !log.contains("typed into default"),
+        log.contains("typed into second") && !log.contains("typed into 0"),
         "{log}"
     );
 }
@@ -1212,7 +1231,7 @@ fn a_session_can_be_named_in_japanese() {
 
     let mut client = Client::start_with_prefix_and_layer(runtime.path(), "/bin/cat", layer.path());
     wait_for_socket(&socket_in(runtime.path()));
-    wait_for_log(runtime.path(), "in default");
+    wait_for_log(runtime.path(), "in 0");
 
     client.send("\x19"); // C-y
     wait_for_log(runtime.path(), "in 作業");
@@ -1239,12 +1258,12 @@ fn a_window_and_a_session_can_both_be_renamed_from_the_keyboard() {
 
     let mut client = Client::start_with_prefix_and_layer(runtime.path(), "/bin/cat", layer.path());
     wait_for_socket(&socket_in(runtime.path()));
-    wait_for_log(runtime.path(), "at default / nil");
+    wait_for_log(runtime.path(), "at 0 / nil");
 
     // `C-b ,` opens the prompt the prefix binds, and Enter applies what was typed.
     client.send("\x02,");
     client.send("編集\r");
-    wait_for_log(runtime.path(), "at default / 編集");
+    wait_for_log(runtime.path(), "at 0 / 編集");
 
     // `C-b s` opens the picker; `r` renames the session under the cursor, with the name it
     // already has in the field — so the seven backspaces are a person clearing it.
@@ -1684,7 +1703,7 @@ fn send_and_capture_refuse_t() {
     wait_for_socket(&socket_in(runtime.path()));
 
     let send_out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
-        .args(["send", "-t", "default", "%1", "hi"])
+        .args(["send", "-t", "0", "%1", "hi"])
         .env("XDG_RUNTIME_DIR", runtime.path())
         .env("HOME", runtime.path())
         .output()
@@ -1694,7 +1713,7 @@ fn send_and_capture_refuse_t() {
     assert!(said.contains("-t"), "{said}");
 
     let capture_out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
-        .args(["capture", "-t", "default", "%1"])
+        .args(["capture", "-t", "0", "%1"])
         .env("XDG_RUNTIME_DIR", runtime.path())
         .env("HOME", runtime.path())
         .output()
@@ -1855,7 +1874,7 @@ fn rename_changes_the_name_ls_shows_and_drops_the_old_one() {
     let client = started(runtime.path());
 
     let out = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
-        .args(["rename", "default", "renamed"])
+        .args(["rename", "0", "renamed"])
         .env("XDG_RUNTIME_DIR", runtime.path())
         .env("HOME", runtime.path())
         .output()
@@ -1876,7 +1895,9 @@ fn rename_changes_the_name_ls_shows_and_drops_the_old_one() {
     let names = String::from_utf8_lossy(&listed.stdout);
     assert!(names.contains("renamed"), "{names}");
     assert!(
-        !names.lines().any(|line| line.starts_with("default")),
+        !names
+            .lines()
+            .any(|line| line.starts_with("0 ") || line == "0"),
         "{names}"
     );
 }
@@ -2061,4 +2082,50 @@ fn a_plugin_s_own_write_passes_the_hook_too() {
         "the blocked write reached the pane: {seen}"
     );
     drop(client);
+}
+
+/// `neotmux` with no name makes a new session every time, as tmux does, called the lowest
+/// number no running session is: `0` is taken by the one already up, so these are `1` and `2`,
+/// and `new` with no name is `3`.
+#[test]
+fn an_attach_with_no_name_is_a_new_session_under_the_next_number() {
+    let runtime = TestRuntime::new();
+    let client = started(runtime.path());
+    let unnamed = || neotmux_proto::wire::Attach {
+        size: neotmux_proto::Size { rows: 24, cols: 80 },
+        session: None,
+    };
+    let mut first = raw_attach(unnamed(), &runtime);
+    next_done(&mut first);
+    let mut second = raw_attach(unnamed(), &runtime);
+    next_done(&mut second);
+    let made = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .arg("new")
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run new");
+    assert!(
+        made.status.success(),
+        "{}",
+        String::from_utf8_lossy(&made.stderr)
+    );
+
+    let listed = std::process::Command::new(env!("CARGO_BIN_EXE_neotmux"))
+        .arg("ls")
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env("HOME", runtime.path())
+        .output()
+        .expect("run ls");
+    drop(client);
+    let names: Vec<String> = String::from_utf8_lossy(&listed.stdout)
+        .lines()
+        .map(|line| line.split_whitespace().next().unwrap_or("").to_string())
+        .collect();
+    for name in ["0", "1", "2", "3"] {
+        assert!(
+            names.iter().any(|n| n == name),
+            "no session {name}: {names:?}"
+        );
+    }
 }

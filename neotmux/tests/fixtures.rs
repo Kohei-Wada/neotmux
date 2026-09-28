@@ -173,10 +173,10 @@ fn configured_reads_the_value_init_lua_mutated_on_the_config_holder() {
 
 #[test]
 fn a_named_client_is_told_its_name_by_the_api() {
-    // One unnamed client: `neotmux.session_name()` must answer `default`; the named case
+    // One unnamed client: `neotmux.session_name()` must answer `0`, the number it was given; the named case
     // is the one the sessions tests cover.
     let (nt, _init) = start("require('plugin.session_name')", "/bin/cat");
-    nt.wait_for_log("session_name default", PATIENCE);
+    nt.wait_for_log("session_name 0", PATIENCE);
 }
 
 #[test]
@@ -2447,7 +2447,7 @@ fn the_shipped_sidebar_is_herdrs_spaces() {
     let mut nt = Neotmux::start_layered(&[init.path(), &shipped_layer()], "cat");
     nt.wait_for_status("cat", PATIENCE);
     nt.wait_for_screen(" spaces", PATIENCE);
-    nt.wait_for_screen(" default", PATIENCE);
+    nt.wait_for_screen(" 0", PATIENCE);
 
     nt.send("\x02w"); // C-b w
     nt.send("\r"); // Enter: the session you are in, so nowhere to go

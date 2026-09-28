@@ -66,6 +66,16 @@ impl Sessions {
     }
 
     /// Every session's name, in name order, which is the order `ls` prints them in.
+    /// What a session asked for by no name is called: the lowest number no running one is,
+    /// as tmux numbers them. `rename` gives it a word when it wants one.
+    pub(crate) fn next_number(&self) -> String {
+        let names = self.names();
+        (0..)
+            .map(|n: u32| n.to_string())
+            .find(|n| !names.contains(n))
+            .expect("fewer sessions than numbers")
+    }
+
     pub(crate) fn names(&self) -> Vec<String> {
         let mut names: Vec<String> = self.live.values().map(|held| held.name.clone()).collect();
         names.sort();

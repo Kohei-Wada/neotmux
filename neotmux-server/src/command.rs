@@ -87,8 +87,7 @@ fn new(args: &[String], session: Option<&str>, ctx: &mut Ctx<'_>) -> Ran {
         .first()
         .map(String::as_str)
         .or(session)
-        .unwrap_or(neotmux_sys::sock::DEFAULT_SESSION)
-        .to_string();
+        .map_or_else(|| ctx.sessions.next_number(), str::to_string);
     match start_session(
         &name,
         HEADLESS,
@@ -138,9 +137,29 @@ fn switch(args: &[String], ctx: &mut Ctx<'_>) -> Ran {
     }
 }
 
-/// The session a command is addressed to, or the sentence that says there is none.
+/// The session a command is addressed to, or the sentence that says there is none. Without
+/// `-t` it is the only session there is: with more than one, which is meant has to be said.
 fn addressed<'a>(session: Option<&str>, ctx: &'a mut Ctx<'_>) -> Result<&'a mut Session, Ran> {
-    let name = session.unwrap_or(neotmux_sys::sock::DEFAULT_SESSION);
+    let only;
+    let name = match session {
+        Some(name) => name,
+        None => {
+            let names = ctx.sessions.names();
+            match names.as_slice() {
+                [one] => {
+                    only = one.clone();
+                    only.as_str()
+                }
+                [] => return Err(Ran::failed("no neotmux session is running")),
+                _ => {
+                    return Err(Ran::failed(format!(
+                        "{} sessions are running; say which with -t <name>",
+                        names.len()
+                    )));
+                }
+            }
+        }
+    };
     match ctx.sessions.id_of(name) {
         Some(id) => Ok(ctx.sessions.get_mut(id).expect("a session it just named")),
         None => Err(Ran::failed(format!(

@@ -74,7 +74,8 @@ pub fn encode_to_server(msg: &ToServer) -> Vec<u8> {
         ToServer::Attach(attach) => {
             w.u8(TO_SERVER_ATTACH);
             w.size(attach.size);
-            w.str(&attach.session);
+            w.bool(attach.session.is_some());
+            w.str(attach.session.as_deref().unwrap_or(""));
         }
         ToServer::Key(key) => {
             w.u8(TO_SERVER_KEY);
@@ -112,7 +113,11 @@ pub fn decode_to_server(bytes: &[u8]) -> Result<ToServer, WireError> {
     let msg = match r.u8()? {
         TO_SERVER_ATTACH => ToServer::Attach(Attach {
             size: r.size()?,
-            session: r.string()?,
+            session: {
+                let named = r.bool()?;
+                let name = r.string()?;
+                named.then_some(name)
+            },
         }),
         TO_SERVER_KEY => ToServer::Key(r.key()?),
         TO_SERVER_RESIZE => ToServer::Resize(r.size()?),
@@ -659,7 +664,16 @@ mod tests {
     fn an_attach_round_trips() {
         round_trip_to_server(ToServer::Attach(Attach {
             size: Size { rows: 24, cols: 80 },
-            session: "work".to_string(),
+            session: Some("work".to_string()),
+        }));
+    }
+
+    /// No name is not an empty one: `neotmux` asking for a new session, not a session called "".
+    #[test]
+    fn an_attach_with_no_name_round_trips_as_no_name() {
+        round_trip_to_server(ToServer::Attach(Attach {
+            size: Size { rows: 24, cols: 80 },
+            session: None,
         }));
     }
 

@@ -196,7 +196,11 @@ fn doorstep(pending: &mut Pending) -> Doorstep {
             // command line is not exempt from it: the name is a key in a map and a word in a
             // list, and both of those are the CLI's business too.
             Ok(ToServer::Attach(attach)) => {
-                match neotmux_sys::sock::validate_session_name(&attach.session) {
+                match attach
+                    .session
+                    .as_deref()
+                    .map_or(Ok(()), neotmux_sys::sock::validate_session_name)
+                {
                     Ok(()) => Doorstep::Attaching(attach),
                     Err(why) => {
                         logging::log(Level::Warn, "neotmux-server", &why);
@@ -318,7 +322,11 @@ fn admit(
         gutter: lua.opt().pane_gutter,
         wants_pane_output: lua.has_subscriber("pane_output"),
     };
-    let session = match sessions.id_of(&attach.session) {
+    let name = attach
+        .session
+        .clone()
+        .unwrap_or_else(|| sessions.next_number());
+    let session = match sessions.id_of(&name) {
         Some(id) => {
             if let Some(session) = sessions.get_mut(id) {
                 session.adopt(&setup)?;
@@ -330,7 +338,7 @@ fn admit(
             sessions.live.insert(
                 id,
                 Held {
-                    name: attach.session.clone(),
+                    name: name.clone(),
                     session: Session::new(
                         &setup,
                         waker.clone(),
@@ -339,7 +347,7 @@ fn admit(
                     )?,
                 },
             );
-            plugins.lua().name_session(id, &attach.session);
+            plugins.lua().name_session(id, &name);
             id
         }
     };

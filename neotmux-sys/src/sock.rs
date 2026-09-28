@@ -24,9 +24,6 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Context as _;
 
-/// The only default there is. A client that was not told a name is holding this one.
-pub const DEFAULT_SESSION: &str = "default";
-
 /// What a session name may be: one to sixty-four characters, none of them a control
 /// character, and the first not `-`.
 ///

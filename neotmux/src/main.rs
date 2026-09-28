@@ -21,7 +21,7 @@ enum Action {
 struct Cli {
     log: Option<PathBuf>,
     action: Action,
-    /// The session the action speaks about, or the default where none was said.
+    /// The session the action speaks about, or `None` where none was said.
     session: Option<String>,
     server: bool,
     help: bool,
@@ -31,15 +31,6 @@ struct Cli {
     /// and the command is not run.
     refusal: Option<String>,
     warnings: Vec<String>,
-}
-
-impl Cli {
-    /// The name as the command will run under, default taken.
-    fn session_name(&self) -> &str {
-        self.session
-            .as_deref()
-            .unwrap_or(neotmux_sys::sock::DEFAULT_SESSION)
-    }
 }
 
 fn parse_args(args: impl IntoIterator<Item = String>) -> Cli {
@@ -67,7 +58,7 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Cli {
                     // says kill must not guess.
                     Some(value) if value.starts_with('-') => {
                         refusal = Some(format!(
-                            "a name for kill cannot start with '-' ('{value}') — kill does not guess at the default"
+                            "a name for kill cannot start with '-' ('{value}') — kill does not guess"
                         ));
                     }
                     // An empty word is a word: it lands in `session` and is refused by the
@@ -197,15 +188,16 @@ you back to them, one at a time or by name.
 
 usage: neotmux [name | command] [options]
 
-With no command, neotmux attaches to the named session (default, where no name is
-given) if it is running, and starts it if it is not. The session survives your
-disconnecting, by any means.
+With no command, neotmux attaches to the named session if it is running, and starts
+it if it is not. With no name it starts a new session every time, called the lowest
+number no running session is — 0, 1, 2 — which `rename` gives a word when you want one.
+The session survives your disconnecting, by any means.
 
 commands:
-  neotmux [name]      attach to the named session, or start it
+  neotmux [name]      attach to the named session, or start it; a new numbered one with no name
   neotmux ls          the running sessions, one per line
-  neotmux kill [name] end a session and every shell in it
-  neotmux new [name]  start a session with no client attached
+  neotmux kill <name> end a session and every shell in it
+  neotmux new [name]  start a session with no client attached, numbered with no name
   neotmux rename <old> <new>
                       rename a session
   neotmux windows [name] [-t name]
@@ -254,7 +246,14 @@ fn main() -> anyhow::Result<()> {
     }
     match cli.action {
         Action::Ls => neotmux_client::ls(),
-        Action::Kill => neotmux_client::kill(cli.session_name()),
+        // A session is a number unless it was named, and a new one is made every time no name
+        // is given, so there is no one session a bare `kill` could mean.
+        Action::Kill => match cli.session.as_deref() {
+            Some(name) => neotmux_client::kill(name),
+            None => {
+                anyhow::bail!("neotmux: kill needs the session's name — 'neotmux ls' lists them")
+            }
+        },
         Action::Attach => neotmux_client::attach(cli.session.clone()),
         Action::Command { name, args } => {
             neotmux_client::command(&name, &args, cli.session.as_deref())
@@ -329,11 +328,10 @@ mod tests {
     }
 
     #[test]
-    fn an_unnamed_attach_is_still_the_default_and_warns_on_nothing() {
+    fn an_unnamed_attach_names_no_session_and_warns_on_nothing() {
         let cli = parse_args(args(&[]));
         assert!(matches!(cli.action, Action::Attach));
         assert!(cli.session.is_none());
-        assert!(cli.session_name() == "default");
         assert!(cli.warnings.is_empty());
     }
 
@@ -370,7 +368,7 @@ mod tests {
     fn kill_is_a_thing_and_the_name_is_optional() {
         let cli = parse_args(args(&["kill"]));
         assert!(matches!(cli.action, Action::Kill));
-        assert!(cli.session.is_none(), "no name is the default session");
+        assert!(cli.session.is_none(), "no name is no session named");
         assert!(cli.refusal.is_none());
 
         let cli = parse_args(args(&["kill", "work"]));

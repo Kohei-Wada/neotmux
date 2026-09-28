@@ -26,4 +26,6 @@
 ///   had ignored all three since.
 /// - 15: a grid cell carries `dim` (SGR 2), a new bit in its flags. A renderer needed it: it
 ///   is an attribute the renderer draws.
-pub const PROTOCOL_VERSION: u32 = 15;
+/// - 16: `Attach` may name no session, which asks for a new one under the next free number.
+///   A renderer needed it: an attach is what a renderer sends first.
+pub const PROTOCOL_VERSION: u32 = 16;

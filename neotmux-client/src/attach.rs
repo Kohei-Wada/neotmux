@@ -43,9 +43,7 @@ pub fn attach(session: Option<String>) -> anyhow::Result<()> {
     // First, and before the socket: until the terminal is in raw mode the line discipline is
     // answering the keyboard, and starting a server is not fast.
     let _raw = RawMode::enter();
-    let name = session
-        .clone()
-        .unwrap_or_else(|| neotmux_sys::sock::DEFAULT_SESSION.to_string());
+    let name = session.clone();
     let link = start::begin()?.finish()?;
 
     // The attach, and the session's answer, before the screen: a session that a plugin ended

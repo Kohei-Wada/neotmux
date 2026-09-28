@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Sessions are numbered, not `default`
+
+`neotmux` with no name starts a new session every time, as tmux does, called the lowest number
+no running session is: `0`, then `1`, then `2`. `neotmux rename 0 work` gives one a word when it
+wants one. Coming back to a session is `neotmux 0`, and `neotmux kill` now needs the name. A
+command given no `-t` goes to the only session there is, and asks which when there are more.
+`neotmux new` and the session picker's `c` with no name are numbered the same way. This is
+protocol 16: an attach may name no session.
+
 ### `C-b a` walks the agents
 
 `C-b a` puts a cursor on the sidebar's agents, as `C-b w` does on its sessions: `j` and `k`

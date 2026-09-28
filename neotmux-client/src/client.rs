@@ -90,7 +90,7 @@ pub(crate) enum Opened {
 pub(crate) fn open(
     link: &Rc<RefCell<Link>>,
     size: Size,
-    session: String,
+    session: Option<String>,
 ) -> anyhow::Result<Opened> {
     send(link, &ToServer::Attach(Attach { size, session }))?;
     let mut transcript = Vec::new();
