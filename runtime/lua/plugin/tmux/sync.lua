@@ -50,12 +50,7 @@ g.command.add("sync-panes", function()
   return M.toggle()
 end, { desc = "type into every pane of this window at once" })
 
-if
-  package.loaded["plugin.tmux.prefix"]
-  or require("neotmux.defaults").tmux and require("neotmux.defaults").prefix
-then
-  require("plugin.tmux.prefix").commands["S"] = "sync-panes"
-end
+require("neotmux.bind").prefix("S", "sync-panes")
 
 g.on_key(function(key)
   if not on then

@@ -501,17 +501,6 @@ end)
 -- The prefix is the standard plugin and this one hangs off it, so this is the direction the
 -- knowledge goes in — the same way the sidebar adds its own fold key. `[` is where tmux puts
 -- it.
---
--- The defaults table and not just `package.loaded`, because a user who rebinds one of the
--- keys above has to `require` this file from their own `init.lua`, which runs before the
--- shipped layer's — so the prefix is not loaded yet and a plain probe would silently leave
--- `C-b [` unbound. Loading it here is what it was about to do anyway.
-if
-  package.loaded["plugin.tmux.prefix"]
-  or require("neotmux.defaults").tmux and require("neotmux.defaults").prefix
-then
-  require("plugin.tmux.prefix").commands["["] = M.enter
-  require("plugin.tmux.prefix").descriptions["["] = "enter copy mode"
-end
+require("neotmux.bind").prefix("[", M.enter, "enter copy mode")
 
 return M

@@ -182,8 +182,6 @@ g.command.add("exits", M.toggle, {
   desc = "show how each command in every pane ended and how long it took",
 })
 
-if package.loaded["plugin.tmux.prefix"] then
-  require("plugin.tmux.prefix").commands["e"] = "exits"
-end
+require("neotmux.bind").prefix("e", "exits")
 
 return M

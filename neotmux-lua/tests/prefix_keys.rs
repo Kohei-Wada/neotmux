@@ -142,3 +142,44 @@ fn enter_runs_the_key_under_the_cursor() {
         KeyOutcome::Fallthrough
     );
 }
+
+/// A plugin set up from the user's own `init.lua` is loaded before the shipped layer loads the
+/// prefix, the way `plugin.stamps` tells you to set its stall: it still gets its prefix key.
+#[test]
+fn a_plugin_required_from_the_users_init_still_gets_its_prefix_key() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(
+        dir.path().join("init.lua"),
+        "require('plugin.stamps').stall = { slow = 1, stuck = 5 }
+         require('plugin.exits')
+         require('plugin.notify')
+         require('plugin.tmux.sessions')
+         neotmux.on_key(function(key)
+           if key ~= 'F12' then return false end
+           local commands = require('plugin.tmux.prefix').commands
+           for _, k in ipairs({ 't', 'e', 'C', 's', 'N', 'X' }) do
+             neotmux.log.info(k .. '=' .. type(commands[k]))
+           end
+           return true
+         end)",
+    )
+    .unwrap();
+    let sub = LuaSubsystem::build(
+        Layers::from_paths(vec![dir.path().to_path_buf(), shipped_layer()]),
+        support::panes(),
+    )
+    .unwrap();
+    assert!(sub.run_init().is_empty());
+    sub.dispatch_key(support::one(), "F12");
+    assert_eq!(
+        logged(&sub),
+        vec![
+            "t=string",
+            "e=string",
+            "C=function",
+            "s=function",
+            "N=string",
+            "X=string"
+        ]
+    );
+}

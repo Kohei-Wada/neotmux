@@ -49,18 +49,16 @@ g.on_tick(function()
     return
   end
   local present = {}
-  for _, window in ipairs(neotmux.window.list()) do
-    for _, pane in ipairs(neotmux.window.panes(window) or {}) do
-      present[pane] = true
-      owner[pane] = name
-      local now = state.of(pane)
-      local was = last[pane]
-      last[pane] = now
-      if now ~= "idle" or looked_at(pane) then
-        unseen[pane] = nil
-      elseif (was == "working" or was == "blocked") and detect.agent(pane) then
-        unseen[pane] = true
-      end
+  for _, pane in ipairs(require("neotmux.panes").all()) do
+    present[pane] = true
+    owner[pane] = name
+    local now = state.of(pane)
+    local was = last[pane]
+    last[pane] = now
+    if now ~= "idle" or looked_at(pane) then
+      unseen[pane] = nil
+    elseif (was == "working" or was == "blocked") and detect.agent(pane) then
+      unseen[pane] = true
     end
   end
   for pane, who in pairs(owner) do

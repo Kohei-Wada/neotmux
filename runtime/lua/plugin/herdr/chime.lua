@@ -197,10 +197,8 @@ end
 g.on_tick(function()
   reconsider()
   local focused = M.only_when_away and neotmux.pane.current() or nil
-  for _, window in ipairs(neotmux.window.list()) do
-    for _, pane in ipairs(neotmux.window.panes(window) or {}) do
-      watch(pane, focused)
-    end
+  for _, pane in ipairs(require("neotmux.panes").all()) do
+    watch(pane, focused)
   end
 end)
 

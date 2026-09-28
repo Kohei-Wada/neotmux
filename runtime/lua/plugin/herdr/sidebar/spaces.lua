@@ -154,13 +154,7 @@ local function entries()
     neotmux.session.with(name, function()
       -- Every window's panes, not `pane.list()`'s, which is the window on screen: an agent
       -- waiting in a window you are not showing is still that session waiting.
-      local panes = {}
-      for _, window in ipairs(neotmux.window.list()) do
-        for _, pane in ipairs(neotmux.window.panes(window) or {}) do
-          panes[#panes + 1] = pane
-        end
-      end
-      it.state = rollup(panes)
+      it.state = rollup(require("neotmux.panes").all())
       local focus = neotmux.pane.current()
       local info = focus and neotmux.pane.info(focus)
       if info and info.cwd then

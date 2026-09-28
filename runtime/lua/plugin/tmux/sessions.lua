@@ -218,14 +218,11 @@ g.command.add("session-kill", function()
   neotmux.session.kill(name)
 end, { desc = "end the session you are in, going to another first" })
 
-if package.loaded["plugin.tmux.prefix"] then
-  local prefix = require("plugin.tmux.prefix")
-  prefix.commands["s"] = function()
-    M.open()
-  end
-  prefix.descriptions["s"] = "pick a session to switch to, make or end one"
-  prefix.commands["N"] = "session-new"
-  prefix.commands["X"] = "session-kill"
-end
+local bind = require("neotmux.bind")
+bind.prefix("s", function()
+  M.open()
+end, "pick a session to switch to, make or end one")
+bind.prefix("N", "session-new")
+bind.prefix("X", "session-kill")
 
 return M

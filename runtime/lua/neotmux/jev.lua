@@ -352,20 +352,18 @@ g.on_tick(function()
     return
   end
   local candidates = {}
-  for _, window in ipairs(neotmux.window.list()) do
-    for _, pane in ipairs(neotmux.window.panes(window) or {}) do
-      local revision = neotmux.pane.revision(pane)
-      if revision == nil then
-        M.forget(pane)
-      else
-        local it = quiet[pane]
-        if it == nil or it.revision ~= revision then
-          quiet[pane] = { revision = revision, at = now }
-        elseif now - it.at >= M.settle_ms then
-          local held = verdicts[pane]
-          if held == nil or held.revision ~= revision then
-            candidates[#candidates + 1] = pane
-          end
+  for _, pane in ipairs(require("neotmux.panes").all()) do
+    local revision = neotmux.pane.revision(pane)
+    if revision == nil then
+      M.forget(pane)
+    else
+      local it = quiet[pane]
+      if it == nil or it.revision ~= revision then
+        quiet[pane] = { revision = revision, at = now }
+      elseif now - it.at >= M.settle_ms then
+        local held = verdicts[pane]
+        if held == nil or held.revision ~= revision then
+          candidates[#candidates + 1] = pane
         end
       end
     end

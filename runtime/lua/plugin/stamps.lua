@@ -136,8 +136,6 @@ g.command.add("timestamps", M.toggle, {
   desc = "show when each line of every pane arrived, and how long it waited",
 })
 
-if package.loaded["plugin.tmux.prefix"] then
-  require("plugin.tmux.prefix").commands["t"] = "timestamps"
-end
+require("neotmux.bind").prefix("t", "timestamps")
 
 return M

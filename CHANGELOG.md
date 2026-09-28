@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### A plugin set up from your `init.lua` keeps its prefix key
+
+Setting a shipped plugin up from your own `init.lua` — `require('plugin.stamps').stall = ...`,
+as its header suggests — loaded it before the shipped layer had loaded the prefix, and `C-b t`
+was silently left unbound; `C-b e`, `C-b C` and the session keys had the same trouble. Every
+shipped plugin now binds its prefix key through `neotmux.bind`, which loads the prefix when the
+defaults say it is about to be loaded anyway.
+
 ### `C-b e` stays cheap however far copy mode winds back
 
 The exits band read every mark from the top of the view to the end of the pane on every tick,

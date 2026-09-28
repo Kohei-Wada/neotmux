@@ -63,11 +63,6 @@ g.command.add("hint-open", function()
   end)
 end, { desc = "label the screen, write an opener command for what you point at" })
 
-if
-  package.loaded["plugin.tmux.prefix"]
-  or require("neotmux.defaults").tmux and require("neotmux.defaults").prefix
-then
-  require("plugin.tmux.prefix").commands["f"] = "hint-copy"
-end
+require("neotmux.bind").prefix("f", "hint-copy")
 
 return M

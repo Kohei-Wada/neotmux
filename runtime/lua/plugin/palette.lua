@@ -288,25 +288,13 @@ function M.open(prefix)
   })
 end
 
--- The defaults table and not just `package.loaded`, because a user who rebinds the key above
--- has to `require` this file from their own `init.lua`, which runs before the shipped layer's
--- — so the prefix is not loaded yet and a plain probe would silently leave `C-b :` unbound.
--- Loading it here is what it was about to do anyway. The same shape `plugin.tmux.copy` binds `[`
--- with.
-if
-  package.loaded["plugin.tmux.prefix"]
-  or require("neotmux.defaults").tmux and require("neotmux.defaults").prefix
-then
-  require("plugin.tmux.prefix").commands[":"] = function()
-    M.open()
-  end
-  -- herdr's goto: every agent, and Enter goes to it.
-  require("plugin.tmux.prefix").commands["g"] = function()
-    M.open("#")
-  end
-  require("plugin.tmux.prefix").descriptions[":"] = "open the command palette"
-  require("plugin.tmux.prefix").descriptions["g"] =
-    "go to an agent, from the palette's list of them"
-end
+local bind = require("neotmux.bind")
+bind.prefix(":", function()
+  M.open()
+end, "open the command palette")
+-- herdr's goto: every agent, and Enter goes to it.
+bind.prefix("g", function()
+  M.open("#")
+end, "go to an agent, from the palette's list of them")
 
 return M

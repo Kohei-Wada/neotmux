@@ -34,14 +34,12 @@ g.on_tick(function()
   local focused = M.ignore_focused and neotmux.pane.current() or nil
   -- Every pane the session owns, hidden windows included: an agent you started in a window you
   -- are not looking at has said nothing yet, and that is exactly the pane worth watching.
-  for _, window in ipairs(neotmux.window.list()) do
-    for _, pane in ipairs(neotmux.window.panes(window) or {}) do
-      local now = state.of(pane) == "blocked"
-      if now and not waiting[pane] and pane ~= focused then
-        neotmux.notify("info", "pane " .. pane .. " looks like it is waiting for you")
-      end
-      waiting[pane] = now
+  for _, pane in ipairs(require("neotmux.panes").all()) do
+    local now = state.of(pane) == "blocked"
+    if now and not waiting[pane] and pane ~= focused then
+      neotmux.notify("info", "pane " .. pane .. " looks like it is waiting for you")
     end
+    waiting[pane] = now
   end
 end)
 

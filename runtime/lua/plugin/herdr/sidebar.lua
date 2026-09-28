@@ -319,23 +319,8 @@ function M.next_session()
 end
 
 -- The prefix is the standard plugin and this one is optional, so this is the direction the
--- knowledge goes in. The defaults table and not only `package.loaded`: an `init.lua` that
--- requires this file to change it runs before the shipped layer's, so the prefix is not loaded
--- yet, and a plain probe would leave `C-b b` unbound — `plugin.palette` binds `:` this way for
--- the same reason.
-local function prefix()
-  if
-    package.loaded["plugin.tmux.prefix"]
-    or require("neotmux.defaults").tmux and require("neotmux.defaults").prefix
-  then
-    return require("plugin.tmux.prefix")
-  end
-end
-
-if prefix() then
-  prefix().commands["b"] = M.toggle
-  prefix().descriptions["b"] = "fold the sidebar to its rail, or open it"
-end
+-- knowledge goes in.
+require("neotmux.bind").prefix("b", M.toggle, "fold the sidebar to its rail, or open it")
 
 g.on_tick(function(ctx)
   local band = ctx:reserved()
@@ -433,11 +418,18 @@ M.sections = {
 -- `C-b w`, herdr's navigate: a cursor over the spaces, and `C-b a` the same over the agents.
 -- Bound here rather than in the sections, for the reason `b` is: the prefix is the standard
 -- plugin and this one is optional.
-if prefix() then
-  prefix().commands["w"] = require("plugin.herdr.sidebar.spaces").navigate
-  prefix().commands["a"] = require("plugin.herdr.sidebar.agents").navigate
-  prefix().descriptions["w"] = "move a cursor over the sidebar's sessions"
-  prefix().descriptions["a"] = "move a cursor over the sidebar's agents"
+do
+  local bind = require("neotmux.bind")
+  bind.prefix(
+    "w",
+    require("plugin.herdr.sidebar.spaces").navigate,
+    "move a cursor over the sidebar's sessions"
+  )
+  bind.prefix(
+    "a",
+    require("plugin.herdr.sidebar.agents").navigate,
+    "move a cursor over the sidebar's agents"
+  )
 end
 
 return M

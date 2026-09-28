@@ -28,20 +28,15 @@ M.max_width = 24
 -- one whose record you will want when you come back to it. The shown panes as well, for a host
 -- that has published panes but no windows.
 function M.every_pane()
-  local out, listed = {}, {}
-  local function add(pane)
-    if not listed[pane] then
-      listed[pane] = true
-      out[#out + 1] = pane
-    end
-  end
-  for _, window in ipairs(neotmux.window.list()) do
-    for _, pane in ipairs(neotmux.window.panes(window) or {}) do
-      add(pane)
-    end
+  local out = require("neotmux.panes").all()
+  local listed = {}
+  for _, pane in ipairs(out) do
+    listed[pane] = true
   end
   for _, pane in ipairs(neotmux.pane.list()) do
-    add(pane)
+    if not listed[pane] then
+      out[#out + 1] = pane
+    end
   end
   return out
 end
