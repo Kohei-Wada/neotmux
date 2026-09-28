@@ -164,10 +164,19 @@ mod tests {
             .expect("sh");
         let group = child.id() as i32;
 
+        // Until one read has both: the `sleep` in the job, and the leader's argv, which is not
+        // read while the leader is in a state where reading it could block — as it can be for
+        // a moment while it forks the `sleep`.
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         let mut found = None;
         while std::time::Instant::now() < deadline {
-            found = job(group).filter(|job| job.processes.len() >= 2);
+            found = job(group).filter(|job| {
+                job.processes.iter().any(|p| p.name == "sleep")
+                    && job
+                        .processes
+                        .iter()
+                        .any(|p| p.pid == group && p.argv.is_some())
+            });
             if found.is_some() {
                 break;
             }
@@ -179,7 +188,7 @@ mod tests {
         );
         let _ = child.wait();
 
-        let job = found.expect("the job never had its sleep in it");
+        let job = found.expect("no read of the job had its sleep and its leader's argv");
         assert_eq!(job.group, group);
         let leader = job
             .processes

@@ -298,7 +298,7 @@ fn a_zero_interval_is_clamped_to_the_frame() {
 #[test]
 fn a_timer_that_keeps_overrunning_is_stopped_and_the_tick_is_not() {
     let (_dir, sub) = built(
-        "neotmux.opt.tick_budget_ms = 1\n\
+        "neotmux.opt.tick_budget_ms = 10\n\
          neotmux.opt.tick_overrun_limit = 2\n\
          neotmux.timer.every(10, function()\n\
            neotmux.log.info('timer')\n\
@@ -309,7 +309,11 @@ fn a_timer_that_keeps_overrunning_is_stopped_and_the_tick_is_not() {
     );
     let start = Instant::now();
 
-    // Per frame, because the tick shares the timer's 1 ms budget: a frame the timer spun in
+    // Ten milliseconds, not one: the timer spins for fifty either way, and a budget of one is
+    // one a slow runner overruns with a tick that only logs a line, which is the tick this is
+    // about keeping.
+    //
+    // Per frame, because the tick shares the timer's budget: a frame the timer spun in
     // may lose its own `tick` line to the overrun that spinning caused, and counting the
     // whole run would make this test ride on that. What it is here to prove is that the
     // frames *after* the timer is gone still tick.
