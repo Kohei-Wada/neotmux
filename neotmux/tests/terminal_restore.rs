@@ -453,6 +453,7 @@ fn exits_when_the_terminal_goes_away() {
 /// before anyone noticed. Measured on the process's own `utime + stime` rather than on how
 /// long the wait took, so a loaded runner cannot fail it.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn burns_no_cpu_once_the_terminal_is_gone() {
     // A tenth of a core over the window. An idle session spends nothing; the spin spent all
     // of it.

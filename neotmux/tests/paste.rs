@@ -52,6 +52,7 @@ fn write_counting_shell(dir: &std::path::Path) -> std::path::PathBuf {
 }
 
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn a_four_kibibyte_paste_arrives_whole_without_a_second_keystroke() {
     let pair = native_pty_system()
         .openpty(PtySize {

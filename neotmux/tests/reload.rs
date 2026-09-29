@@ -103,6 +103,7 @@ fn reload_rows(nt: &mut Neotmux) -> usize {
 /// write as the Enter that chose it. The key lands in the pane; the bar is still one row, so
 /// the pane still starts under it; and the palette lists the command once.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn config_reload_from_the_palette_redraws_once_and_keeps_the_next_key() {
     let (mut nt, _init) = start_shipped("");
     nt.wait_for_status("cat", PATIENCE);
@@ -143,6 +144,7 @@ fn config_reload_from_the_palette_redraws_once_and_keeps_the_next_key() {
 /// outside here is a job the test lets go of by creating a file, whose `on_exit` asks for the
 /// reload; what reaches the pane from outside meanwhile is `neotmux send`, the real CLI.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn a_reload_while_copy_mode_is_open_thaws_the_pane_and_closes_the_mode() {
     let flag_dir = tempfile::tempdir().expect("flag dir");
     let flag = flag_dir.path().join("go");
@@ -192,6 +194,7 @@ fn a_reload_while_copy_mode_is_open_thaws_the_pane_and_closes_the_mode() {
 /// Check 3 of the brief: `neotmux.defaults` is read again, so the sidebar follows the config
 /// file across a reload, on and then off.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn the_sidebar_follows_init_lua_across_a_reload() {
     let (mut nt, init) = start_shipped("");
     nt.wait_for_status("cat", PATIENCE);

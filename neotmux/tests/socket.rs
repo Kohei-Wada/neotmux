@@ -779,6 +779,7 @@ fn kill_with_no_name_is_refused() {
 
 /// What an agent asks before it sends anything: which pane is which.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn panes_names_the_pane_and_what_it_is_running() {
     let runtime = TestRuntime::new();
     let client = Client::start(runtime.path(), "/bin/cat");

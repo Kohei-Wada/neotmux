@@ -155,7 +155,8 @@ fn watcher_sees_the_bytes_the_harness_wrote_to_the_pty() {
 fn binder_consumes_one_key_and_lets_the_other_reach_the_pty() {
     let (mut nt, _init) = start("require('plugin.binder')", "cat");
     nt.send("\x18"); // C-x, consumed by the fixture
-    nt.send("\x19"); // C-y, refused by the fixture
+    // C-g rather than C-y, which macOS's terminal takes as its delayed suspend.
+    nt.send("\x07"); // C-g, refused by the fixture
     nt.send("\r");
     let screen = nt.screen_after(Duration::from_secs(2));
     assert!(
@@ -163,7 +164,7 @@ fn binder_consumes_one_key_and_lets_the_other_reach_the_pty() {
         "the consumed key reached the shell:\n{screen}"
     );
     assert!(
-        screen.contains("^Y"),
+        screen.contains("^G"),
         "the fallthrough key never reached the shell:\n{screen}"
     );
 }
@@ -539,6 +540,7 @@ fn a_coroutine_wrapped_spinner_loses_its_tick_too() {
 /// Task 4: the prefix does what a prefix is for. `C-b v` splits vertically and `C-b o`
 /// walks to the next pane, both expressed with nothing but `neotmux.pane`.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn the_prefix_splits_vertically_and_walks_to_the_next_pane() {
     let (mut nt, _init) = start_shipped("", "cat");
     nt.send("\x02v"); // C-b v
@@ -570,6 +572,7 @@ fn the_prefix_splits_vertically_and_walks_to_the_next_pane() {
 
 /// Task 4: `C-b -` splits the other way — the two panes are stacked, not side by side.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn the_prefix_splits_horizontally() {
     let (mut nt, _init) = start_shipped("", "cat");
     nt.send("\x02-"); // C-b -
@@ -658,6 +661,7 @@ fn pane_area(screen: &str) -> String {
 /// screen said where one ended. `C-b v` now rules the reserved column between them, and a
 /// shell is still live on each side of it.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn a_vertical_split_draws_a_divider_column_between_the_panes() {
     let (mut nt, _init) = start_shipped("", "cat");
     nt.send("\x02v"); // C-b v
@@ -695,6 +699,7 @@ fn a_vertical_split_draws_a_divider_column_between_the_panes() {
 
 /// The same, the other way up: `C-b -` rules the boundary row, with a shell above and below.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn a_horizontal_split_draws_a_divider_row_between_the_panes() {
     let (mut nt, _init) = start_shipped("", "cat");
     nt.send("\x02-"); // C-b -
@@ -738,6 +743,7 @@ const TEE_DOWN: &str = "\u{252c}";
 /// it is inside neither pane's extent and no pane draws it. It used to be left blank: a
 /// cross with a hole in the middle.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn a_two_by_two_grid_meets_in_a_cross() {
     let (mut nt, _init) = start_shipped("", "cat");
     nt.send("\x02v"); // C-b v: a left pane and a right one
@@ -791,6 +797,7 @@ fn a_divider_running_into_another_from_the_right_is_a_tee() {
 /// The mirror image: the column that is split is the left one, so the arm points the other
 /// way.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn a_divider_running_into_another_from_the_left_is_the_mirror_tee() {
     let (mut nt, _init) = start_shipped("", "cat");
     nt.send("\x02v");
@@ -857,6 +864,7 @@ fn a_lone_divider_has_no_junction_anywhere_along_it() {
 /// than it was, which is the only place a resize can be seen. The mode is the plugin's own
 /// state, so the keys in it never reach a shell, and the key that leaves it gives them back.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn resize_mode_moves_the_divider_five_columns_and_gives_the_keys_back() {
     let (mut nt, _init) = start_shipped("", "cat");
     nt.send("\x02v"); // C-b v: the new pane on the right is the focused one
@@ -908,6 +916,7 @@ fn resize_mode_moves_the_divider_five_columns_and_gives_the_keys_back() {
 /// From the bottom-right pane `k` is the one above it and `h` is the tall one beside it —
 /// asserted by typing into whatever ends up focused and seeing where the text lands.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn directional_focus_lands_on_the_pane_a_person_would_point_at() {
     let (mut nt, _init) = start_shipped("", "cat");
     nt.send("\x02v"); // C-b v: pane 2, the right-hand column, is focused
@@ -1004,6 +1013,7 @@ fn copy_tree(from: &Path, to: &Path) {
 /// Task 5: the default status bar is a shipped plugin, so it is there with no user config at
 /// all — in the row it reserved, with a tab for the window it is showing.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn the_shipped_status_line_shows_with_no_user_config() {
     let init = harness::runtime(&[("init.lua", "require('plugin.splitter')")]);
     let fixtures = harness::fixture_layer();
@@ -1027,6 +1037,7 @@ fn the_shipped_status_line_shows_with_no_user_config() {
 /// The requirement the user stated first, on the screen a user sees: the bar does not merely
 /// change when the focus moves, it says something different about the pane the focus is on.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn the_bar_says_something_different_about_each_focused_pane() {
     let (mut nt, _init) = start_shipped("", "bash");
     nt.wait_for_status("bash", PATIENCE);
@@ -1053,6 +1064,7 @@ fn the_bar_says_something_different_about_each_focused_pane() {
 /// what the bar's right side is given on their own — the second of those with no keystroke at
 /// all in between.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn the_bar_follows_a_command_and_a_cd_with_no_keystroke() {
     let (mut nt, _init) = start_shipped("", "bash");
     nt.wait_for_status("bash", PATIENCE);
@@ -1075,6 +1087,7 @@ fn the_bar_follows_a_command_and_a_cd_with_no_keystroke() {
 /// living pane's id is 3. A bar that showed the id counted up for ever; what it shows is the
 /// pane's place in `pane.list()`, which closes the gap the closed pane left.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn closing_a_pane_leaves_the_bars_pane_number_where_it_was() {
     let (mut nt, _init) = start_shipped("", "cat");
     nt.wait_for_status(FIRST_WINDOW, PATIENCE);
@@ -1098,6 +1111,7 @@ fn closing_a_pane_leaves_the_bars_pane_number_where_it_was() {
 /// either, so the bar counts positions there too: opening and closing a second window keeps
 /// saying 2, never 3.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn closing_a_window_leaves_the_bars_window_number_where_it_was() {
     let (mut nt, _init) = start_shipped("", "cat");
     nt.wait_for_status(FIRST_WINDOW, PATIENCE);
@@ -1122,6 +1136,7 @@ fn closing_a_window_leaves_the_bars_window_number_where_it_was() {
 /// replaced by it. With the host reserving the divider's column, all 40 are still there, the
 /// divider is beside them, and the right pane's first column is its own too.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn a_border_takes_no_column_from_either_pane_it_divides() {
     const FILL: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcd";
     let init = harness::runtime(&[("init.lua", "require('plugin.splitter')")]);
@@ -1164,6 +1179,7 @@ fn a_border_takes_no_column_from_either_pane_it_divides() {
 /// The other half of the bargain: the gutter is reserved because a plugin asked for it, so
 /// with that plugin switched off the panes tile the surface again and pay nothing.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn switching_the_borders_off_gives_the_panes_their_cells_back() {
     let init = harness::runtime(&[(
         "init.lua",
@@ -1238,6 +1254,7 @@ fn two_sources_reserving_the_bottom_get_a_row_each() {
 /// The other half of the bargain: a band is outside every pane's rect, so a shell that
 /// floods its pane can neither reach it nor be drawn over by it.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn a_flooding_shell_cannot_reach_a_reserved_band() {
     let (mut nt, _init) = start_shipped("", "cat");
     nt.wait_for_status("cat", PATIENCE);
@@ -1294,6 +1311,7 @@ fn a_reservation_the_edge_cannot_hold_is_refused_and_changes_nothing() {
 /// blanks for a frame, the host reads the blank as "gone", takes the row back and gives it
 /// straight back: two recomputes and two SIGWINCHes for one reservation.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn reserving_a_band_costs_one_layout_recompute() {
     let init = harness::runtime(&[(
         "init.lua",
@@ -1512,6 +1530,7 @@ fn resize_probe() -> (Neotmux, tempfile::TempDir) {
 /// host read the empty status as "the status plugin stopped drawing", took its row back and
 /// gave it straight back on the next frame: two recomputes and two SIGWINCHes per split.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn a_split_does_not_resize_every_pane() {
     let (mut nt, _init) = resize_probe();
     nt.wait_for_status("cat", PATIENCE);
@@ -1544,6 +1563,7 @@ fn a_split_does_not_resize_every_pane() {
 /// terminal to announce one. Neotmux reads its own input now, so nothing else is listening
 /// for that signal on its behalf.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn a_terminal_resize_reaches_the_panes() {
     let (mut nt, _init) = resize_probe();
     nt.wait_for_status("cat", PATIENCE);
@@ -1557,6 +1577,7 @@ fn a_terminal_resize_reaches_the_panes() {
 /// The same for a focus change, which invalidated the epoch for the same reason: focus is one
 /// of the three things it is made of.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn a_focus_change_does_not_resize_every_pane() {
     let (mut nt, _init) = resize_probe();
     nt.wait_for_status("cat", PATIENCE);
@@ -1592,6 +1613,7 @@ fn a_focus_change_does_not_resize_every_pane() {
 /// moment it finishes. Reporting the spawned child instead would say `bash` throughout, and
 /// that is the whole distinction this test exists to pin.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn a_panes_command_follows_what_it_is_running_and_falls_back_to_its_shell() {
     let (mut nt, _init) = start("require('plugin.paneinfo')", "bash");
     nt.wait_for_log("paneinfo 1 command=bash", PATIENCE);
@@ -1619,6 +1641,7 @@ fn a_panes_command_follows_what_it_is_running_and_falls_back_to_its_shell() {
 }
 
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn a_panes_directory_follows_a_cd_in_it() {
     let (mut nt, _init) = start("require('plugin.paneinfo')", "bash");
     nt.wait_for_log("paneinfo 1 command=bash", PATIENCE);
@@ -1638,6 +1661,7 @@ fn a_panes_directory_follows_a_cd_in_it() {
 /// directory is the isolation tempdir the harness hands the session, and it is *different*
 /// from `launch`, which is what makes the timeout below a failure rather than a flake.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn the_first_pane_begins_where_neotmux_was_started() {
     let launch = tempfile::tempdir().expect("launch dir");
     let home = std::fs::canonicalize(launch.path()).expect("canonical launch");
@@ -1656,6 +1680,7 @@ fn the_first_pane_begins_where_neotmux_was_started() {
 /// assertion is on *its* line: pane 1 already reports the target directory from the `cd`,
 /// so the pane number is what carries the claim.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn the_split_begins_in_the_focused_panes_directory() {
     let launch = tempfile::tempdir().expect("launch dir");
     let home = std::fs::canonicalize(launch.path()).expect("canonical launch");
@@ -1690,6 +1715,7 @@ fn the_split_begins_in_the_focused_panes_directory() {
 /// which is what the un-pinned path silently chooses, and not an error, which would cost
 /// the split.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn the_split_whose_focused_pane_left_a_deleted_directory_begins_where_neotmux_was_started() {
     let launch = tempfile::tempdir().expect("launch dir");
     let home = std::fs::canonicalize(launch.path()).expect("canonical launch");
@@ -1736,6 +1762,7 @@ fn an_unknown_pane_id_answers_nil_rather_than_raising() {
 /// A pane's child can exit between one tick and the next. That is an ordinary end, not an
 /// error, and the plugin asking about the panes that are left must not start raising.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn a_pane_whose_child_exited_does_not_raise() {
     let (mut nt, _init) = start(
         "require('plugin.paneinfo') require('plugin.splitter')",
@@ -1762,6 +1789,7 @@ fn a_pane_whose_child_exited_does_not_raise() {
 /// redraws: the facts are sampled on the host's own cadence, and a sample that found nothing
 /// new produces no output at all.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn a_plugin_asking_every_tick_does_not_make_an_idle_session_redraw() {
     let (mut nt, _init) = start("require('plugin.paneinfo')", "/bin/cat");
     nt.wait_for_log("paneinfo 1 command=cat", PATIENCE);
@@ -1894,6 +1922,7 @@ fn pane_ids_do_not_collide_across_windows() {
 /// — but `pane.info` describes it all the same. What the pane in the window you are not
 /// looking at is running is the question a sidebar exists to answer.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn a_hidden_windows_pane_is_in_no_list_but_still_reports_what_it_is_running() {
     let (mut nt, _init) = start(
         "require('plugin.windows') require('plugin.paneinfo')",
@@ -1939,6 +1968,7 @@ fn a_hidden_windows_pane_is_in_no_list_but_still_reports_what_it_is_running() {
 /// The facts are sampled while the pane is hidden, not caught up with when it is shown again:
 /// a `cd` and a command started after the window went away are both reported.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn a_hidden_panes_command_and_directory_follow_what_it_does_while_it_is_hidden() {
     let (mut nt, _init) = start(
         "require('plugin.windows') require('plugin.paneinfo')",
@@ -1980,6 +2010,7 @@ fn a_hidden_panes_command_and_directory_follow_what_it_does_while_it_is_hidden()
 /// Every pane is sampled now, so a pane that closed must leave the sample rather than sit in
 /// it answering with whatever it was running when it died.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn a_closed_pane_leaves_no_stale_info_behind() {
     let (mut nt, _init) = start(
         "require('plugin.splitter') require('plugin.paneinfo')",
@@ -2089,6 +2120,7 @@ fn focusing_an_unknown_window_is_reported_and_does_not_stop_the_session() {
 /// A band belongs to the surface, not to a window: the status plugin reserved it once and
 /// keeps it across a switch.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn the_shipped_status_band_survives_a_switch() {
     let (mut nt, _init) = start_shipped("", "cat");
     nt.wait_for_status(FIRST_WINDOW, PATIENCE);
@@ -2113,6 +2145,7 @@ fn the_shipped_status_band_survives_a_switch() {
 /// `C-b p` is the step `C-b n` undoes. Three windows is the smallest number that tells them
 /// apart: from the third, `n` wraps to the first and `p` goes back to the second.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn the_prefix_walks_back_to_the_window_before() {
     let (mut nt, _init) = start_shipped("", "cat");
     nt.wait_for_status(FIRST_WINDOW, PATIENCE);
@@ -2139,6 +2172,7 @@ fn the_prefix_walks_back_to_the_window_before() {
 
 /// `C-b c` and `C-b n` do what they say, expressed with nothing but `neotmux.window`.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn the_prefix_opens_a_window_and_walks_to_the_next_one() {
     let (mut nt, _init) = start_shipped("", "cat");
     nt.wait_for_status(FIRST_WINDOW, PATIENCE);
@@ -2432,6 +2466,7 @@ fn sidebar_row_naming(nt: &mut Neotmux, label: &str, command: &str, timeout: Dur
 /// that asks for a band of columns, lists what the session holds in it, and costs the panes
 /// exactly the columns it took.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn the_shipped_sidebar_lists_the_session_and_narrows_the_panes() {
     let init = harness::runtime(&[("init.lua", TREE_SIDEBAR)]);
     let mut nt = Neotmux::start_layered(&[init.path(), &shipped_layer()], "cat");
@@ -2472,6 +2507,7 @@ const SIDEBAR_RAIL_COLS: u16 = 4;
 /// it was and against the same edge. The echoed `X` is the ruler — it sits at the first
 /// column the pane owns, so where it lands says how wide the band is.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn the_shipped_sidebar_folds_to_a_rail_and_back() {
     let init = harness::runtime(&[("init.lua", TREE_SIDEBAR)]);
     let mut nt = Neotmux::start_layered(&[init.path(), &shipped_layer()], "cat");
@@ -2511,6 +2547,7 @@ fn the_shipped_sidebar_folds_to_a_rail_and_back() {
 /// question: the pane you are in has to be one of the ones that stayed, or the sidebar is
 /// about somebody else's session.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn the_shipped_sidebar_keeps_the_pane_you_are_in_on_screen() {
     let init = harness::runtime(&[("init.lua", TREE_SIDEBAR)]);
     // Short on purpose: five windows do not fit in what is left of ten rows.
@@ -2538,6 +2575,7 @@ fn the_shipped_sidebar_keeps_the_pane_you_are_in_on_screen() {
 /// among them, and `C-b w`'s cursor over them, which Enter leaves the way it found them when
 /// the session under it is the one you are in.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn the_shipped_sidebar_is_herdrs_spaces() {
     let init = harness::runtime(&[("init.lua", "require('neotmux.defaults').sidebar = true")]);
     let mut nt = Neotmux::start_layered(&[init.path(), &shipped_layer()], "cat");
@@ -2554,6 +2592,7 @@ fn the_shipped_sidebar_is_herdrs_spaces() {
 /// Off unless the user says otherwise, like the watcher: what the watcher spends is an
 /// opinion about what you run, what a sidebar spends is a third of the width.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn the_shipped_sidebar_is_off_by_default() {
     let (mut nt, _init) = start_shipped("", "cat");
 
@@ -2794,6 +2833,7 @@ fn turning_the_footer_on_reserves_a_second_row() {
 /// else, which reads as a hole rather than as an empty bar. The footer reserves its row
 /// whether or not a mode is ever raised into it, so it paints it whether or not one is.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn the_footer_paints_the_row_it_reserved_with_no_mode_raised() {
     let init = harness::runtime(&[("init.lua", "require('neotmux.defaults').footer = true")]);
     let mut nt = Neotmux::start_layered(&[init.path(), &shipped_layer()], "cat");
@@ -2829,6 +2869,7 @@ fn a_user_config_can_switch_the_footer_off_again() {
 /// The armed prefix names itself in the footer, and stops the moment a command fires — `o`
 /// with one pane is a harmless one, focusing the only pane there is.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn the_footer_shows_the_armed_prefix_and_clears_when_it_fires() {
     let (mut nt, _init) = start_shipped("require('neotmux.defaults').footer = true", "cat");
     nt.wait_for_status("cat", PATIENCE);
@@ -2850,6 +2891,7 @@ fn the_footer_shows_the_armed_prefix_and_clears_when_it_fires() {
 /// Resize mode names itself too, and differently from the armed prefix — the whole reason
 /// `plugin.tmux.prefix` was asked to raise two names rather than one.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn the_footer_shows_resize_mode_and_clears_when_it_leaves() {
     let (mut nt, _init) = start_shipped("require('neotmux.defaults').footer = true", "cat");
     nt.send("\x02v"); // C-b v: a second pane, so there is a boundary to resize
@@ -2872,6 +2914,7 @@ fn the_footer_shows_resize_mode_and_clears_when_it_leaves() {
 /// Copy mode raises its own name too, entirely independently of the prefix's two — proving
 /// the footer reads one shared convention rather than something specific to `plugin.tmux.prefix`.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn the_footer_shows_copy_mode_and_clears_when_it_leaves() {
     let (mut nt, _init) = start_shipped("require('neotmux.defaults').footer = true", "cat");
     nt.wait_for_status("cat", PATIENCE);
@@ -2894,6 +2937,7 @@ fn the_footer_shows_copy_mode_and_clears_when_it_leaves() {
 /// rather than in the checked-in fixture set, raises its own name and the footer shows it —
 /// and stops the moment that plugin lowers it, with no change to `plugin.footer` at all.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn a_third_party_plugin_raising_its_own_mode_shows_in_the_footer() {
     let init = harness::runtime(&[
         (
@@ -2944,6 +2988,7 @@ end)
 /// second, and when the second is lowered the first is showing again — its own lower call
 /// was never asked to touch anything but the entry it was handed.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn a_raised_mode_is_uncovered_when_the_one_over_it_is_lowered() {
     let init = harness::runtime(&[
         (
@@ -3073,6 +3118,7 @@ fn copy_mode_keeps_the_colours_the_pane_was_written_in() {
 /// given and lost cells off the end — `ペインが返事を待っています` came out as `ペン返をっい`.
 /// It is a plugin's drawing now, cut in columns by the host's own measure.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn a_notification_in_japanese_keeps_its_characters() {
     let init = harness::runtime(&[(
         "init.lua",
@@ -3089,6 +3135,7 @@ fn a_notification_in_japanese_keeps_its_characters() {
 /// And it is readable over whatever the pane was printing: the surface it is drawn on is the
 /// plugin's own, with a background and a frame, rather than bare text laid over the cells.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn a_notification_is_drawn_on_a_ground_of_its_own() {
     let init = harness::runtime(&[(
         "init.lua",
@@ -3146,6 +3193,7 @@ fn zoom_gives_the_focused_pane_the_window_and_gives_it_back() {
 /// Moving to a pane the zoom is hiding unzooms, as tmux's does: `C-b o` from a zoomed pane
 /// lands on the next one with the window back.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn focusing_another_pane_ends_the_zoom() {
     let (mut nt, _init) = start_shipped("", "cat");
     nt.send("\x02v");

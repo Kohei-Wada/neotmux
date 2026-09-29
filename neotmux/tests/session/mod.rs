@@ -15,12 +15,34 @@ pub(crate) fn end_session(runtime_dir: &Path) {
     }) else {
         return;
     };
-    if let Ok(neotmux_sys::sock::Holder::Pid(pid)) = neotmux_sys::sock::holder(&paths) {
-        let _ = nix::sys::signal::kill(
-            nix::unistd::Pid::from_raw(pid),
-            nix::sys::signal::Signal::SIGTERM,
-        );
-    }
+    let pid = match neotmux_sys::sock::holder(&paths) {
+        Ok(neotmux_sys::sock::Holder::Pid(pid)) => pid,
+        // `holder` confirms through `/proc`, which only Linux has; elsewhere `ps` confirms.
+        Ok(neotmux_sys::sock::Holder::Unconfirmed) => match confirmed_by_ps(&paths.lock) {
+            Some(pid) => pid,
+            None => return,
+        },
+        _ => return,
+    };
+    let _ = nix::sys::signal::kill(
+        nix::unistd::Pid::from_raw(pid),
+        nix::sys::signal::Signal::SIGTERM,
+    );
+}
+
+/// The pid in a held lock, if `ps` names it neotmux.
+fn confirmed_by_ps(lock: &Path) -> Option<i32> {
+    let pid = std::fs::read_to_string(lock)
+        .ok()?
+        .trim()
+        .parse::<i32>()
+        .ok()?;
+    let out = std::process::Command::new("ps")
+        .args(["-o", "comm=", "-p", &pid.to_string()])
+        .output()
+        .ok()?;
+    let comm = String::from_utf8_lossy(&out.stdout);
+    (Path::new(comm.trim()).file_name()? == "neotmux").then_some(pid)
 }
 
 /// Ends the session behind a test's own `$XDG_RUNTIME_DIR` when dropped — on a panic as much

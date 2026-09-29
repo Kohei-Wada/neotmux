@@ -25,7 +25,7 @@ fn run_neotmux(runtime_dir: &Path, log: &Path) {
     cmd.arg("--log");
     cmd.arg(log);
     cmd.env("NEOTMUX_RUNTIME", runtime_dir);
-    cmd.env("SHELL", "/bin/true");
+    cmd.env("SHELL", true_on_path());
     cmd.env("TERM", "xterm-256color");
     cmd.env("HOME", home.path());
     cmd.env("XDG_CONFIG_HOME", home.path());
@@ -54,6 +54,15 @@ fn run_neotmux(runtime_dir: &Path, log: &Path) {
     drop(pair.master);
     collector.join().ok();
     assert!(status.success(), "neotmux exited with {status:?}");
+}
+
+/// A shell that exits at once. Looked for on `PATH`, because macOS has no `/bin/true` and a
+/// `$SHELL` that is not there is passed over for the passwd shell, which never exits.
+fn true_on_path() -> std::path::PathBuf {
+    std::env::split_paths(&std::env::var_os("PATH").expect("PATH"))
+        .map(|dir| dir.join("true"))
+        .find(|path| path.is_file())
+        .expect("true on PATH")
 }
 
 fn read_log_containing(log: &Path, marker: &str) -> String {
@@ -162,7 +171,7 @@ fn an_init_time_quit_exits_before_entering_the_alternate_screen() {
     cmd.arg("--log");
     cmd.arg(&log);
     cmd.env("NEOTMUX_RUNTIME", dir.path());
-    cmd.env("SHELL", "/bin/true");
+    cmd.env("SHELL", true_on_path());
     cmd.env("TERM", "xterm-256color");
     cmd.env("HOME", home.path());
     cmd.env("XDG_CONFIG_HOME", home.path());

@@ -124,6 +124,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
     fn this_process_reports_its_own_name_and_directory() {
         let me = std::process::id() as i32;
         let info = read(me);
@@ -150,6 +151,7 @@ mod tests {
     /// A real job: `sh` running a script in a process group of its own, with a `sleep` under
     /// it. Both are in the job, and the leader's argv names the script it was handed.
     #[test]
+    #[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
     fn a_job_is_its_leader_and_what_it_started() {
         use std::os::unix::process::CommandExt;
 

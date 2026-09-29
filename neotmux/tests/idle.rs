@@ -274,6 +274,7 @@ fn idle_cpu(layers: &[&[(&str, &str)]], window: Duration) -> Vec<f64> {
 /// The claim is about the *plugin's* share, not the absolute seconds, which belong to
 /// whatever runner this is and to an unoptimised test build.
 #[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "needs /proc, which only Linux has")]
 fn reading_every_pane_every_frame_costs_about_nothing_while_the_panes_are_quiet() {
     const WINDOW: Duration = Duration::from_secs(3);
 
