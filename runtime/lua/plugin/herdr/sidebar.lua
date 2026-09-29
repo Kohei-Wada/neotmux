@@ -535,13 +535,11 @@ end
 -- in every session judged again once a second, and every session's directory asked again once
 -- its refresh has passed.
 --
--- A timer belongs to the first session to run a frame after it is armed and ends with it, so a
--- session closing that had it arms another.
-local clock_in
+-- A timer belongs to the first session to run a frame after it is armed and ends with it, so
+-- any session closing arms a fresh one for whichever frames next.
+local clock
 local function arm()
-  clock_in = nil
-  g.timer.every(1000, function()
-    clock_in = clock_in or neotmux.session.current()
+  clock = g.timer.every(1000, function()
     for _, name in ipairs(neotmux.session.list()) do
       neotmux.session.with(name, function()
         for _, pane in ipairs(require("neotmux.panes").all()) do
@@ -566,17 +564,15 @@ g.on_event("session_closed", function(e)
     neotmux.buf.delete(bufs[e.session])
   end
   bufs[e.session], last[e.session] = nil, nil
-  if e.session == clock_in then
-    arm()
+  if clock then
+    clock:stop()
   end
+  arm()
 end)
 g.on_event("session_renamed", function(e)
   M.dirty()
   bufs[e.session], bufs[e.from] = bufs[e.from], nil
   last[e.session], last[e.from] = last[e.from], nil
-  if e.from == clock_in then
-    clock_in = e.session
-  end
 end)
 
 -- Each session a client is at renders into its own buffer, laid out for its own band, in its own

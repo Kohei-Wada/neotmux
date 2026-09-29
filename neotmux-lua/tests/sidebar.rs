@@ -1192,6 +1192,32 @@ fn a_command_that_changes_with_no_output_is_shown_after_the_timer() {
     line_with(&frame(&sub, &s, 1), "1.1 vim");
 }
 
+/// The session that claimed the sidebar's timer ending before it ever fired does not take the
+/// clock with it: the next session to frame claims a new one, and it still judges the panes.
+#[test]
+fn the_timer_outlives_the_session_that_claimed_it() {
+    let (_dir, sub) = built("");
+    let both = [
+        Sess::new(1, "work", vec![vec![101]]),
+        Sess::new(2, "home", vec![vec![201]]),
+    ];
+    open(&sub, &both);
+    settled(&sub, &both, 1);
+    let now = std::time::Instant::now();
+    sub.dispatch_timers(SessionId::from(1), now);
+    sub.dispatch_event_unbound(&Event::SessionClosed {
+        session: "work".to_string(),
+    });
+    sub.forget_session(SessionId::from(1));
+    let home = [Sess::new(2, "home", vec![vec![201]])];
+    line_with(&settled(&sub, &home, 2), "1.1 cat");
+    let home = [Sess::new(2, "home", vec![vec![201]]).command("vim")];
+    frame(&sub, &home, 2);
+    sub.dispatch_timers(SessionId::from(2), now);
+    sub.dispatch_timers(SessionId::from(2), now + std::time::Duration::from_secs(2));
+    line_with(&frame(&sub, &home, 2), "1.1 vim");
+}
+
 /// A window named since the last render is in the tree the frame after `window_renamed` says so.
 #[test]
 fn a_window_renamed_is_in_the_sidebar_the_next_frame() {
