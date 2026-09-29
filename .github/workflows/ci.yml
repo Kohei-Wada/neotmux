@@ -11,7 +11,11 @@ env:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -27,7 +31,8 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
       # The suite spawns real PTYs and runs the binary under one, so it needs a
-      # Linux runner with a working /dev/ptmx — not just a container filesystem.
+      # runner with a working /dev/ptmx — not just a container filesystem. What
+      # reads /proc runs on Linux only.
       - run: cargo test --workspace
 
   lua:
