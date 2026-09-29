@@ -8,6 +8,13 @@ A session name or git branch too long for the sidebar was cut at the band's edge
 branch's `↑`/`↓` counts with it. Both now end in `…` where they would overflow, and the counts
 stay. An agent row's session, window, agent and command, a window name in the tree, and a pane's command, do the same.
 
+### A wide character is two columns in the status bar and the sidebar
+
+`status.segments` counted a character a column, so a branch, session or window name in Japanese
+or with emoji ran past the sidebar's edge instead of ending in `…`, and a tab label of them
+misplaced the tabs after it. It now measures with `neotmux.width`, the renderer's own count, and
+never cuts a wide character in half.
+
 ### One place for every plugin's colours
 
 Every shipped plugin now reads its colours from `neotmux.style`, and every colour is a name in

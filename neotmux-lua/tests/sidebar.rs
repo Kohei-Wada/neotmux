@@ -714,6 +714,47 @@ fn the_shipped_sidebar_is_herdrs_spaces_over_its_agents() {
     assert_eq!(lines[first + 1].trim(), "blocked fake", "{lines:#?}");
 }
 
+/// A wide character is two columns, so a branch of them is cut by what it takes on screen and not
+/// by how many characters it has: the counts after it stay.
+#[test]
+fn a_branch_of_wide_characters_is_cut_by_its_columns() {
+    use neotmux_lua::host::JobChunk;
+    let runner = support::FakeRunner::new();
+    runner.will_say(vec![vec![
+        JobChunk::Stdout(
+            "feature/\u{65e5}\u{672c}\u{8a9e}\u{306e}\u{30d6}\u{30e9}\u{30f3}\u{30c1}\n"
+                .as_bytes()
+                .to_vec(),
+        ),
+        JobChunk::Exited(0),
+    ]]);
+    runner.will_say(vec![vec![
+        JobChunk::Stdout(b"1\t2\n".to_vec()),
+        JobChunk::Exited(0),
+    ]]);
+    let (_dir, sub) = built_herdr_running("", runner.clone());
+    let mut work = Sess::new(1, "work", vec![vec![101]]);
+    work.cwd = Some("/src/work".to_string());
+    let s = [work];
+    open(&sub, &s);
+    let mut lines = Vec::new();
+    for _ in 0..6 {
+        lines = frame(&sub, &s, 1);
+    }
+    line_with(&lines, "feature/\u{65e5}\u{672c}\u{8a9e}\u{2026}");
+    // `band` puts a character a cell, so where the count lands is read off the draws themselves:
+    // three columns in, fifteen of branch, one of space.
+    let up = sub
+        .frame_output()
+        .into_iter()
+        .find_map(|cmd| match cmd {
+            DrawCmd::Text { x, text, .. } if text == "\u{2191}2" => Some(x),
+            _ => None,
+        })
+        .expect("the ahead count is drawn");
+    assert_eq!(up, 19, "{lines:#?}");
+}
+
 /// A window name in the tree under the space you are in ends in an ellipsis when it is too long
 /// for the band.
 #[test]
