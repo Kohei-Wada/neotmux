@@ -28,8 +28,8 @@
 --
 -- Nothing here is a host feature. `neotmux.reserve('left', n)` takes the band,
 -- `handle:resize_to(n)` widens and folds it, and `ctx:reserved()` answers where it landed. The
--- rows are written into a buffer the band shows (`neotmux.buf`), rewritten only when something
--- they show changed: see `dirty` below.
+-- rows are written into a buffer of each session's that the band shows in that session
+-- (`neotmux.buf`), rewritten only when something they show changed: see `dirty` below.
 local segments = require("status.segments")
 local style = require("neotmux.style")
 -- Before this file's own tick, so a pane `seen` moved this frame is drawn in this frame.
@@ -103,11 +103,7 @@ M.rule = "\u{2502}" -- │
 
 M.band = g.reserve("left", M.widths.min)
 
-local buf = g.buf.create()
 local ns = neotmux.buf.namespace("plugin.herdr.sidebar")
-if M.band then
-  M.band:set_buf(buf)
-end
 
 -- Which of the two the band is in. Folded, a section with a `rail` draws that, and one without is
 -- its open rows cut to the rail's width.
@@ -383,8 +379,8 @@ end
 -- knowledge goes in.
 require("neotmux.bind").prefix("b", M.toggle, "fold the sidebar to its rail, or open it")
 
--- The whole band as lines, row for row, written into the buffer the band shows.
-function M.render(band)
+-- The whole band as lines, row for row, written into `buf`.
+function M.render(band, buf)
   local grid = {}
   for y = 1, band.h do
     grid[y] = { text = "", cols = 0, marks = {} }
@@ -490,10 +486,11 @@ function M.render(band)
 end
 
 -- When to render: the model is stale when something it shows changed. Events say most of it; a
--- token of your own that shows something else must call `dirty()` when that changes.
-local dirty = true
+-- token of your own that shows something else must call `dirty()` when that changes. A count,
+-- not a flag, so every session's tick sees a change however many ticks ran since.
+local changes = 0
 function M.dirty()
-  dirty = true
+  changes = changes + 1
 end
 
 -- Per pane, the facts its rows depend on: `state|command|agent`.
@@ -509,7 +506,7 @@ local function judge(pane)
     .. tostring(require("neotmux.detect").agent(pane))
   if facts[pane] ~= fact then
     facts[pane] = fact
-    dirty = true
+    changes = changes + 1
   end
 end
 
@@ -518,7 +515,7 @@ g.on_event("pane_changed", function(e)
 end)
 g.on_event("pane_closed", function(e)
   facts[e.pane] = nil
-  dirty = true
+  M.dirty()
 end)
 for _, name in ipairs({
   "pane_opened",
@@ -529,7 +526,6 @@ for _, name in ipairs({
   "window_changed",
   "window_renamed",
   "session_created",
-  "session_renamed",
 }) do
   g.on_event(name, M.dirty)
 end
@@ -561,22 +557,30 @@ local function arm()
 end
 arm()
 
+-- Per session a client is at, the buffer its band shows and what it was last rendered against.
+local bufs, last = {}, {}
+
 g.on_event("session_closed", function(e)
-  dirty = true
+  M.dirty()
+  if bufs[e.session] then
+    neotmux.buf.delete(bufs[e.session])
+  end
+  bufs[e.session], last[e.session] = nil, nil
   if e.session == clock_in then
     arm()
   end
 end)
 g.on_event("session_renamed", function(e)
+  M.dirty()
+  bufs[e.session], bufs[e.from] = bufs[e.from], nil
+  last[e.session], last[e.from] = last[e.from], nil
   if e.from == clock_in then
     clock_in = e.session
   end
 end)
 
--- The one buffer is the sidebar of the session a client is at, laid out for that session's band,
--- so only its own tick writes it: a session nobody is at leaves `dirty` for that tick, which comes
--- within the host's idle tick if nothing else brings it sooner.
-local last = {}
+-- Each session a client is at renders into its own buffer, laid out for its own band, in its own
+-- tick; a session nobody is at renders nothing.
 g.on_tick(function(ctx)
   local band = ctx:reserved()
   -- Nil while the terminal is too narrow to spare the columns. The panes have them back, so
@@ -588,23 +592,41 @@ g.on_tick(function(ctx)
   if who == nil or neotmux.session.attached(who) == 0 then
     return
   end
+  if not bufs[who] then
+    bufs[who] = g.buf.create()
+    M.band:set_buf(bufs[who])
+  end
   -- What the rows are laid out against, besides the model.
   local spaces = package.loaded["plugin.herdr.sidebar.spaces"]
   local agents = package.loaded["plugin.herdr.sidebar.agents"]
-  local layout = table.concat({
-    who,
-    band.w,
-    band.h,
-    tostring(M.open),
-    tostring(spaces and spaces.cursor),
-    tostring(agents and agents.cursor),
-    tostring(agents and agents.sort),
-  }, ",")
-  local stale = agents and agents.stale_at and agents.clock() >= agents.stale_at
-  if dirty or stale or layout ~= last.layout or seen_state.generation ~= last.seen then
-    dirty = false
-    last.layout, last.seen = layout, seen_state.generation
-    M.render(band)
+  local spaces_cursor = spaces and spaces.cursor
+  local agents_cursor = agents and agents.cursor
+  local sort = agents and agents.sort
+  local was = last[who]
+  if
+    was == nil
+    or (was.stale_at and agents.clock() >= was.stale_at)
+    or was.changes ~= changes
+    or was.seen ~= seen_state.generation
+    or was.w ~= band.w
+    or was.h ~= band.h
+    or was.open ~= M.open
+    or was.spaces_cursor ~= spaces_cursor
+    or was.agents_cursor ~= agents_cursor
+    or was.sort ~= sort
+  then
+    M.render(band, bufs[who])
+    last[who] = {
+      changes = changes,
+      seen = seen_state.generation,
+      w = band.w,
+      h = band.h,
+      open = M.open,
+      spaces_cursor = spaces_cursor,
+      agents_cursor = agents_cursor,
+      sort = sort,
+      stale_at = agents and agents.stale_at,
+    }
   end
 end)
 

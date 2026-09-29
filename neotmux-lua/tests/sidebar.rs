@@ -134,6 +134,17 @@ fn frame_in(sub: &Built, surface: Size, sessions: &[Sess], current: u32) -> Vec<
 /// A frame in which each session has a surface of its own, `surfaces[i]` for `sessions[i]`; the
 /// band read back is the current session's.
 fn frame_sized(sub: &Built, surfaces: &[Size], sessions: &[Sess], current: u32) -> Vec<String> {
+    frame_attached(sub, surfaces, sessions, current, &[current])
+}
+
+/// `frame_sized` with a client at every session in `attached`, and nobody at the rest.
+fn frame_attached(
+    sub: &Built,
+    surfaces: &[Size],
+    sessions: &[Sess],
+    current: u32,
+    attached: &[u32],
+) -> Vec<String> {
     let reserved = sub.reserved();
     for (s, surface) in sessions.iter().zip(surfaces) {
         let surface = *surface;
@@ -144,8 +155,7 @@ fn frame_sized(sub: &Built, surfaces: &[Size], sessions: &[Sess], current: u32) 
         let area = Rect::new(reserved.left, reserved.top, content.cols, content.rows);
         let id = SessionId::from(s.id);
         sub.name_session(id, s.name);
-        // The session being looked at has the one client; every other is nobody's.
-        sub.publish_attached(id, usize::from(s.id == current));
+        sub.publish_attached(id, usize::from(attached.contains(&s.id)));
         sub.lay_out_reservations(id, surface, reserved);
         let focus = PaneId::from(s.focus);
         let at = s
@@ -217,7 +227,22 @@ fn frame_sized(sub: &Built, surfaces: &[Size], sessions: &[Sess], current: u32) 
         sub.lay_out_reservations(id, surfaces[i], reserved);
         sub.dispatch_tick(id);
     }
+    LOOKED_AT.set(current);
     band(sub, surfaces[at])
+}
+
+thread_local! {
+    /// The session the last frame read back was for.
+    static LOOKED_AT: std::cell::Cell<u32> = const { std::cell::Cell::new(1) };
+}
+
+/// What the session the last frame was read back for is shown.
+fn output(sub: &Built) -> Vec<DrawCmd> {
+    output_for(sub, LOOKED_AT.get())
+}
+
+fn output_for(sub: &Built, session: u32) -> Vec<DrawCmd> {
+    sub.frame_over(SessionId::from(session), &sub.frame_immediate())
 }
 
 fn frame(sub: &Built, sessions: &[Sess], current: u32) -> Vec<String> {
@@ -234,7 +259,7 @@ fn settled(sub: &Built, sessions: &[Sess], current: u32) -> Vec<String> {
 /// sidebar draws), each line's trailing blanks trimmed.
 fn band(sub: &Built, surface: Size) -> Vec<String> {
     let mut grid = vec![vec![' '; surface.cols as usize]; surface.rows as usize];
-    for cmd in sub.frame_output() {
+    for cmd in output(sub) {
         if let DrawCmd::Text { x, y, text, .. } = cmd {
             for (i, ch) in text.chars().enumerate() {
                 if let Some(cell) = grid
@@ -775,8 +800,7 @@ fn a_branch_of_wide_characters_is_cut_by_its_columns() {
     line_with(&lines, "feature/\u{65e5}\u{672c}\u{8a9e}\u{2026}");
     // `band` puts a character a cell, so where the count lands is read off the draws themselves:
     // three columns in, fifteen of branch, one of space.
-    let up = sub
-        .frame_output()
+    let up = output(&sub)
         .into_iter()
         .find_map(|cmd| match cmd {
             DrawCmd::Text { x, text, .. } if text == "\u{2191}2" => Some(x),
@@ -1079,6 +1103,47 @@ fn a_session_nobody_is_at_does_not_rebuild_the_sidebar() {
     assert_eq!(style_of(&sub, "home"), (SUBTEXT, false), "{lines:#?}");
 }
 
+/// A client at each of two sessions: each session's band is its own sidebar, with its own "you
+/// are here", whichever session ticked last, and with nothing new neither tick rewrites it.
+#[test]
+fn two_sessions_with_a_client_each_show_their_own_sidebar() {
+    let (_dir, sub) = built_herdr(
+        "local sidebar = require('plugin.herdr.sidebar')\n\
+         local builds = 0\n\
+         local real = sidebar.render\n\
+         sidebar.render = function(...) builds = builds + 1 return real(...) end\n\
+         neotmux.on_key(function(key) if key == 'B' then neotmux.log.info('builds=' .. builds) return true end return false end)\n",
+    );
+    let s = [
+        Sess::new(1, "work", vec![vec![101]]),
+        Sess::new(2, "home", vec![vec![201]]),
+    ];
+    let sizes = [SURFACE, SURFACE];
+    open(&sub, &s);
+    for _ in 0..2 {
+        frame_attached(&sub, &sizes, &s, 1, &[1, 2]);
+        frame_attached(&sub, &sizes, &s, 2, &[1, 2]);
+    }
+    support::keys(&sub, &["B"]);
+    let first = logged_builds(&sub);
+    for _ in 0..5 {
+        frame_attached(&sub, &sizes, &s, 1, &[1, 2]);
+        frame_attached(&sub, &sizes, &s, 2, &[1, 2]);
+    }
+    support::keys(&sub, &["B"]);
+    assert_eq!(
+        logged_builds(&sub),
+        first,
+        "idle alternating ticks rendered"
+    );
+    // Session 1 ticked last; what session 2 is shown is still its own.
+    frame_attached(&sub, &sizes, &s, 1, &[1, 2]);
+    assert_eq!(style_in(&sub, 2, "home"), (TEXT, true));
+    assert_eq!(style_in(&sub, 2, "work"), (SUBTEXT, false));
+    assert_eq!(style_in(&sub, 1, "work"), (TEXT, true));
+    assert_eq!(style_in(&sub, 1, "home"), (SUBTEXT, false));
+}
+
 /// Sessions of different sizes: the band is laid out for the one a client is at, and a tick in
 /// the other, whose band is another height, neither rewrites it nor makes the next one rewrite it.
 #[test]
@@ -1254,7 +1319,12 @@ const CURSOR: neotmux_proto::Color = neotmux_proto::Color::Rgb(0x31, 0x32, 0x44)
 
 /// The first text drawn that holds `needle`: its colour and whether it is bold.
 fn style_of(sub: &Built, needle: &str) -> (neotmux_proto::Color, bool) {
-    sub.frame_output()
+    style_in(sub, LOOKED_AT.get(), needle)
+}
+
+/// `style_of` in what `session` is shown.
+fn style_in(sub: &Built, session: u32, needle: &str) -> (neotmux_proto::Color, bool) {
+    output_for(sub, session)
         .into_iter()
         .find_map(|cmd| match cmd {
             DrawCmd::Text { text, fg, bold, .. } if text.contains(needle) => Some((fg, bold)),
@@ -1265,7 +1335,7 @@ fn style_of(sub: &Built, needle: &str) -> (neotmux_proto::Color, bool) {
 
 /// What row `y` of the band is painted with, if anything paints it.
 fn fill_on(sub: &Built, y: u16) -> Option<neotmux_proto::Color> {
-    sub.frame_output().into_iter().find_map(|cmd| match cmd {
+    output(sub).into_iter().find_map(|cmd| match cmd {
         DrawCmd::Rect { rect, bg, .. } if rect.y == y && rect.h == 1 => Some(bg),
         _ => None,
     })
@@ -1401,8 +1471,7 @@ fn a_band_colour_of_your_own_still_shows_the_rows_you_are_at() {
     let s = [Sess::new(1, "work", vec![vec![101]])];
     open(&sub, &s);
     settled(&sub, &s, 1);
-    let bg = sub
-        .frame_output()
+    let bg = output(&sub)
         .into_iter()
         .find_map(|cmd| match cmd {
             DrawCmd::Text { text, bg, .. } if text == "work" => Some(bg),

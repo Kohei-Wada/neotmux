@@ -583,6 +583,7 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
             sources.clone(),
             reservations.clone(),
             text_buffers.clone(),
+            ambient.clone(),
             groups.clone(),
         )?;
         neotmux.set("reserve", reserve)?;
@@ -600,6 +601,7 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
             sources.clone(),
             floats.clone(),
             text_buffers.clone(),
+            ambient.clone(),
             groups.clone(),
         )?;
         neotmux.set("float", float)?;

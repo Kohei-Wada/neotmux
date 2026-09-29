@@ -142,7 +142,7 @@ impl Plugins {
                 // What the tick drew still stands; only a buffer or a group moved.
                 let immediate = drawn.immediate.clone();
                 let views = drawn.views.clone();
-                let overlay = self.lua.frame_over(&immediate);
+                let overlay = self.lua.frame_over(session, &immediate);
                 self.drawn.insert(
                     session,
                     Drawn {
@@ -158,7 +158,7 @@ impl Plugins {
             None => {
                 self.lua.dispatch_tick(session);
                 let immediate = self.lua.frame_immediate();
-                let overlay = self.lua.frame_over(&immediate);
+                let overlay = self.lua.frame_over(session, &immediate);
                 let views = self.lua.frame_views();
                 let retained = self.lua.retained_generation();
                 self.drawn.insert(

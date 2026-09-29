@@ -80,8 +80,9 @@ neotmux.buf.delete(buf)                                -- idempotent
 - The owner is the source that created it, or the group it was created through. A failed load
   or `config-reload` emptying the group deletes it, the same fate a band or a float has. A deleted buffer's handle raises on every call but
   `delete`.
-- One VM serves every session, so a buffer is not a session's. The sidebar has one buffer, shown
-  in every session's band.
+- One VM serves every session, so a buffer is not a session's; which buffer a window shows is
+  (§2.3). The sidebar has a buffer per session a client is at, each shown in its own session's
+  band.
 
 ### 2.2 Extmarks and highlight groups
 
@@ -130,6 +131,12 @@ win:set_buf(buf)
 
 - A band's handle and a float's handle are windows. Each shows at most one buffer; one buffer may
   be shown in any number of windows. `set_buf` answers `true`, or raises on a deleted buffer.
+- **A window's buffer is bound per session**, as Neovim's window is a tabpage's and a session is
+  the tabpage. `set_buf` called while a session is bound (its tick, its events, `session.with`)
+  binds the window in that session; called with none bound (at load) it sets the default every
+  session without a binding of its own shows. A session's binding, `nil` included, overrides the
+  default window by window. `handle:remove()` takes the window away in every session, and a
+  session that ends takes its bindings with it.
 - Line 0 is the window's top row. Rows past the buffer's end are left as the window's background;
   lines past the window's height are not drawn. A line wider than the window is cut at its
   width, and a wide character that would straddle the edge is left out. Ellipses are the

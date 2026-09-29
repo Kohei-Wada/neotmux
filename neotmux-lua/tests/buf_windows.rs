@@ -4,7 +4,7 @@ use std::fs;
 
 use neotmux_lua::LuaSubsystem;
 use neotmux_lua::plugin::Layers;
-use neotmux_proto::{Color, DrawCmd, Epoch, Geometry, PaneId, Rect, Reserved, Size};
+use neotmux_proto::{Color, DrawCmd, Epoch, Geometry, PaneId, Rect, Reserved, SessionId, Size};
 
 mod support;
 
@@ -29,12 +29,16 @@ fn built(files: &[(&str, &str)]) -> (tempfile::TempDir, LuaSubsystem) {
 /// What the host does at a frame boundary: settle the surface, hand out the bands, publish
 /// the geometry the panes were left with, and tick.
 fn frame(sub: &LuaSubsystem, applied: bool) {
+    frame_in(sub, support::one(), applied)
+}
+
+fn frame_in(sub: &LuaSubsystem, session: SessionId, applied: bool) {
     let reserved = if applied {
         sub.reserved()
     } else {
         Reserved::default()
     };
-    sub.lay_out_reservations(support::one(), SURFACE, reserved);
+    sub.lay_out_reservations(session, SURFACE, reserved);
     let content = Size {
         rows: SURFACE.rows - reserved.rows(),
         cols: SURFACE.cols - reserved.cols(),
@@ -42,7 +46,7 @@ fn frame(sub: &LuaSubsystem, applied: bool) {
     let pane = PaneId::from(1);
     let rect = Rect::new(reserved.left, reserved.top, content.cols, content.rows);
     sub.begin_frame(
-        support::one(),
+        session,
         Epoch::new(content, vec![pane], Some(pane)),
         Geometry {
             area: rect,
@@ -51,12 +55,20 @@ fn frame(sub: &LuaSubsystem, applied: bool) {
             ..Default::default()
         },
     );
-    sub.dispatch_tick(support::one());
+    sub.dispatch_tick(session);
 }
 
 fn texts(sub: &LuaSubsystem) -> Vec<(u16, u16, String)> {
-    sub.frame_output()
-        .into_iter()
+    texts_of(sub.frame_output())
+}
+
+/// What `session` is shown.
+fn texts_in(sub: &LuaSubsystem, session: SessionId) -> Vec<(u16, u16, String)> {
+    texts_of(sub.frame_over(session, &sub.frame_immediate()))
+}
+
+fn texts_of(cmds: Vec<DrawCmd>) -> Vec<(u16, u16, String)> {
+    cmds.into_iter()
         .filter_map(|cmd| match cmd {
             DrawCmd::Text { x, y, text, .. } => Some((x, y, text)),
             _ => None,
@@ -283,4 +295,69 @@ fn set_buf_on_a_deleted_buffer_raises() {
     let ops = format!("{:?}", sub.drain_ops(None));
     assert!(ops.contains("set_buf false"), "{ops}");
     assert!(ops.contains("does not exist"), "{ops}");
+}
+
+/// Two sessions and one band: what `set_buf` was given at load is every session's, and what it is
+/// given in a session's tick is that session's alone, down to showing nothing, until it ends.
+const PER_SESSION: &str = "local default = neotmux.buf.create()\n\
+    neotmux.buf.set_lines(default, 0, -1, { 'dflt' })\n\
+    local mine = neotmux.buf.create()\n\
+    neotmux.buf.set_lines(mine, 0, -1, { 'two' })\n\
+    local band = neotmux.reserve('left', 6)\n\
+    band:set_buf(default)\n\
+    neotmux.on_tick(function()\n\
+      local who = neotmux.session.current()\n\
+      if who == 'two' then band:set_buf(mine) elseif who == 'three' then band:set_buf(nil) end\n\
+    end)\n\
+    return {}";
+
+fn sessions(sub: &LuaSubsystem) -> [SessionId; 3] {
+    let ids = [SessionId::from(1), SessionId::from(2), SessionId::from(3)];
+    for (id, name) in ids.iter().zip(["one", "two", "three"]) {
+        sub.name_session(*id, name);
+    }
+    for id in ids {
+        frame_in(sub, id, true);
+    }
+    ids
+}
+
+#[test]
+fn a_buffer_given_in_a_sessions_tick_is_shown_in_that_session_only() {
+    let (_d, sub) = built(&[
+        ("init.lua", "require('plugin.b')"),
+        ("lua/plugin/b.lua", PER_SESSION),
+    ]);
+    let [one, two, _] = sessions(&sub);
+    assert_eq!(texts_in(&sub, one), vec![(0, 0, "dflt".to_string())]);
+    assert_eq!(texts_in(&sub, two), vec![(0, 0, "two".to_string())]);
+    // One ticking after two changes nothing two is shown.
+    frame_in(&sub, one, true);
+    assert_eq!(texts_in(&sub, two), vec![(0, 0, "two".to_string())]);
+}
+
+#[test]
+fn set_buf_nil_in_a_sessions_tick_shows_nothing_there_only() {
+    let (_d, sub) = built(&[
+        ("init.lua", "require('plugin.b')"),
+        ("lua/plugin/b.lua", PER_SESSION),
+    ]);
+    let [one, _, three] = sessions(&sub);
+    assert!(
+        texts_in(&sub, three).is_empty(),
+        "{:?}",
+        texts_in(&sub, three)
+    );
+    assert_eq!(texts_in(&sub, one), vec![(0, 0, "dflt".to_string())]);
+}
+
+#[test]
+fn a_session_that_ends_takes_its_own_buffer_with_it() {
+    let (_d, sub) = built(&[
+        ("init.lua", "require('plugin.b')"),
+        ("lua/plugin/b.lua", PER_SESSION),
+    ]);
+    let [_, two, _] = sessions(&sub);
+    sub.forget_session(two);
+    assert_eq!(texts_in(&sub, two), vec![(0, 0, "dflt".to_string())]);
 }

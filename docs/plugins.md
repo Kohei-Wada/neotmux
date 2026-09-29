@@ -445,6 +445,11 @@ ns, start, end)` and `delete` are there too.
 A window shows one buffer from its top row, cut at its width; what you draw with `ctx:*` in the
 same cells goes over it. A buffer belongs to the source or group that made it and goes with it.
 
+Which buffer a window shows is per session, the way a Neovim window belongs to a tabpage:
+`set_buf` in a session's tick or event binds it in that session only, and `set_buf` at load is
+the default for every session that has not bound its own. So a plugin whose rows differ by
+session — "you are here" — gives each session its own buffer from that session's tick.
+
 ### Panes
 
 ```lua
@@ -1928,9 +1933,9 @@ marker is one cell: one that measured two columns would push every name on its r
 
 A token answers its text, a highlight group name — `'sidebar:branch'`, or one of your own made
 with `neotmux.hl.set` — whether it is bold, and whether it shrinks to `…` when the row is too
-wide. The sidebar draws into a buffer (see Buffers) and rewrites it only when a pane's state,
-the sessions, windows or panes, the band's size, the fold or the navigate cursor changed; a
-token you add that shows something else that changes must call
+wide. The sidebar draws into a buffer per session a client is at (see Buffers), and rewrites
+one only when a pane's state, the sessions, windows or panes, the band's size, the fold or the
+navigate cursor changed; a token you add that shows something else that changes must call
 `require('plugin.herdr.sidebar').dirty()` when it does.
 
 ### Adding to the palette

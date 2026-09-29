@@ -1,15 +1,23 @@
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 
+use neotmux_proto::SessionId;
+
 use crate::draw::{BufId, BufWindow, TextBuffer};
 use crate::plugin::SourceId;
 
-/// Every buffer, who owns it, which window shows which, and the namespaces. The generation
-/// moves on any change a frame would show.
+type Bindings = BTreeMap<(Option<SessionId>, BufWindow), Option<BufId>>;
+
+/// Every buffer, who owns it, which window shows which in which session, and the namespaces.
+/// The generation moves on any change a frame would show.
+///
+/// A window's buffer is bound per session, as Neovim binds a window per tabpage: what was set
+/// with no session bound is every session's, and a session's own binding, `None` included,
+/// overrides it there.
 #[derive(Default)]
 pub struct TextBuffers {
     bufs: RefCell<BTreeMap<BufId, (SourceId, TextBuffer)>>,
-    windows: RefCell<BTreeMap<BufWindow, BufId>>,
+    windows: RefCell<Bindings>,
     namespaces: RefCell<BTreeMap<String, u32>>,
     next: Cell<u32>,
     generation: Cell<u64>,
@@ -39,7 +47,9 @@ impl TextBuffers {
 
     pub fn delete(&self, id: BufId) {
         if self.bufs.borrow_mut().remove(&id).is_some() {
-            self.windows.borrow_mut().retain(|_, shown| *shown != id);
+            self.windows
+                .borrow_mut()
+                .retain(|_, shown| *shown != Some(id));
             self.bump();
         }
     }
@@ -62,20 +72,44 @@ impl TextBuffers {
         *namespaces.entry(name.to_string()).or_insert(next)
     }
 
-    pub(crate) fn show(&self, window: BufWindow, buf: Option<BufId>) {
+    pub(crate) fn show(&self, session: Option<SessionId>, window: BufWindow, buf: Option<BufId>) {
         let mut windows = self.windows.borrow_mut();
-        match buf {
-            Some(buf) => windows.insert(window, buf),
-            None => windows.remove(&window),
+        match (session, buf) {
+            (None, None) => windows.remove(&(None, window)),
+            _ => windows.insert((session, window), buf),
         };
         self.bump();
     }
 
-    pub(crate) fn shown(&self) -> Vec<(BufWindow, BufId)> {
-        self.windows
-            .borrow()
-            .iter()
-            .map(|(w, b)| (*w, *b))
+    /// The window is gone, from every session.
+    pub(crate) fn close(&self, window: BufWindow) {
+        self.windows.borrow_mut().retain(|(_, w), _| *w != window);
+        self.bump();
+    }
+
+    /// A session is over: its own bindings go with it.
+    pub(crate) fn forget(&self, session: SessionId) {
+        let mut windows = self.windows.borrow_mut();
+        let before = windows.len();
+        windows.retain(|(s, _), _| *s != Some(session));
+        if windows.len() != before {
+            self.bump();
+        }
+    }
+
+    /// What each window shows in `session`: its own binding where it has one, else the default.
+    pub(crate) fn shown_in(&self, session: Option<SessionId>) -> Vec<(BufWindow, BufId)> {
+        let windows = self.windows.borrow();
+        let mut shown: BTreeMap<BufWindow, Option<BufId>> = BTreeMap::new();
+        // The unbound keys sort first, so a session's own binding is inserted over them.
+        for ((s, w), b) in windows.iter() {
+            if s.is_none() || *s == session {
+                shown.insert(*w, *b);
+            }
+        }
+        shown
+            .into_iter()
+            .filter_map(|(w, b)| b.map(|b| (w, b)))
             .collect()
     }
 

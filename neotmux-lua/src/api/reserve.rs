@@ -4,6 +4,7 @@ use mlua::{Function, Lua, Table, Value};
 use neotmux_proto::Edge;
 
 use crate::draw::{BufId, BufWindow, ReservationId, Reservations, TextBuffers, max_reserved};
+use crate::host::Ambient;
 use crate::plugin::{self, Groups, Held, Sources};
 
 /// What a `cells` argument has to be for either call to mean anything, whoever else is on the
@@ -27,10 +28,12 @@ fn check_cells(call: &str, edge: Edge, cells: u16) -> mlua::Result<()> {
 }
 
 /// `handle:set_buf(buf | nil)` on a band or a float: the window shows `buf` from its top row
-/// from the next frame on, or nothing. A buffer that does not exist raises.
+/// from the next frame on, or nothing — in the session bound, or in every session that has no
+/// binding of its own when none is. A buffer that does not exist raises.
 pub(crate) fn set_buf(
     lua: &Lua,
     bufs: Rc<TextBuffers>,
+    ambient: Rc<Ambient>,
     window: BufWindow,
 ) -> mlua::Result<Function> {
     lua.create_function(move |_, (_self, buf): (Value, Option<u32>)| {
@@ -41,7 +44,7 @@ pub(crate) fn set_buf(
                 "buffer {buf} does not exist"
             )));
         }
-        bufs.show(window, buf.map(BufId));
+        bufs.show(ambient.current(), window, buf.map(BufId));
         Ok(true)
     })
 }
@@ -55,6 +58,7 @@ fn handle(
     lua: &Lua,
     reservations: Rc<Reservations>,
     bufs: Rc<TextBuffers>,
+    ambient: Rc<Ambient>,
     id: ReservationId,
     edge: Edge,
 ) -> mlua::Result<Table> {
@@ -64,12 +68,12 @@ fn handle(
         let bufs = bufs.clone();
         lua.create_function(move |_, _self: Value| {
             reservations.remove(id);
-            bufs.show(BufWindow::Band(id), None);
+            bufs.close(BufWindow::Band(id));
             Ok(())
         })?
     };
     handle.set("remove", remove)?;
-    handle.set("set_buf", set_buf(lua, bufs, BufWindow::Band(id))?)?;
+    handle.set("set_buf", set_buf(lua, bufs, ambient, BufWindow::Band(id))?)?;
     let resize_to = lua.create_function(move |lua, (_self, cells): (Value, u16)| {
         check_cells("handle:resize_to", edge, cells)?;
         match reservations.resize(id, cells) {
@@ -97,6 +101,7 @@ pub(crate) fn install(
     sources: Rc<Sources>,
     reservations: Rc<Reservations>,
     bufs: Rc<TextBuffers>,
+    ambient: Rc<Ambient>,
     groups: Rc<Groups>,
 ) -> mlua::Result<Function> {
     lua.create_function(move |lua, (edge, cells): (String, u16)| {
@@ -112,7 +117,14 @@ pub(crate) fn install(
             Ok(id) => {
                 groups.note(Held::Reservation(id));
                 Ok((
-                    Value::Table(handle(lua, reservations.clone(), bufs.clone(), id, parsed)?),
+                    Value::Table(handle(
+                        lua,
+                        reservations.clone(),
+                        bufs.clone(),
+                        ambient.clone(),
+                        id,
+                        parsed,
+                    )?),
                     Value::Nil,
                 ))
             }

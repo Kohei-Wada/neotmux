@@ -4,6 +4,7 @@ use mlua::{Function, Lua, Table, Value};
 use neotmux_proto::Rect;
 
 use crate::draw::{BufWindow, FloatId, Floats, TextBuffers};
+use crate::host::Ambient;
 use crate::plugin::{self, Groups, Held, Sources};
 
 /// A field read as a whole Lua integer, or the message a bad one gets: `min` is the
@@ -60,6 +61,7 @@ fn handle(
     lua: &Lua,
     floats: Rc<Floats>,
     bufs: Rc<TextBuffers>,
+    ambient: Rc<Ambient>,
     id: FloatId,
 ) -> mlua::Result<Table> {
     let handle = lua.create_table()?;
@@ -139,12 +141,12 @@ fn handle(
 
     handle.set(
         "set_buf",
-        super::reserve::set_buf(lua, bufs.clone(), BufWindow::Float(id))?,
+        super::reserve::set_buf(lua, bufs.clone(), ambient, BufWindow::Float(id))?,
     )?;
 
     let remove = lua.create_function(move |_, _self: Value| {
         floats.remove(id);
-        bufs.show(BufWindow::Float(id), None);
+        bufs.close(BufWindow::Float(id));
         Ok(())
     })?;
     handle.set("remove", remove)?;
@@ -168,6 +170,7 @@ pub(crate) fn install(
     sources: Rc<Sources>,
     floats: Rc<Floats>,
     bufs: Rc<TextBuffers>,
+    ambient: Rc<Ambient>,
     groups: Rc<Groups>,
 ) -> mlua::Result<Function> {
     lua.create_function(move |lua, opts: Table| {
@@ -205,7 +208,13 @@ pub(crate) fn install(
         let id = floats.add(owner, Rect::new(x, y, w, h));
         groups.note(Held::Float(id));
         Ok((
-            Value::Table(handle(lua, floats.clone(), bufs.clone(), id)?),
+            Value::Table(handle(
+                lua,
+                floats.clone(),
+                bufs.clone(),
+                ambient.clone(),
+                id,
+            )?),
             Value::Nil,
         ))
     })

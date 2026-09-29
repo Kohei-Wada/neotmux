@@ -1027,8 +1027,10 @@ impl LuaSubsystem {
         self.buffers.applicable_views()
     }
 
+    /// What the session bound now is shown, or what every session is shown by default when
+    /// none is.
     pub fn frame_output(&self) -> Vec<DrawCmd> {
-        self.frame_over(&self.frame_immediate())
+        self.project_over(self.ambient.current(), &self.frame_immediate())
     }
 
     /// What this frame's tick drew with `ctx:*`, for `frame_over` now or on a later quiet
@@ -1040,11 +1042,16 @@ impl LuaSubsystem {
         }
     }
 
-    /// The buffers as they are now, projected into their windows, with `immediate` over them.
-    pub fn frame_over(&self, immediate: &Immediate) -> Vec<DrawCmd> {
+    /// The buffers `session` is shown as they are now, projected into their windows, with
+    /// `immediate` over them.
+    pub fn frame_over(&self, session: SessionId, immediate: &Immediate) -> Vec<DrawCmd> {
+        self.project_over(Some(session), immediate)
+    }
+
+    fn project_over(&self, session: Option<SessionId>, immediate: &Immediate) -> Vec<DrawCmd> {
         let mut bands = Vec::new();
         let mut floats: BTreeMap<FloatId, Vec<DrawCmd>> = BTreeMap::new();
-        for (window, buf) in self.text_buffers.shown() {
+        for (window, buf) in self.text_buffers.shown_in(session) {
             let rect = match window {
                 BufWindow::Band(id) => self
                     .reservations
@@ -1144,6 +1151,7 @@ impl LuaSubsystem {
         // A timer is a promise to call again, not a thing owed an ending, so it is dropped
         // where a job is reported.
         self.timers.remove_all_for(session);
+        self.text_buffers.forget(session);
         self.ambient.forget(session);
     }
 
