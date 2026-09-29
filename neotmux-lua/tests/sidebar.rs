@@ -1199,8 +1199,8 @@ const SETTLING: &str = "local detect = require('neotmux.detect')\n\
         match = function(v) return v.lines[#v.lines] == 'QUIET' end },\n\
     } }\n";
 
-/// A `working` pane that settles with no output after its last is shown idle once the sidebar's
-/// timer has judged it again.
+/// A `working` pane that settles with no output after its last is shown idle once a frame after
+/// the settle has asked it again.
 #[test]
 fn a_working_agent_that_settles_with_no_output_is_shown_idle_after_the_timer() {
     let (_dir, sub) = built(SETTLING);
@@ -1929,4 +1929,171 @@ fn a_row_narrowing_that_was_not_the_widest_is_rewritten_without_a_render() {
     let row = line_with(&before, "   working fake");
     assert_eq!(after[row], "   done fake", "{after:#?}");
     line_with(&after, " a-rather-long-session-name");
+}
+
+/// Only `neotmux.seen` of everything that asks a pane its state, and a count of how often it does
+/// on `C`. A shell is idle the moment it is first looked at, so the panes here have no clock.
+const COUNTED: &str = "local defaults = require('neotmux.defaults')\n\
+    defaults.sidebar, defaults.palette, defaults.chime = false, false, false\n\
+    require('neotmux.detect').agents = {}\n\
+    neotmux.opt.tick_budget_ms = 0\n\
+    local state = require('neotmux.state')\n\
+    state.working_for = 0\n\
+    require('neotmux.seen')\n\
+    local of, asked = state.of, 0\n\
+    state.of = function(pane) asked = asked + 1 return of(pane) end\n\
+    neotmux.on_key(function(key) if key == 'C' then neotmux.log.info('asked=' .. asked) return true end return false end)\n";
+
+fn logged_asked(sub: &Built) -> u32 {
+    support::logged(sub)
+        .iter()
+        .rev()
+        .find_map(|l| l.strip_prefix("asked=").and_then(|n| n.parse().ok()))
+        .expect("asked= logged")
+}
+
+/// `neotmux.seen` asks a pane again when something that can move it happened, not every frame:
+/// idle panes nothing happens to cost it nothing, however many sessions they are in.
+#[test]
+fn seen_asks_nothing_of_idle_panes_nothing_happens_to() {
+    let (_dir, sub) = support::built(COUNTED);
+    let s = [
+        Sess::new(1, "work", vec![vec![101, 102], vec![103]]),
+        Sess::new(2, "home", vec![vec![201, 202]]),
+    ];
+    open(&sub, &s);
+    for _ in 0..3 {
+        frame(&sub, &s, 1);
+    }
+    support::keys(&sub, &["C"]);
+    let first = logged_asked(&sub);
+    assert!(first > 0, "seen never asked the panes");
+    for _ in 0..5 {
+        frame(&sub, &s, 1);
+    }
+    support::keys(&sub, &["C"]);
+    assert_eq!(logged_asked(&sub), first);
+}
+
+/// A client attaching to a session is somebody looking at its window: a done agent there is only
+/// idle from then on, with no window or focus changing.
+#[test]
+fn a_client_attaching_clears_done_in_the_window_it_is_shown() {
+    let (_dir, sub) = built_herdr(&format!("{AGENTS}{LETTERS}"));
+    let s = [
+        Sess::new(1, "work", vec![vec![101]]),
+        Sess::new(2, "home", vec![vec![201]]).agents(&[201]),
+    ];
+    open(&sub, &s);
+    show(&sub, 201, "BUSY");
+    settled(&sub, &s, 1);
+    show(&sub, 201, "DONE");
+    line_with(&settled(&sub, &s, 1), "D home");
+    let both = [SURFACE, SURFACE];
+    frame_attached(&sub, &both, &s, 1, &[1, 2]);
+    line_with(&frame_attached(&sub, &both, &s, 1, &[1, 2]), "I home");
+}
+
+/// A `working` agent that settles with no output and nobody watching is done a frame after the
+/// settle, with no event and no timer: time alone moves a working pane.
+#[test]
+fn a_working_agent_that_settles_unwatched_is_done_with_no_event_and_no_timer() {
+    let (_dir, sub) = built_herdr(&format!("{SETTLING}{PALETTE_ONLY}"));
+    let s = [
+        Sess::new(1, "work", vec![vec![101]]),
+        Sess::new(2, "home", vec![vec![201]]).agents(&[201]),
+    ];
+    open(&sub, &s);
+    show(&sub, 201, "BUSY");
+    frame(&sub, &s, 1);
+    show(&sub, 201, "QUIET");
+    frame(&sub, &s, 1);
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    frame(&sub, &s, 1);
+    support::keys(&sub, &["G"]);
+    line_with(&frame(&sub, &s, 1), "home fake done");
+}
+
+/// The model's decision about a pane lands between frames with no output and no event, and the
+/// sidebar shows it: `neotmux.seen` notices a decision landed.
+#[test]
+fn a_decision_that_lands_with_no_output_is_in_the_sidebar() {
+    use neotmux_lua::host::JobChunk;
+    let runner = support::FakeRunner::new();
+    let answer = r#"{"model":"jev-1.13.0","answers":{"p101":{"type":"choice","choice":"blocked","probabilities":{"blocked":0.9,"working":0.05,"idle":0.05},"confidence":0.9}},"usage":{"input_tokens":300,"output_tokens":20}}
+200"#;
+    runner.will_say(vec![vec![
+        JobChunk::Stdout(answer.as_bytes().to_vec()),
+        JobChunk::Exited(0),
+    ]]);
+    let (_dir, sub) = support::built_running(
+        &preamble(
+            TREE,
+            "local jev = require('neotmux.jev')\n\
+             jev.enabled, jev.settle_ms = true, 1\n\
+             require('neotmux.state').working_for = 0\n",
+        ),
+        runner.clone(),
+    );
+    let s = [Sess::new(1, "work", vec![vec![101]])];
+    open(&sub, &s);
+    show(&sub, 101, "Select an option (1-3):");
+    line_with(&settled(&sub, &s, 1), "\u{25cb} work");
+    let mut lines = Vec::new();
+    for _ in 0..4 {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        lines = frame(&sub, &s, 1);
+    }
+    assert_eq!(runner.started.borrow().len(), 1, "{lines:#?}");
+    line_with(&lines, "\u{25c9} work");
+}
+
+/// A pane that closes is forgotten: nothing of what it went through is kept.
+#[test]
+fn a_pane_that_closes_is_forgotten_by_seen() {
+    let (_dir, sub) = built_herdr(&format!(
+        "{AGENTS}{LETTERS}neotmux.on_key(function(key)\n\
+           if key == 'M' then\n\
+             local seen = require('neotmux.seen')\n\
+             neotmux.log.info('moved=' .. tostring(seen.moved[202]) .. ' of=' .. seen.of(202, 'idle'))\n\
+             return true\n\
+           end\n\
+           return false\n\
+         end)\n"
+    ));
+    let s = [
+        Sess::new(1, "work", vec![vec![101]]),
+        Sess::new(2, "home", vec![vec![201, 202]]).agents(&[201, 202]),
+    ];
+    open(&sub, &s);
+    show(&sub, 202, "BUSY");
+    settled(&sub, &s, 1);
+    show(&sub, 202, "DONE");
+    line_with(&settled(&sub, &s, 1), "D home");
+    support::keys(&sub, &["M"]);
+    assert!(
+        support::logged(&sub)
+            .iter()
+            .any(|l| l.ends_with(" of=done")),
+        "202 was not done"
+    );
+    sub.terminals().close(PaneId::from(202));
+    sub.dispatch_event(
+        SessionId::from(2),
+        &Event::PaneClosed {
+            pane: PaneId::from(202),
+        },
+    );
+    let s = [
+        Sess::new(1, "work", vec![vec![101]]),
+        Sess::new(2, "home", vec![vec![201]]).agents(&[201]),
+    ];
+    settled(&sub, &s, 1);
+    support::keys(&sub, &["M"]);
+    assert!(
+        support::logged(&sub)
+            .iter()
+            .any(|l| l == "moved=nil of=idle"),
+        "202 was not forgotten"
+    );
 }

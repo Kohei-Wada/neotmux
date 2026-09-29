@@ -98,6 +98,9 @@ M.max_panes = 24
 -- What each pane is being held at, and against which screen. `quiet` is the settle's own
 -- bookkeeping: the last revision this module saw for a pane, and when it saw it.
 local verdicts = {}
+-- Moves whenever a decision lands, which changes what `of` answers with no output and no event,
+-- so `neotmux.seen` knows to ask again.
+M.decisions = 0
 local quiet = {}
 -- The in-flight request, and the revision each of its panes was built from: an answer that
 -- comes back for a screen the pane has since left is about a past, and is dropped.
@@ -220,6 +223,7 @@ local function settle_response(panes, fresh, stdout)
     if word ~= nil and M.criteria[word] ~= nil and answer.confidence >= M.min_confidence then
       if neotmux.pane.revision(pane) == fresh[pane] then
         verdicts[pane] = { state = word, revision = fresh[pane] }
+        M.decisions = M.decisions + 1
       end
       -- The pane has moved since: the decision is about a screen nobody is reading any
       -- more, and a pane that has moved is what the next request is for.
