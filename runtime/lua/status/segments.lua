@@ -39,20 +39,22 @@ function M.clip(text, cols)
 end
 
 -- Draws left to right from `x`, within `limit` columns. A run that only partly fits is cut
--- rather than allowed to run past the band into somebody else's cells.
-function M.draw(ctx, x, y, limit, runs)
+-- rather than allowed to run past the band into somebody else's cells. `target` is what
+-- `ctx:text` draws on — nil for the surface, or a float — and `bg` is the colour a run with none
+-- of its own is drawn on.
+function M.draw(ctx, x, y, limit, runs, target, bg)
   local at = x
   for _, run in ipairs(runs) do
     local room = limit - (at - x)
     if room <= 0 then
       break
     end
-    local text = run.text
+    local text = run.text or ""
     if M.columns(text) > room then
       text = M.clip(text, room)
     end
     if text ~= "" then
-      ctx:text(nil, at, y, text, { fg = run.fg, bg = run.bg, bold = run.bold })
+      ctx:text(target, at, y, text, { fg = run.fg, bg = run.bg or bg, bold = run.bold })
       at = at + M.columns(text)
     end
   end

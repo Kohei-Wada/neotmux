@@ -64,6 +64,7 @@
 local modes = require("neotmux.mode")
 local box = require("neotmux.box")
 local line = require("neotmux.line")
+local segments = require("status.segments")
 local style = require("neotmux.style")
 local g = neotmux.group("neotmux.list")
 
@@ -110,40 +111,6 @@ end
 local function fail(label, err)
   close()
   neotmux.notify("error", "neotmux.list: " .. label .. ": " .. tostring(err))
-end
-
--- `text` cut to at most `room` columns, on a character boundary — `neotmux.width`, never `#`,
--- since a run can hold a wide character and a byte count would cut one in half.
-local function truncate(text, room)
-  if neotmux.width(text) <= room then
-    return text
-  end
-  local out = ""
-  for _, code in utf8.codes(text) do
-    local ch = utf8.char(code)
-    if neotmux.width(out .. ch) > room then
-      break
-    end
-    out = out .. ch
-  end
-  return out
-end
-
--- Draws one row of runs, left to right from `x`, clipped to `limit` columns rather than
--- allowed to run past the frame into somebody else's cells. Columns are `neotmux.width`,
--- never `#`: a run can hold a wide character. A run longer than the room left is truncated to
--- it, not merely refused — the frame is the caller's, not a run's to paint over.
-local function draw_runs(ctx, target, x, y, limit, runs, bg)
-  local at = x
-  for _, run in ipairs(runs) do
-    local room = limit - (at - x)
-    if room <= 0 then
-      break
-    end
-    local text = truncate(run.text or "", room)
-    ctx:text(target, at, y, text, { fg = run.fg, bg = run.bg or bg })
-    at = at + neotmux.width(text)
-  end
 end
 
 -- The rows the window shows, taken fresh: an item can appear or go while the list is up, and
@@ -453,7 +420,7 @@ local function arm()
         fail("header", runs)
         return
       end
-      draw_runs(ctx, win, inner.x, first_row, inner.w, runs or {}, c.frame)
+      segments.draw(ctx, inner.x, first_row, inner.w, runs or {}, win, c.frame)
       room = room - 1
       first_row = first_row + 1
     end
@@ -472,7 +439,7 @@ local function arm()
         fail("row", runs)
         return
       end
-      draw_runs(ctx, win, inner.x, row, inner.w, runs or {}, background)
+      segments.draw(ctx, inner.x, row, inner.w, runs or {}, win, background)
     end
 
     local last = input_first() and inner.y or inner.y + inner.h - 1
