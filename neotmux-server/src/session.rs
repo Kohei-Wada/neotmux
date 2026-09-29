@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Instant;
@@ -63,6 +63,9 @@ pub struct Session {
     /// it is being told about, so the geometry moves between the events exactly as it does
     /// when both halves are one process.
     steps: Vec<Step>,
+    /// The panes that wrote since the last tick, told as one `pane_changed` each when it runs,
+    /// however many drains found their output.
+    pending_changed: BTreeSet<PaneId>,
     /// Whether any plugin is subscribed to `pane_output`. Nothing is, almost always, and a
     /// pane's bytes are the one payload worth not sending.
     wants_pane_output: bool,
@@ -120,6 +123,7 @@ impl Session {
             last_overlay: Vec::new(),
             last_views: BTreeMap::new(),
             steps: Vec::new(),
+            pending_changed: BTreeSet::new(),
             wants_pane_output: setup.wants_pane_output,
             wants_pane_changed: setup.wants_pane_changed,
             ended: false,
@@ -224,19 +228,15 @@ impl Session {
         let wanted = self.wants_pane_output;
         let changed_wanted = self.wants_pane_changed;
         let steps = &mut self.steps;
-        let mut changed: Vec<PaneId> = Vec::new();
+        let changed = &mut self.pending_changed;
         let drained = self.shells.drain(MAX_CHUNKS_PER_FRAME, |pane, bytes| {
-            // A pane's chunks arrive together, so the last one pushed is the only one to check.
-            if changed_wanted && changed.last() != Some(&pane) {
-                changed.push(pane);
+            if changed_wanted {
+                changed.insert(pane);
             }
             if wanted {
                 steps.push(Step::Event(Event::PaneOutput { pane, bytes }));
             }
         })?;
-        for pane in changed {
-            self.steps.push(Step::Event(Event::PaneChanged { pane }));
-        }
         if drained.output {
             self.dirty = true;
         }
@@ -256,6 +256,8 @@ impl Session {
     /// was the focused one. The other panes keep running. The pane may belong to a window
     /// nobody is looking at, and closing the last pane of one closes the window too.
     fn close_pane(&mut self, pane: PaneId) -> anyhow::Result<()> {
+        // `pane_changed` never follows `pane_closed`.
+        self.pending_changed.remove(&pane);
         self.shells.close(pane);
         self.pane_info.invalidate();
         let was_shown = self.windows.current().rects.contains_key(&pane);
@@ -327,6 +329,7 @@ impl Session {
         // there: geometry is how a plugin learns what exists, events how it learns what
         // changed, and everything here is the former.
         self.steps.clear();
+        self.pending_changed.clear();
         self.apply_geometry()?;
         // `apply_geometry` raises `Resized`, but a client that was never told a previous size
         // has nothing to be resized from (§4: "No events are replayed").
@@ -862,6 +865,9 @@ impl Session {
     /// has to be told before it ticks. The tick itself happens in the other process.
     pub fn tick(&mut self) -> anyhow::Result<Tick> {
         self.drain()?;
+        for pane in std::mem::take(&mut self.pending_changed) {
+            self.steps.push(Step::Event(Event::PaneChanged { pane }));
+        }
         let pane_info = self.refresh_pane_info();
         let pane_tty = self.pane_tty();
         let now = Instant::now();

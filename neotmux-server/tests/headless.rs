@@ -11,8 +11,8 @@ use neotmux_lua::draw::Hl;
 use neotmux_lua::plugin::Layers;
 use neotmux_lua::{KeyOutcome, LuaSubsystem};
 use neotmux_proto::screen::Frame;
-use neotmux_proto::wire::End;
-use neotmux_proto::{Color, DrawCmd, Key, KeyCode, Reserved, SessionId, Size, WindowId};
+use neotmux_proto::wire::{End, Step};
+use neotmux_proto::{Color, DrawCmd, Event, Key, KeyCode, Reserved, SessionId, Size, WindowId};
 use neotmux_pty::child::{Wakeup, wakeup};
 use neotmux_server::{Plugins, Session, Setup};
 
@@ -277,6 +277,46 @@ fn pane_changed_fires_once_per_pane_per_frame() {
     // The count actually advanced: `pane_changed` fired more than a couple of times, not zero.
     assert!(counts.len() >= 3, "{counts:?}");
     assert!(counts.iter().max().copied().unwrap_or(0) >= 3, "{counts:?}");
+}
+
+/// Output drained between frames, as the server drains on every pane wakeup while a frame
+/// waits for its floor, is still one `pane_changed` for that pane in the frame that follows.
+#[test]
+fn draining_several_times_before_a_tick_is_one_pane_changed() {
+    let (_dir, _wakeup, mut session, mut plugins) = halves(&[
+        ("init.lua", "require('plugin.count')"),
+        (
+            "lua/plugin/count.lua",
+            "neotmux.on_event('pane_changed', function() end)\n\
+             return {}",
+        ),
+    ]);
+    let pane = {
+        let pass = frame(&mut session, &mut plugins);
+        pass.frame
+            .as_ref()
+            .expect("a frame")
+            .cursor
+            .expect("a focused pane")
+    };
+    // `wants_pane_changed` reaches the session through the first tock; the prompt is up.
+    assert!(step_until(&mut session, &mut plugins, |shown| {
+        !screen(shown).trim().is_empty()
+    }));
+    session
+        .write_to_pane(pane, b"yes | head -c 400000\r")
+        .expect("type");
+    for _ in 0..100 {
+        std::thread::sleep(Duration::from_millis(20));
+        session.drain().expect("drain");
+    }
+    let tick = session.tick().expect("tick");
+    let changed = tick
+        .steps
+        .iter()
+        .filter(|step| matches!(step, Step::Event(Event::PaneChanged { pane: p }) if *p == pane))
+        .count();
+    assert_eq!(changed, 1);
 }
 
 #[test]
