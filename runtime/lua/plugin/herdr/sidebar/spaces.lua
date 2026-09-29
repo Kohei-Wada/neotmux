@@ -179,7 +179,8 @@ local function entries()
     neotmux.session.with(name, function()
       -- Every window's panes, not `pane.list()`'s, which is the window on screen: an agent
       -- waiting in a window you are not showing is still that session waiting.
-      it.state = rollup(require("neotmux.panes").all())
+      it.panes = require("neotmux.panes").all()
+      it.state = rollup(it.panes)
       local focus = neotmux.pane.current()
       local info = focus and neotmux.pane.info(focus)
       if info and info.cwd then
@@ -191,36 +192,57 @@ local function entries()
   return out
 end
 
+-- Every row of the space at `at`, the empty ones too: a space is as tall as `M.rows` whatever
+-- it has to say, as herdr's are, so a session with no branch does not pull the ones below it up
+-- a row. An empty one is marked, so a band too short for everything gives it up before a pane.
+local function space_rows(it, at)
+  local fill = M.cursor == at and "sidebar:selection" or it.here and "sidebar:here" or nil
+  local own = {}
+  for line, names in ipairs(M.rows) do
+    local runs = sidebar.row(M.tokens, names, it)
+    runs.blank = #runs == 0
+    table.insert(runs, 1, { text = line == 1 and " " or "   " })
+    runs.fill = fill
+    own[#own + 1] = runs
+  end
+  return own
+end
+
+-- The windows and panes of the session you are in, each indented past the space's first column.
+local function tree_rows(tree)
+  tree.anchor = sessions.subtree(sidebar, tree.rows, M.tree_rows)
+  for _, runs in ipairs(tree.rows) do
+    table.insert(runs, 1, { text = "   " })
+  end
+  return tree
+end
+
 -- Shaped as `plugin.herdr.sidebar.sessions` shapes its model, each space's own rows and the tree
--- hung under the one you are in, so that section's fit cuts this one the same way.
+-- hung under the one you are in, so that section's fit cuts this one the same way. Beside them,
+-- for `patch`, where each space's rows are and which session each pane is in.
 function M.build(given)
   sidebar = given
   local rows, anchor, spaces = {}, 1, {}
   local tree = { rows = {} }
+  local where, owner = {}, {}
   for at, it in ipairs(entries()) do
-    local selected = M.cursor == at
-    local fill = selected and "sidebar:selection" or it.here and "sidebar:here" or nil
-    if (it.here and not M.cursor) or selected then
+    if (it.here and not M.cursor) or M.cursor == at then
       anchor = #rows + 1
     end
-    -- Every row, the empty ones too: a space is as tall as `M.rows` whatever it has to say,
-    -- as herdr's are, so a session with no branch does not pull the ones below it up a row. An
-    -- empty one is marked, so a band too short for everything gives it up before a pane.
-    local own = {}
-    for line, names in ipairs(M.rows) do
-      local runs = sidebar.row(M.tokens, names, it)
-      runs.blank = #runs == 0
-      table.insert(runs, 1, { text = line == 1 and " " or "   " })
-      runs.fill = fill
-      own[#own + 1] = runs
+    for _, pane in ipairs(it.panes or {}) do
+      owner[pane] = it.name
+    end
+    where[it.name] = { first = #rows + 1, at = at, here = it.here }
+    local own = space_rows(it, at)
+    for _, runs in ipairs(own) do
       rows[#rows + 1] = runs
     end
     spaces[#spaces + 1] = { rows = own, here = it.here }
     if it.here and M.tree then
       local base = #rows
-      tree.anchor = sessions.subtree(sidebar, tree.rows, M.tree_rows)
+      tree.first = base + 1
+      tree_rows(tree)
       for _, runs in ipairs(tree.rows) do
-        table.insert(runs, 1, { text = "   " })
         rows[#rows + 1] = runs
       end
       if tree.anchor and not M.cursor then
@@ -231,7 +253,53 @@ function M.build(given)
       rows[#rows + 1] = { { text = "" } }
     end
   end
-  return { rows = rows, anchor = anchor, entries = spaces, tree = tree }
+  return {
+    rows = rows,
+    anchor = anchor,
+    entries = spaces,
+    tree = tree,
+    where = where,
+    owner = owner,
+  }
+end
+
+-- The rows of each space a pane in `change.panes` is in, and the tree when one of them is the
+-- space you are in, built again as `build` would; nil for a pane `build` did not see, or a tree
+-- that would have other rows.
+function M.patch(given, model, change)
+  sidebar = given
+  local touched = {}
+  for pane in pairs(change.panes) do
+    local name = model.owner[pane]
+    if name == nil then
+      return nil
+    end
+    touched[name] = true
+  end
+  local out = {}
+  for name in pairs(touched) do
+    local space = model.where[name]
+    local it = { name = name, here = space.here }
+    neotmux.session.with(name, function()
+      it.state = rollup(require("neotmux.panes").all())
+      local focus = neotmux.pane.current()
+      local info = focus and neotmux.pane.info(focus)
+      it.git = info and info.cwd and git[info.cwd] or nil
+    end)
+    for line, runs in ipairs(space_rows(it, space.at)) do
+      out[#out + 1] = { at = space.first + line - 1, runs = runs }
+    end
+    if space.here and M.tree then
+      local tree = tree_rows({ rows = {} })
+      if #tree.rows ~= #model.tree.rows or tree.anchor ~= model.tree.anchor then
+        return nil
+      end
+      for k, runs in ipairs(tree.rows) do
+        out[#out + 1] = { at = model.tree.first + k - 1, runs = runs }
+      end
+    end
+  end
+  return out
 end
 
 -- With a tree, every space's name before any of its panes, as the tree section cuts; without

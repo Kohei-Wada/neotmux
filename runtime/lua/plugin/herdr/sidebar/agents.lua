@@ -117,8 +117,9 @@ local function before(a, b)
 end
 
 -- Every agent there is, in `M.sort` order. Each is what a row is built from, plus the ids a
--- caller needs to go there: `pane_id`, `window_id` and `session`.
-function M.collect()
+-- caller needs to go there: `pane_id`, `window_id` and `session`. `owners`, when given, gets the
+-- session of every pane walked, agent or not.
+function M.collect(owners)
   local now = M.clock()
   local found, kept = {}, {}
   local here = neotmux.session.current()
@@ -128,6 +129,9 @@ function M.collect()
       local windows = neotmux.window.list()
       for window_at, window in ipairs(windows) do
         for pane_at, pane in ipairs(neotmux.window.panes(window) or {}) do
+          if owners then
+            owners[pane] = name
+          end
           -- `state.of` first: it is what asks the detector, and `agent` reads what it found.
           local now_state = seen.of(pane, state.of(pane))
           local agent = detect.agent(pane)
@@ -220,30 +224,112 @@ local function shows_age()
   return false
 end
 
-function M.build(given)
-  sidebar = given
-  local rows, anchor = {}, nil
-  local aged = shows_age()
+-- The rows of the agent at `index`, the empty ones left out.
+local function agent_rows(it, index)
+  local fill = M.cursor == index and "sidebar:selection" or it.focused and "sidebar:here" or nil
+  local out = {}
+  for at, names in ipairs(M.rows) do
+    local runs = sidebar.row(M.tokens, names, it)
+    if #runs > 0 then
+      table.insert(runs, 1, { text = at == 1 and " " or "   " })
+      runs.fill = fill
+      out[#out + 1] = runs
+    end
+  end
+  return out
+end
+
+local function restale(agents)
   M.stale_at = nil
-  for index, it in ipairs(M.collect()) do
-    if aged and (M.stale_at == nil or it.age_changes_at < M.stale_at) then
-      M.stale_at = it.age_changes_at
-    end
-    local selected = M.cursor == index
-    if (it.focused and not M.cursor) or selected then
-      anchor = #rows + 1
-    end
-    local fill = selected and "sidebar:selection" or it.focused and "sidebar:here" or nil
-    for at, names in ipairs(M.rows) do
-      local runs = sidebar.row(M.tokens, names, it)
-      if #runs > 0 then
-        table.insert(runs, 1, { text = at == 1 and " " or "   " })
-        runs.fill = fill
-        rows[#rows + 1] = runs
+  if shows_age() then
+    for _, one in pairs(agents) do
+      if M.stale_at == nil or one.it.age_changes_at < M.stale_at then
+        M.stale_at = one.it.age_changes_at
       end
     end
   end
-  return { rows = rows, anchor = anchor }
+end
+
+-- Beside the rows, for `patch`: where each agent's rows are, and which session each pane is in.
+function M.build(given)
+  sidebar = given
+  local rows, anchor = {}, nil
+  local agents, owners = {}, {}
+  for index, it in ipairs(M.collect(owners)) do
+    if (it.focused and not M.cursor) or M.cursor == index then
+      anchor = #rows + 1
+    end
+    local own = agent_rows(it, index)
+    agents[it.pane_id] = { first = #rows + 1, count = #own, index = index, it = it }
+    for _, runs in ipairs(own) do
+      rows[#rows + 1] = runs
+    end
+  end
+  restale(agents)
+  return { rows = rows, anchor = anchor, agents = agents, owners = owners }
+end
+
+-- The rows of each agent in `change.panes`, and of every one when `change.aged`, built again as
+-- `build` would; nil for a pane that came or stopped being an agent, one that would move under
+-- `priority`, or one whose rows would be more or fewer.
+function M.patch(given, model, change)
+  sidebar = given
+  local now = M.clock()
+  local panes = {}
+  for pane in pairs(change.panes) do
+    panes[pane] = true
+  end
+  if change.aged then
+    for pane in pairs(model.agents) do
+      panes[pane] = true
+    end
+  end
+  local out = {}
+  for pane in pairs(panes) do
+    local one = model.agents[pane]
+    local session = one and one.it.session or model.owners[pane]
+    if session == nil then
+      return nil
+    end
+    local now_state, agent, info
+    neotmux.session.with(session, function()
+      now_state = seen.of(pane, state.of(pane))
+      agent = detect.agent(pane)
+      info = neotmux.pane.info(pane)
+    end)
+    local is = now_state ~= nil and agent ~= nil
+    if is ~= (one ~= nil) then
+      return nil
+    end
+    if one then
+      local was = since[pane]
+      if was == nil or was.state ~= now_state then
+        was = { state = now_state, at = now }
+        since[pane] = was
+      end
+      local it = {}
+      for k, v in pairs(one.it) do
+        it[k] = v
+      end
+      it.state, it.agent = now_state, agent
+      it.command = info and info.command or agent
+      it.age, it.age_changes_at = age(now - was.at), was.at + next_age(now - was.at)
+      local rank = M.sort == "priority" and (RANK[now_state] or 5) or 0
+      if rank ~= one.it.order[1] then
+        return nil
+      end
+      local own = agent_rows(it, one.index)
+      if #own ~= one.count then
+        return nil
+      end
+      one.it = it
+      for k, runs in ipairs(own) do
+        out[#out + 1] = { at = one.first + k - 1, runs = runs }
+      end
+    end
+  end
+  restale(model.agents)
+  return out
 end
 
 -- Folded: `1 ●`, an agent a row, numbered as `1`-`9` in navigate go to them.

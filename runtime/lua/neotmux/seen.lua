@@ -24,6 +24,9 @@ local M = {}
 -- drew can tell it is stale without asking every pane.
 M.generation = 0
 
+-- Per pane, the generation it last moved the count to, so that reader can tell which panes.
+M.moved = {}
+
 -- The state each pane was last seen in, the panes that finished unwatched, and which session
 -- each pane is in, so a session's tick can drop the ones it no longer has.
 local last = {}
@@ -67,11 +70,12 @@ g.on_tick(function()
     end
     if now ~= was or unseen[pane] ~= done then
       M.generation = M.generation + 1
+      M.moved[pane] = M.generation
     end
   end
   for pane, who in pairs(owner) do
     if who == name and not present[pane] then
-      owner[pane], last[pane], unseen[pane] = nil, nil, nil
+      owner[pane], last[pane], unseen[pane], M.moved[pane] = nil, nil, nil, nil
       M.generation = M.generation + 1
     end
   end

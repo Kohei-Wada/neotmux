@@ -1338,6 +1338,7 @@ fn typing_a_state_in_the_agents_palette_narrows_to_it() {
 // ---- herdr's look, as read off a real herdr 0.9.1 with catppuccin (2026-09-25) ----
 
 const TEXT: neotmux_proto::Color = neotmux_proto::Color::Rgb(0xcd, 0xd6, 0xf4);
+const RED: neotmux_proto::Color = neotmux_proto::Color::Rgb(0xf3, 0x8b, 0xa8);
 const SUBTEXT: neotmux_proto::Color = neotmux_proto::Color::Rgb(0xa6, 0xad, 0xc8);
 const OVERLAY: neotmux_proto::Color = neotmux_proto::Color::Rgb(0x6c, 0x70, 0x86);
 const HERE: neotmux_proto::Color = neotmux_proto::Color::Rgb(0x1e, 0x1e, 0x2e);
@@ -1695,4 +1696,182 @@ fn one_navigate_cursor_puts_the_other_away() {
         })
         .collect();
     assert_eq!(said, vec!["1 nil", "nil 1", "1 nil"]);
+}
+
+/// Counts `sidebar.render`, the whole band laid out again, and logs the count on `N`.
+const RENDERS: &str = "local sidebar = require('plugin.herdr.sidebar')\n\
+    local renders = 0\n\
+    local real = sidebar.render\n\
+    sidebar.render = function(...) renders = renders + 1 return real(...) end\n\
+    neotmux.on_key(function(key) if key == 'N' then neotmux.log.info('renders=' .. renders) return true end return false end)\n";
+
+fn renders(sub: &Built) -> u32 {
+    support::keys(sub, &["N"]);
+    support::logged(sub)
+        .iter()
+        .rev()
+        .find_map(|l| l.strip_prefix("renders=").and_then(|n| n.parse().ok()))
+        .expect("renders= logged")
+}
+
+/// The lines that differ between two reads of the band, as (row, before, after).
+fn changed(before: &[String], after: &[String]) -> Vec<(usize, String, String)> {
+    before
+        .iter()
+        .zip(after)
+        .enumerate()
+        .filter(|(_, (a, b))| a != b)
+        .map(|(y, (a, b))| (y, a.clone(), b.clone()))
+        .collect()
+}
+
+/// One pane's state moving rewrites the rows that show it, its space's and its agent's, and
+/// nothing else: the band is not laid out again, and every other row is as it was.
+#[test]
+fn a_panes_state_changing_rewrites_only_the_rows_that_show_it() {
+    let (_dir, sub) = built_herdr(&format!("{AGENTS}{LETTERS}{RENDERS}"));
+    let s = [
+        Sess::new(1, "work", vec![vec![101, 102]]).agents(&[101]),
+        Sess::new(2, "home", vec![vec![201]]).agents(&[201]),
+    ];
+    open(&sub, &s);
+    show(&sub, 101, "BUSY");
+    show(&sub, 201, "BUSY");
+    let tall = Size { rows: 20, cols: 80 };
+    frame_in(&sub, tall, &s, 1);
+    let before = frame_in(&sub, tall, &s, 1);
+    let first = renders(&sub);
+    show(&sub, 101, "ASK");
+    frame_in(&sub, tall, &s, 1);
+    let after = frame_in(&sub, tall, &s, 1);
+    assert_eq!(renders(&sub), first, "{after:#?}");
+    let spaces = line_with(&before, " W work");
+    let agents = line_with(&before[spaces + 1..], " W work") + spaces + 1;
+    assert_eq!(
+        changed(&before, &after),
+        vec![
+            (spaces, " W work".to_string(), " B work".to_string()),
+            (agents, " W work".to_string(), " B work".to_string()),
+            (
+                agents + 1,
+                "   working fake".to_string(),
+                "   blocked fake".to_string()
+            ),
+        ],
+        "{after:#?}"
+    );
+    // The rows rewritten keep their colours and their fill.
+    assert_eq!(fill_on(&sub, spaces as u16), Some(HERE), "{after:#?}");
+    assert_eq!(fill_on(&sub, agents as u16 + 1), Some(HERE), "{after:#?}");
+    assert_eq!(style_of(&sub, "blocked"), (RED, false), "{after:#?}");
+    assert_eq!(style_of(&sub, "work"), (TEXT, true), "{after:#?}");
+}
+
+/// A client at each of two sessions: a state moving in one is rewritten into both bands, each
+/// still its own, and neither is laid out again.
+#[test]
+fn a_state_change_reaches_every_attached_sessions_band_without_a_render() {
+    let (_dir, sub) = built_herdr(&format!("{AGENTS}{LETTERS}{RENDERS}"));
+    let s = [
+        Sess::new(1, "work", vec![vec![101]]).agents(&[101]),
+        Sess::new(2, "home", vec![vec![201]]).agents(&[201]),
+    ];
+    let tall = Size { rows: 20, cols: 80 };
+    let sizes = [tall, tall];
+    open(&sub, &s);
+    show(&sub, 101, "BUSY");
+    show(&sub, 201, "BUSY");
+    for _ in 0..2 {
+        frame_attached(&sub, &sizes, &s, 1, &[1, 2]);
+        frame_attached(&sub, &sizes, &s, 2, &[1, 2]);
+    }
+    let first = renders(&sub);
+    show(&sub, 201, "ASK");
+    frame_attached(&sub, &sizes, &s, 2, &[1, 2]);
+    let one = frame_attached(&sub, &sizes, &s, 1, &[1, 2]);
+    assert_eq!(renders(&sub), first, "{one:#?}");
+    line_with(&one, " B home");
+    assert_eq!(style_in(&sub, 1, "work"), (TEXT, true));
+    assert_eq!(style_in(&sub, 1, "home"), (SUBTEXT, false));
+    let two = frame_attached(&sub, &sizes, &s, 2, &[1, 2]);
+    line_with(&two, " B home");
+    assert_eq!(style_in(&sub, 2, "home"), (TEXT, true));
+    assert_eq!(style_in(&sub, 2, "work"), (SUBTEXT, false));
+}
+
+/// A session coming is more rows, so the band is laid out again, once.
+#[test]
+fn a_session_added_lays_the_band_out_again() {
+    let (_dir, sub) = built_herdr(&format!("{AGENTS}{LETTERS}{RENDERS}"));
+    let one = [Sess::new(1, "work", vec![vec![101]]).agents(&[101])];
+    open(&sub, &one);
+    show(&sub, 101, "BUSY");
+    settled(&sub, &one, 1);
+    let first = renders(&sub);
+    let two = [
+        Sess::new(1, "work", vec![vec![101]]).agents(&[101]),
+        Sess::new(2, "home", vec![vec![201]]),
+    ];
+    open(&sub, &two[1..]);
+    sub.dispatch_event_unbound(&Event::SessionCreated {
+        session: "home".to_string(),
+    });
+    let lines = settled(&sub, &two, 1);
+    assert_eq!(renders(&sub), first + 1, "{lines:#?}");
+    line_with(&lines, " home");
+}
+
+/// Under `priority` a state moving can move an agent past another, which is the band laid out
+/// again, in the new order.
+#[test]
+fn a_state_change_that_reorders_the_agents_lays_the_band_out_again() {
+    let (_dir, sub) = built_herdr(&format!(
+        "{AGENTS}{LETTERS}{RENDERS}require('plugin.herdr.sidebar.agents').sort = 'priority'\n"
+    ));
+    let s = [
+        Sess::new(1, "work", vec![vec![101]]).agents(&[101]),
+        Sess::new(2, "home", vec![vec![201]]).agents(&[201]),
+    ];
+    open(&sub, &s);
+    show(&sub, 101, "BUSY");
+    show(&sub, 201, "BUSY");
+    let tall = Size { rows: 20, cols: 80 };
+    frame_in(&sub, tall, &s, 1);
+    let lines = frame_in(&sub, tall, &s, 1);
+    let header = line_with(&lines, " agents");
+    assert!(
+        line_with(&lines[header..], " W home") < line_with(&lines[header..], " W work"),
+        "{lines:#?}"
+    );
+    let first = renders(&sub);
+    show(&sub, 101, "ASK");
+    frame_in(&sub, tall, &s, 1);
+    let lines = frame_in(&sub, tall, &s, 1);
+    assert_eq!(renders(&sub), first + 1, "{lines:#?}");
+    assert!(
+        line_with(&lines[header..], " B work") < line_with(&lines[header..], " W home"),
+        "{lines:#?}"
+    );
+}
+
+/// An age moving on is its rows rewritten, with the band not laid out again.
+#[test]
+fn an_age_moving_on_rewrites_its_rows_without_a_render() {
+    let (_dir, sub) = built_herdr(&format!(
+        "{AGENTS}{LETTERS}{RENDERS}require('plugin.herdr.sidebar.agents').rows = {{ {{ 'state_icon', 'session', 'age' }} }}\n"
+    ));
+    let s = [Sess::new(1, "work", vec![vec![101]]).agents(&[101])];
+    open(&sub, &s);
+    show(&sub, 101, "BUSY");
+    let before = settled(&sub, &s, 1);
+    let row = line_with(&before, " W work  0s");
+    let first = renders(&sub);
+    support::keys(&sub, &["T"]);
+    let after = settled(&sub, &s, 1);
+    assert_eq!(renders(&sub), first, "{after:#?}");
+    assert_eq!(
+        changed(&before, &after),
+        vec![(row, " W work  0s".to_string(), " W work  3m".to_string())],
+        "{after:#?}"
+    );
 }

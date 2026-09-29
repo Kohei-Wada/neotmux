@@ -18,7 +18,10 @@
 --     build = function(sidebar) return { rows = { runs, ... }, anchor = 1 } end,
 --     fit = function(model, height, sidebar) return { runs, ... } end,   -- optional
 --     rail = function(sidebar) return { runs, ... } end,   -- optional: what it is folded
+--     patch = function(sidebar, model, change) ... end,   -- optional: see `patch` below
 --   })
+--
+-- A section with no `patch` has the whole band laid out again whenever any pane's state moves.
 --
 -- A row is a list of runs, `{ text = ..., hl = 'sidebar:branch', bold = ... }`, each coloured by
 -- the highlight group it names, and a row with a `fill` has the band's width behind it painted
@@ -336,7 +339,13 @@ local function heights_of(live, height)
   return share_out(live, height)
 end
 
--- How wide the band wants to be: the widest row any section has, between the two bounds.
+-- How wide the band wants to be for a widest row of `widest` columns, between the two bounds.
+local function width_at(widest)
+  -- One for a column of air, one for the rule.
+  return math.max(M.widths.min, math.min(M.widths.max, widest + 2))
+end
+
+-- How wide the band wants to be: the widest row any section has, and that widest.
 local function width_for(live)
   local widest = 0
   for _, it in ipairs(live) do
@@ -344,8 +353,7 @@ local function width_for(live)
       widest = math.max(widest, segments.width(runs))
     end
   end
-  -- One for a column of air, one for the rule.
-  return math.max(M.widths.min, math.min(M.widths.max, widest + 2))
+  return width_at(widest), widest
 end
 
 -- Swap the two. A resize keeps the band's place on the left edge, which a remove and a fresh
@@ -379,7 +387,31 @@ end
 -- knowledge goes in.
 require("neotmux.bind").prefix("b", M.toggle, "fold the sidebar to its rail, or open it")
 
--- The whole band as lines, row for row, written into `buf`.
+-- A row once everything is in it: the band's own colour where a fill of its own did not paint,
+-- named even while unset so a `bar` set later paints at once; then the rule down the right edge.
+local function finish(grid, y, ruled, inner)
+  grid[y].fill = grid[y].fill or "sidebar:bar"
+  if ruled then
+    pad_to(grid[y], inner)
+    put(grid, y, inner, 1, { { text = M.rule, hl = "sidebar:rule" } })
+  end
+end
+
+local function mark(buf, y, row)
+  neotmux.buf.set_extmark(buf, ns, y, 0, { line_hl_group = row.fill })
+  for _, m in ipairs(row.marks) do
+    neotmux.buf.set_extmark(
+      buf,
+      ns,
+      y,
+      m.col,
+      { end_col = m.end_col, hl_group = m.hl, bold = m.bold }
+    )
+  end
+end
+
+-- The whole band as lines, row for row, written into `buf`. Answers where each section's rows
+-- landed, for `patch`; nil when folded, which is never patched.
 function M.render(band, buf)
   local grid = {}
   for y = 1, band.h do
@@ -389,9 +421,15 @@ function M.render(band, buf)
 
   -- A section with nothing to show takes no room and draws no header, unless it is `always`.
   local live = {}
+  local layout = M.open and { sections = {} } or nil
   for at, section in ipairs(M.sections) do
     local model = guarded(section, at, "build", section.build, M)
-    if type(model) == "table" and type(model.rows) == "table" then
+    if type(model) ~= "table" or type(model.rows) ~= "table" then
+      layout = nil
+    else
+      if layout then
+        layout.sections[at] = { section = section, at = at, model = model, y_of = {} }
+      end
       if rail and section.rail then
         local rows = guarded(section, at, "rail", section.rail, M)
         model = { rows = type(rows) == "table" and rows or {} }
@@ -407,11 +445,12 @@ function M.render(band, buf)
 
   -- The width the content wants, asked for once it is known. `resize_to` lands on the next
   -- frame, which is why this is a comparison and not a call every render.
-  if M.band then
-    local want = M.open and width_for(live) or M.widths.closed
-    if want ~= band.w then
-      M.band:resize_to(want)
-    end
+  local want, widest = width_for(live)
+  if not M.open then
+    want = M.widths.closed
+  end
+  if M.band and want ~= band.w then
+    M.band:resize_to(want)
   end
 
   local ruled = band.w > 1
@@ -446,51 +485,49 @@ function M.render(band, buf)
       local fit = (not rail or not it.section.rail) and it.section.fit or default_fit
       local rows = guarded(it.section, it.at, "fit", fit, it.model, body, M)
       if type(rows) == "table" then
+        local index = {}
+        for k, runs in ipairs(it.model.rows) do
+          index[runs] = k
+        end
         for k = 1, math.min(#rows, body) do
           put(grid, top + k - 1, 0, inner, rows[k])
+          if layout and index[rows[k]] then
+            layout.sections[it.at].y_of[index[rows[k]]] = top + k - 1
+          end
         end
       end
     end
     y = y + heights[i]
   end
 
-  -- The band's own colour on every row a fill of its own did not paint, named even while unset
-  -- so a `bar` set later paints at once; then the rule down the right edge.
   local lines = {}
   for row = 1, band.h do
-    grid[row].fill = grid[row].fill or "sidebar:bar"
-    if ruled then
-      pad_to(grid[row], inner)
-      put(grid, row, inner, 1, { { text = M.rule, hl = "sidebar:rule" } })
-    end
+    finish(grid, row, ruled, inner)
     lines[row] = grid[row].text
   end
   neotmux.buf.set_lines(buf, 0, -1, lines)
   neotmux.buf.clear_namespace(buf, ns, 0, -1)
   for row = 1, band.h do
-    local it = grid[row]
-    if it.fill then
-      neotmux.buf.set_extmark(buf, ns, row - 1, 0, { line_hl_group = it.fill })
-    end
-    for _, m in ipairs(it.marks) do
-      neotmux.buf.set_extmark(
-        buf,
-        ns,
-        row - 1,
-        m.col,
-        { end_col = m.end_col, hl_group = m.hl, bold = m.bold }
-      )
-    end
+    mark(buf, row - 1, grid[row])
   end
+  if layout then
+    layout.want, layout.widest, layout.inner, layout.ruled = want, widest, inner, ruled
+    layout.count = #M.sections
+  end
+  return layout
 end
 
 -- When to render: the model is stale when something it shows changed. Events say most of it; a
 -- token of your own that shows something else must call `dirty()` when that changes. A count,
 -- not a flag, so every session's tick sees a change however many ticks ran since.
-local changes = 0
+local structure = 0
 function M.dirty()
-  changes = changes + 1
+  structure = structure + 1
 end
+
+-- What only rewrites rows: a pane's facts moving. `judged[pane]` is the count when its last did.
+local changes = 0
+local judged = {}
 
 -- Per pane, the facts its rows depend on: `state|command|agent`.
 local facts = {}
@@ -506,6 +543,7 @@ local function judge(pane)
   if facts[pane] ~= fact then
     facts[pane] = fact
     changes = changes + 1
+    judged[pane] = changes
   end
 end
 
@@ -513,7 +551,7 @@ g.on_event("pane_changed", function(e)
   judge(e.pane)
 end)
 g.on_event("pane_closed", function(e)
-  facts[e.pane] = nil
+  facts[e.pane], judged[e.pane] = nil, nil
   M.dirty()
 end)
 for _, name in ipairs({
@@ -574,8 +612,101 @@ g.on_event("session_renamed", function(e)
   last[e.session], last[e.from] = last[e.from], nil
 end)
 
+local function same(a, b)
+  if a.fill ~= b.fill or a.blank ~= b.blank or #a ~= #b then
+    return false
+  end
+  for k, run in ipairs(a) do
+    local other = b[k]
+    if
+      run.text ~= other.text
+      or run.hl ~= other.hl
+      or run.bold ~= other.bold
+      or run.shrink ~= other.shrink
+    then
+      return false
+    end
+  end
+  return true
+end
+
+-- The rows that changed since `was` rewritten in place, for a change that moved no row: each
+-- section's `patch(sidebar, model, change)` answers `{ { at = model row, runs = ... }, ... }`
+-- for the rows it would build differently, or nil when that is not a row for row change. False
+-- when the band has to be laid out again instead.
+local function patch(was, buf, stale)
+  local layout = was.layout
+  if layout == nil or layout.count ~= #M.sections or layout.want ~= was.w then
+    return false
+  end
+  local panes = {}
+  for pane, n in pairs(judged) do
+    if n > was.changes then
+      panes[pane] = true
+    end
+  end
+  if was.seen ~= seen_state.generation then
+    -- A pane that moved it and is gone since is a pane closing, which is a new layout.
+    local found = false
+    for pane, n in pairs(seen_state.moved) do
+      if n > was.seen then
+        panes[pane], found = true, true
+      end
+    end
+    if not found then
+      return false
+    end
+  end
+  local change = { panes = panes, aged = stale }
+  local edits = {}
+  for at, section in ipairs(M.sections) do
+    local rec = layout.sections[at]
+    if rec == nil or rec.section ~= section or type(section.patch) ~= "function" then
+      return false
+    end
+    local got = guarded(section, at, "patch", section.patch, M, rec.model, change)
+    if type(got) ~= "table" then
+      return false
+    end
+    for _, edit in ipairs(got) do
+      local old = rec.model.rows[edit.at]
+      if old == nil then
+        return false
+      end
+      if not same(old, edit.runs) then
+        edits[#edits + 1] = { rec = rec, at = edit.at, old = old, runs = edit.runs }
+      end
+    end
+  end
+  -- A row not on screen may be one a fit would now keep, and a row of another width may be
+  -- one the band would be resized for.
+  local widest = layout.widest
+  for _, edit in ipairs(edits) do
+    if not edit.rec.y_of[edit.at] then
+      return false
+    end
+    local wide, before = segments.width(edit.runs), segments.width(edit.old)
+    widest = math.max(widest, wide)
+    if width_at(widest) ~= layout.want or (wide < before and width_at(wide) ~= layout.want) then
+      return false
+    end
+  end
+  layout.widest = widest
+  for _, edit in ipairs(edits) do
+    local y = edit.rec.y_of[edit.at]
+    local grid = { { text = "", cols = 0, marks = {} } }
+    put(grid, 1, 0, layout.inner, edit.runs)
+    finish(grid, 1, layout.ruled, layout.inner)
+    neotmux.buf.set_lines(buf, y - 1, y, { grid[1].text })
+    mark(buf, y - 1, grid[1])
+    edit.rec.model.rows[edit.at] = edit.runs
+  end
+  return true
+end
+
 -- Each session a client is at renders into its own buffer, laid out for its own band, in its own
--- tick; a session nobody is at renders nothing.
+-- tick; a session nobody is at renders nothing. A change that is only some pane's state rewrites
+-- the rows showing it, when `patch` can.
 g.on_tick(function(ctx)
   local band = ctx:reserved()
   -- Nil while the terminal is too narrow to spare the columns. The panes have them back, so
@@ -598,31 +729,37 @@ g.on_tick(function(ctx)
   local agents_cursor = agents and agents.cursor
   local sort = agents and agents.sort
   local was = last[who]
-  if
-    was == nil
-    or (was.stale_at and agents.clock() >= was.stale_at)
-    or was.changes ~= changes
-    or was.seen ~= seen_state.generation
-    or was.w ~= band.w
-    or was.h ~= band.h
-    or was.open ~= M.open
-    or was.spaces_cursor ~= spaces_cursor
-    or was.agents_cursor ~= agents_cursor
-    or was.sort ~= sort
-  then
-    M.render(band, bufs[who])
-    last[who] = {
-      changes = changes,
-      seen = seen_state.generation,
-      w = band.w,
-      h = band.h,
-      open = M.open,
-      spaces_cursor = spaces_cursor,
-      agents_cursor = agents_cursor,
-      sort = sort,
-      stale_at = agents and agents.stale_at,
-    }
+  local laid = was ~= nil
+    and was.structure == structure
+    and was.w == band.w
+    and was.h == band.h
+    and was.open == M.open
+    and was.spaces_cursor == spaces_cursor
+    and was.agents_cursor == agents_cursor
+    and was.sort == sort
+  local stale = laid and was.stale_at ~= nil and agents.clock() >= was.stale_at
+  if laid and not stale and was.changes == changes and was.seen == seen_state.generation then
+    return
   end
+  if laid and patch(was, bufs[who], stale) then
+    was.changes, was.seen = changes, seen_state.generation
+    was.stale_at = agents and agents.stale_at
+    return
+  end
+  local layout = M.render(band, bufs[who])
+  last[who] = {
+    structure = structure,
+    changes = changes,
+    seen = seen_state.generation,
+    w = band.w,
+    h = band.h,
+    open = M.open,
+    spaces_cursor = spaces_cursor,
+    agents_cursor = agents_cursor,
+    sort = sort,
+    stale_at = agents and agents.stale_at,
+    layout = layout,
+  }
 end)
 
 -- Last, so a section's own file can already find everything above in the module it is handed.
