@@ -8,9 +8,14 @@ use support::{Built, built, one};
 /// Two panes, one above the other, over the whole 40x16 surface with a one-row gutter between
 /// them, each with `band` columns given up on its left.
 fn stacked(sub: &Built, band: u16) {
+    stacked_at(sub, band, 7);
+}
+
+/// The same, with the gutter at row `rule`.
+fn stacked_at(sub: &Built, band: u16, rule: u16) {
     let (top, bottom) = (PaneId::from(1), PaneId::from(2));
-    let top_outer = Rect::new(0, 0, 40, 7);
-    let bottom_outer = Rect::new(0, 8, 40, 8);
+    let top_outer = Rect::new(0, 0, 40, rule);
+    let bottom_outer = Rect::new(0, rule + 1, 40, 16 - rule - 1);
     let inset = |r: Rect| Rect::new(r.x + band, r.y, r.w - band, r.h);
     sub.begin_frame(
         one(),
@@ -47,4 +52,39 @@ fn the_rule_under_a_banded_pane_runs_under_its_band_too() {
         Some(&0),
         "the rule starts at the band, not at the content: {starts:?}"
     );
+}
+
+/// The dividers are a function of where the panes are, so a tick with the panes where they were
+/// works nothing out again, and one after they moved does.
+#[test]
+fn the_crossings_are_worked_out_again_only_when_the_panes_move() {
+    let (_dir, sub) = built(
+        "require('plugin.tmux.borders')\n\
+         local junctions = require('neotmux.junctions')\n\
+         local of = junctions.of\n\
+         junctions.of = function(...) neotmux.log.info('worked out') return of(...) end\n",
+    );
+    stacked(&sub, 10);
+    stacked(&sub, 10);
+    stacked(&sub, 10);
+    assert_eq!(support::logged(&sub), vec!["worked out"]);
+    // A band is inside a pane's outer rect, so resizing one moves no divider.
+    stacked(&sub, 0);
+    assert!(support::logged(&sub).is_empty());
+    stacked_at(&sub, 0, 9);
+    assert_eq!(support::logged(&sub), vec!["worked out"]);
+}
+
+/// Drawn every tick all the same: what a tick draws is the whole of its output.
+#[test]
+fn a_tick_with_the_panes_where_they_were_still_draws_the_rule() {
+    let (_dir, sub) = built("require('plugin.tmux.borders')");
+    stacked(&sub, 0);
+    stacked(&sub, 0);
+    let rules = sub
+        .frame_output()
+        .into_iter()
+        .filter(|cmd| matches!(cmd, DrawCmd::Line { from: (_, 7), .. }))
+        .count();
+    assert_eq!(rules, 1);
 }

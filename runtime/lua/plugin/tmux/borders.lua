@@ -58,39 +58,56 @@ end
 
 neotmux.opt.pane_gutter = GUTTER
 
-g.on_tick(function(ctx)
-  local colours = { fg = M.fg }
-  local panes = neotmux.pane.list()
-  local right, bottom = 0, 0
-  for _, id in ipairs(panes) do
-    local r = ctx:pane_outer(id)
-    if r then
-      right = math.max(right, r.x + r.w)
-      bottom = math.max(bottom, r.y + r.h)
-    end
-  end
+-- The dividers and where they cross, for the panes as they were last laid out. They follow
+-- from where the panes are and nothing else, so a tick with the panes where they were draws
+-- them again without working them out again.
+local last = { key = nil, segments = {}, crossings = {} }
 
+local function lay_out(outers)
+  local right, bottom = 0, 0
+  for _, r in ipairs(outers) do
+    right = math.max(right, r.x + r.w)
+    bottom = math.max(bottom, r.y + r.h)
+  end
   local segments = {}
-  for _, id in ipairs(panes) do
-    local r = ctx:pane_outer(id)
+  for _, r in ipairs(outers) do
     -- A pane the terminal has shrunk to nothing has no neighbour worth a divider.
-    if r and r.w > 0 and r.h > 0 then
+    if r.w > 0 and r.h > 0 then
       if r.x + r.w < right then
         segments[#segments + 1] =
-          { x1 = r.x + r.w, y1 = r.y, x2 = r.x + r.w, y2 = r.y + r.h - 1, glyph = M.vertical }
+          { x1 = r.x + r.w, y1 = r.y, x2 = r.x + r.w, y2 = r.y + r.h - 1, vertical = true }
       end
       if r.y + r.h < bottom then
         segments[#segments + 1] =
-          { x1 = r.x, y1 = r.y + r.h, x2 = r.x + r.w - 1, y2 = r.y + r.h, glyph = M.horizontal }
+          { x1 = r.x, y1 = r.y + r.h, x2 = r.x + r.w - 1, y2 = r.y + r.h, vertical = false }
       end
     end
   end
+  return segments, junctions.of(segments)
+end
 
-  for _, s in ipairs(segments) do
-    ctx:line(nil, s.x1, s.y1, s.x2, s.y2, colours, s.glyph)
+g.on_tick(function(ctx)
+  local outers, key = {}, {}
+  for _, id in ipairs(neotmux.pane.list()) do
+    local r = ctx:pane_outer(id)
+    if r then
+      outers[#outers + 1] = r
+      key[#key + 1] = r.x .. " " .. r.y .. " " .. r.w .. " " .. r.h
+    end
+  end
+  key = table.concat(key, ",")
+  if key ~= last.key then
+    last.key = key
+    last.segments, last.crossings = lay_out(outers)
+  end
+
+  -- The glyphs and the colour are read here, every tick, so assigning to one takes effect.
+  local colours = { fg = M.fg }
+  for _, s in ipairs(last.segments) do
+    ctx:line(nil, s.x1, s.y1, s.x2, s.y2, colours, s.vertical and M.vertical or M.horizontal)
   end
   -- A junction is a single cell, which `line` draws as a run of one.
-  for _, arms in ipairs(junctions.of(segments)) do
+  for _, arms in ipairs(last.crossings) do
     local glyph = glyph_for(arms)
     if glyph then
       ctx:line(nil, arms.x, arms.y, arms.x, arms.y, colours, glyph)
