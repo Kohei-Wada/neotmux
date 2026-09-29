@@ -1,9 +1,10 @@
-use crate::draw::Committed;
-use crate::draw::FloatId;
-use crate::plugin::SourceId;
-use neotmux_proto::{DrawCmd, Epoch, PaneId};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+
+use neotmux_proto::{DrawCmd, Epoch, PaneId};
+
+use crate::draw::{Committed, FloatId};
+use crate::plugin::SourceId;
 
 /// One source's float scratch/commit: every float it drew this tick, in recording
 /// order. Named so `Inner`'s maps don't spell out the nested tuple-of-vec-of-tuple

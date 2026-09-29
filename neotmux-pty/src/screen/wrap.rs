@@ -29,8 +29,9 @@ pub fn history(screen: &mut vt100::Screen, from: usize, count: usize) -> Vec<boo
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use neotmux_proto::screen::Trailing;
+
+    use super::*;
 
     fn parser(rows: u16, cols: u16, scrollback: usize, feed: &[u8]) -> vt100::Parser {
         let mut parser = vt100::Parser::new(rows, cols, scrollback);

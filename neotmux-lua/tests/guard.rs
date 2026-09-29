@@ -1,15 +1,14 @@
 //! `plugin.guard`: the Enter a person presses, held back once when the line it would run
 //! matches a rule — and the two states it refuses to have an opinion in.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use neotmux_lua::plugin::Layers;
 use neotmux_lua::{KeyOutcome, LuaSubsystem};
-use neotmux_proto::{
-    Epoch, Geometry, LineMode, PaneId, PaneTty, Rect, Size, WindowId, geom::Window,
-};
-use std::collections::BTreeMap;
+use neotmux_proto::geom::Window;
+use neotmux_proto::{Epoch, Geometry, LineMode, PaneId, PaneTty, Rect, Size, WindowId};
 
 mod support;
 

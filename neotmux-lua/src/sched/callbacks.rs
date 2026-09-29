@@ -1,5 +1,6 @@
-use mlua::RegistryKey;
 use std::rc::Rc;
+
+use mlua::RegistryKey;
 
 /// The callbacks a job was started with. Each is a `RegistryKey` because a Lua function
 /// cannot outlive a borrow of the `Lua` it came from.

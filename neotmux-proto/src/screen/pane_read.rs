@@ -10,11 +10,7 @@
 //! common to both.
 
 use crate::PaneId;
-use crate::screen::Extent;
-use crate::screen::Hold;
-use crate::screen::Lines;
-use crate::screen::Mark;
-use crate::screen::Want;
+use crate::screen::{Extent, Hold, Lines, Mark, Want};
 
 /// Reading a pane's text.
 ///

@@ -47,6 +47,11 @@ mod shells;
 
 pub use answer::*;
 pub use apply::*;
+pub(crate) use clip::*;
+pub(crate) use drained::*;
+pub(crate) use drawn::*;
+pub(crate) use notifications::*;
+pub(crate) use pane_info_cache::*;
 pub use pane_row::*;
 pub use pass::*;
 pub use plugins::*;
@@ -54,12 +59,6 @@ pub use processes::*;
 pub use server::*;
 pub use server_op::*;
 pub use session::*;
-pub use setup::*;
-
-pub(crate) use clip::*;
-pub(crate) use drained::*;
-pub(crate) use drawn::*;
-pub(crate) use notifications::*;
-pub(crate) use pane_info_cache::*;
 pub(crate) use sessions::*;
+pub use setup::*;
 pub(crate) use shells::*;

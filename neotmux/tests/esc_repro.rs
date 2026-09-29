@@ -13,8 +13,9 @@
 mod harness;
 mod session;
 
-use harness::Neotmux;
 use std::time::Duration;
+
+use harness::Neotmux;
 
 /// The pane's shell: a python child that raw-reads its stdin and prints the hex of each byte.
 /// Written into the test's own tempdir so the test is self-contained.

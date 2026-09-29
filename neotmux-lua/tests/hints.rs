@@ -12,8 +12,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use neotmux_lua::host::Clipboard;
-use neotmux_lua::host::Op;
+use neotmux_lua::host::{Clipboard, Op};
 use neotmux_lua::plugin::Layers;
 use neotmux_lua::{KeyOutcome, LuaSubsystem};
 use neotmux_proto::{DrawCmd, Epoch, Geometry, PaneId, Rect, Size};

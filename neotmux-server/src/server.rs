@@ -1,33 +1,21 @@
-use crate::Attached;
-use crate::Clip;
-use crate::Pass;
-use crate::RenameFailure;
-use crate::Sessions;
-use crate::StartFailure;
-use crate::doorstep::Pending;
-use crate::doorstep::await_client;
-use crate::doorstep::door;
-use crate::sessions::end_session;
-use crate::sessions::rename_session;
-use crate::sessions::start_session;
-use crate::sessions::switch_clients;
-use crate::{Plugins, ServerOp};
-use anyhow::Context as _;
-use neotmux_lua::plugin::Layers;
-use neotmux_lua::{KeyOutcome, LuaSubsystem};
-use neotmux_proto::wire;
-use neotmux_proto::wire::{Done, End, ToClient, ToServer};
-use neotmux_proto::{Level, SessionId};
-use neotmux_pty::PaneTerminals;
-use neotmux_pty::child::{Waker, Wakeup, wakeup};
-use neotmux_sys::Link;
-use neotmux_sys::ShutdownSignal;
-use neotmux_sys::logging;
-use neotmux_sys::sock::{self, Lock, Paths};
 use std::os::fd::AsFd as _;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
+
+use anyhow::Context as _;
+use neotmux_lua::plugin::Layers;
+use neotmux_lua::{KeyOutcome, LuaSubsystem};
+use neotmux_proto::wire::{Done, End, ToClient, ToServer};
+use neotmux_proto::{Level, SessionId, wire};
+use neotmux_pty::PaneTerminals;
+use neotmux_pty::child::{Waker, Wakeup, wakeup};
+use neotmux_sys::sock::{self, Lock, Paths};
+use neotmux_sys::{Link, ShutdownSignal, logging};
+
+use crate::doorstep::{Pending, await_client, door};
+use crate::sessions::{end_session, rename_session, start_session, switch_clients};
+use crate::{Attached, Clip, Pass, Plugins, RenameFailure, ServerOp, Sessions, StartFailure};
 
 /// The frame's cadence, and so the closest together two frames can be. The same number
 /// the one-process loop used, for the same reason: it is a property of the loop rather

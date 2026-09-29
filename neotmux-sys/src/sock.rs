@@ -16,11 +16,10 @@
 //! and no more open than that before anything is put in it. On `$XDG_RUNTIME_DIR` that is
 //! belt and braces; under `/tmp`, where anyone can create a name, it is the whole defence.
 
-use std::fs;
-use std::io;
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
+use std::{fs, io};
 
 use anyhow::Context as _;
 

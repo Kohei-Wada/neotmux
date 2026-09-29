@@ -1,11 +1,12 @@
-use crate::Drained;
+use std::collections::BTreeMap;
+use std::rc::Rc;
+
 use anyhow::Context as _;
 use neotmux_proto::{GridSnapshot, LineMode, PaneId, Rect as PRect, Size};
 use neotmux_pty::PaneTerminals;
-use neotmux_pty::child::Waker;
-use neotmux_pty::child::{CommandBuilder, PtyEvent, PtyHandle};
-use std::collections::BTreeMap;
-use std::rc::Rc;
+use neotmux_pty::child::{CommandBuilder, PtyEvent, PtyHandle, Waker};
+
+use crate::Drained;
 
 const SCROLLBACK: usize = 10_000;
 
@@ -213,14 +214,13 @@ impl Drop for Shells {
 mod tests {
     use std::time::{Duration, Instant};
 
+    use neotmux_layout::PaneLayout;
     use neotmux_proto::{Reserved, SplitDir};
+    use neotmux_pty::child::{Wakeup, wakeup};
     use nix::sys::wait::{WaitPidFlag, WaitStatus, waitpid};
     use nix::unistd::Pid;
 
-    use neotmux_pty::child::{Wakeup, wakeup};
-
     use super::*;
-    use neotmux_layout::PaneLayout;
 
     /// The wakeup is handed back rather than dropped: a `Shells` whose panes nudge an end
     /// nobody holds is not the arrangement these tests are about.

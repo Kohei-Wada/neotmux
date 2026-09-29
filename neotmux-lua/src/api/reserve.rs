@@ -1,7 +1,6 @@
 use std::rc::Rc;
 
 use mlua::{Function, Lua, Table, Value};
-
 use neotmux_proto::Edge;
 
 use crate::draw::{ReservationId, Reservations, max_reserved};

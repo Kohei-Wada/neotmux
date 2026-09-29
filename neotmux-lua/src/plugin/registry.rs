@@ -1,11 +1,10 @@
-use crate::plugin::Kind;
-use crate::plugin::KindTag;
-use crate::plugin::RegistrationId;
-use crate::plugin::SourceId;
-use mlua::RegistryKey;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
+
+use mlua::RegistryKey;
+
+use crate::plugin::{Kind, KindTag, RegistrationId, SourceId};
 
 struct Entry {
     owner: SourceId,

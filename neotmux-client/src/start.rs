@@ -16,7 +16,6 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
-
 use neotmux_sys::Link;
 use neotmux_sys::sock::{self, Paths};
 

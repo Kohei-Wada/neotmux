@@ -12,13 +12,9 @@
 //! is a byte slice, and whoever owns the socket decides where one ends.
 
 use super::tags::*;
-use crate::Key;
-use crate::PROTOCOL_VERSION;
 use crate::screen::{Frame, OwnedFrame};
-use crate::wire::Reader;
-use crate::wire::WireError;
-use crate::wire::Writer;
-use crate::wire::{Attach, OwnedToClient, ToClient, ToServer};
+use crate::wire::{Attach, OwnedToClient, Reader, ToClient, ToServer, WireError, Writer};
+use crate::{Key, PROTOCOL_VERSION};
 
 /// The length of the handshake, which is the one message with a fixed size.
 pub const HELLO_LEN: usize = 4;
@@ -230,24 +226,10 @@ pub fn decode_to_client(bytes: &[u8]) -> Result<OwnedToClient, WireError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    use crate::KeyCode;
-
-    use crate::Modifiers;
-    use crate::PaneId;
-
-    use crate::geom::Color;
-
-    use crate::geom::GridSnapshot;
-    use crate::geom::PaneRects;
-
-    use crate::geom::Size;
-
-    use crate::screen::DrawCmd;
-
-    use crate::screen::OwnedPaneFrame;
-    use crate::screen::Rect;
+    use crate::geom::{Color, GridSnapshot, PaneRects, Size};
+    use crate::screen::{DrawCmd, OwnedPaneFrame, Rect};
     use crate::wire::End;
+    use crate::{KeyCode, Modifiers, PaneId};
 
     const COLORS: [Color; 4] = [
         Color::Default,

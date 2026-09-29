@@ -1,9 +1,11 @@
-use crate::api::Opts;
-use crate::sched::{Outcome, thread_cpu};
-use mlua::{HookTriggers, Lua, VmState};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
+
+use mlua::{HookTriggers, Lua, VmState};
+
+use crate::api::Opts;
+use crate::sched::{Outcome, thread_cpu};
 
 /// How often the hook samples the clock. Throughput is flat from 1e3 to 1e6 instructions — a
 /// count hook costs a `luaG_traceexec` call per instruction whatever n is — so this is the

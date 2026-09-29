@@ -1,11 +1,11 @@
 use anyhow::Context as _;
+use neotmux_proto::screen::Frame;
 use neotmux_proto::{Color as PColor, GridSnapshot};
 use ratatui::layout::{Position, Rect};
 use ratatui::style::{Color, Modifier};
 use ratatui::{DefaultTerminal, Frame as TuiFrame};
 
 use crate::overlay;
-use neotmux_proto::screen::Frame;
 
 /// Puts a frame on this process's terminal. The one place a produced frame meets a screen:
 /// everything above it is what to show, and everything here is the showing.

@@ -2,8 +2,7 @@ use std::rc::Rc;
 
 use mlua::{Lua, Table};
 
-use crate::host::Ambient;
-use crate::host::{Op, OpBuffer};
+use crate::host::{Ambient, Op, OpBuffer};
 use crate::plugin::{self, Sources};
 
 /// `neotmux.session`: which sessions there are, which one the work in hand is for, and a way

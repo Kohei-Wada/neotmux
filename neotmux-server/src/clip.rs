@@ -65,8 +65,9 @@ impl neotmux_lua::host::Clipboard for Clip {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use neotmux_lua::host::Clipboard as _;
+
+    use super::*;
 
     fn one() -> SessionId {
         SessionId::from(1)

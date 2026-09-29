@@ -1,5 +1,4 @@
-use crate::geom::Axis;
-use crate::geom::Edge;
+use crate::geom::{Axis, Edge};
 
 /// How much of the surface each edge is reserved for. The host subtracts it from what the
 /// panes get and never learns what goes in it.
@@ -81,7 +80,6 @@ impl Reserved {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     use crate::geom::fixtures::EDGES;
 
     #[test]

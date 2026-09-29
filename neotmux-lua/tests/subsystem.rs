@@ -1,10 +1,8 @@
 use std::fs;
 
-use neotmux_lua::KeyOutcome;
-use neotmux_lua::LuaSubsystem;
 use neotmux_lua::host::Op;
-use neotmux_lua::plugin::KindTag;
-use neotmux_lua::plugin::Layers;
+use neotmux_lua::plugin::{KindTag, Layers};
+use neotmux_lua::{KeyOutcome, LuaSubsystem};
 use neotmux_proto::Level;
 
 mod support;

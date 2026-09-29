@@ -1,5 +1,6 @@
-use crate::geom::Axis;
 use std::fmt;
+
+use crate::geom::Axis;
 
 /// Which edge of the surface a band is taken from.
 ///

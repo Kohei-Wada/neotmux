@@ -18,6 +18,10 @@ mod version;
 mod window_id;
 
 pub use event::*;
+pub use geom::{
+    Axis, Color, Dir, Edge, Geometry, GridSnapshot, MIN_GRID, PaneRects, Reserved, Size, SnapCell,
+    SplitDir, Window, clamp_to_min_grid,
+};
 pub use job::*;
 pub use job_process::*;
 pub use key::*;
@@ -28,16 +32,11 @@ pub use modifiers::*;
 pub use pane_id::*;
 pub use pane_info::*;
 pub use pane_tty::*;
-pub use session_id::*;
-pub use version::*;
-pub use window_id::*;
-
-pub use geom::{
-    Axis, Color, Dir, Edge, Geometry, GridSnapshot, MIN_GRID, PaneRects, Reserved, Size, SnapCell,
-    SplitDir, Window, clamp_to_min_grid,
-};
 pub use screen::{
     DrawCmd, Epoch, Extent, Frame, Lines, Notice, OwnedFrame, OwnedPaneFrame, PaneFrame, PaneRead,
     Rect, Trailing, Want,
 };
+pub use session_id::*;
+pub use version::*;
+pub use window_id::*;
 pub use wire::{OwnedToClient, ToClient, ToServer, WireError};

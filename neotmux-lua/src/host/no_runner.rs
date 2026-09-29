@@ -1,6 +1,4 @@
-use crate::host::JobSpec;
-use crate::host::Runner;
-use crate::host::Running;
+use crate::host::{JobSpec, Runner, Running};
 
 /// The one a subsystem built without a host gets: no processes here.
 pub struct NoRunner;

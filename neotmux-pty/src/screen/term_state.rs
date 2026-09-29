@@ -332,8 +332,9 @@ impl TermState {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use neotmux_proto::MIN_GRID;
+
+    use super::*;
 
     fn snap(state: &TermState) -> GridSnapshot {
         let mut out = GridSnapshot::default();

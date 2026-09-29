@@ -1,5 +1,6 @@
-use crate::{ResizeRefused, SplitRefused, Tree, assign};
 use neotmux_proto::{Dir, Edge, Epoch, PaneId, PaneRects, Rect as PRect, Reserved, Size, SplitDir};
+
+use crate::{ResizeRefused, SplitRefused, Tree, assign};
 
 /// Everything the host knows about how panes are arranged: the tree (§6), the surface it is
 /// assigned onto, and which pane has focus. Nothing outside this file decides how many panes

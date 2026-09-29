@@ -9,19 +9,18 @@
 //! that names a terminal. The session is on the other side of it, and it is the next function
 //! call rather than a socket.
 
-use crate::Answer;
-use crate::Drawn;
-use crate::Notifications;
-use crate::ServerOp;
-use crate::input::{encode_key, key_spec};
+use std::cell::RefCell;
+use std::collections::{BTreeMap, BTreeSet};
+use std::time::Instant;
+
 use neotmux_lua::host::Op;
 use neotmux_lua::{KeyOutcome, LuaSubsystem, WriteVerdict};
 use neotmux_proto::wire::{SessionOp, Step, Tick, Tock};
 use neotmux_proto::{Key, Level, PaneId, PaneTty, SessionId};
 use neotmux_sys::logging;
-use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet};
-use std::time::Instant;
+
+use crate::input::{encode_key, key_spec};
+use crate::{Answer, Drawn, Notifications, ServerOp};
 
 /// The Lua subsystem and the notification surface that goes with it, driven a frame at a
 /// time.

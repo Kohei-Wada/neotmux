@@ -5,7 +5,6 @@
 //! layer's business and stays here.
 
 use mlua::{Lua, LuaString, Table};
-
 use neotmux_proto::Event;
 
 /// `pane_output`'s bytes are the only payload expensive enough to copy per subscriber, so

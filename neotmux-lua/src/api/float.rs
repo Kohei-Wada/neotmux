@@ -1,7 +1,6 @@
 use std::rc::Rc;
 
 use mlua::{Function, Lua, Table, Value};
-
 use neotmux_proto::Rect;
 
 use crate::draw::{FloatId, Floats};

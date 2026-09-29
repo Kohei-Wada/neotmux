@@ -2,8 +2,7 @@
 //! pane, and nothing else. There is no mouse, no bracketed paste and no focus event here
 //! because nothing in neotmux asks for one.
 
-use crate::KeyCode;
-use crate::Modifiers;
+use crate::{KeyCode, Modifiers};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Key {

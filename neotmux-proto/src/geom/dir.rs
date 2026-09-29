@@ -1,5 +1,6 @@
-use crate::geom::SplitDir;
 use std::fmt;
+
+use crate::geom::SplitDir;
 
 /// Where a neighbour is, and therefore which boundary a resize moves. A split's orientation
 /// answers to two of these: a vertical split's boundary is the one a left or right move

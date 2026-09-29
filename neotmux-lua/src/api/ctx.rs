@@ -2,12 +2,10 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use mlua::{Function, Table, UserData, UserDataMethods, Value};
-
 use neotmux_proto::{Color, DrawCmd, PaneId, Rect};
 
 use crate::api::rect;
-use crate::draw::Buffers;
-use crate::draw::FloatId;
+use crate::draw::{Buffers, FloatId};
 use crate::plugin::SourceId;
 
 /// Scope-bound: created fresh inside `Lua::scope` for one dispatch and dies with it.

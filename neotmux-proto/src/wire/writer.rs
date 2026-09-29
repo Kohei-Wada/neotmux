@@ -1,8 +1,7 @@
 use super::tags::*;
 use crate::screen::{Frame, PaneFrame};
 use crate::wire::End;
-use crate::{Color, DrawCmd, GridSnapshot, PaneId, PaneRects, Rect, Size, SnapCell};
-use crate::{Key, KeyCode};
+use crate::{Color, DrawCmd, GridSnapshot, Key, KeyCode, PaneId, PaneRects, Rect, Size, SnapCell};
 
 pub(crate) struct Writer {
     bytes: Vec<u8>,

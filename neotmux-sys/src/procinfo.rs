@@ -2,9 +2,8 @@
 //! simply unknown. There is no fallback, and pretending otherwise would be a lie in the one
 //! place a user would believe it.
 
-use std::fs;
-
 use std::collections::{HashSet, VecDeque};
+use std::fs;
 
 use neotmux_proto::{Job, JobProcess, PaneInfo};
 

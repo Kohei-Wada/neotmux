@@ -2,13 +2,11 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use mlua::{Lua, Table, Value};
-
 use neotmux_proto::screen::{Lines, PaneRead, Trailing, Want};
 use neotmux_proto::{Dir, Geometry, PaneId, Rect, SplitDir};
 
 use crate::api::rect;
-use crate::host::{Op, OpBuffer};
-use crate::host::{PaneInfos, PaneTtys};
+use crate::host::{Op, OpBuffer, PaneInfos, PaneTtys};
 use crate::plugin::{self, Sources};
 
 /// A count a caller gave in Lua, where the only wrong value is a negative one: that is a

@@ -1,6 +1,7 @@
+use std::collections::BTreeMap;
+
 use crate::wire::Step;
 use crate::{Epoch, Geometry, PaneId, PaneInfo, PaneTty};
-use std::collections::BTreeMap;
 
 /// The server's half of a frame: what happened, and what the session looks like now.
 #[derive(Debug, Clone, PartialEq, Eq)]

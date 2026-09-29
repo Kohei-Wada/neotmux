@@ -3,12 +3,13 @@
 //! Mirrors `registry.rs`'s shape and borrow discipline: every accessor clones what it needs
 //! out from under its `RefCell` borrow before the caller can call back into Lua with it.
 
-use crate::plugin::RegisteredCommand;
-use crate::plugin::SourceId;
-use mlua::{RegistryKey, Value};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
+
+use mlua::{RegistryKey, Value};
+
+use crate::plugin::{RegisteredCommand, SourceId};
 
 struct Entry {
     callback: Rc<RegistryKey>,
@@ -129,9 +130,10 @@ pub fn lines_from(value: Value) -> Result<Vec<String>, String> {
 
 #[cfg(test)]
 mod tests {
+    use mlua::Table;
+
     use super::*;
     use crate::plugin::{SourceId, Sources};
-    use mlua::Table;
 
     fn key(lua: &mlua::Lua, body: &str) -> Rc<mlua::RegistryKey> {
         let f: mlua::Function = lua.load(body).eval().unwrap();

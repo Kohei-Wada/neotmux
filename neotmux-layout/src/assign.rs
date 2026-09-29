@@ -77,9 +77,10 @@ pub(crate) fn divide(split: &Split, rect: Rect, gutter: u16) -> (Rect, Rect) {
 
 #[cfg(test)]
 mod tests {
+    use neotmux_proto::Size;
+
     use super::*;
     use crate::fixtures::*;
-    use neotmux_proto::Size;
 
     #[test]
     fn a_lone_pane_fills_the_surface() {

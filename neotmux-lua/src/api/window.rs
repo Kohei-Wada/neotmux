@@ -2,11 +2,9 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use mlua::{Lua, Table, Value};
-
 use neotmux_proto::{Geometry, WindowId};
 
-use crate::host::WindowIds;
-use crate::host::{Op, OpBuffer};
+use crate::host::{Op, OpBuffer, WindowIds};
 use crate::plugin::{self, Sources};
 
 /// `neotmux.window`, shaped like `neotmux.pane`. `list`, `panes` and `current` read this frame's

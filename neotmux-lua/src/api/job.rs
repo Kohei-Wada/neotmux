@@ -5,8 +5,7 @@ use std::rc::Rc;
 use mlua::{Function, Lua, Table, Value};
 
 use crate::api::opt::Opts;
-use crate::host::Ambient;
-use crate::host::JobSpec;
+use crate::host::{Ambient, JobSpec};
 use crate::plugin::{Groups, Held, Sources};
 use crate::sched::{Callbacks, JobId, Jobs};
 

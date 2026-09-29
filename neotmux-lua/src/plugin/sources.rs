@@ -1,10 +1,12 @@
-use crate::plugin::SourceId;
-use mlua::chunk::ChunkMode;
-use mlua::{Function, Lua, Table, Value};
 use std::cell::RefCell;
 use std::fs;
 use std::path::PathBuf;
 use std::rc::Rc;
+
+use mlua::chunk::ChunkMode;
+use mlua::{Function, Lua, Table, Value};
+
+use crate::plugin::SourceId;
 
 /// The identity of a call with no real chunk behind it: a native function, a `loadstring`d
 /// or otherwise anonymous chunk, or a call reached with no Lua frame below it at all.

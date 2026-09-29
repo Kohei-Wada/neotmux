@@ -1,6 +1,4 @@
-use crate::screen::Frame;
-use crate::screen::OwnedPaneFrame;
-use crate::screen::PaneFrame;
+use crate::screen::{Frame, OwnedPaneFrame, PaneFrame};
 use crate::{DrawCmd, PaneId, PaneRects, Size};
 
 /// What a decoded frame is held in. [`Frame`] borrows so that encoding a grid can write

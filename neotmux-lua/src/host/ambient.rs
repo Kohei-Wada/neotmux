@@ -6,12 +6,13 @@
 //! session's, this holds everybody else's, and binding a session swaps the two. The swap moves
 //! a `Vec`'s and a `BTreeMap`'s headers, so it costs the same whatever a session holds.
 
-use crate::host::Bound;
-use crate::host::{PaneInfos, PaneTtys};
-use neotmux_proto::{Geometry, SessionId};
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::rc::Rc;
+
+use neotmux_proto::{Geometry, SessionId};
+
+use crate::host::{Bound, PaneInfos, PaneTtys};
 
 /// What one session is holding while some other session is the one bound.
 #[derive(Default)]
@@ -136,8 +137,9 @@ impl Ambient {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use neotmux_proto::Rect;
+
+    use super::*;
 
     fn ambient() -> (Ambient, Rc<RefCell<Geometry>>) {
         let geometry = Rc::new(RefCell::new(Geometry::default()));

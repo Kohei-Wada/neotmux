@@ -1,29 +1,22 @@
-use crate::Apply;
-use crate::PaneInfoCache;
-use crate::PaneRow;
-use crate::Pass;
-use crate::Setup;
-use crate::Shells;
-use crate::input::encode_key;
-use anyhow::Context as _;
-use neotmux_layout::{PaneIds, Shown, Surface, Windows};
-use neotmux_proto::Key;
-use neotmux_proto::clamp_to_min_grid;
-use neotmux_proto::screen::{Frame, PaneFrame};
-use neotmux_proto::wire::{End, SessionOp, Step, Tick, Tock};
-use neotmux_proto::{
-    DrawCmd, Event, Geometry, Level, PaneId, PaneInfo, PaneTty, Rect as PRect, Reserved, Size,
-    Window as LuaWindow, WindowId,
-};
-use neotmux_pty::PaneTerminals;
-use neotmux_pty::child::PtyHandle;
-use neotmux_pty::child::Waker;
-use neotmux_sys::logging;
-use neotmux_sys::procinfo;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Instant;
+
+use anyhow::Context as _;
+use neotmux_layout::{PaneIds, Shown, Surface, Windows};
+use neotmux_proto::screen::{Frame, PaneFrame};
+use neotmux_proto::wire::{End, SessionOp, Step, Tick, Tock};
+use neotmux_proto::{
+    DrawCmd, Event, Geometry, Key, Level, PaneId, PaneInfo, PaneTty, Rect as PRect, Reserved, Size,
+    Window as LuaWindow, WindowId, clamp_to_min_grid,
+};
+use neotmux_pty::PaneTerminals;
+use neotmux_pty::child::{PtyHandle, Waker};
+use neotmux_sys::{logging, procinfo};
+
+use crate::input::encode_key;
+use crate::{Apply, PaneInfoCache, PaneRow, Pass, Setup, Shells};
 
 const MAX_CHUNKS_PER_FRAME: usize = 32;
 
@@ -936,8 +929,7 @@ fn pane_size(rect: Option<PRect>, pane: PaneId) -> anyhow::Result<Size> {
 #[cfg(test)]
 mod tests {
     use neotmux_proto::MIN_GRID;
-    use neotmux_pty::child::CommandBuilder;
-    use neotmux_pty::child::wakeup;
+    use neotmux_pty::child::{CommandBuilder, wakeup};
     use neotmux_pty::screen::TermState;
 
     use super::*;

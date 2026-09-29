@@ -1,12 +1,11 @@
 use std::rc::Rc;
 
 use mlua::{Function, Lua, Table, Value};
+use neotmux_proto::Level;
 
 use crate::api::attribute;
 use crate::host::{Op, OpBuffer};
-use crate::plugin::Commands;
-use crate::plugin::{Groups, Held, Sources};
-use neotmux_proto::Level;
+use crate::plugin::{Commands, Groups, Held, Sources};
 
 /// `neotmux.command`: a name a plugin registers, anything can list, and anything can call by
 /// name — the in-process half of the command surface spec's §4. The names live in Rust, in

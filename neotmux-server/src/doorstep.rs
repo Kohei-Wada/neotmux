@@ -1,24 +1,16 @@
-use crate::Attached;
-use crate::Held;
-use crate::Plugins;
-use crate::Sessions;
-use crate::server::DOORSTEP;
-use crate::server::FRAME;
-use crate::server::STARTUP;
-use crate::server::Serving;
-use crate::server::taken;
-use crate::sessions::end_session;
-use crate::{Session, Setup};
-use anyhow::Context as _;
-use neotmux_proto::Level;
-use neotmux_proto::wire;
-use neotmux_proto::wire::{Attach, ToClient, ToServer};
-use neotmux_pty::PaneTerminals;
-use neotmux_pty::child::Waker;
-use neotmux_sys::Link;
-use neotmux_sys::logging;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
+
+use anyhow::Context as _;
+use neotmux_proto::wire::{Attach, ToClient, ToServer};
+use neotmux_proto::{Level, wire};
+use neotmux_pty::PaneTerminals;
+use neotmux_pty::child::Waker;
+use neotmux_sys::{Link, logging};
+
+use crate::server::{DOORSTEP, FRAME, STARTUP, Serving, taken};
+use crate::sessions::end_session;
+use crate::{Attached, Held, Plugins, Session, Sessions, Setup};
 
 /// The one short wait the door is allowed, and only for a connection that has just greeted.
 ///

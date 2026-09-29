@@ -1,8 +1,10 @@
-use crate::draw::FloatId;
-use crate::plugin::SourceId;
-use neotmux_proto::{Color, DrawCmd, Rect};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+
+use neotmux_proto::{Color, DrawCmd, Rect};
+
+use crate::draw::FloatId;
+use crate::plugin::SourceId;
 
 /// Who has been granted a floating window, and where each one currently sits.
 #[derive(Default)]

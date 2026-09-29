@@ -1,5 +1,4 @@
 use mlua::{Lua, Table};
-
 use neotmux_proto::Rect;
 
 /// The one shape a rect takes in Lua. `ctx:pane_rect` and `neotmux.pane.rect` read the same

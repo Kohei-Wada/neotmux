@@ -1,10 +1,10 @@
-use crate::host::Ambient;
-use crate::host::Mark;
-use crate::host::Op;
-use crate::plugin::SourceId;
-use neotmux_proto::SessionId;
 use std::cell::RefCell;
 use std::rc::Rc;
+
+use neotmux_proto::SessionId;
+
+use crate::host::{Ambient, Mark, Op};
+use crate::plugin::SourceId;
 
 pub struct OpBuffer {
     ops: RefCell<Vec<(Option<SessionId>, SourceId, Op)>>,
@@ -64,11 +64,12 @@ impl OpBuffer {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
+
+    use neotmux_proto::{Geometry, Level, PaneId, SplitDir};
+
     use super::*;
     use crate::plugin::Sources;
-    use neotmux_proto::Geometry;
-    use neotmux_proto::{Level, PaneId, SplitDir};
-    use std::cell::RefCell;
 
     /// A buffer with nothing bound: every op in these tests is raised outside a session, so
     /// `None` is what they are filed under and what they are drained by.

@@ -1,43 +1,27 @@
-use crate::Census;
-use crate::CommandInfo;
-use crate::CommandOutcome;
-use crate::KeyOutcome;
-use crate::LoadFailure;
-use crate::WriteVerdict;
-use crate::api::ctx::Ctx;
-use crate::api::{self, Opts, keymap};
-use crate::draw::Buffers;
-use crate::draw::Floats;
-use crate::draw::PaneBands;
-use crate::draw::Reservations;
-use crate::host::Ambient;
-use crate::host::Clipboard;
-use crate::host::Runner;
-use crate::host::WindowIds;
-use crate::host::{Op, OpBuffer};
-use crate::host::{PaneInfos, PaneTtys};
-use crate::plugin::Commands;
-use crate::plugin::Groups;
-use crate::plugin::Layers;
-use crate::plugin::{Kind, KindTag, RegistrationId, Registry};
-use crate::plugin::{SourceId, Sources};
-use crate::sched::Overrun;
-use crate::sched::timers::Timers;
-use crate::sched::{Budget, Outcome};
-use crate::sched::{CountsOverruns, Delivery, Jobs};
-use mlua::chunk::ChunkMode;
-use mlua::{Function, Lua, Table, Value};
-use neotmux_proto::screen::Notice;
-use neotmux_proto::screen::PaneRead;
-use neotmux_proto::{
-    DrawCmd, Epoch, Event, Geometry, Level, PaneId, PaneInfo, PaneTty, Reserved, SessionId, Size,
-    WindowId,
-};
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::fs;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
+
+use mlua::chunk::ChunkMode;
+use mlua::{Function, Lua, Table, Value};
+use neotmux_proto::screen::{Notice, PaneRead};
+use neotmux_proto::{
+    DrawCmd, Epoch, Event, Geometry, Level, PaneId, PaneInfo, PaneTty, Reserved, SessionId, Size,
+    WindowId,
+};
+
+use crate::api::ctx::Ctx;
+use crate::api::{self, Opts, keymap};
+use crate::draw::{Buffers, Floats, PaneBands, Reservations};
+use crate::host::{Ambient, Clipboard, Op, OpBuffer, PaneInfos, PaneTtys, Runner, WindowIds};
+use crate::plugin::{
+    Commands, Groups, Kind, KindTag, Layers, RegistrationId, Registry, SourceId, Sources,
+};
+use crate::sched::timers::Timers;
+use crate::sched::{Budget, CountsOverruns, Delivery, Jobs, Outcome, Overrun};
+use crate::{Census, CommandInfo, CommandOutcome, KeyOutcome, LoadFailure, WriteVerdict};
 
 pub struct LuaSubsystem {
     lua: Lua,

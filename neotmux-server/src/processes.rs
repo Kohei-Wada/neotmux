@@ -12,12 +12,11 @@ use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::{self, JoinHandle};
 
+use neotmux_lua::host::{JobChunk, JobSpec, Runner, Running};
+use neotmux_pty::child::Waker;
 use nix::errno::Errno;
 use nix::sys::signal::{Signal, kill, killpg};
 use nix::unistd::Pid;
-
-use neotmux_lua::host::{JobChunk, JobSpec, Runner, Running};
-use neotmux_pty::child::Waker;
 
 const OUTPUT_CHANNEL_BOUND: usize = 64;
 

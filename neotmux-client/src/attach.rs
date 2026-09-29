@@ -4,9 +4,10 @@
 //! is answered before the alternate screen is entered, and the terminal is given back
 //! however the loop leaves.
 
-use crate::start;
 use neotmux_proto::Level;
 use neotmux_sys::logging;
+
+use crate::start;
 
 /// Raw mode, taken before anything slow and given back however [`attach`] leaves — a
 /// panic included, because unwinding runs this drop.

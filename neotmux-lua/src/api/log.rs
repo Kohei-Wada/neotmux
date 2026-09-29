@@ -1,10 +1,10 @@
 use std::rc::Rc;
 
 use mlua::{Lua, Table};
+use neotmux_proto::Level;
 
 use crate::host::{Op, OpBuffer};
 use crate::plugin::{self, Sources};
-use neotmux_proto::Level;
 
 pub fn install(lua: &Lua, sources: Rc<Sources>, ops: Rc<OpBuffer>) -> mlua::Result<Table> {
     let table = lua.create_table()?;

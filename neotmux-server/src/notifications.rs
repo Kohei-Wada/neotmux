@@ -2,7 +2,6 @@ use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 use neotmux_proto::Level;
-
 use neotmux_proto::screen::Notice;
 use neotmux_sys::logging;
 

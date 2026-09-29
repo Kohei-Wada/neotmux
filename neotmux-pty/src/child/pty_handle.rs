@@ -4,13 +4,12 @@ use std::thread;
 
 use anyhow::Context as _;
 use neotmux_proto::{LineMode, Size};
-use portable_pty::{Child, ExitStatus, MasterPty, PtySize, native_pty_system};
-
-use crate::child::{PtyEvent, Waker};
-
 // `spawn` takes one, so it is part of this crate's surface either way: re-exported so a
 // caller does not need its own dependency on portable-pty to name the type.
 pub use portable_pty::CommandBuilder;
+use portable_pty::{Child, ExitStatus, MasterPty, PtySize, native_pty_system};
+
+use crate::child::{PtyEvent, Waker};
 
 const OUTPUT_CHANNEL_BOUND: usize = 64;
 

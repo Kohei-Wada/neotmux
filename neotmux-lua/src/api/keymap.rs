@@ -1,13 +1,12 @@
 use std::rc::Rc;
 
 use mlua::{Function, Lua, Table, Value};
+use neotmux_proto::Level;
 
 use crate::api::{attribute, make_handle};
 use crate::draw::Buffers;
 use crate::host::{Op, OpBuffer};
-use crate::plugin::{Groups, Held, Sources};
-use crate::plugin::{Kind, KindTag, RegistrationId, Registry};
-use neotmux_proto::Level;
+use crate::plugin::{Groups, Held, Kind, KindTag, RegistrationId, Registry, Sources};
 
 /// Canonical order for modifier prefixes: Control, then Meta/Alt, then Shift.
 const ORDER: [char; 3] = ['C', 'M', 'S'];

@@ -9,10 +9,9 @@ use std::env;
 use std::rc::Rc;
 
 use anyhow::Context as _;
+use neotmux_sys::{Link, sock};
 
 use crate::start;
-use neotmux_sys::Link;
-use neotmux_sys::sock;
 
 /// Runs a host command and prints what it said. Lines on stdout where it worked, the one
 /// sentence on stderr where it did not, and the exit status says which.

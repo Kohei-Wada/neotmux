@@ -1,14 +1,14 @@
-use crate::Plugins;
-use crate::{Session, Setup};
+use std::collections::BTreeMap;
+use std::rc::Rc;
+
 use neotmux_layout::PaneIds;
-use neotmux_proto::wire;
 use neotmux_proto::wire::{Done, End, ToClient};
-use neotmux_proto::{SessionId, Size};
+use neotmux_proto::{SessionId, Size, wire};
 use neotmux_pty::PaneTerminals;
 use neotmux_pty::child::Waker;
 use neotmux_sys::Link;
-use std::collections::BTreeMap;
-use std::rc::Rc;
+
+use crate::{Plugins, Session, Setup};
 
 /// One client the frame reaches, and everything the server has to remember about it. Which
 /// is very little: the picture is the session's, one Lua layer's, so every client attached

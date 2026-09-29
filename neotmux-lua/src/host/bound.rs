@@ -1,5 +1,6 @@
-use crate::host::Ambient;
 use neotmux_proto::SessionId;
+
+use crate::host::Ambient;
 
 /// The binding, undone when it goes out of scope — including on the way out of a dispatch that
 /// ended in an error, which is the whole reason it is a guard and not two calls.

@@ -5,8 +5,7 @@
 //! something to check what a plugin does with its output would be testing the operating
 //! system. The host implements it; a test hands over a script.
 
-use crate::host::JobSpec;
-use crate::host::Running;
+use crate::host::{JobSpec, Running};
 
 /// Somewhere to start a program.
 pub trait Runner {

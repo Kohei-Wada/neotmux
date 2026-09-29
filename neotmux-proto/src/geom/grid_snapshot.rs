@@ -1,5 +1,4 @@
-use crate::geom::Size;
-use crate::geom::SnapCell;
+use crate::geom::{Size, SnapCell};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]

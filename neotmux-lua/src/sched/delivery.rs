@@ -1,7 +1,9 @@
+use std::rc::Rc;
+
+use mlua::RegistryKey;
+
 use crate::plugin::SourceId;
 use crate::sched::JobId;
-use mlua::RegistryKey;
-use std::rc::Rc;
 
 /// One thing the frame has to do for a job: call a callback, or end it.
 pub enum Delivery {

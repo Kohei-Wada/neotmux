@@ -2,23 +2,17 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use mlua::{Function, Lua, Table, Value};
-
 use neotmux_proto::screen::PaneRead;
+use neotmux_proto::{Geometry, Level, PaneId};
 
 use crate::LoadFailure;
 use crate::api::Sweep;
-use crate::draw::Buffers;
-use crate::draw::Floats;
-use crate::draw::PaneBands;
-use crate::draw::Reservations;
-use crate::host::WindowIds;
-use crate::host::{Op, OpBuffer};
-use crate::host::{PaneInfos, PaneTtys};
-use crate::plugin::Commands;
-use crate::plugin::{self, Groups, Held, SourceId, Sources};
-use crate::plugin::{Kind, KindTag, RegistrationId, Registry};
+use crate::draw::{Buffers, Floats, PaneBands, Reservations};
+use crate::host::{Op, OpBuffer, PaneInfos, PaneTtys, WindowIds};
+use crate::plugin::{
+    self, Commands, Groups, Held, Kind, KindTag, RegistrationId, Registry, SourceId, Sources,
+};
 use crate::sched::Overrun;
-use neotmux_proto::{Geometry, Level, PaneId};
 
 /// The state every binding is wired to, passed as one value because `install` otherwise takes
 /// eight collaborators.

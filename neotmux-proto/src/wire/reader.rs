@@ -1,9 +1,9 @@
 use super::tags::*;
 use crate::screen::{OwnedFrame, OwnedPaneFrame};
-use crate::wire::End;
-use crate::wire::WireError;
-use crate::{Color, DrawCmd, GridSnapshot, PaneId, PaneRects, Rect, Size, SnapCell};
-use crate::{Key, KeyCode, Modifiers};
+use crate::wire::{End, WireError};
+use crate::{
+    Color, DrawCmd, GridSnapshot, Key, KeyCode, Modifiers, PaneId, PaneRects, Rect, Size, SnapCell,
+};
 
 pub(crate) struct Reader<'a> {
     bytes: &'a [u8],

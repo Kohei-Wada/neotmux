@@ -3,18 +3,13 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
-use neotmux_proto::clamp_to_min_grid;
-use neotmux_proto::wire;
 use neotmux_proto::wire::{Attach, OwnedDone, ToServer};
-use neotmux_proto::{OwnedToClient, Size};
+use neotmux_proto::{Key, OwnedToClient, Size, clamp_to_min_grid, wire};
+use neotmux_sys::tty::{Ready, Terminal};
+use neotmux_sys::{Link, ShutdownSignal, WindowChange, signals};
 use ratatui::DefaultTerminal;
 
 use crate::decoder::Decoder;
-use neotmux_proto::Key;
-use neotmux_sys::Link;
-
-use neotmux_sys::tty::{Ready, Terminal};
-use neotmux_sys::{ShutdownSignal, WindowChange, signals};
 
 /// How long one pass of the loop waits before looking up. The server sets the frame rate;
 /// this is only how often the client notices a signal or a resize with nothing else going on.
@@ -251,9 +246,11 @@ fn gone(peer: &mut Link) -> anyhow::Error {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use neotmux_proto::wire::End;
     use std::os::unix::net::UnixStream;
+
+    use neotmux_proto::wire::End;
+
+    use super::*;
 
     /// A client link and the server's end of it, both past the hello.
     fn pair() -> (Rc<RefCell<Link>>, Link) {

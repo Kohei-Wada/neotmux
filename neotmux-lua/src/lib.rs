@@ -11,8 +11,7 @@ pub mod plugin;
 pub mod sched;
 mod write_verdict;
 
-pub use api::Opts;
-pub use api::keymap;
+pub use api::{Opts, keymap};
 pub use census::*;
 pub use command_info::*;
 pub use command_outcome::*;
