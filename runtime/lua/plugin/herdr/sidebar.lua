@@ -454,12 +454,11 @@ function M.render(band, buf)
     y = y + heights[i]
   end
 
-  -- The band's own colour, where a user gave it one (`sidebar:bar` exists only then), on every
-  -- row a fill of its own did not paint; then the rule down the right edge.
-  local bar = neotmux.hl.get("sidebar:bar") and "sidebar:bar" or nil
+  -- The band's own colour on every row a fill of its own did not paint, named even while unset
+  -- so a `bar` set later paints at once; then the rule down the right edge.
   local lines = {}
   for row = 1, band.h do
-    grid[row].fill = grid[row].fill or bar
+    grid[row].fill = grid[row].fill or "sidebar:bar"
     if ruled then
       pad_to(grid[row], inner)
       put(grid, row, inner, 1, { { text = M.rule, hl = "sidebar:rule" } })

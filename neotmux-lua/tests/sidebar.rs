@@ -1522,6 +1522,26 @@ fn a_style_set_recolours_the_band_itself() {
     );
 }
 
+/// A `bar` set after the sidebar has rendered paints the band at once, with nothing rewritten.
+#[test]
+fn a_bar_set_at_runtime_paints_the_band_with_no_render() {
+    let (_dir, sub) = built_herdr(
+        "neotmux.on_key(function(key)\n\
+           if key == 'P' then require('neotmux.style').set('sidebar', { bar = '#123456' }) return true end\n\
+           return false\n\
+         end)\n",
+    );
+    let s = [Sess::new(1, "work", vec![vec![101]])];
+    open(&sub, &s);
+    settled(&sub, &s, 1);
+    assert_eq!(fill_on(&sub, 0), None);
+    support::keys(&sub, &["P"]);
+    assert_eq!(
+        fill_on(&sub, 0),
+        Some(neotmux_proto::Color::Rgb(0x12, 0x34, 0x56))
+    );
+}
+
 /// The theme, not only a plugin's own `style.set`, reaches the sidebar: `header` is `overlay0`
 /// by default, and renaming what `overlay0` means recolours it with no `sidebar` selector touched
 /// at all.
