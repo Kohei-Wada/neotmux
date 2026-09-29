@@ -896,6 +896,16 @@ impl LuaSubsystem {
 
     pub fn dispatch_event(&self, session: SessionId, event: &Event) {
         let _bound = self.ambient.bind(session);
+        self.deliver(event);
+    }
+
+    /// An event about something no session is left to be bound to — a session that has just
+    /// ended — delivered the way `unload` is when nobody asked for it.
+    pub fn dispatch_event_unbound(&self, event: &Event) {
+        self.deliver(event);
+    }
+
+    fn deliver(&self, event: &Event) {
         let subscribers: Vec<_> = self
             .registry
             .snapshot(KindTag::Event)

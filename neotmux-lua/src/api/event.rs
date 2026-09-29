@@ -30,13 +30,24 @@ pub(crate) fn table(event: &Event, lua: &Lua, bytes: Option<&LuaString>) -> mlua
             table.set("rows", size.rows)?;
             table.set("cols", size.cols)?;
         }
-        Event::PaneOpened { pane } | Event::PaneClosed { pane } | Event::FocusChanged { pane } => {
+        Event::PaneOpened { pane }
+        | Event::PaneClosed { pane }
+        | Event::FocusChanged { pane }
+        | Event::PaneChanged { pane } => {
             table.set("pane", pane.get())?;
         }
         Event::WindowOpened { window }
         | Event::WindowClosed { window }
-        | Event::WindowChanged { window } => {
+        | Event::WindowChanged { window }
+        | Event::WindowRenamed { window } => {
             table.set("window", window.get())?;
+        }
+        Event::SessionCreated { session } | Event::SessionClosed { session } => {
+            table.set("session", session.as_str())?;
+        }
+        Event::SessionRenamed { session, from } => {
+            table.set("session", session.as_str())?;
+            table.set("from", from.as_str())?;
         }
     }
     Ok(table)

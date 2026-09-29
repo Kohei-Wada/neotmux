@@ -106,6 +106,11 @@ Every event that fires, and the fields it carries:
 | `pane_opened` | `pane` | a split created it |
 | `pane_closed` | `pane` | its child exited and the pane is gone |
 | `focus_changed` | `pane` | focus moved to that pane |
+| `pane_changed` | `pane` | that pane's terminal was fed since the last frame; once per pane per frame, no bytes |
+| `window_renamed` | `window` | a window was named or unnamed |
+| `session_created` | `session` | a session started |
+| `session_closed` | `session` | a session ended; dispatched with no session bound |
+| `session_renamed` | `session`, `from` | a session was renamed |
 | `unload` | (none) | the config is about to be reloaded; see Reloading |
 
 There are no others. Subscribe to a name nothing sends and nothing happens, silently.

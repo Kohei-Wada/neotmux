@@ -186,3 +186,64 @@ fn subscribers_run_in_registration_order() {
     let second_idx = text.find("second").expect("second should have run");
     assert!(first_idx < second_idx, "{text}");
 }
+
+fn saw(files_body: &str, event: &Event) -> String {
+    let (_d, sub) = built(&[
+        ("init.lua", "require('plugin.watcher')"),
+        ("lua/plugin/watcher.lua", files_body),
+    ]);
+    assert!(sub.run_init().is_empty());
+    sub.dispatch_event(support::one(), event);
+    format!("{:?}", sub.drain_ops(Some(support::one())))
+}
+
+#[test]
+fn pane_changed_carries_the_pane_and_no_bytes() {
+    let ops = saw(
+        "neotmux.on_event('pane_changed', function(e) neotmux.log.info('changed ' .. e.pane .. ' ' .. tostring(e.bytes)) end) return {}",
+        &Event::PaneChanged {
+            pane: PaneId::from(7),
+        },
+    );
+    assert!(ops.contains("changed 7 nil"), "{ops}");
+}
+
+#[test]
+fn window_renamed_carries_the_window() {
+    let ops = saw(
+        "neotmux.on_event('window_renamed', function(e) neotmux.log.info('renamed ' .. e.window) end) return {}",
+        &Event::WindowRenamed {
+            window: neotmux_proto::WindowId::from(3),
+        },
+    );
+    assert!(ops.contains("renamed 3"), "{ops}");
+}
+
+#[test]
+fn session_renamed_carries_both_names() {
+    let ops = saw(
+        "neotmux.on_event('session_renamed', function(e) neotmux.log.info(e.from .. '->' .. e.session) end) return {}",
+        &Event::SessionRenamed {
+            session: "work".into(),
+            from: "0".into(),
+        },
+    );
+    assert!(ops.contains("0->work"), "{ops}");
+}
+
+#[test]
+fn session_closed_is_dispatched_with_no_session_bound() {
+    let (_d, sub) = built(&[
+        ("init.lua", "require('plugin.watcher')"),
+        (
+            "lua/plugin/watcher.lua",
+            "neotmux.on_event('session_closed', function(e) neotmux.log.info('closed ' .. e.session) end) return {}",
+        ),
+    ]);
+    assert!(sub.run_init().is_empty());
+    sub.dispatch_event_unbound(&Event::SessionClosed {
+        session: "work".into(),
+    });
+    let ops = format!("{:?}", sub.drain_ops(None));
+    assert!(ops.contains("closed work"), "{ops}");
+}
