@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### `C-b N` makes a session without asking for a name, `C-b W` renames it
+
+`session-new`, on `C-b N` and in the palette, no longer opens a prompt: the session is called the
+lowest number no running one is, as `neotmux` with no name does. `session-rename`, now on
+`C-b W`, names it.
+
 ### A long branch ends in an ellipsis
 
 A session name or git branch too long for the sidebar was cut at the band's edge, taking the

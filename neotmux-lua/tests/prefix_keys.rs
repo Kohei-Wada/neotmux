@@ -13,7 +13,7 @@ use neotmux_proto::{DrawCmd, Epoch, Geometry, PaneId, Rect, Size, WindowId};
 mod support;
 
 const SIZE: Size = Size {
-    rows: 30,
+    rows: 40,
     cols: 120,
 };
 

@@ -338,3 +338,50 @@ fn esc_and_q_close_the_picker_without_a_switch() {
     assert!(session_ops(&sub).is_empty());
     assert!(frame(&sub).is_empty(), "the picker did not close on q");
 }
+
+/// `C-b N` makes a session without asking, called the lowest number no running session is.
+#[test]
+fn c_b_n_makes_the_next_numbered_session_without_asking() {
+    let (_dir, sub) = built(WITH_PREFIX);
+    make(&sub, support::one(), "0", "bash");
+    make(&sub, SessionId::from(2), "2", "vim");
+    keys(&sub, &["C-b", "N"]);
+    assert_eq!(
+        session_ops(&sub),
+        vec![
+            Op::SessionCreate { name: "1".into() },
+            Op::SessionSwitch { name: "1".into() },
+        ]
+    );
+    assert!(frame(&sub).is_empty(), "C-b N opened a prompt");
+}
+
+/// `C-b W` asks for a new name for the session you are in, starting from the old one.
+#[test]
+fn c_b_w_renames_the_session_you_are_in() {
+    let (_dir, sub) = built(WITH_PREFIX);
+    two_sessions(&sub);
+    keys(&sub, &["C-b", "W"]);
+    assert!(!frame(&sub).is_empty(), "C-b W opened no prompt");
+    keys(
+        &sub,
+        &[
+            "Backspace",
+            "Backspace",
+            "Backspace",
+            "Backspace",
+            "h",
+            "o",
+            "m",
+            "e",
+            "Enter",
+        ],
+    );
+    assert_eq!(
+        session_ops(&sub),
+        vec![Op::SessionRename {
+            from: "work".into(),
+            to: "home".into()
+        }]
+    );
+}

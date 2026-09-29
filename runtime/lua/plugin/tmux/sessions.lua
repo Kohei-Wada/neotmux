@@ -9,7 +9,8 @@
 --   d           end the one under the cursor
 --   Esc q       leave
 --
---   C-b N       make one without the picker: type a name, Enter to make it and go there
+--   C-b N       make one without the picker, called the next number, and go there
+--   C-b W       rename the one you are in
 --   C-b X       end the one you are in, going to another first if there is one
 --
 -- A composition on `neotmux.list`: the float, the cursor, the scrolling and the caret are
@@ -173,19 +174,15 @@ function M.open()
   })
 end
 
--- The picker's `c` and `r` without the picker, for the palette: a name asked for in a prompt.
+-- The picker's `c` without the picker, and without asking: the name is the next number, and
+-- `session-rename` is there for one that should be called something else.
 g.command.add("session-new", function()
-  prompt.open({
-    title = "new session",
-    mode = "rename",
-    done = function(text)
-      local name = text ~= "" and text or next_number()
-      neotmux.session.create(name)
-      neotmux.session.switch(name)
-    end,
-  })
+  local name = next_number()
+  neotmux.session.create(name)
+  neotmux.session.switch(name)
 end, { desc = "make a session and go there" })
 
+-- The picker's `r` without the picker, for the palette: the new name asked for in a prompt.
 g.command.add("session-rename", function()
   local name = neotmux.session.current()
   if not name then
@@ -224,6 +221,7 @@ bind.prefix("s", function()
   M.open()
 end, "pick a session to switch to, make or end one")
 bind.prefix("N", "session-new")
+bind.prefix("W", "session-rename")
 bind.prefix("X", "session-kill")
 
 return M

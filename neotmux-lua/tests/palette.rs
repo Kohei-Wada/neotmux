@@ -421,12 +421,12 @@ fn session_ops(sub: &Built) -> Vec<Op> {
         .collect()
 }
 
-/// `session-new` from the palette asks for a name, then makes the session and goes there, as
-/// the picker's `c` does.
+/// `session-new` from the palette makes the session without asking, called the lowest number no
+/// running session is, and goes there.
 #[test]
 fn a_session_can_be_made_from_the_palette() {
     let (_dir, sub) = built(SESSIONS);
-    sub.name_session(support::one(), "work");
+    sub.name_session(support::one(), "0");
     open(&sub);
     keys(
         &sub,
@@ -434,17 +434,11 @@ fn a_session_can_be_made_from_the_palette() {
             "s", "e", "s", "s", "i", "o", "n", "-", "n", "e", "w", "Enter",
         ],
     );
-    frame(&sub);
-    keys(&sub, &["h", "o", "m", "e", "Enter"]);
     assert_eq!(
         session_ops(&sub),
         vec![
-            Op::SessionCreate {
-                name: "home".into()
-            },
-            Op::SessionSwitch {
-                name: "home".into()
-            },
+            Op::SessionCreate { name: "1".into() },
+            Op::SessionSwitch { name: "1".into() },
         ]
     );
 }

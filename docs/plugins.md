@@ -1501,7 +1501,7 @@ do what tmux does and live under `plugin/tmux/`, loaded together by `plugin.tmux
 | `tmux.status` | the default status bar, on one reserved top row: herdr's tab bar, a tab a window |
 | `tmux.prefix` | a `C-b` prefix over `v`, `-`, `o`, `h/j/k/l`, `r`, `z`, `c`, `n`, `p`, `,`, `x`, `[` and `?` |
 | `tmux.copy` | copy mode: read back over a pane's scrollback, select a region, yank it |
-| `tmux.sessions` | the session picker on `C-b s`: every session and what it is running, `Enter` to go, `c` to make one, `r` to rename one, `d` to end one; `C-b N` makes one and `C-b X` ends the one you are in without it |
+| `tmux.sessions` | the session picker on `C-b s`: every session and what it is running, `Enter` to go, `c` to make one, `r` to rename one, `d` to end one; `C-b N` makes one, `C-b W` renames the one you are in and `C-b X` ends it, without it |
 | `tmux.borders` | a rule along every boundary between two panes |
 | `tmux.sync` | relays every key to every pane of the window — tmux's `synchronize-panes`, turned on and off with `:sync-panes` or `C-b S`; the plugin loads by default, the relaying starts off |
 
@@ -1905,7 +1905,8 @@ The palette's items come from `require('plugin.palette').providers`, and the que
 character picks which: `@` is the sessions (Enter goes there), `#` the agents (Enter focuses the
 agent's pane, in whatever session it is in), and anything else the commands. `C-b g` is the
 palette opened on `#`, herdr's goto. Among the commands are `session-new` and `session-rename`,
-the session picker's `c` and `r` without the picker: each asks for a name in a prompt. A provider of your own:
+the session picker's `c` and `r` without the picker: `session-new` names the session the next
+number without asking, `session-rename` asks for the new name in a prompt. A provider of your own:
 
 ```lua
 table.insert(require('plugin.palette').providers, 1, {
