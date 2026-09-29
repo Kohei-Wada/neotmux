@@ -13,4 +13,7 @@ pub struct Tock {
     pub pane_band: u16,
     pub wants_pane_output: bool,
     pub wants_pane_changed: bool,
+    /// The Lua layer's band generation, so a layout whose totals came out the same is still
+    /// laid out again when a band moved within an edge.
+    pub bands: u64,
 }

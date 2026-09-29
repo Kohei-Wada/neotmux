@@ -71,6 +71,8 @@ pub struct Session {
     wants_pane_output: bool,
     /// Whether any plugin is subscribed to `pane_changed`.
     wants_pane_changed: bool,
+    /// The band generation the last layout was made at.
+    bands: u64,
     /// The last pane's child is gone. The session ends after one more frame, which is what
     /// draws that pane's final output.
     ended: bool,
@@ -126,6 +128,7 @@ impl Session {
             pending_changed: BTreeSet::new(),
             wants_pane_output: setup.wants_pane_output,
             wants_pane_changed: setup.wants_pane_changed,
+            bands: setup.bands,
             ended: false,
             terminals,
             last_ticked: Instant::now(),
@@ -325,6 +328,7 @@ impl Session {
         self.surface.pane_band = setup.pane_band;
         self.wants_pane_output = setup.wants_pane_output;
         self.wants_pane_changed = setup.wants_pane_changed;
+        self.bands = setup.bands;
         // What happened while nobody was looking is not news for a client that was not
         // there: geometry is how a plugin learns what exists, events how it learns what
         // changed, and everything here is the former.
@@ -820,7 +824,10 @@ impl Session {
                 end: Some(end),
             });
         }
-        let reserved_changed = self.reserved_changed(tock.reserved);
+        // A band moving within an edge changes where it sits without changing the totals.
+        let bands_moved = tock.bands != self.bands;
+        self.bands = tock.bands;
+        let reserved_changed = self.reserved_changed(tock.reserved) || bands_moved;
         let gutter_changed = self.gutter_changed(tock.gutter);
         let pane_band_changed = self.pane_band_changed(tock.pane_band);
         if reserved_changed || gutter_changed || pane_band_changed {

@@ -50,6 +50,9 @@ struct Inner {
     /// A session's map is empty while its surface cannot afford the bands, and absent until
     /// its first frame lays them out.
     bands: BTreeMap<SessionId, BTreeMap<SourceId, Rect>>,
+    /// Moves whenever a band is granted, resized or taken back, so a session can tell its
+    /// bands need laying out again when the totals per edge came out the same.
+    generation: u64,
 }
 
 impl Inner {
@@ -99,6 +102,7 @@ impl Reservations {
             edge,
             cells,
         });
+        inner.generation += 1;
         Ok(id)
     }
 
@@ -132,6 +136,7 @@ impl Reservations {
                 entry.cells = cells;
             }
         }
+        inner.generation += 1;
         Ok(())
     }
 
@@ -139,14 +144,26 @@ impl Reservations {
         let mut inner = self.inner.borrow_mut();
         let before = inner.entries.len();
         inner.entries.retain(|entry| entry.id != id);
-        before != inner.entries.len()
+        let removed = before != inner.entries.len();
+        if removed {
+            inner.generation += 1;
+        }
+        removed
     }
 
     pub fn remove_all_of(&self, owner: SourceId) -> usize {
         let mut inner = self.inner.borrow_mut();
         let before = inner.entries.len();
         inner.entries.retain(|entry| entry.owner != owner);
-        before - inner.entries.len()
+        let removed = before - inner.entries.len();
+        if removed > 0 {
+            inner.generation += 1;
+        }
+        removed
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.inner.borrow().generation
     }
 
     /// What has been granted so far, per edge. Whether the surface can afford it is not this

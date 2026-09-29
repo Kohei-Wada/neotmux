@@ -1127,6 +1127,11 @@ impl LuaSubsystem {
     /// a tick changes what `reserved()` reports, but not the bands this frame is being drawn
     /// against — the same discipline `pane.split` follows, and what keeps a reservation from
     /// invalidating the epoch of a frame already being composed.
+    /// Moves whenever a band is granted, resized or taken back.
+    pub fn bands_generation(&self) -> u64 {
+        self.reservations.generation()
+    }
+
     pub fn lay_out_reservations(&self, session: SessionId, surface: Size, applied: Reserved) {
         let _bound = self.ambient.bind(session);
         self.reservations.lay_out(session, surface, applied);

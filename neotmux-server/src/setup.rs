@@ -14,4 +14,5 @@ pub struct Setup {
     pub pane_band: u16,
     pub wants_pane_output: bool,
     pub wants_pane_changed: bool,
+    pub bands: u64,
 }

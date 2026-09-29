@@ -184,6 +184,7 @@ impl Plugins {
             pane_band: self.lua.pane_band(),
             wants_pane_output: self.lua.has_subscriber("pane_output"),
             wants_pane_changed: self.lua.has_subscriber("pane_changed"),
+            bands: self.lua.bands_generation(),
         };
         Answer {
             tock,

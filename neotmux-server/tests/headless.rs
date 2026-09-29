@@ -48,6 +48,7 @@ fn halves(files: &[(&str, &str)]) -> (tempfile::TempDir, Wakeup, Session, Plugin
             pane_band: 0,
             wants_pane_output: false,
             wants_pane_changed: false,
+            bands: 0,
         },
         waker,
         terminals.clone(),
@@ -498,6 +499,7 @@ fn two_applies_are_two_stops_on_the_way_to_two_frames() {
         pane_band: 0,
         wants_pane_output: false,
         wants_pane_changed: false,
+        bands: 0,
     };
     // A fresh session hands out with its own steps already queued (`Session::new`:
     // the initial `Bands` and `Geometry`), so the first apply carries those and says
@@ -727,4 +729,52 @@ fn a_quiet_frame_recolours_a_buffer_whose_group_changed() {
         std::thread::sleep(Duration::from_millis(5));
     }
     panic!("no frame was quiet");
+}
+
+/// Two bands on one edge that swap sizes keep the same total, and are laid out again all the
+/// same: where each sits moved, even though what the edge spends did not.
+#[test]
+fn bands_that_swap_sizes_are_laid_out_again() {
+    let reporter = |name: &str, cells: u16| {
+        format!(
+            "local band = neotmux.reserve('right', {cells})\n\
+             neotmux.on_key(function(key)\n\
+               if key ~= 'S' then return false end\n\
+               band:resize_to({swapped})\n\
+               return false\n\
+             end)\n\
+             neotmux.on_tick(function(ctx)\n\
+               local b = ctx:reserved()\n\
+               ctx:text(nil, 0, {row}, '{name}=' .. (b and (b.x .. '+' .. b.w) or 'nil'))\n\
+             end)\n\
+             return {{}}",
+            swapped = if cells == 10 { 6 } else { 10 },
+            row = if name == "a" { 0 } else { 1 },
+        )
+    };
+    let a = reporter("a", 10);
+    let b = reporter("b", 6);
+    let (_dir, _wakeup, mut session, mut plugins) = halves(&[
+        ("init.lua", "require('plugin.a') require('plugin.b')"),
+        ("lua/plugin/a.lua", &a),
+        ("lua/plugin/b.lua", &b),
+    ]);
+    let cols = SURFACE.cols;
+    let before = format!("a={}+10", cols - 10);
+    assert!(
+        step_until(&mut session, &mut plugins, |shown| overlay_text(shown)
+            .contains(&before)),
+        "the bands were never laid out as granted"
+    );
+    plugins.key(one(), Key::plain(KeyCode::Char('S')));
+    let after = format!("a={}+6", cols - 6);
+    let mut last = String::new();
+    let swapped = step_until(&mut session, &mut plugins, |shown| {
+        last = overlay_text(shown);
+        last.contains(&after)
+    });
+    assert!(
+        swapped,
+        "a's band kept its old place after the swap: {last}"
+    );
 }

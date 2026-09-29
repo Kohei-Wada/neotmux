@@ -315,6 +315,7 @@ fn admit(
         pane_band: lua.pane_band(),
         wants_pane_output: lua.has_subscriber("pane_output"),
         wants_pane_changed: lua.has_subscriber("pane_changed"),
+        bands: lua.bands_generation(),
     };
     let name = attach
         .session
