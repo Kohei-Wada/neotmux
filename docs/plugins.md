@@ -1690,8 +1690,9 @@ table.insert(require('plugin.herdr.sidebar').sections, {
 ```
 
 A row is a list of runs, `{ text = 'hello', hl = 'sidebar:text', bold = true }`, each coloured by
-the highlight group it names; a row with `fill = 'sidebar:here'` has the band's width behind it
-painted that group's colour. `sidebar.row(tokens, names, it)` builds one out of a token table the
+the highlight group it names; a row with `fill = 'sidebar:here'` has the band up to its rule
+painted that group's colour, by its `sidebar:here:bg` twin (a group of your own with no `:bg`
+twin paints the whole width, the rule too). `sidebar.row(tokens, names, it)` builds one out of a token table the
 way the tree does, a token answering its text, a highlight group name, whether it is bold and
 whether it shrinks: a row too wide for the band ends its first shrinking run in
 `…` so the runs after it stay on screen, as a space's name and branch, an agent's names and a window's name and a pane's command in the tree do. A section with no `rail` is its open rows cut to the rail's width. Without a `fit` a section is cut by
@@ -2548,7 +2549,8 @@ end)
 
 Every selector with a default or a set is also published as highlight groups, one per part,
 named `selector:part` — `sidebar:branch`, `float.list:frame` — for buffers to be coloured by
-(see Buffers). `neotmux.hl.set(name, { fg, bg, bold })` defines one of your own and
+(see Buffers), each with the part's colour as its `fg`, and again as `selector:part:bg` with it
+as its `bg`, for a range to be painted on. `neotmux.hl.set(name, { fg, bg, bold })` defines one of your own and
 `neotmux.hl.get(name)` reads one back; a theme change republishes them, and every buffer shown
 is recoloured on the next frame without its plugin doing anything.
 

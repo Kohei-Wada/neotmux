@@ -1401,12 +1401,35 @@ fn style_in(sub: &Built, session: u32, needle: &str) -> (neotmux_proto::Color, b
         .unwrap_or_else(|| panic!("nothing drawn holds {needle:?}"))
 }
 
-/// What row `y` of the band is painted with, if anything paints it.
+/// What row `y` of the band is painted with at its first column, if anything paints it.
 fn fill_on(sub: &Built, y: u16) -> Option<neotmux_proto::Color> {
-    output(sub).into_iter().find_map(|cmd| match cmd {
-        DrawCmd::Rect { rect, bg, .. } if rect.y == y && rect.h == 1 => Some(bg),
-        _ => None,
-    })
+    paint_at(sub, 0, y)
+}
+
+/// What the cell at `x`, `y` is painted with, if anything paints it: the background of the last
+/// command drawn over it, one `char` per column as everything the sidebar draws is.
+fn paint_at(sub: &Built, x: u16, y: u16) -> Option<neotmux_proto::Color> {
+    let mut paint = None;
+    for cmd in output(sub) {
+        match cmd {
+            DrawCmd::Rect { rect, bg, .. }
+                if rect.y <= y && y < rect.y + rect.h && rect.x <= x && x < rect.x + rect.w =>
+            {
+                paint = Some(bg);
+            }
+            DrawCmd::Text {
+                x: at,
+                y: row,
+                text,
+                bg,
+                ..
+            } if row == y && at <= x && usize::from(x - at) < text.chars().count() => {
+                paint = (bg != neotmux_proto::Color::Default).then_some(bg);
+            }
+            _ => {}
+        }
+    }
+    paint
 }
 
 /// Row for row what herdr draws: ` spaces` and a blank, the sessions two rows each — the second
@@ -1472,6 +1495,75 @@ fn only_the_rows_you_are_in_are_painted_and_names_are_herdrs_colours() {
     assert_eq!(style_of(&sub, "home"), (SUBTEXT, false));
     assert_eq!(style_of(&sub, "work"), (TEXT, true));
     assert_eq!(style_of(&sub, "fake"), (OVERLAY, false));
+}
+
+/// The column the rule is drawn in on row `y`.
+fn rule_at(sub: &Built, y: u16) -> u16 {
+    output(sub)
+        .into_iter()
+        .find_map(|cmd| match cmd {
+            DrawCmd::Text {
+                x, y: row, text, ..
+            } if row == y => text
+                .chars()
+                .position(|c| c == '\u{2502}')
+                .map(|at| x + at as u16),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no rule on row {y}"))
+}
+
+/// The rows you are at are painted up to the rule and not under it: the rule stays on the band's
+/// own colour, as it was before the sidebar was a buffer.
+#[test]
+fn the_rows_you_are_at_are_painted_up_to_the_rule_and_not_under_it() {
+    let (_dir, sub) = built_herdr(AGENTS);
+    let s = [Sess::new(1, "work", vec![vec![101]]).agents(&[101])];
+    open(&sub, &s);
+    show(&sub, 101, "BUSY");
+    let lines = settled(&sub, &s, 1);
+    let work = line_with(&lines, " \u{25cf} work") as u16;
+    let rule = rule_at(&sub, work);
+    assert_eq!(paint_at(&sub, 0, work), Some(HERE), "{lines:#?}");
+    assert_eq!(paint_at(&sub, rule - 1, work), Some(HERE), "{lines:#?}");
+    assert_eq!(paint_at(&sub, rule, work), None, "{lines:#?}");
+}
+
+/// A section's fill naming a group of your own, one with no `:bg` twin, paints its row's whole
+/// width, the rule too, as every fill did before the twins.
+#[test]
+fn a_fill_of_your_own_group_paints_the_whole_row() {
+    let (_dir, sub) = built_herdr(
+        "neotmux.hl.set('mine:row', { bg = '#0a0b0c' })\n\
+         table.insert(require('plugin.herdr.sidebar').sections, {\n\
+           build = function() return { rows = { { { text = 'hello' }, fill = 'mine:row' } } } end,\n\
+         })",
+    );
+    let s = [Sess::new(1, "work", vec![vec![101]])];
+    open(&sub, &s);
+    let lines = settled(&sub, &s, 1);
+    let hello = line_with(&lines, "hello") as u16;
+    let rule = rule_at(&sub, hello);
+    let mine = Some(neotmux_proto::Color::Rgb(0x0a, 0x0b, 0x0c));
+    assert_eq!(paint_at(&sub, 0, hello), mine, "{lines:#?}");
+    assert_eq!(paint_at(&sub, rule, hello), mine, "{lines:#?}");
+}
+
+/// With a band colour of your own, the rule of a row you are at is on the band's colour.
+#[test]
+fn the_rule_of_a_row_you_are_at_is_on_the_band_colour() {
+    let (_dir, sub) = built_herdr("require('neotmux.style').set('sidebar', { bar = '#123456' })\n");
+    let s = [Sess::new(1, "work", vec![vec![101]])];
+    open(&sub, &s);
+    let lines = settled(&sub, &s, 1);
+    let work = line_with(&lines, " work") as u16;
+    let rule = rule_at(&sub, work);
+    assert_eq!(paint_at(&sub, rule - 1, work), Some(HERE), "{lines:#?}");
+    assert_eq!(
+        paint_at(&sub, rule, work),
+        Some(neotmux_proto::Color::Rgb(0x12, 0x34, 0x56)),
+        "{lines:#?}"
+    );
 }
 
 /// The agents are headed whether or not there are any, as herdr's are.
@@ -1806,6 +1898,30 @@ fn a_panes_state_changing_rewrites_only_the_rows_that_show_it() {
     assert_eq!(fill_on(&sub, agents as u16 + 1), Some(HERE), "{after:#?}");
     assert_eq!(style_of(&sub, "blocked"), (RED, false), "{after:#?}");
     assert_eq!(style_of(&sub, "work"), (TEXT, true), "{after:#?}");
+}
+
+/// A row rewritten in place is painted as a laid out one is: up to the rule, not under it.
+#[test]
+fn a_row_rewritten_in_place_is_painted_up_to_the_rule() {
+    let (_dir, sub) = built_herdr(&format!("{AGENTS}{LETTERS}{RENDERS}"));
+    let s = [Sess::new(1, "work", vec![vec![101]]).agents(&[101])];
+    open(&sub, &s);
+    show(&sub, 101, "BUSY");
+    let tall = Size { rows: 20, cols: 80 };
+    frame_in(&sub, tall, &s, 1);
+    let before = frame_in(&sub, tall, &s, 1);
+    let first = renders(&sub);
+    show(&sub, 101, "ASK");
+    frame_in(&sub, tall, &s, 1);
+    let after = frame_in(&sub, tall, &s, 1);
+    assert_eq!(renders(&sub), first, "{after:#?}");
+    let spaces = line_with(&before, " W work");
+    assert_eq!(after[spaces], " B work", "{after:#?}");
+    let y = spaces as u16;
+    let rule = rule_at(&sub, y);
+    assert_eq!(paint_at(&sub, 0, y), Some(HERE), "{after:#?}");
+    assert_eq!(paint_at(&sub, rule - 1, y), Some(HERE), "{after:#?}");
+    assert_eq!(paint_at(&sub, rule, y), None, "{after:#?}");
 }
 
 /// A client at each of two sessions: a state moving in one is rewritten into both bands, each

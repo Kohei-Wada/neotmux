@@ -24,7 +24,7 @@
 -- A section with no `patch` has the whole band laid out again whenever any pane's state moves.
 --
 -- A row is a list of runs, `{ text = ..., hl = 'sidebar:branch', bold = ... }`, each coloured by
--- the highlight group it names, and a row with a `fill` has the band's width behind it painted
+-- the highlight group it names, and a row with a `fill` has the band up to its rule painted
 -- that group's colour. `build` is handed this module
 -- rather than requiring it, because the shipped sections are required from here while this file
 -- is still loading. Without a `fit`, a section is cut by `sidebar.scroll`.
@@ -396,8 +396,16 @@ local function finish(grid, y, ruled, inner)
   end
 end
 
-local function mark(buf, y, row)
-  neotmux.buf.set_extmark(buf, ns, y, 0, { line_hl_group = row.fill })
+-- A row's own fill is its group's `:bg` twin up to the rule, laid before the text's marks so their
+-- foregrounds keep it; the band's colour, and a fill with no twin, is the whole width, rule too.
+local function mark(buf, y, row, ruled, inner)
+  local own = row.fill ~= "sidebar:bar" and neotmux.hl.get(row.fill .. ":bg")
+  if own and ruled then
+    neotmux.buf.set_extmark(buf, ns, y, 0, { line_hl_group = "sidebar:bar" })
+    neotmux.buf.set_extmark(buf, ns, y, 0, { end_col = inner, hl_group = row.fill .. ":bg" })
+  else
+    neotmux.buf.set_extmark(buf, ns, y, 0, { line_hl_group = row.fill })
+  end
   for _, m in ipairs(row.marks) do
     neotmux.buf.set_extmark(
       buf,
@@ -507,7 +515,7 @@ function M.render(band, buf)
   neotmux.buf.set_lines(buf, 0, -1, lines)
   neotmux.buf.clear_namespace(buf, ns, 0, -1)
   for row = 1, band.h do
-    mark(buf, row - 1, grid[row])
+    mark(buf, row - 1, grid[row], ruled, inner)
   end
   if layout then
     layout.want, layout.widest, layout.inner, layout.ruled = want, widest, inner, ruled
@@ -692,7 +700,7 @@ local function patch(was, buf, stale)
     put(grid, 1, 0, layout.inner, edit.runs)
     finish(grid, 1, layout.ruled, layout.inner)
     neotmux.buf.set_lines(buf, y - 1, y, { grid[1].text })
-    mark(buf, y - 1, grid[1])
+    mark(buf, y - 1, grid[1], layout.ruled, layout.inner)
     edit.rec.model.rows[edit.at] = edit.runs
   end
   return true

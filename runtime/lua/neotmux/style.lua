@@ -86,7 +86,8 @@ function M.get(selector)
 end
 
 -- Every selector with a default or a set, published as `selector:part` highlight groups for
--- buffers to be coloured by. All of them each time: a set on `float` changes `float.list`'s.
+-- buffers to be coloured by, and each part as a background too, `selector:part:bg`. All of them
+-- each time: a set on `float` changes `float.list`'s.
 local function publish()
   if not (neotmux and neotmux.hl) then
     return
@@ -101,6 +102,7 @@ local function publish()
   for selector in pairs(selectors) do
     for part, colour in pairs(M.get(selector)) do
       neotmux.hl.set(selector .. ":" .. part, { fg = colour })
+      neotmux.hl.set(selector .. ":" .. part .. ":bg", { bg = colour })
     end
   end
 end

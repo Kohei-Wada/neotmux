@@ -73,3 +73,27 @@ fn hl_cannot_be_replaced() {
         built("neotmux.log.info(tostring(pcall(function() neotmux.hl.set = nil end)))\n");
     assert_eq!(logged(&sub), vec!["false"]);
 }
+
+#[test]
+fn a_style_part_is_also_published_as_a_background_and_a_theme_change_republishes_it() {
+    let (_dir, sub) = built(
+        "local style = require('neotmux.style')\n\
+         style.default('mine', { accent = 'blue' })\n\
+         local g = neotmux.hl.get('mine:accent:bg')\n\
+         local before = g.bg .. ' ' .. tostring(g.fg)\n\
+         require('neotmux.theme').set({ blue = '#000001' })\n\
+         neotmux.log.info(before .. ' ' .. neotmux.hl.get('mine:accent:bg').bg)\n",
+    );
+    assert_eq!(logged(&sub), vec!["#89b4fa nil #000001"]);
+}
+
+#[test]
+fn the_sidebars_here_is_published_as_a_background_that_follows_the_theme() {
+    let (_dir, sub) = built(
+        "require('plugin.herdr.sidebar')\n\
+         local before = neotmux.hl.get('sidebar:here:bg').bg\n\
+         require('neotmux.theme').set({ base = '#000002' })\n\
+         neotmux.log.info(before .. ' ' .. neotmux.hl.get('sidebar:here:bg').bg)\n",
+    );
+    assert_eq!(logged(&sub), vec!["#1e1e2e #000002"]);
+}

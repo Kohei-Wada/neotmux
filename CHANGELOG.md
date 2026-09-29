@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### A sidebar row you are at is painted up to the rule again
+
+The focused session, agent and navigate cursor are filled up to the band's `│` and no longer
+under it, as before the sidebar was a buffer. `neotmux.style` also publishes every part as
+`selector:part:bg`, the part's colour as a background.
+
 ### A pane's command or directory moving is an event
 
 New event `pane_info_changed`, with `pane`: what `neotmux.pane.info(pane)` answers differs from
