@@ -161,8 +161,8 @@ impl Reservations {
     }
 
     /// The host has settled `session`'s surface for this frame: give every granted reservation
-    /// its band there in surface coordinates, or — for an axis the surface could not afford, which `applied`
-    /// reports as nothing reserved on its edges — no band at all.
+    /// its band there in surface coordinates, or — for an axis the surface could not afford,
+    /// which `applied` reports as nothing reserved on its edges — no band at all.
     ///
     /// A vertical band spans the full height and a horizontal one only what the vertical
     /// bands left, so no two bands ever share a cell. The corner goes to the sidebar, as
