@@ -273,6 +273,9 @@ fn pane_changed_fires_once_per_pane_per_frame() {
         })
         .collect();
     assert!(counts.windows(2).all(|w| w[1] <= w[0] + 1), "{counts:?}");
+    // The count actually advanced: `pane_changed` fired more than a couple of times, not zero.
+    assert!(counts.len() >= 3, "{counts:?}");
+    assert!(counts.iter().max().copied().unwrap_or(0) >= 3, "{counts:?}");
 }
 
 #[test]
