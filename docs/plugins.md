@@ -1656,7 +1656,7 @@ A row is a list of runs, the shape `status.segments.draw` takes; a row with `fil
 has the band's width behind it painted that colour. `sidebar.row(tokens, names, it)` builds one
 out of a token table the way the tree does, a token answering its text, its colour, whether
 it is bold and whether it shrinks: a row too wide for the band ends its first shrinking run in
-`…` so the runs after it stay on screen, as a space's name and branch and an agent's names do. A section with no `rail` is its open rows cut to the rail's width. Without a `fit` a section is cut by
+`…` so the runs after it stay on screen, as a space's name and branch, an agent's names and a window's name in the tree do. A section with no `rail` is its open rows cut to the rail's width. Without a `fit` a section is cut by
 `sidebar.scroll`, which keeps `anchor` on screen. A section whose `build` or `fit` raises is left
 out of that frame and named once through `neotmux.notify`.
 

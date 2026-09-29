@@ -25,6 +25,8 @@ struct Sess {
     agents: Vec<u32>,
     /// The directory every pane of the session reports, or none.
     cwd: Option<String>,
+    /// Each window's name, left to right; a window past the end has none.
+    window_names: Vec<&'static str>,
 }
 
 impl Sess {
@@ -37,6 +39,7 @@ impl Sess {
             focus,
             agents: Vec::new(),
             cwd: None,
+            window_names: Vec::new(),
         }
     }
 
@@ -47,6 +50,11 @@ impl Sess {
 
     fn agents(mut self, panes: &[u32]) -> Self {
         self.agents = panes.to_vec();
+        self
+    }
+
+    fn window_names(mut self, names: &[&'static str]) -> Self {
+        self.window_names = names.to_vec();
         self
     }
 }
@@ -139,7 +147,7 @@ fn frame_in(sub: &Built, surface: Size, sessions: &[Sess], current: u32) -> Vec<
             .map(|(n, panes)| Window {
                 id: WindowId::from(s.id * 100 + n as u32),
                 panes: panes.iter().map(|p| PaneId::from(*p)).collect(),
-                name: None,
+                name: s.window_names.get(n).map(|name| name.to_string()),
             })
             .collect();
         sub.begin_frame(
@@ -680,6 +688,20 @@ fn the_shipped_sidebar_is_herdrs_spaces_over_its_agents() {
         "{lines:#?}"
     );
     assert_eq!(lines[first + 1].trim(), "blocked fake", "{lines:#?}");
+}
+
+/// A window name in the tree under the space you are in ends in an ellipsis when it is too long
+/// for the band.
+#[test]
+fn a_window_name_too_long_for_the_band_ends_in_an_ellipsis() {
+    let (_dir, sub) = built_herdr("");
+    let s = [Sess::new(1, "work", vec![vec![101]]).window_names(&["a-window-name-far-too-long"])];
+    open(&sub, &s);
+    let lines = settled(&sub, &s, 1);
+    line_with(
+        &lines,
+        "   \u{25b8} \u{2514}\u{2500} 1 a-window-name-\u{2026}",
+    );
 }
 
 /// An agent's session name too long for the band ends in an ellipsis, and its window number after

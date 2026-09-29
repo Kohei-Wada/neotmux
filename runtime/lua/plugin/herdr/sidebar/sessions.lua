@@ -108,7 +108,7 @@ M.tokens = {
     end,
     -- Nothing for a window nobody has named: its number is what it is called until then.
     name = function(it)
-      return it.name, it.current and colors.current_window or colors.window
+      return it.name, it.current and colors.current_window or colors.window, false, true
     end,
   },
   panes = {
