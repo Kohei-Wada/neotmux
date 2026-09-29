@@ -6,7 +6,7 @@
 
 A session name or git branch too long for the sidebar was cut at the band's edge, taking the
 branch's `↑`/`↓` counts with it. Both now end in `…` where they would overflow, and the counts
-stay. An agent row's session, window, agent and command, and a window name in the tree, do the same.
+stay. An agent row's session, window, agent and command, a window name in the tree, and a pane's command, do the same.
 
 ### One place for every plugin's colours
 

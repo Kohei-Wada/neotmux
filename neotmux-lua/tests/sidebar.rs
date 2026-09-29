@@ -21,8 +21,9 @@ struct Sess {
     name: &'static str,
     windows: Vec<Vec<u32>>,
     focus: u32,
-    /// Panes that report `agent` as their command; every other pane reports `cat`.
+    /// Panes that report `agent` as their command; every other pane reports `command`.
     agents: Vec<u32>,
+    command: &'static str,
     /// The directory every pane of the session reports, or none.
     cwd: Option<String>,
     /// Each window's name, left to right; a window past the end has none.
@@ -38,6 +39,7 @@ impl Sess {
             windows,
             focus,
             agents: Vec::new(),
+            command: "cat",
             cwd: None,
             window_names: Vec::new(),
         }
@@ -50,6 +52,11 @@ impl Sess {
 
     fn agents(mut self, panes: &[u32]) -> Self {
         self.agents = panes.to_vec();
+        self
+    }
+
+    fn command(mut self, command: &'static str) -> Self {
+        self.command = command;
         self
     }
 
@@ -168,7 +175,11 @@ fn frame_in(sub: &Built, surface: Size, sessions: &[Sess], current: u32) -> Vec<
             .iter()
             .flatten()
             .map(|p| {
-                let command = if s.agents.contains(p) { "agent" } else { "cat" };
+                let command = if s.agents.contains(p) {
+                    "agent"
+                } else {
+                    s.command
+                };
                 (
                     PaneId::from(*p),
                     PaneInfo {
@@ -250,6 +261,19 @@ fn the_tree_is_what_the_shipped_sidebar_draws() {
     line_with(&lines, "work");
     line_with(&lines, "1.1 cat");
     line_with(&lines, "1.2 cat");
+}
+
+/// A pane's command too long for the band ends in an ellipsis, in its own row and in its
+/// session's, where the pane count after it stays.
+#[test]
+fn a_pane_command_too_long_for_the_band_ends_in_an_ellipsis() {
+    let (_dir, sub) =
+        built("require('plugin.herdr.sidebar').widths = { min = 20, max = 20, closed = 1 }\n");
+    let s = [Sess::new(1, "work", vec![vec![101]]).command("a-command-far-too-long")];
+    open(&sub, &s);
+    let lines = settled(&sub, &s, 1);
+    line_with(&lines, "  a-command-far\u{2026} 1p");
+    line_with(&lines, "1.1 a-comma\u{2026}");
 }
 
 #[test]

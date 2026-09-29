@@ -89,7 +89,7 @@ M.tokens = {
       return it.name, it.here and colors.current_session or colors.session
     end,
     command = function(it)
-      return it.command, colors.detail
+      return it.command, colors.detail, false, true
     end,
     panes = function(it)
       return it.panes .. "p", colors.detail
@@ -126,7 +126,7 @@ M.tokens = {
       return it.number, it.focused and colors.focused_pane or colors.pane
     end,
     command = function(it)
-      return it.command, colors.detail
+      return it.command, colors.detail, false, true
     end,
   },
 }
