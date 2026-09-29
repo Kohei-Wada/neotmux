@@ -194,9 +194,19 @@ local function watch(pane, focused)
   seen[pane] = now
 end
 
+-- The pane in front of you, if anybody is looking at this session at all: every session
+-- ticks, and the focus of one you have walked away from is the pane an agent was left in.
+local function looking()
+  local name = neotmux.session.current()
+  if name == nil or neotmux.session.attached(name) == 0 then
+    return nil
+  end
+  return neotmux.pane.current()
+end
+
 g.on_tick(function()
   reconsider()
-  local focused = M.only_when_away and neotmux.pane.current() or nil
+  local focused = M.only_when_away and looking() or nil
   for _, pane in ipairs(require("neotmux.panes").all()) do
     watch(pane, focused)
   end

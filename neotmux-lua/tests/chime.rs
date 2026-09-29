@@ -66,6 +66,9 @@ fn built(init: &str, runner: Rc<FakeRunner>) -> (tempfile::TempDir, Built) {
     )
     .unwrap();
     assert!(sub.run_init().is_empty());
+    // Named and looked at by one client, as the session you are in is.
+    sub.name_session(support::one(), "work");
+    sub.publish_attached(support::one(), 1);
     let shown = vec![PaneId::from(ONE), PaneId::from(TWO)];
     sub.begin_frame(
         support::one(),
@@ -182,6 +185,22 @@ fn the_focused_pane_is_silent_by_default() {
     assert!(
         runner.started.borrow().is_empty(),
         "the pane in front of you chimed"
+    );
+}
+
+/// A session nobody is attached to has no pane in front of you, so its focused pane is the
+/// one an agent was left working in, and it chimes like any other.
+#[test]
+fn the_focused_pane_of_a_session_nobody_is_looking_at_chimes() {
+    let runner = FakeRunner::new();
+    let (_dir, sub) = built(TWO_PANES, Rc::clone(&runner));
+    sub.publish_attached(support::one(), 0);
+    blocked(&sub, ONE);
+    frame(&sub);
+    assert_eq!(
+        runner.started.borrow().len(),
+        1,
+        "the focused pane of an unattached session was silenced"
     );
 }
 
