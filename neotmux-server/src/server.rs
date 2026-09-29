@@ -209,7 +209,13 @@ fn nothing_to_serve(serving: &Serving<'_>, plugins: &Plugins) -> anyhow::Result<
 /// can be asked at any point of a frame without risking one.
 pub(crate) fn taken(listener: &UnixListener) -> anyhow::Result<Option<UnixStream>> {
     match listener.accept() {
-        Ok((stream, _)) => Ok(Some(stream)),
+        Ok((stream, _)) => {
+            // macOS hands the listener's O_NONBLOCK on to what it accepts; Linux does not.
+            stream
+                .set_nonblocking(false)
+                .context("make a client's socket blocking")?;
+            Ok(Some(stream))
+        }
         Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => Ok(None),
         Err(err) => Err(err).context("accept a client"),
     }
@@ -638,6 +644,8 @@ fn deliver(clients: &mut [Attached], i: usize, sessions: &mut Sessions, plugins:
 
 #[cfg(test)]
 mod tests {
+    use std::os::fd::AsRawFd as _;
+
     use super::*;
 
     /// Two sessions asking for a reload in the same frame reload the config once, as the
@@ -664,5 +672,19 @@ mod tests {
             },
         )];
         assert_eq!(reload_requested(&asked), None);
+    }
+
+    /// The link reads a client as a blocking socket, so one accepted off the non-blocking
+    /// listener must not come out non-blocking, which is what macOS would otherwise hand over.
+    #[test]
+    fn a_taken_client_is_blocking() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let listener = UnixListener::bind(dir.path().join("s.sock")).expect("bind");
+        listener.set_nonblocking(true).expect("nonblocking");
+        let _client = UnixStream::connect(dir.path().join("s.sock")).expect("connect");
+        let stream = taken(&listener).expect("accept").expect("a client");
+        let flags =
+            nix::fcntl::fcntl(stream.as_raw_fd(), nix::fcntl::FcntlArg::F_GETFL).expect("F_GETFL");
+        assert_eq!(flags & nix::libc::O_NONBLOCK, 0);
     }
 }
