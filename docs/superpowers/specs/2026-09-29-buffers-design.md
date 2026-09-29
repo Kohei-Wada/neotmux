@@ -75,11 +75,10 @@ neotmux.buf.delete(buf)                                -- idempotent
   lines)` inserts before line 2.
 - `set_lines` raises on an index past the end (Neovim's `strict = true`), a non-string line, or a
   line holding `\n`. These are typos, the same class `reserve` raises for.
-- A buffer has a kind, `text`, and only `text` exists. The kind is there so a terminal buffer can
-  be added without renaming anything (§1, non-goals).
-- The owner is the source that created it, or the group it was created through. A failed load,
-  `config-reload` emptying the group, or the unsubscription an over-budget plugin earns deletes
-  it, the same fate a band or a float has. A deleted buffer's handle raises on every call but
+- The host's type is `TextBuffer`, not `Buffer`, so a terminal buffer can sit beside it later
+  without renaming anything (§1, non-goals). There is no kind field until there is a second kind.
+- The owner is the source that created it, or the group it was created through. A failed load
+  or `config-reload` emptying the group deletes it, the same fate a band or a float has. A deleted buffer's handle raises on every call but
   `delete`.
 - One VM serves every session, so a buffer is not a session's. The sidebar has one buffer, shown
   in every session's band.
@@ -150,8 +149,9 @@ buffer into `DrawCmd`s against the window's rectangle **of this frame**: a `Rect
   lost on a geometry change. A buffer is projected afresh every frame, so it has no such problem.
 - The frame is recomposed when a buffer shown in the session changed, the same way a changed
   overlay makes the session dirty today.
-- A buffer changed in session A's event is drawn in session B when B next makes a frame, which
-  for an attached, idle B is within the 250 ms idle tick. That is the lag the sidebar has today.
+- A buffer changed in session A's event reaches session B's next frame: a quiet frame reuses
+  the last overlay only while no buffer and no highlight group changed since it was drawn, and
+  otherwise recomputes the overlay (no tick runs for it).
 - Widths are `neotmux_proto::screen::width`, the measure `neotmux.width` and the renderer use.
 - New types follow the one-file-per-type rule: `TextBuffer`, `TextBuffers` (the store), `Extmark`,
   `HlGroups`, each in its own file under `draw/`; the Lua bindings are `api/buf.rs` and
@@ -167,18 +167,18 @@ What the sidebar needs to know, as events, in the existing `on_event` table:
 | `session_created` | `session` | a session started |
 | `session_closed` | `session` | a session ended |
 | `session_renamed` | `session`, `from` | a session was renamed |
-| `window_created` | `window` | a window was made |
-| `window_closed` | `window` | a window's last pane went |
 | `window_renamed` | `window` | a window was named or unnamed |
 
 - `pane_changed` is Neovim's `TextChanged` beside its `on_bytes`: `pane_output` still fires per
   chunk with the bytes, for a plugin that reads them, and `pane_changed` is coalesced by the host
   at the end of the drain. A plugin that only wants to know is not handed every chunk.
-- `pane_opened`, `pane_closed`, `focus_changed` and `resized` exist and are used as they are.
+- `pane_opened`, `pane_closed`, `focus_changed`, `resized`, `window_opened`, `window_closed` and
+  `window_changed` exist and are used as they are.
 - **Across sessions.** Events are dispatched bound to the session they happened in, as today, so
   `neotmux.session.current()` and `pane.*` inside a handler speak of that session. Session events
-  are dispatched bound to the session they name; `session_closed` is dispatched unbound, in the
-  next dispatch of any session, with only the name; inside it `neotmux.session.current()` is nil.
+  are dispatched bound to the session they name; `session_closed` is dispatched unbound, directly
+  from where the server ends the session and before the Lua layer forgets it, with only the name,
+  the way `unload` is.
 - `window_renamed` and the session events are raised where the server applies the op that
   caused them, not by the Lua call asking for it: a rename refused or queued is not an event.
 
@@ -218,7 +218,8 @@ its tree with it.
   overrun source's drawing is discarded, and it is deliberate — a notification about the Lua layer
   failing already has its own surface, and a sidebar that froze is easier to diagnose than one that
   vanished.
-- An over-budget plugin is unsubscribed as today, and its buffers and windows go with it.
+- An over-budget plugin has its ticks unsubscribed as today. Its floats and bands survive that,
+  and so do its buffers: what it last wrote stays up.
 - `config-reload` empties the group; the sidebar comes back by building its model from nothing,
   the same path it takes at load.
 
