@@ -15,7 +15,8 @@ use neotmux_proto::{
 use crate::api::ctx::Ctx;
 use crate::api::{self, Opts, keymap};
 use crate::draw::{
-    BufWindow, Buffers, FloatId, Floats, HlGroups, PaneBands, Reservations, TextBuffers, project,
+    BufWindow, Buffers, FloatId, Floats, HlGroups, Immediate, PaneBands, Reservations, TextBuffers,
+    project,
 };
 use crate::host::{Ambient, Clipboard, Op, OpBuffer, PaneInfos, PaneTtys, Runner, WindowIds};
 use crate::plugin::{
@@ -1027,6 +1028,20 @@ impl LuaSubsystem {
     }
 
     pub fn frame_output(&self) -> Vec<DrawCmd> {
+        self.frame_over(&self.frame_immediate())
+    }
+
+    /// What this frame's tick drew with `ctx:*`, for `frame_over` now or on a later quiet
+    /// frame of the same session.
+    pub fn frame_immediate(&self) -> Immediate {
+        Immediate {
+            plain: self.buffers.applicable(),
+            floats: self.buffers.applicable_floats(),
+        }
+    }
+
+    /// The buffers as they are now, projected into their windows, with `immediate` over them.
+    pub fn frame_over(&self, immediate: &Immediate) -> Vec<DrawCmd> {
         let mut bands = Vec::new();
         let mut floats: BTreeMap<FloatId, Vec<DrawCmd>> = BTreeMap::new();
         for (window, buf) in self.text_buffers.shown() {
@@ -1052,9 +1067,9 @@ impl LuaSubsystem {
         // A buffer under every source's immediate drawing; a float's buffer under that
         // float's drawing, and floats in grant order over everything.
         let mut out = bands;
-        out.extend(self.buffers.applicable());
-        for (id, cmds) in self.buffers.applicable_floats() {
-            floats.entry(id).or_default().extend(cmds);
+        out.extend(immediate.plain.iter().cloned());
+        for (id, cmds) in &immediate.floats {
+            floats.entry(*id).or_default().extend(cmds.iter().cloned());
         }
         for cmds in floats.into_values() {
             out.extend(cmds);

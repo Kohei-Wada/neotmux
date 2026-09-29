@@ -275,10 +275,12 @@ fn set_buf_on_a_deleted_buffer_raises() {
             "lua/plugin/b.lua",
             "local buf = neotmux.buf.create()\n\
              neotmux.buf.delete(buf)\n\
-             neotmux.log.info('set_buf ' .. tostring(pcall(function() neotmux.reserve('left', 4):set_buf(buf) end)))\n\
+             local ok, err = pcall(function() neotmux.reserve('left', 4):set_buf(buf) end)\n\
+             neotmux.log.info('set_buf ' .. tostring(ok) .. ' ' .. tostring(err))\n\
              return {}",
         ),
     ]);
     let ops = format!("{:?}", sub.drain_ops(None));
     assert!(ops.contains("set_buf false"), "{ops}");
+    assert!(ops.contains("does not exist"), "{ops}");
 }

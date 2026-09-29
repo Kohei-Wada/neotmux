@@ -139,13 +139,15 @@ impl Plugins {
                 (drawn.overlay.clone(), drawn.views.clone())
             }
             Some(drawn) => {
-                // What the ticks drew still stands; only a buffer or a group moved.
+                // What the tick drew still stands; only a buffer or a group moved.
+                let immediate = drawn.immediate.clone();
                 let views = drawn.views.clone();
-                let overlay = self.lua.frame_output();
+                let overlay = self.lua.frame_over(&immediate);
                 self.drawn.insert(
                     session,
                     Drawn {
                         overlay: overlay.clone(),
+                        immediate,
                         views: views.clone(),
                         notices,
                         retained,
@@ -155,13 +157,15 @@ impl Plugins {
             }
             None => {
                 self.lua.dispatch_tick(session);
-                let overlay = self.lua.frame_output();
+                let immediate = self.lua.frame_immediate();
+                let overlay = self.lua.frame_over(&immediate);
                 let views = self.lua.frame_views();
                 let retained = self.lua.retained_generation();
                 self.drawn.insert(
                     session,
                     Drawn {
                         overlay: overlay.clone(),
+                        immediate,
                         views: views.clone(),
                         notices,
                         retained,
@@ -453,11 +457,11 @@ fn refuse(tag: &str, call: &str, why: &str) {
 mod tests {
     use std::rc::Rc;
 
-    use neotmux_lua::LuaSubsystem;
     use neotmux_lua::host::{JobChunk, JobSpec, Runner, Running};
     use neotmux_lua::plugin::Layers;
+    use neotmux_lua::{CommandOutcome, LuaSubsystem};
     use neotmux_proto::geom::Window;
-    use neotmux_proto::{Epoch, Geometry, PaneId, Rect, SessionId, Size, WindowId};
+    use neotmux_proto::{DrawCmd, Epoch, Geometry, PaneId, Rect, SessionId, Size, WindowId};
     use neotmux_pty::PaneTerminals;
 
     use super::*;
@@ -526,6 +530,67 @@ mod tests {
                 ..Default::default()
             },
         );
+    }
+
+    fn tick_of(rows: u16, quiet: bool) -> Tick {
+        let pane = PaneId::from(1);
+        let size = Size { rows, cols: 80 };
+        let rect = Rect::new(8, 0, size.cols - 8, size.rows);
+        Tick {
+            steps: Vec::new(),
+            epoch: Epoch::new(size, vec![pane], Some(pane)),
+            geometry: Geometry {
+                area: rect,
+                panes: vec![(pane, rect)],
+                focus: Some(pane),
+                ..Default::default()
+            },
+            pane_info: None,
+            pane_tty: BTreeMap::new(),
+            revisions: BTreeMap::new(),
+            quiet,
+        }
+    }
+
+    fn texts(answer: &Answer) -> Vec<String> {
+        answer
+            .tock
+            .overlay
+            .iter()
+            .filter_map(|cmd| match cmd {
+                DrawCmd::Text { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The Lua layer's committed drawing is one map, left under whichever session ticked
+    /// last: a quiet frame that re-projects a changed buffer keeps its own session's drawing.
+    #[test]
+    fn a_quiet_recompute_keeps_its_own_sessions_drawing_after_another_ticked() {
+        let (_dir, mut plugins) = built(
+            "local buf = neotmux.buf.create()
+             neotmux.buf.set_lines(buf, 0, -1, { 'before' })
+             neotmux.reserve('left', 8):set_buf(buf)
+             neotmux.command.add('change', function()
+               neotmux.buf.set_lines(buf, 0, -1, { 'after' })
+             end)
+             neotmux.on_tick(function(ctx) ctx:text(nil, 20, 0, 'mine') end)",
+        );
+        let (a, b) = (SessionId::from(1), SessionId::from(2));
+        let applied = plugins.lua.reserved();
+        plugins
+            .lua
+            .lay_out_reservations(a, Size { rows: 24, cols: 80 }, applied);
+        let first = plugins.respond(a, tick_of(24, false));
+        assert_eq!(texts(&first), vec!["before", "mine"]);
+        plugins.respond(b, tick_of(12, false));
+        assert!(matches!(
+            plugins.lua.run_command(a, "change", &[]),
+            CommandOutcome::Ran(_)
+        ));
+        let quiet = plugins.respond(a, tick_of(24, true));
+        assert_eq!(texts(&quiet), vec!["after", "mine"]);
     }
 
     /// A job's `on_exit` runs inside `forget_session`, with the dying session bound, so what
