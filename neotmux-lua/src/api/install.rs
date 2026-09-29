@@ -7,7 +7,7 @@ use neotmux_proto::{Geometry, Level, PaneId};
 
 use crate::LoadFailure;
 use crate::api::Sweep;
-use crate::draw::{Buffers, Floats, PaneBands, Reservations};
+use crate::draw::{Buffers, Floats, HlGroups, PaneBands, Reservations};
 use crate::host::{Op, OpBuffer, PaneInfos, PaneTtys, WindowIds};
 use crate::plugin::{
     self, Commands, Groups, Held, Kind, KindTag, RegistrationId, Registry, SourceId, Sources,
@@ -37,6 +37,7 @@ pub(crate) struct Shared {
     pub(crate) pane_bands: Rc<PaneBands>,
     pub(crate) window_ids: Rc<WindowIds>,
     pub(crate) floats: Rc<Floats>,
+    pub(crate) hl_groups: Rc<HlGroups>,
     /// `$HOME` as the host read it, absent where the process had none.
     pub(crate) home: Option<String>,
     /// Which session this client is in, as the host knows it. Beside `home` in kind:
@@ -188,6 +189,7 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
         pane_bands,
         window_ids,
         floats,
+        hl_groups,
         home,
         ambient,
         groups,
@@ -401,6 +403,10 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
     let log = super::log::install(lua, sources.clone(), ops.clone())?;
     let log = seal(lua, log, "neotmux.log")?;
     neotmux.set("log", log)?;
+
+    let hl = super::hl::install(lua, hl_groups.clone())?;
+    let hl = seal(lua, hl, "neotmux.hl")?;
+    neotmux.set("hl", hl)?;
 
     let opt = super::opt::install(lua, opts.clone())?;
     neotmux.set("opt", opt)?;

@@ -2496,6 +2496,12 @@ neotmux.on_tick(function(ctx)
 end)
 ```
 
+Every selector with a default or a set is also published as highlight groups, one per part,
+named `selector:part` — `sidebar:branch`, `float.list:frame` — for buffers to be coloured by
+(see Buffers). `neotmux.hl.set(name, { fg, bg, bold })` defines one of your own and
+`neotmux.hl.get(name)` reads one back; a theme change republishes them, and every buffer shown
+is recoloured on the next frame without its plugin doing anything.
+
 ### The mode convention
 
 The host has no concept of a mode. What makes a plugin modal is entirely on the plugin's side —

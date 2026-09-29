@@ -5,6 +5,7 @@ pub mod event;
 pub mod float;
 mod freeze;
 mod group;
+mod hl;
 mod install;
 pub mod job;
 pub mod keymap;

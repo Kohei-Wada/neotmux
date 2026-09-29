@@ -48,7 +48,7 @@ fn want(opts: Option<&Table>) -> mlua::Result<Want> {
 
 /// A colour as the draw verbs take one, so that a colour read can be drawn back: a palette
 /// index, `#rrggbb`, or nil for the terminal's own.
-fn color_value(lua: &Lua, color: neotmux_proto::Color) -> mlua::Result<Value> {
+pub(crate) fn color_value(lua: &Lua, color: neotmux_proto::Color) -> mlua::Result<Value> {
     Ok(match color {
         neotmux_proto::Color::Default => Value::Nil,
         neotmux_proto::Color::Idx(i) => Value::Integer(i64::from(i)),

@@ -33,12 +33,22 @@ for name, hex in pairs(require("neotmux.themes.catppuccin-mocha")) do
   M.colors[name] = hex
 end
 
+-- Told after every change of the colours, so `neotmux.style` can republish its highlight groups.
+-- Internal: the underscore says so.
+local watchers = {}
+function M._watch(fn)
+  watchers[#watchers + 1] = fn
+end
+
 -- Replaces the colours named in `t` and leaves the rest; a name of its own is added.
 function M.set(t)
   for name, hex in pairs(t) do
     M.colors[name] = hex
   end
   M.generation = M.generation + 1
+  for _, fn in ipairs(watchers) do
+    fn()
+  end
 end
 
 -- A whole shipped theme, by name — `theme.names`, `catppuccin-*` first. Raises for a name that

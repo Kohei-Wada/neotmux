@@ -542,7 +542,7 @@ fn pairs_over_the_sealed_top_level_table_sees_the_real_fields() {
     };
     assert_eq!(
         text,
-        "clipboard command costs detach float group job keymap log notifications notify now on_event on_key on_tick on_write opt pane quit regex reload reserve reserve_pane resubscribe session session_name timer width window",
+        "clipboard command costs detach float group hl job keymap log notifications notify now on_event on_key on_tick on_write opt pane quit regex reload reserve reserve_pane resubscribe session session_name timer width window",
         "the top-level ABI surface changed"
     );
 }

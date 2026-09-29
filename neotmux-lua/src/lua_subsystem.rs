@@ -14,7 +14,7 @@ use neotmux_proto::{
 
 use crate::api::ctx::Ctx;
 use crate::api::{self, Opts, keymap};
-use crate::draw::{Buffers, Floats, PaneBands, Reservations};
+use crate::draw::{Buffers, Floats, HlGroups, PaneBands, Reservations};
 use crate::host::{Ambient, Clipboard, Op, OpBuffer, PaneInfos, PaneTtys, Runner, WindowIds};
 use crate::plugin::{
     Commands, Groups, Kind, KindTag, Layers, RegistrationId, Registry, SourceId, Sources,
@@ -47,6 +47,7 @@ pub struct LuaSubsystem {
     pane_bands: Rc<PaneBands>,
     window_ids: Rc<WindowIds>,
     floats: Rc<Floats>,
+    hl_groups: Rc<HlGroups>,
     jobs: Rc<Jobs>,
     timers: Rc<Timers>,
     groups: Rc<Groups>,
@@ -107,6 +108,7 @@ impl LuaSubsystem {
         let pane_bands = Rc::new(PaneBands::new());
         let window_ids = Rc::new(WindowIds::new());
         let floats = Rc::new(Floats::new());
+        let hl_groups = Rc::new(HlGroups::new());
         let buffers = Rc::new(Buffers::new());
 
         let jobs = Rc::new(Jobs::new(runner));
@@ -151,6 +153,7 @@ impl LuaSubsystem {
                 pane_bands: pane_bands.clone(),
                 window_ids: window_ids.clone(),
                 floats: floats.clone(),
+                hl_groups: hl_groups.clone(),
                 home,
                 ambient: Rc::clone(&ambient),
                 groups: groups.clone(),
@@ -182,6 +185,7 @@ impl LuaSubsystem {
             pane_bands,
             window_ids,
             floats,
+            hl_groups,
             jobs,
             timers,
             groups,
@@ -1184,6 +1188,10 @@ impl LuaSubsystem {
     /// tick starts drawing into a float.
     pub fn floats(&self) -> &Floats {
         &self.floats
+    }
+
+    pub fn hl_groups(&self) -> &HlGroups {
+        &self.hl_groups
     }
 
     pub fn opt(&self) -> Opts {

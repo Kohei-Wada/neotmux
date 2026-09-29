@@ -31,12 +31,14 @@ function M.default(selector, parts)
   copy_into(own, parts)
   defaults[selector] = own
   cache = {}
+  M.publish()
 end
 
 function M.set(selector, parts)
   sets[selector] = sets[selector] or {}
   copy_into(sets[selector], parts)
   cache = {}
+  M.publish()
 end
 
 -- `*`, then each dotted prefix of `selector`, ending with `selector` itself.
@@ -82,5 +84,27 @@ function M.get(selector)
   cache[selector] = resolved
   return resolved
 end
+
+-- Every selector with a default or a set, published as `selector:part` highlight groups for
+-- buffers to be coloured by. All of them each time: a set on `float` changes `float.list`'s.
+local function publish()
+  if not (neotmux and neotmux.hl) then
+    return
+  end
+  local selectors = {}
+  for selector in pairs(defaults) do
+    selectors[selector] = true
+  end
+  for selector in pairs(sets) do
+    selectors[selector] = true
+  end
+  for selector in pairs(selectors) do
+    for part, colour in pairs(M.get(selector)) do
+      neotmux.hl.set(selector .. ":" .. part, { fg = colour })
+    end
+  end
+end
+M.publish = publish
+theme._watch(publish)
 
 return M

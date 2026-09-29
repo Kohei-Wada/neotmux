@@ -171,7 +171,10 @@ fn parse_fg_only(colours: Option<Table>) -> mlua::Result<Color> {
 
 /// A channel the caller did not name at all, as distinct from one named `Default`. Only
 /// `tint` can tell the two apart: everything else paints a whole cell.
-fn optional_colour_field(table: &Table, field: &'static str) -> mlua::Result<Option<Color>> {
+pub(crate) fn optional_colour_field(
+    table: &Table,
+    field: &'static str,
+) -> mlua::Result<Option<Color>> {
     match table.get::<Value>(field)? {
         Value::Nil => Ok(None),
         _ => colour_field(table, field).map(Some),
