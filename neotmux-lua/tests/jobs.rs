@@ -956,8 +956,7 @@ fn a_job_whose_callback_keeps_overrunning_is_killed_and_says_the_budget_did_it()
                 "    neotmux.job.start({ 'tail' }, {\n\
                        buffered = false,\n\
                        on_stdout = function(lines)\n\
-                         local t = os.clock()\n\
-                         while os.clock() - t < 0.05 do end\n\
+                         while true do end\n\
                        end,\n\
                        on_exit = function(code, out, errout, err)\n\
                          neotmux.log.info('exit code=' .. tostring(code)\n\
@@ -1011,8 +1010,7 @@ fn a_job_callback_inside_its_budget_forgives_the_overruns_before_it() {
                        on_stdout = function(lines)\n\
                          neotmux.log.info('saw ' .. lines[1])\n\
                          if lines[1] == 'slow' then\n\
-                           local t = os.clock()\n\
-                           while os.clock() - t < 0.05 do end\n\
+                           while true do end\n\
                          end\n\
                        end,\n\
                      })",

@@ -391,6 +391,17 @@ mod tests {
             lock: dir.path().join("default.lock"),
         };
         drop(UnixListener::bind(&paths.socket).expect("bind a listener and drop it"));
+        // Waited for: another test's thread forking in the moment before the drop hands its
+        // child the listener until that child execs, and the kernel answers out of the socket
+        // until it is torn down, which a loaded suite takes longer than the next line to do.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while UnixStream::connect(&paths.socket).is_ok() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the stale socket still had something behind it"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
 
         let listener = bind(&paths).expect("bind").expect("nobody was listening");
         assert!(connect(&paths.socket).expect("connect").is_some());

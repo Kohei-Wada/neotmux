@@ -284,12 +284,15 @@ fn stopping_a_one_shot_before_it_fires_answers_true() {
 /// frame.
 #[test]
 fn a_zero_interval_is_clamped_to_the_frame() {
+    // The timer is armed somewhere inside `built`, so "not yet" is counted from before it and
+    // "now" from after: a slow build then cannot put the first frame past the deadline.
+    let before = Instant::now();
     let (_dir, sub) = built("neotmux.timer.every(0, function() neotmux.log.info('fired') end)\n");
-    let start = Instant::now();
+    let after = Instant::now();
 
-    frame(&sub, start + Duration::from_millis(8));
+    frame(&sub, before + Duration::from_millis(8));
     assert!(logged(&sub).is_empty(), "fired inside the first frame");
-    frame(&sub, start + Duration::from_millis(16));
+    frame(&sub, after + Duration::from_millis(16));
     assert_eq!(logged(&sub), vec!["fired"]);
 }
 
@@ -302,16 +305,16 @@ fn a_timer_that_keeps_overrunning_is_stopped_and_the_tick_is_not() {
          neotmux.opt.tick_overrun_limit = 2\n\
          neotmux.timer.every(10, function()\n\
            neotmux.log.info('timer')\n\
-           local t = os.clock()\n\
-           while os.clock() - t < 0.05 do end\n\
+           while true do end\n\
          end)\n\
          neotmux.on_tick(function() neotmux.log.info('tick') end)\n",
     );
     let start = Instant::now();
 
-    // Ten milliseconds, not one: the timer spins for fifty either way, and a budget of one is
-    // one a slow runner overruns with a tick that only logs a line, which is the tick this is
-    // about keeping.
+    // The timer spins until the budget stops it, rather than for a time read off `os.clock`:
+    // that is the process's CPU, which other tests' threads run ahead of this one's, and the
+    // budget counts this thread's. Ten milliseconds, not one: a budget of one is one a slow
+    // runner overruns with a tick that only logs a line, which is the tick this is about keeping.
     //
     // Per frame, because the tick shares the timer's budget: a frame the timer spun in
     // may lose its own `tick` line to the overrun that spinning caused, and counting the

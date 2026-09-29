@@ -13,8 +13,8 @@ fn every_source_is_counted_once_a_tick_most_expensive_first() {
     let (_dir, sub) = built(
         "require('neotmux.defaults').status = true\n\
          neotmux.on_tick(function()\n\
-           local t = os.clock()\n\
-           while os.clock() - t < 0.003 do end\n\
+           local t = neotmux.now()\n\
+           while neotmux.now() - t < 3 do end\n\
          end)\n\
          neotmux.on_key(function(key)\n\
            if key ~= 'J' then return false end\n\
