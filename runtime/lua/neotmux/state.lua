@@ -15,11 +15,9 @@
 --
 -- The guess itself now lives in `neotmux.detect`, which reads a screen by rules rather than by
 -- pattern, and knows the difference between a spinner's blink and a turn actually finishing.
--- `M.of` asks it first. Then it asks `neotmux.jev` — a decision about the pane's own text,
--- from a model that has never seen it and needs no teaching — and only then the pattern list
--- in this file, which is what answers for a pane nothing else does: a shell asking in words
--- the list below never listed, a pane with no key set, a machine off the net. Each layer
--- stands in for the one above it failing, and each costs less than the one below it.
+-- `M.of` asks it first, and only then the pattern list in this file, which is what answers for
+-- a pane nothing else does: a shell asking in words the list below never listed. The second
+-- layer stands in for the first failing, and costs less than it.
 --
 -- Which panes those are is the ruleset's own answer: `neotmux.detect` asks it, through its
 -- optional `claims(info)`, before running a rule. The shipped Claude ruleset names the *shells*
@@ -112,7 +110,6 @@ end
 function M.forget(pane)
   seen[pane] = nil
   detect.forget(pane)
-  require("neotmux.jev").forget(pane)
 end
 
 g.on_event("pane_closed", function(event)
@@ -156,10 +153,6 @@ function M.of(pane)
   local detected, view = detect.of(pane)
   if detected ~= nil then
     return detected
-  end
-  local judged = require("neotmux.jev").of(pane)
-  if judged ~= nil then
-    return judged
   end
   return fallback(pane, view and view.lines or nil)
 end

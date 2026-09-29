@@ -2142,40 +2142,6 @@ fn a_working_agent_that_settles_unwatched_is_done_with_no_event_and_no_timer() {
     line_with(&frame(&sub, &s, 1), "home fake done");
 }
 
-/// The model's decision about a pane lands between frames with no output and no event, and the
-/// sidebar shows it: `neotmux.seen` notices a decision landed.
-#[test]
-fn a_decision_that_lands_with_no_output_is_in_the_sidebar() {
-    use neotmux_lua::host::JobChunk;
-    let runner = support::FakeRunner::new();
-    let answer = r#"{"model":"jev-1.13.0","answers":{"p101":{"type":"choice","choice":"blocked","probabilities":{"blocked":0.9,"working":0.05,"idle":0.05},"confidence":0.9}},"usage":{"input_tokens":300,"output_tokens":20}}
-200"#;
-    runner.will_say(vec![vec![
-        JobChunk::Stdout(answer.as_bytes().to_vec()),
-        JobChunk::Exited(0),
-    ]]);
-    let (_dir, sub) = support::built_running(
-        &preamble(
-            TREE,
-            "local jev = require('neotmux.jev')\n\
-             jev.enabled, jev.settle_ms = true, 1\n\
-             require('neotmux.state').working_for = 0\n",
-        ),
-        runner.clone(),
-    );
-    let s = [Sess::new(1, "work", vec![vec![101]])];
-    open(&sub, &s);
-    show(&sub, 101, "Select an option (1-3):");
-    line_with(&settled(&sub, &s, 1), "\u{25cb} work");
-    let mut lines = Vec::new();
-    for _ in 0..4 {
-        std::thread::sleep(std::time::Duration::from_millis(20));
-        lines = frame(&sub, &s, 1);
-    }
-    assert_eq!(runner.started.borrow().len(), 1, "{lines:#?}");
-    line_with(&lines, "\u{25c9} work");
-}
-
 /// A pane that closes is forgotten: nothing of what it went through is kept.
 #[test]
 fn a_pane_that_closes_is_forgotten_by_seen() {

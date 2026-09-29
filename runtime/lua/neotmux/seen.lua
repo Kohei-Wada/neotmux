@@ -7,8 +7,8 @@
 -- `of` only reads; what a pane went through is recorded here, and a pane is asked again only when
 -- something that can move it happened: its output or its program (`pane_changed`,
 -- `pane_info_changed`), its opening, time while it is `working` (a detector's settle and the
--- fallback's grace run out with no output), a model's decision landing (`neotmux.jev`), and
--- somebody coming to look at a pane that is done. A pane is looked at when it is in the current
+-- fallback's grace run out with no output), and somebody coming to look at a pane that is
+-- done. A pane is looked at when it is in the current
 -- window of a session a client is attached to (`neotmux.session.attached`): every session ticks
 -- whether or not anybody is there, so a session nobody is at does not count as being read.
 --
@@ -18,7 +18,6 @@
 -- Not a detector's answer, which is why it is not in `neotmux.state`: the chime and the watcher
 -- ask what a pane is doing, and this is about what you have and have not looked at.
 local detect = require("neotmux.detect")
-local jev = require("neotmux.jev")
 local state = require("neotmux.state")
 local g = neotmux.group("neotmux.seen")
 
@@ -38,8 +37,7 @@ local unseen = {}
 local owner = {}
 
 -- Per session: its panes, the ones last seen `working` and the ones done, which are the only
--- ones its tick asks again, and the `neotmux.jev` decision count its tick last asked every pane
--- at, nil until its first tick has.
+-- ones its tick asks again, and whether its first tick has asked every pane yet.
 local sessions = {}
 
 local function looked_at(pane)
@@ -160,8 +158,8 @@ function M.update()
     return
   end
   local s = session(name)
-  if s.decisions ~= jev.decisions then
-    s.decisions = jev.decisions
+  if not s.swept then
+    s.swept = true
     for _, pane in ipairs(require("neotmux.panes").all()) do
       judge(pane)
     end

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### neotmux.jev is gone
+
+The layer of `neotmux.state` that sent a pane's text to TypeSafe's Jev model for a decision,
+off by default, is removed, and `neotmux.json` with it, which only it used. A pane no ruleset
+answers for goes straight to the pattern fallback, as it did with the layer off.
+
 ### A sidebar row you are at is painted up to the rule again
 
 The focused session, agent and navigate cursor are filled up to the band's `│` and no longer
