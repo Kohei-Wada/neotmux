@@ -1199,10 +1199,10 @@ const SETTLING: &str = "local detect = require('neotmux.detect')\n\
         match = function(v) return v.lines[#v.lines] == 'QUIET' end },\n\
     } }\n";
 
-/// A `working` pane that settles with no output after its last is shown idle once a frame after
-/// the settle has asked it again.
+/// A `working` pane that settles with no output after its last is shown idle the first frame
+/// after the settle: `neotmux.seen` asks a working pane again every frame.
 #[test]
-fn a_working_agent_that_settles_with_no_output_is_shown_idle_after_the_timer() {
+fn a_working_agent_that_settles_with_no_output_is_shown_idle_the_frame_after_the_settle() {
     let (_dir, sub) = built(SETTLING);
     let s = [Sess::new(1, "work", vec![vec![101]]).agents(&[101])];
     open(&sub, &s);
@@ -1219,14 +1219,23 @@ fn a_working_agent_that_settles_with_no_output_is_shown_idle_after_the_timer() {
 }
 
 /// The session that claimed the sidebar's timer ending before it ever fired does not take the
-/// clock with it: the next session to frame claims a new one, and it still judges the panes.
+/// clock with it: the next session to frame claims a new one, and it still asks git again.
 #[test]
 fn the_timer_outlives_the_session_that_claimed_it() {
-    let (_dir, sub) = built(SETTLING);
-    let both = [
-        Sess::new(1, "work", vec![vec![101]]).agents(&[101]),
-        Sess::new(2, "home", vec![vec![201]]).agents(&[201]),
-    ];
+    use neotmux_lua::host::JobChunk;
+    let runner = support::FakeRunner::new();
+    for _ in 0..16 {
+        runner.will_say(vec![vec![JobChunk::Exited(1)]]);
+    }
+    let (_dir, sub) = built_herdr_running(
+        "require('plugin.herdr.sidebar.spaces').refresh = 0\n",
+        runner.clone(),
+    );
+    let mut work = Sess::new(1, "work", vec![vec![101]]);
+    work.cwd = Some("/src/work".to_string());
+    let mut home = Sess::new(2, "home", vec![vec![201]]);
+    home.cwd = Some("/src/home".to_string());
+    let both = [work, home];
     open(&sub, &both);
     settled(&sub, &both, 1);
     let now = std::time::Instant::now();
@@ -1235,16 +1244,19 @@ fn the_timer_outlives_the_session_that_claimed_it() {
         session: "work".to_string(),
     });
     sub.forget_session(SessionId::from(1));
-    let home = [Sess::new(2, "home", vec![vec![201]]).agents(&[201])];
-    show(&sub, 201, "BUSY");
-    line_with(&settled(&sub, &home, 2), "\u{25cf} home:1.1 fake");
-    show(&sub, 201, "QUIET");
-    frame(&sub, &home, 2);
-    std::thread::sleep(std::time::Duration::from_millis(500));
+    let mut home = Sess::new(2, "home", vec![vec![201]]);
+    home.cwd = Some("/src/home".to_string());
+    let home = [home];
+    for _ in 0..3 {
+        frame(&sub, &home, 2);
+    }
+    let asked = runner.started.borrow().len();
     let now = std::time::Instant::now();
     sub.dispatch_timers(SessionId::from(2), now);
     sub.dispatch_timers(SessionId::from(2), now + std::time::Duration::from_secs(2));
-    line_with(&frame(&sub, &home, 2), "\u{25cb} home:1.1 fake");
+    let started = runner.started.borrow();
+    assert!(started.len() > asked, "git was not asked again");
+    assert_eq!(started[asked].cmd[..3], ["git", "-C", "/src/home"]);
 }
 
 /// A window named since the last render is in the tree the frame after `window_renamed` says so.

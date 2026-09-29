@@ -98,10 +98,10 @@ M.max_panes = 24
 -- What each pane is being held at, and against which screen. `quiet` is the settle's own
 -- bookkeeping: the last revision this module saw for a pane, and when it saw it.
 local verdicts = {}
+local quiet = {}
 -- Moves whenever a decision lands, which changes what `of` answers with no output and no event,
 -- so `neotmux.seen` knows to ask again.
 M.decisions = 0
-local quiet = {}
 -- The in-flight request, and the revision each of its panes was built from: an answer that
 -- comes back for a screen the pane has since left is about a past, and is dropped.
 local in_flight = false
