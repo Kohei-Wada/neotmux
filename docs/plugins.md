@@ -1684,6 +1684,7 @@ table.insert(require('plugin.herdr.sidebar').sections, {
   build = function(sidebar) return { rows = { { { text = 'hello' } } }, anchor = 1 } end,
   fit = function(model, height, sidebar) ... end,   -- optional: cut the rows to a height
   rail = function(sidebar) return { ... } end,      -- optional: its rows when folded
+  patch = function(sidebar, model, change) ... end, -- optional: rows again for a state change
 })
 ```
 
@@ -1695,6 +1696,16 @@ whether it shrinks: a row too wide for the band ends its first shrinking run in
 `…` so the runs after it stay on screen, as a space's name and branch, an agent's names and a window's name and a pane's command in the tree do. A section with no `rail` is its open rows cut to the rail's width. Without a `fit` a section is cut by
 `sidebar.scroll`, which keeps `anchor` on screen. A section whose `build` or `fit` raises is left
 out of that frame and named once through `neotmux.notify`.
+
+When all that changed is some panes' state, command or agent, or an agent's age, the band is not
+laid out again: each section's `patch` is handed the model its last `build` returned and `change`,
+`{ panes = { [pane] = true, ... }, aged = true | false }` — the panes whose facts moved, and
+whether the soonest age on screen has passed. It answers `{ { at = n, runs = row }, ... }`, the
+rows at those places in `model.rows` built again, and only the ones that differ are rewritten.
+It answers nil when the change is more than rows rewritten in place — a row more or fewer, an
+entry moving — and the band is laid out again, as it is for every section when one has no
+`patch`, or when a row it answers is off screen, goes blank or not, or would change the band's
+width.
 
 `h/j/k/l` are geometry, not list order: the pane you get is the one whose edge faces most of
 yours on that side, which is what you would point at however deeply the splits are nested.

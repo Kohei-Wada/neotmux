@@ -1875,3 +1875,29 @@ fn an_age_moving_on_rewrites_its_rows_without_a_render() {
         "{after:#?}"
     );
 }
+
+/// In a band whose width follows its rows, a row that narrows but was not the widest leaves the
+/// width where it was, so it is rewritten with the band not laid out again.
+#[test]
+fn a_row_narrowing_that_was_not_the_widest_is_rewritten_without_a_render() {
+    let (_dir, sub) = built_herdr(&format!(
+        "{AGENTS}{LETTERS}{RENDERS}require('plugin.herdr.sidebar').widths = {{ min = 20, max = 40, closed = 4 }}\n"
+    ));
+    let s = [
+        Sess::new(1, "a-rather-long-session-name", vec![vec![101]]),
+        Sess::new(2, "work", vec![vec![201]]).agents(&[201]),
+    ];
+    open(&sub, &s);
+    show(&sub, 201, "BUSY");
+    let tall = Size { rows: 20, cols: 80 };
+    frame_in(&sub, tall, &s, 1);
+    let before = frame_in(&sub, tall, &s, 1);
+    let first = renders(&sub);
+    show(&sub, 201, "DONE");
+    frame_in(&sub, tall, &s, 1);
+    let after = frame_in(&sub, tall, &s, 1);
+    assert_eq!(renders(&sub), first, "{after:#?}");
+    let row = line_with(&before, "   working fake");
+    assert_eq!(after[row], "   done fake", "{after:#?}");
+    line_with(&after, " a-rather-long-session-name");
+}

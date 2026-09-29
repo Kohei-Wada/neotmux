@@ -678,16 +678,17 @@ local function patch(was, buf, stale)
       end
     end
   end
-  -- A row not on screen may be one a fit would now keep, and a row of another width may be
-  -- one the band would be resized for.
+  -- A row not on screen may be one a fit would now keep, a row of another width may be one
+  -- the band would be resized for, and a row going blank or not is one a fit cuts first.
   local widest = layout.widest
   for _, edit in ipairs(edits) do
-    if not edit.rec.y_of[edit.at] then
+    if not edit.rec.y_of[edit.at] or edit.old.blank ~= edit.runs.blank then
       return false
     end
     local wide, before = segments.width(edit.runs), segments.width(edit.old)
     widest = math.max(widest, wide)
-    if width_at(widest) ~= layout.want or (wide < before and width_at(wide) ~= layout.want) then
+    local shrinks = wide < before and before >= layout.widest
+    if width_at(widest) ~= layout.want or (shrinks and width_at(wide) ~= layout.want) then
       return false
     end
   end
