@@ -3,10 +3,10 @@ use std::rc::Rc;
 
 use neotmux_layout::PaneIds;
 use neotmux_proto::wire::{Done, End, ToClient};
-use neotmux_proto::{Event, SessionId, Size, wire};
+use neotmux_proto::{Event, Level, SessionId, Size, wire};
 use neotmux_pty::PaneTerminals;
 use neotmux_pty::child::Waker;
-use neotmux_sys::Link;
+use neotmux_sys::{Link, logging};
 
 use crate::{Plugins, Session, Setup};
 
@@ -237,24 +237,38 @@ pub(crate) fn setup_for(plugins: &Plugins, size: Size) -> Setup {
     }
 }
 
-/// A session ends: its clients are told, its shells go with it — `Shells::drop` closes every
-/// child — and the Lua layer forgets what it was holding for it.
+/// A session ends: its clients move to the next session left, or are told to leave when it
+/// was the last, its shells go with it — `Shells::drop` closes every child — and the Lua
+/// layer forgets what it was holding for it.
 pub(crate) fn end_session(
     id: SessionId,
     plugins: &mut Plugins,
     sessions: &mut Sessions,
     clients: &mut Vec<Attached>,
 ) {
-    for client in clients.iter_mut().filter(|client| client.session == id) {
-        let _ = client
-            .link
-            .send(&wire::encode_to_client(&ToClient::Done(&Done {
-                frame: None,
-                end: Some(End::Quit),
-            })));
-        client.gone = true;
+    match successor(id, sessions) {
+        Some(to) => {
+            if let Err(err) = switch_clients(to, Some(id), clients, sessions, plugins) {
+                logging::log(
+                    Level::Error,
+                    "neotmux-server",
+                    &format!("moving the clients of an ended session failed: {err:#}"),
+                );
+            }
+        }
+        None => {
+            for client in clients.iter_mut().filter(|client| client.session == id) {
+                let _ = client
+                    .link
+                    .send(&wire::encode_to_client(&ToClient::Done(&Done {
+                        frame: None,
+                        end: Some(End::Quit),
+                    })));
+                client.gone = true;
+            }
+            clients.retain(|client| !client.gone);
+        }
     }
-    clients.retain(|client| !client.gone);
     if let Some(name) = sessions.live.get(&id).map(|held| held.name.clone()) {
         plugins
             .lua()
@@ -268,4 +282,13 @@ pub(crate) fn end_session(
     // last frame, so no frame will ever come and take it: drained here, or never.
     plugins.drain_teardown_ops(id);
     sessions.live.remove(&id);
+}
+
+/// Where the clients of an ending session go: the next session by id, or the one before it
+/// when it was the last.
+fn successor(id: SessionId, sessions: &Sessions) -> Option<SessionId> {
+    let mut ids = sessions.live.keys().copied();
+    ids.clone()
+        .find(|to| *to > id)
+        .or_else(|| ids.rfind(|to| *to < id))
 }

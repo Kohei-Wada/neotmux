@@ -1059,6 +1059,10 @@ neotmux.session.attached(name)     -- how many clients are looking at it this fr
 Every session ticks whether or not anybody is attached to it, so `attached` is how a plugin tells
 a screen somebody is reading from one that is only being kept up to date.
 
+A session that ends however it ends — `kill`, `neotmux.quit()`, its last shell exiting — moves the
+clients looking at it to the next session left, by the order they were made in. Only the last
+session to end sends its clients back to the shell.
+
 `with` is the interesting one, and it is how the shipped sidebar says what each session is
 running:
 

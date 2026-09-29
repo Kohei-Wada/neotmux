@@ -319,3 +319,49 @@ fn kill_work_with_two_clients_attached_ends_both() {
         "and so is the second, which is the half a one-client kill could not have said"
     );
 }
+
+/// `kill work` while `default` is still running moves work's client over to `default`, as
+/// tmux does, rather than dropping it back at the shell it started from.
+#[test]
+fn kill_work_moves_its_client_to_the_session_left() {
+    let rt = Runtime::new();
+    let layer = harness::runtime(&[("init.lua", "")]);
+    let mut work = Neotmux::start_named_on(rt.dir.path(), "work", &layer, "/bin/cat");
+    let mut default = Neotmux::start_named_on(rt.dir.path(), "default", &layer, "/bin/cat");
+    up(&rt, "work");
+    up(&rt, "default");
+    default.send("typed-in-default\r");
+    default.wait_for_screen("typed-in-default", Duration::from_secs(10));
+
+    let (code, said) = kill(&rt, Some("work"));
+    assert_eq!(code, 0, "kill work: {said:?}");
+    wait_for_gone(&rt, "work");
+
+    work.wait_for_screen("typed-in-default", Duration::from_secs(10));
+    assert!(
+        work.wait_for_exit(Duration::from_millis(300)).is_none(),
+        "work's client left instead of moving to default"
+    );
+}
+
+/// The same when the session ends from inside: its last shell exits.
+#[test]
+fn a_session_whose_shell_exits_moves_its_client_to_the_session_left() {
+    let rt = Runtime::new();
+    let layer = harness::runtime(&[("init.lua", "")]);
+    let mut work = Neotmux::start_named_on(rt.dir.path(), "work", &layer, "/bin/cat");
+    let mut default = Neotmux::start_named_on(rt.dir.path(), "default", &layer, "/bin/cat");
+    up(&rt, "work");
+    up(&rt, "default");
+    default.send("typed-in-default\r");
+    default.wait_for_screen("typed-in-default", Duration::from_secs(10));
+
+    work.send("\x04");
+    wait_for_gone(&rt, "work");
+
+    work.wait_for_screen("typed-in-default", Duration::from_secs(10));
+    assert!(
+        work.wait_for_exit(Duration::from_millis(300)).is_none(),
+        "work's client left instead of moving to default"
+    );
+}

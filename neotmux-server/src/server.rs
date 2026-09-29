@@ -437,6 +437,9 @@ fn frame(
     // frames in one pass, and a session made here must not tick before it has been drawn.
     let mut asked: Vec<(SessionId, String, ServerOp)> = Vec::new();
     for id in ids {
+        // A session that ends with others still live keeps its clients, which move to one of
+        // them in `end_session`, so they are not told to leave.
+        let alone = sessions.live.len() == 1;
         let Some(live) = sessions.get_mut(id) else {
             continue;
         };
@@ -452,11 +455,12 @@ fn frame(
         let answer = plugins.respond(id, tick);
         asked.extend(answer.server.into_iter().map(|(tag, op)| (id, tag, op)));
         let Pass { steps, frame, end } = live.advance(&answer.tock, &answer.views)?;
-        let picture = (frame.is_some() || end.is_some()).then(|| {
+        let told = end.filter(|end| alone || *end == End::Detach);
+        let picture = (frame.is_some() || told.is_some()).then(|| {
             // The steps are not the client's: they go to the Lua layer in this process, below.
             wire::encode_to_client(&ToClient::Done(&Done {
                 frame: frame.as_ref(),
-                end,
+                end: told,
             }))
         });
         drop(frame);
