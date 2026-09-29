@@ -566,12 +566,23 @@ fn a_quiet_session_skips_its_ticks_until_a_key_or_the_idle_interval() {
     let (_dir, _wakeup, mut session, mut plugins) = halves(&[("init.lua", COUNTING)]);
     settle(&mut session, &mut plugins);
 
-    for _ in 0..5 {
-        assert!(
-            frame(&mut session, &mut plugins).frame.is_none(),
-            "a frame with nothing happening ticked the plugins"
-        );
+    // A second of frames a few milliseconds apart: ticking every frame would draw a new count
+    // in each of them, and the idle interval draws one about every quarter of a second. Counted
+    // over a second rather than asserted frame by frame, since a slow machine can put one of
+    // those interval ticks anywhere in a short run.
+    let until = Instant::now() + Duration::from_secs(1);
+    let (mut frames, mut drawn) = (0, 0);
+    while Instant::now() < until {
+        frames += 1;
+        if frame(&mut session, &mut plugins).frame.is_some() {
+            drawn += 1;
+        }
+        std::thread::sleep(Duration::from_millis(5));
     }
+    assert!(
+        frames >= 20 && drawn <= 8,
+        "a second with nothing happening drew {drawn} of {frames} frames"
+    );
 
     key(&mut session, &plugins, Key::plain(KeyCode::Char('Q')));
     assert!(

@@ -8,6 +8,9 @@ use std::rc::Rc;
 use support::{built, built_with, keys, logged, notified, one};
 
 const NAMES_26: &str = "
+-- Thirteen themes in one key, each republishing every highlight group: a check of the themes'
+-- colours, not of how long switching takes, so the budget is not what this is about.
+neotmux.opt.tick_budget_ms = 0
 local theme = require('neotmux.theme')
 local names = {
   'rosewater', 'flamingo', 'pink', 'mauve', 'red', 'maroon', 'peach', 'yellow', 'green',
