@@ -535,8 +535,9 @@ for _, name in ipairs({
 end
 
 -- What changes with time and no output: a `working` pane settling to idle, a detector's hold
--- running out, a branch. Every agent pane in every session judged again once a second, and every
--- session's directory asked again once its refresh has passed.
+-- running out, a command the host sampled after the output that started it, a branch. Every pane
+-- in every session judged again once a second, and every session's directory asked again once
+-- its refresh has passed.
 --
 -- A timer belongs to the first session to run a frame after it is armed and ends with it, so a
 -- session closing that had it arms another.
@@ -548,9 +549,7 @@ local function arm()
     for _, name in ipairs(neotmux.session.list()) do
       neotmux.session.with(name, function()
         for _, pane in ipairs(require("neotmux.panes").all()) do
-          if facts[pane] and not facts[pane]:find("|nil$") then
-            judge(pane)
-          end
+          judge(pane)
         end
       end)
     end
@@ -574,21 +573,9 @@ g.on_event("session_renamed", function(e)
   end
 end)
 
--- Whose sidebar the one buffer is: the session this tick is for when a client is at it, else one
--- that has a client, so a session nobody is at does not draw its own "you are here" over theirs.
-local function viewer()
-  local here = neotmux.session.current()
-  if here == nil or neotmux.session.attached(here) > 0 then
-    return here
-  end
-  for _, name in ipairs(neotmux.session.list()) do
-    if neotmux.session.attached(name) > 0 then
-      return name
-    end
-  end
-  return here
-end
-
+-- The one buffer is the sidebar of the session a client is at, laid out for that session's band,
+-- so only its own tick writes it: a session nobody is at leaves `dirty` for that tick, which comes
+-- within the host's idle tick if nothing else brings it sooner.
 local last = {}
 g.on_tick(function(ctx)
   local band = ctx:reserved()
@@ -597,12 +584,15 @@ g.on_tick(function(ctx)
   if not band then
     return
   end
-  local who = viewer()
+  local who = neotmux.session.current()
+  if who == nil or neotmux.session.attached(who) == 0 then
+    return
+  end
   -- What the rows are laid out against, besides the model.
   local spaces = package.loaded["plugin.herdr.sidebar.spaces"]
   local agents = package.loaded["plugin.herdr.sidebar.agents"]
   local layout = table.concat({
-    tostring(who),
+    who,
     band.w,
     band.h,
     tostring(M.open),
@@ -614,13 +604,7 @@ g.on_tick(function(ctx)
   if dirty or stale or layout ~= last.layout or seen_state.generation ~= last.seen then
     dirty = false
     last.layout, last.seen = layout, seen_state.generation
-    if who and who ~= neotmux.session.current() then
-      neotmux.session.with(who, function()
-        M.render(band)
-      end)
-    else
-      M.render(band)
-    end
+    M.render(band)
   end
 end)
 

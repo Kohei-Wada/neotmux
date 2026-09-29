@@ -128,13 +128,20 @@ fn open(sub: &Built, sessions: &[Sess]) {
 }
 
 fn frame_in(sub: &Built, surface: Size, sessions: &[Sess], current: u32) -> Vec<String> {
+    frame_sized(sub, &vec![surface; sessions.len()], sessions, current)
+}
+
+/// A frame in which each session has a surface of its own, `surfaces[i]` for `sessions[i]`; the
+/// band read back is the current session's.
+fn frame_sized(sub: &Built, surfaces: &[Size], sessions: &[Sess], current: u32) -> Vec<String> {
     let reserved = sub.reserved();
-    let content = Size {
-        rows: surface.rows - reserved.rows(),
-        cols: surface.cols - reserved.cols(),
-    };
-    let area = Rect::new(reserved.left, reserved.top, content.cols, content.rows);
-    for s in sessions {
+    for (s, surface) in sessions.iter().zip(surfaces) {
+        let surface = *surface;
+        let content = Size {
+            rows: surface.rows - reserved.rows(),
+            cols: surface.cols - reserved.cols(),
+        };
+        let area = Rect::new(reserved.left, reserved.top, content.cols, content.rows);
         let id = SessionId::from(s.id);
         sub.name_session(id, s.name);
         // The session being looked at has the one client; every other is nobody's.
@@ -198,11 +205,19 @@ fn frame_in(sub: &Built, surface: Size, sessions: &[Sess], current: u32) -> Vec<
     for s in sessions {
         sub.dispatch_jobs(SessionId::from(s.id));
     }
-    for s in sessions.iter().filter(|s| s.id != current) {
-        sub.dispatch_tick(SessionId::from(s.id));
+    // The bands are laid out again right before each session's tick, as the server does in
+    // each session's own frame: where a band lands is the last layout's, whichever session's.
+    let at = sessions
+        .iter()
+        .position(|s| s.id == current)
+        .expect("the current session is one of them");
+    let order = (0..sessions.len()).filter(|i| *i != at).chain([at]);
+    for i in order {
+        let id = SessionId::from(sessions[i].id);
+        sub.lay_out_reservations(id, surfaces[i], reserved);
+        sub.dispatch_tick(id);
     }
-    sub.dispatch_tick(SessionId::from(current));
-    band(sub, surface)
+    band(sub, surfaces[at])
 }
 
 fn frame(sub: &Built, sessions: &[Sess], current: u32) -> Vec<String> {
@@ -1062,6 +1077,54 @@ fn a_session_nobody_is_at_does_not_rebuild_the_sidebar() {
     assert_eq!(logged_builds(&sub), first, "{lines:#?}");
     assert_eq!(style_of(&sub, "work"), (TEXT, true), "{lines:#?}");
     assert_eq!(style_of(&sub, "home"), (SUBTEXT, false), "{lines:#?}");
+}
+
+/// Sessions of different sizes: the band is laid out for the one a client is at, and a tick in
+/// the other, whose band is another height, neither rewrites it nor makes the next one rewrite it.
+#[test]
+fn a_session_of_another_size_does_not_rebuild_the_sidebar() {
+    let (_dir, sub) = built_herdr(
+        "local sidebar = require('plugin.herdr.sidebar')\n\
+         local builds = 0\n\
+         local real = sidebar.render\n\
+         sidebar.render = function(...) builds = builds + 1 return real(...) end\n\
+         neotmux.on_key(function(key) if key == 'B' then neotmux.log.info('builds=' .. builds) return true end return false end)\n",
+    );
+    let s = [
+        Sess::new(1, "work", vec![vec![101]]),
+        Sess::new(2, "home", vec![vec![201]]),
+    ];
+    let sizes = [Size { rows: 20, cols: 80 }, Size { rows: 12, cols: 80 }];
+    open(&sub, &s);
+    frame_sized(&sub, &sizes, &s, 1);
+    frame_sized(&sub, &sizes, &s, 1);
+    support::keys(&sub, &["B"]);
+    let first = logged_builds(&sub);
+    let mut lines = Vec::new();
+    for _ in 0..5 {
+        lines = frame_sized(&sub, &sizes, &s, 1);
+    }
+    support::keys(&sub, &["B"]);
+    assert_eq!(logged_builds(&sub), first, "{lines:#?}");
+    assert_eq!(lines[10], "\u{2500}".repeat(25), "{lines:#?}");
+    assert_eq!(lines[19].trim(), "\u{ab}", "{lines:#?}");
+}
+
+/// The host samples what a pane runs apart from its output, so a command that changed after the
+/// last output is in the tree once the sidebar's timer has judged the pane again.
+#[test]
+fn a_command_that_changes_with_no_output_is_shown_after_the_timer() {
+    let (_dir, sub) = built("");
+    let s = [Sess::new(1, "work", vec![vec![101]])];
+    open(&sub, &s);
+    line_with(&settled(&sub, &s, 1), "1.1 cat");
+    let s = [Sess::new(1, "work", vec![vec![101]]).command("vim")];
+    frame(&sub, &s, 1);
+    sub.dispatch_timers(
+        SessionId::from(1),
+        std::time::Instant::now() + std::time::Duration::from_secs(2),
+    );
+    line_with(&frame(&sub, &s, 1), "1.1 vim");
 }
 
 /// A window named since the last render is in the tree the frame after `window_renamed` says so.
