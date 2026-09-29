@@ -682,6 +682,28 @@ fn the_shipped_sidebar_is_herdrs_spaces_over_its_agents() {
     assert_eq!(lines[first + 1].trim(), "blocked fake", "{lines:#?}");
 }
 
+/// An agent's session name too long for the band ends in an ellipsis, and its window number after
+/// it stays on screen.
+#[test]
+fn an_agent_whose_session_name_is_too_long_ends_in_an_ellipsis() {
+    let (_dir, sub) = built_herdr(&format!("{AGENTS}{LETTERS}"));
+    let s = [Sess::new(
+        1,
+        "a-session-name-far-too-long-for-it",
+        vec![vec![101], vec![102]],
+    )
+    .agents(&[101, 102])];
+    open(&sub, &s);
+    show(&sub, 101, "BUSY");
+    show(&sub, 102, "BUSY");
+    let tall = Size { rows: 20, cols: 80 };
+    frame_in(&sub, tall, &s, 1);
+    let lines = frame_in(&sub, tall, &s, 1);
+    let agents = line_with(&lines, " agents");
+    line_with(&lines[agents..], " W a-session-name-far-\u{2026} 1");
+    line_with(&lines[agents..], " W a-session-name-far-\u{2026} 2");
+}
+
 /// herdr's `done`: an agent that finishes where nobody is looking is done until it is looked at,
 /// and one that finishes on screen is only idle.
 #[test]

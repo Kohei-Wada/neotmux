@@ -54,23 +54,25 @@ M.tokens = {
     return it.state, c[it.state]
   end,
   session = function(it)
-    return it.session, it.focused and c.text or c.subtext, true
+    return it.session, it.focused and c.text or c.subtext, true, true
   end,
   window = function(it)
     if it.windows < 2 then
       return nil
     end
-    return it.window_name or tostring(it.window), c.subtext
+    return it.window_name or tostring(it.window), c.subtext, false, true
   end,
   location = function(it)
     return it.session .. ":" .. it.window .. "." .. it.pane,
-      it.focused and c.focused_pane or c.window
+      it.focused and c.focused_pane or c.window,
+      false,
+      true
   end,
   agent = function(it)
-    return it.agent, c.overlay
+    return it.agent, c.overlay, false, true
   end,
   command = function(it)
-    return it.command, c.overlay
+    return it.command, c.overlay, false, true
   end,
   age = function(it)
     return it.age, c.overlay
