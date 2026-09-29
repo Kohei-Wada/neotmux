@@ -7,11 +7,12 @@
 use std::fs;
 use std::time::{Duration, Instant};
 
+use neotmux_lua::draw::Hl;
 use neotmux_lua::plugin::Layers;
 use neotmux_lua::{KeyOutcome, LuaSubsystem};
 use neotmux_proto::screen::Frame;
 use neotmux_proto::wire::End;
-use neotmux_proto::{DrawCmd, Key, KeyCode, Reserved, SessionId, Size, WindowId};
+use neotmux_proto::{Color, DrawCmd, Key, KeyCode, Reserved, SessionId, Size, WindowId};
 use neotmux_pty::child::{Wakeup, wakeup};
 use neotmux_server::{Plugins, Session, Setup};
 
@@ -597,4 +598,88 @@ fn a_pane_split_while_a_band_is_held_starts_at_its_content_width() {
         }),
         "the new pane's shell is not its content's width"
     );
+}
+
+/// A buffer changed while this session's frames are quiet still reaches its next frame, with
+/// no tick run for it.
+#[test]
+fn a_quiet_frame_picks_up_a_changed_buffer() {
+    let (_dir, _wakeup, mut session, mut plugins) = halves(&[
+        ("init.lua", "require('plugin.b')"),
+        (
+            "lua/plugin/b.lua",
+            "local buf = neotmux.buf.create()\n\
+             neotmux.buf.set_lines(buf, 0, -1, { 'before' })\n\
+             neotmux.reserve('left', 8):set_buf(buf)\n\
+             local armed = false\n\
+             neotmux.on_tick(function(ctx)\n\
+               if armed or not ctx:reserved() then return end\n\
+               armed = true\n\
+               neotmux.timer.after(50, function() neotmux.buf.set_lines(buf, 0, -1, { 'after' }) end)\n\
+             end)\n\
+             return {}",
+        ),
+    ]);
+    assert!(step_until(&mut session, &mut plugins, |pass| overlay_text(
+        pass
+    )
+    .contains("before")));
+    assert!(step_until(&mut session, &mut plugins, |pass| overlay_text(
+        pass
+    )
+    .contains("after")));
+}
+
+/// A highlight group changed between frames the session calls quiet: the next quiet frame
+/// is recoloured, standing on the last tick rather than running one.
+#[test]
+fn a_quiet_frame_recolours_a_buffer_whose_group_changed() {
+    let (_dir, _wakeup, mut session, mut plugins) = halves(&[
+        ("init.lua", "require('plugin.b')"),
+        (
+            "lua/plugin/b.lua",
+            "neotmux.hl.set('t:hi', { fg = '#ff0000' })\n\
+             local buf = neotmux.buf.create()\n\
+             neotmux.buf.set_lines(buf, 0, -1, { 'mark' })\n\
+             neotmux.buf.set_extmark(buf, neotmux.buf.namespace('t'), 0, 0, { hl_group = 't:hi' })\n\
+             neotmux.reserve('left', 8):set_buf(buf)\n\
+             return {}",
+        ),
+    ]);
+    assert!(step_until(&mut session, &mut plugins, |pass| overlay_text(
+        pass
+    )
+    .contains("mark")));
+    let blue = Color::Rgb(0, 0, 0xff);
+    let deadline = Instant::now() + PATIENCE;
+    while Instant::now() < deadline {
+        let tick = session.tick().expect("tick");
+        let quiet = tick.quiet;
+        if quiet {
+            plugins.lua().hl_groups().set(
+                "t:hi",
+                Hl {
+                    fg: Some(blue),
+                    ..Default::default()
+                },
+            );
+        }
+        let answer = plugins.respond(one(), tick);
+        let mut pass = session
+            .advance(&answer.tock, &answer.views)
+            .expect("advance");
+        plugins.catch_up(one(), std::mem::take(&mut pass.steps));
+        if quiet {
+            assert!(
+                answer.tock.overlay.iter().any(|cmd| matches!(cmd,
+                    DrawCmd::Text { text, fg, .. } if text == "mark" && *fg == blue)),
+                "{:?}",
+                answer.tock.overlay
+            );
+            return;
+        }
+        drop(pass);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    panic!("no frame was quiet");
 }

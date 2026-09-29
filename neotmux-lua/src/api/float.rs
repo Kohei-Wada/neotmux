@@ -3,7 +3,7 @@ use std::rc::Rc;
 use mlua::{Function, Lua, Table, Value};
 use neotmux_proto::Rect;
 
-use crate::draw::{FloatId, Floats};
+use crate::draw::{BufWindow, FloatId, Floats, TextBuffers};
 use crate::plugin::{self, Groups, Held, Sources};
 
 /// A field read as a whole Lua integer, or the message a bad one gets: `min` is the
@@ -56,7 +56,12 @@ fn field(opts: &Table, name: &'static str, min: i64) -> mlua::Result<Result<u16,
 /// `ctx:float_rect(win)` to the float this handle names. The handle table is not sealed,
 /// so `pairs(win)` does enumerate it like any other field; privacy here is a convention,
 /// not an enforced boundary.
-fn handle(lua: &Lua, floats: Rc<Floats>, id: FloatId) -> mlua::Result<Table> {
+fn handle(
+    lua: &Lua,
+    floats: Rc<Floats>,
+    bufs: Rc<TextBuffers>,
+    id: FloatId,
+) -> mlua::Result<Table> {
     let handle = lua.create_table()?;
     handle.set("__id", lua.create_function(move |_, ()| Ok(id.0))?)?;
 
@@ -132,8 +137,14 @@ fn handle(lua: &Lua, floats: Rc<Floats>, id: FloatId) -> mlua::Result<Table> {
     };
     handle.set("resize_to", resize_to)?;
 
+    handle.set(
+        "set_buf",
+        super::reserve::set_buf(lua, bufs.clone(), BufWindow::Float(id))?,
+    )?;
+
     let remove = lua.create_function(move |_, _self: Value| {
         floats.remove(id);
+        bufs.show(BufWindow::Float(id), None);
         Ok(())
     })?;
     handle.set("remove", remove)?;
@@ -156,6 +167,7 @@ pub(crate) fn install(
     lua: &Lua,
     sources: Rc<Sources>,
     floats: Rc<Floats>,
+    bufs: Rc<TextBuffers>,
     groups: Rc<Groups>,
 ) -> mlua::Result<Function> {
     lua.create_function(move |lua, opts: Table| {
@@ -192,6 +204,9 @@ pub(crate) fn install(
         let owner = plugin::caller(lua, &sources);
         let id = floats.add(owner, Rect::new(x, y, w, h));
         groups.note(Held::Float(id));
-        Ok((Value::Table(handle(lua, floats.clone(), id)?), Value::Nil))
+        Ok((
+            Value::Table(handle(lua, floats.clone(), bufs.clone(), id)?),
+            Value::Nil,
+        ))
     })
 }

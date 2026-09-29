@@ -578,8 +578,13 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
     }
 
     {
-        let reserve =
-            super::reserve::install(lua, sources.clone(), reservations.clone(), groups.clone())?;
+        let reserve = super::reserve::install(
+            lua,
+            sources.clone(),
+            reservations.clone(),
+            text_buffers.clone(),
+            groups.clone(),
+        )?;
         neotmux.set("reserve", reserve)?;
     }
 
@@ -590,7 +595,13 @@ pub(crate) fn install(lua: &Lua, shared: Shared) -> mlua::Result<Rc<Cell<bool>>>
     }
 
     {
-        let float = super::float::install(lua, sources.clone(), floats.clone(), groups.clone())?;
+        let float = super::float::install(
+            lua,
+            sources.clone(),
+            floats.clone(),
+            text_buffers.clone(),
+            groups.clone(),
+        )?;
         neotmux.set("float", float)?;
     }
 

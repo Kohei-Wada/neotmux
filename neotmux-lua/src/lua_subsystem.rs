@@ -14,7 +14,9 @@ use neotmux_proto::{
 
 use crate::api::ctx::Ctx;
 use crate::api::{self, Opts, keymap};
-use crate::draw::{Buffers, Floats, HlGroups, PaneBands, Reservations, TextBuffers};
+use crate::draw::{
+    BufWindow, Buffers, FloatId, Floats, HlGroups, PaneBands, Reservations, TextBuffers, project,
+};
 use crate::host::{Ambient, Clipboard, Op, OpBuffer, PaneInfos, PaneTtys, Runner, WindowIds};
 use crate::plugin::{
     Commands, Groups, Kind, KindTag, Layers, RegistrationId, Registry, SourceId, Sources,
@@ -1025,11 +1027,45 @@ impl LuaSubsystem {
     }
 
     pub fn frame_output(&self) -> Vec<DrawCmd> {
-        let mut out = self.buffers.applicable();
-        for cmds in self.buffers.applicable_floats().into_values() {
+        let mut bands = Vec::new();
+        let mut floats: BTreeMap<FloatId, Vec<DrawCmd>> = BTreeMap::new();
+        for (window, buf) in self.text_buffers.shown() {
+            let rect = match window {
+                BufWindow::Band(id) => self
+                    .reservations
+                    .owner(id)
+                    .and_then(|owner| self.reservations.band(owner)),
+                BufWindow::Float(id) => self.floats.rect(id),
+            };
+            let Some(rect) = rect else { continue };
+            let Some(cmds) = self
+                .text_buffers
+                .read(buf, |b| project(b, rect, &self.hl_groups))
+            else {
+                continue;
+            };
+            match window {
+                BufWindow::Band(_) => bands.extend(cmds),
+                BufWindow::Float(id) => floats.entry(id).or_default().extend(cmds),
+            }
+        }
+        // A buffer under every source's immediate drawing; a float's buffer under that
+        // float's drawing, and floats in grant order over everything.
+        let mut out = bands;
+        out.extend(self.buffers.applicable());
+        for (id, cmds) in self.buffers.applicable_floats() {
+            floats.entry(id).or_default().extend(cmds);
+        }
+        for cmds in floats.into_values() {
             out.extend(cmds);
         }
         out
+    }
+
+    /// What a quiet frame has to match to stand on the last overlay: a changed buffer or
+    /// highlight group means the overlay is recomputed, though no tick has to run for it.
+    pub fn retained_generation(&self) -> (u64, u64) {
+        (self.text_buffers.generation(), self.hl_groups.generation())
     }
 
     /// What every source has been granted, per edge. Whether the terminal can afford it is

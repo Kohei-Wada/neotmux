@@ -424,6 +424,27 @@ leaves the rest of the tick running; `move_to` and `resize_to` answer the same t
 bad answer changes nothing. `remove` does not answer at all, because it has nothing to lose: it
 is idempotent, the way every `remove` in this API is.
 
+### Buffers
+
+```lua
+local buf = neotmux.buf.create()                  -- also g.buf.create()
+neotmux.buf.set_lines(buf, 0, -1, { ' ● work', '   main' })
+local ns = neotmux.buf.namespace('mine')
+neotmux.buf.set_extmark(buf, ns, 0, 1, { end_col = 2, hl_group = 'sidebar:working' })
+neotmux.buf.set_extmark(buf, ns, 0, 0, { line_hl_group = 'sidebar:here' })
+neotmux.reserve('left', 26):set_buf(buf)          -- or a float's handle
+```
+
+Neovim's buffers: the host keeps the lines and draws them every frame into the window showing
+them — no tick of yours runs for it, and a buffer you do not change costs nothing. Indexing is
+Neovim's (zero-based, `end` exclusive, `-1` the end) and `set_lines` is strict. Extmark columns
+are columns, not bytes. Replacing a line drops the extmarks on it; that is the one place this
+differs from Neovim. `get_lines`, `line_count`, `get_extmarks(buf, ns)`, `clear_namespace(buf,
+ns, start, end)` and `delete` are there too.
+
+A window shows one buffer from its top row, cut at its width; what you draw with `ctx:*` in the
+same cells goes over it. A buffer belongs to the source or group that made it and goes with it.
+
 ### Panes
 
 ```lua

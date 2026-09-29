@@ -218,6 +218,16 @@ impl Reservations {
         self.inner.borrow().bands.get(&owner).copied()
     }
 
+    /// Whose band this is, while it exists.
+    pub fn owner(&self, id: ReservationId) -> Option<SourceId> {
+        self.inner
+            .borrow()
+            .entries
+            .iter()
+            .find(|entry| entry.id == id)
+            .map(|entry| entry.owner)
+    }
+
     /// Who holds each band, in reservation order.
     pub fn owners(&self) -> Vec<SourceId> {
         self.inner

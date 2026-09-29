@@ -10,4 +10,6 @@ pub(crate) struct Drawn {
     pub overlay: Vec<DrawCmd>,
     pub views: BTreeMap<PaneId, usize>,
     pub notices: Vec<Notice>,
+    /// `LuaSubsystem::retained_generation` when this was drawn.
+    pub retained: (u64, u64),
 }

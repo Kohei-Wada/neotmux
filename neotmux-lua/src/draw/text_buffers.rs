@@ -62,8 +62,6 @@ impl TextBuffers {
         *namespaces.entry(name.to_string()).or_insert(next)
     }
 
-    // Called from Task 5's `set_buf` on a reserve/float handle.
-    #[allow(dead_code)]
     pub(crate) fn show(&self, window: BufWindow, buf: Option<BufId>) {
         let mut windows = self.windows.borrow_mut();
         match buf {
@@ -73,8 +71,6 @@ impl TextBuffers {
         self.bump();
     }
 
-    // Called from Task 5's drawing of a window's shown buffer.
-    #[allow(dead_code)]
     pub(crate) fn shown(&self) -> Vec<(BufWindow, BufId)> {
         self.windows
             .borrow()

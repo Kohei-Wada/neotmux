@@ -130,21 +130,41 @@ impl Plugins {
         // A quiet frame stands on the last one this session ticked in, where there is one and
         // nothing a plugin was told since could have changed it.
         let keyed = self.keyed.borrow_mut().remove(&session);
+        let retained = self.lua.retained_generation();
         let kept = self.drawn.get(&session).filter(|drawn| {
             tick.quiet && !keyed && !jobs_ran && !timers_ran && drawn.notices == notices
         });
         let (overlay, views) = match kept {
-            Some(drawn) => (drawn.overlay.clone(), drawn.views.clone()),
-            None => {
-                self.lua.dispatch_tick(session);
+            Some(drawn) if drawn.retained == retained => {
+                (drawn.overlay.clone(), drawn.views.clone())
+            }
+            Some(drawn) => {
+                // What the ticks drew still stands; only a buffer or a group moved.
+                let views = drawn.views.clone();
                 let overlay = self.lua.frame_output();
-                let views = self.lua.frame_views();
                 self.drawn.insert(
                     session,
                     Drawn {
                         overlay: overlay.clone(),
                         views: views.clone(),
                         notices,
+                        retained,
+                    },
+                );
+                (overlay, views)
+            }
+            None => {
+                self.lua.dispatch_tick(session);
+                let overlay = self.lua.frame_output();
+                let views = self.lua.frame_views();
+                let retained = self.lua.retained_generation();
+                self.drawn.insert(
+                    session,
+                    Drawn {
+                        overlay: overlay.clone(),
+                        views: views.clone(),
+                        notices,
+                        retained,
                     },
                 );
                 (overlay, views)
