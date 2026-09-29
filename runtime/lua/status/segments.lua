@@ -19,7 +19,7 @@ function M.width(runs)
   return total
 end
 
-local function clip(text, cols)
+function M.clip(text, cols)
   if not utf8.len(text) then
     return text:sub(1, cols)
   end
@@ -38,7 +38,7 @@ function M.draw(ctx, x, y, limit, runs)
     end
     local text = run.text
     if M.columns(text) > room then
-      text = clip(text, room)
+      text = M.clip(text, room)
     end
     if text ~= "" then
       ctx:text(nil, at, y, text, { fg = run.fg, bg = run.bg, bold = run.bold })

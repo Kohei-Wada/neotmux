@@ -792,6 +792,33 @@ fn a_space_in_a_git_repository_shows_its_branch_and_how_far_it_is_from_upstream(
     line_with(&lines, "trunk \u{2191}2 \u{2193}1");
 }
 
+/// A branch or a session name too long for the band ends in an ellipsis, and the counts after the
+/// branch stay on screen rather than being cut off with its end.
+#[test]
+fn a_name_or_branch_too_long_for_the_band_ends_in_an_ellipsis() {
+    use neotmux_lua::host::JobChunk;
+    let runner = support::FakeRunner::new();
+    runner.will_say(vec![vec![
+        JobChunk::Stdout(b"feature/sidebar-branch-ellipsis\n".to_vec()),
+        JobChunk::Exited(0),
+    ]]);
+    runner.will_say(vec![vec![
+        JobChunk::Stdout(b"1\t2\n".to_vec()),
+        JobChunk::Exited(0),
+    ]]);
+    let (_dir, sub) = built_herdr_running("", runner.clone());
+    let mut work = Sess::new(1, "a-session-name-far-too-long-for-it", vec![vec![101]]);
+    work.cwd = Some("/src/work".to_string());
+    let s = [work];
+    open(&sub, &s);
+    let mut lines = Vec::new();
+    for _ in 0..6 {
+        lines = frame(&sub, &s, 1);
+    }
+    line_with(&lines, "   feature/sidebar\u{2026} \u{2191}2 \u{2193}1");
+    line_with(&lines, " a-session-name-far-to\u{2026}");
+}
+
 /// With the palette on and the sidebar off (the defaults), `C-b g` still knows an agent finished
 /// unwatched: `done` is recorded by `neotmux.seen`'s own tick, not by whoever draws it.
 const PALETTE_ONLY: &str = "local defaults = require('neotmux.defaults')\n\

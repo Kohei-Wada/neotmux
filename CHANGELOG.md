@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### A long branch ends in an ellipsis
+
+A session name or git branch too long for the sidebar was cut at the band's edge, taking the
+branch's `↑`/`↓` counts with it. Both now end in `…` where they would overflow, and the counts
+stay.
+
 ### One place for every plugin's colours
 
 Every shipped plugin now reads its colours from `neotmux.style`, and every colour is a name in

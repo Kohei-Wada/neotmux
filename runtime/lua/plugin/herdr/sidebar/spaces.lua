@@ -55,12 +55,12 @@ M.tokens = {
   end,
   name = function(it)
     if it.here then
-      return it.name, c.text, true
+      return it.name, c.text, true, true
     end
-    return it.name, c.subtext
+    return it.name, c.subtext, false, true
   end,
   branch = function(it)
-    return it.git and it.git.branch, it.here and c.branch or c.overlay
+    return it.git and it.git.branch, it.here and c.branch or c.overlay, false, true
   end,
   ahead = function(it)
     local n = it.git and it.git.ahead or 0

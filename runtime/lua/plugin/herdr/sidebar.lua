@@ -110,20 +110,22 @@ M.split = 0.5
 M.folds = { open = "\u{ab}", closed = "\u{bb}" } -- «, »
 
 -- One row: every token in `names` that has something to say, in order, separated by a space.
--- A token answers its text, its colour and whether it is bold. One that answers nil or an empty
--- string is left out, so a row whose tokens are all empty is no row.
+-- A token answers its text, its colour, whether it is bold and whether it gives up its end to an
+-- ellipsis when the row is too wide for the band. One that answers nil or an empty string is left
+-- out, so a row whose tokens are all empty is no row.
 function M.row(tokens, names, it)
   local c = style.get("sidebar")
   local runs = {}
   for _, name in ipairs(names) do
     local token = tokens[name]
     if token then
-      local text, colour, bold = token(it)
+      local text, colour, bold, shrink = token(it)
       if text and text ~= "" then
         if #runs > 0 then
           runs[#runs + 1] = { text = " ", bg = c.bar }
         end
-        runs[#runs + 1] = { text = text, fg = colour or c.detail, bg = c.bar, bold = bold }
+        runs[#runs + 1] =
+          { text = text, fg = colour or c.detail, bg = c.bar, bold = bold, shrink = shrink }
       end
     end
   end
@@ -258,7 +260,35 @@ local function heading(section, first, rail)
   return rows
 end
 
+-- A row too wide for `width` ends its first `shrink` run in an ellipsis, so the runs after it
+-- stay on screen. One that cannot give up enough is left to be cut at the band.
+local function shrunk(runs, width)
+  local over = segments.width(runs) - width
+  if over <= 0 then
+    return runs
+  end
+  for at, run in ipairs(runs) do
+    if run.shrink then
+      local keep = segments.columns(run.text) - over - 1
+      if keep < 1 then
+        return runs
+      end
+      local out = { fill = runs.fill }
+      for k, other in ipairs(runs) do
+        out[k] = other
+      end
+      out[at] = setmetatable(
+        { text = segments.clip(run.text, keep) .. "\u{2026}" },
+        { __index = run }
+      )
+      return out
+    end
+  end
+  return runs
+end
+
 local function draw_row(ctx, x, y, width, runs)
+  runs = shrunk(runs, width)
   if runs.fill then
     ctx:rect(nil, x, y, width, 1, { bg = runs.fill })
     -- Over the band's own colour too, which `row` gives every run it builds.
