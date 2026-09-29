@@ -259,20 +259,25 @@ fn pane_changed_fires_once_per_pane_per_frame() {
         .expect("type");
     // `wants_pane_changed` reaches the session through the first tock.
     frame(&mut session, &mut plugins);
+    // Until the count has moved a few times: the output ends long before twenty frames, and
+    // a quiet session makes no frame to look at.
+    let count = |text: &str| -> Option<u32> {
+        text.strip_prefix("changed=")
+            .and_then(|n| n.trim().parse().ok())
+    };
     let mut seen = Vec::new();
-    step_until(&mut session, &mut plugins, |shown| {
+    let moved = step_until(&mut session, &mut plugins, |shown| {
         let text = overlay_text(shown);
-        seen.push(text.clone());
-        text.contains("changed=") && seen.len() > 20
+        let now = count(&text);
+        seen.push(text);
+        now.is_some_and(|n| n >= 5)
     });
+    assert!(
+        moved,
+        "pane_changed stopped before it fired five times: {seen:?}"
+    );
     // Each frame adds at most one: the count never jumps by more than one between frames.
-    let counts: Vec<u32> = seen
-        .iter()
-        .filter_map(|t| {
-            t.strip_prefix("changed=")
-                .and_then(|n| n.trim().parse().ok())
-        })
-        .collect();
+    let counts: Vec<u32> = seen.iter().filter_map(|t| count(t)).collect();
     assert!(counts.windows(2).all(|w| w[1] <= w[0] + 1), "{counts:?}");
     // The count actually advanced: `pane_changed` fired more than a couple of times, not zero.
     assert!(counts.len() >= 3, "{counts:?}");
