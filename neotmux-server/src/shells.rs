@@ -242,9 +242,11 @@ mod tests {
 
     /// A child that closes its descriptors and keeps running. The master reaches EOF while
     /// the process is still very much alive, which is the case a blocking wait stalls on.
+    /// Perl rather than `sh`: bash on macOS holds the terminal until its child exits, however
+    /// the descriptors were closed, so the EOF this test is about would never come.
     fn daemoniser() -> CommandBuilder {
-        let mut cmd = CommandBuilder::new("sh");
-        cmd.args(["-c", "exec 0<&- 1>&- 2>&-; sleep 10"]);
+        let mut cmd = CommandBuilder::new("perl");
+        cmd.args(["-e", "close STDIN; close STDOUT; close STDERR; sleep 10"]);
         cmd
     }
 

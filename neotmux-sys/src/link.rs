@@ -47,10 +47,12 @@ impl Link {
         let mut link = Self::greet(stream)?;
         link.stream.set_read_timeout(Some(GREETING_PATIENCE))?;
         let heard = link.stream.read_exact(&mut link.greeting);
-        link.stream.set_read_timeout(None)?;
+        // macOS refuses the reset once the peer has hung up, so what was heard is judged first.
+        let reset = link.stream.set_read_timeout(None);
         heard?;
         link.heard = HELLO_LEN;
         wire::decode_hello(&link.greeting).map_err(io::Error::other)?;
+        reset?;
         Ok(link)
     }
 
