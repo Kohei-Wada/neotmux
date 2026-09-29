@@ -107,6 +107,7 @@ Every event that fires, and the fields it carries:
 | `pane_closed` | `pane` | its child exited and the pane is gone |
 | `focus_changed` | `pane` | focus moved to that pane |
 | `pane_changed` | `pane` | that pane's terminal was fed since the last frame; once per pane per frame, no bytes |
+| `pane_info_changed` | `pane` | what `neotmux.pane.info(pane)` answers differs from the host's last sample, or the pane has its first; the handler reads the new one |
 | `window_renamed` | `window` | a window was named or unnamed |
 | `session_created` | `session` | a session started |
 | `session_closed` | `session` | a session ended; dispatched with no session bound |

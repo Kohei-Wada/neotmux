@@ -1176,30 +1176,56 @@ fn a_session_of_another_size_does_not_rebuild_the_sidebar() {
 }
 
 /// The host samples what a pane runs apart from its output, so a command that changed after the
-/// last output is in the tree once the sidebar's timer has judged the pane again.
+/// last output is in the tree the frame `pane_info_changed` says so, with no timer.
 #[test]
-fn a_command_that_changes_with_no_output_is_shown_after_the_timer() {
+fn a_command_that_changes_with_no_output_is_shown_the_next_frame() {
     let (_dir, sub) = built("");
     let s = [Sess::new(1, "work", vec![vec![101]])];
     open(&sub, &s);
     line_with(&settled(&sub, &s, 1), "1.1 cat");
     let s = [Sess::new(1, "work", vec![vec![101]]).command("vim")];
-    frame(&sub, &s, 1);
+    line_with(&frame(&sub, &s, 1), "1.1 vim");
+}
+
+/// A ruleset whose `QUIET` is a fall to idle the screen does not say in so many words, so the
+/// detector holds it `working` for a settle short enough to wait out.
+const SETTLING: &str = "local detect = require('neotmux.detect')\n\
+    detect.settle = 50\n\
+    detect.agents = { fake = {\n\
+      claims = function(info) return info ~= nil and info.command == 'agent' end,\n\
+      { id = 'busy', state = 'working', priority = 2,\n\
+        match = function(v) return v.lines[#v.lines] == 'BUSY' end },\n\
+      { id = 'quiet', state = 'idle', priority = 1,\n\
+        match = function(v) return v.lines[#v.lines] == 'QUIET' end },\n\
+    } }\n";
+
+/// A `working` pane that settles with no output after its last is shown idle once the sidebar's
+/// timer has judged it again.
+#[test]
+fn a_working_agent_that_settles_with_no_output_is_shown_idle_after_the_timer() {
+    let (_dir, sub) = built(SETTLING);
+    let s = [Sess::new(1, "work", vec![vec![101]]).agents(&[101])];
+    open(&sub, &s);
+    show(&sub, 101, "BUSY");
+    line_with(&settled(&sub, &s, 1), "\u{25cf} work:1.1 fake");
+    show(&sub, 101, "QUIET");
+    line_with(&frame(&sub, &s, 1), "\u{25cf} work:1.1 fake");
+    std::thread::sleep(std::time::Duration::from_millis(100));
     sub.dispatch_timers(
         SessionId::from(1),
         std::time::Instant::now() + std::time::Duration::from_secs(2),
     );
-    line_with(&frame(&sub, &s, 1), "1.1 vim");
+    line_with(&frame(&sub, &s, 1), "\u{25cb} work:1.1 fake");
 }
 
 /// The session that claimed the sidebar's timer ending before it ever fired does not take the
 /// clock with it: the next session to frame claims a new one, and it still judges the panes.
 #[test]
 fn the_timer_outlives_the_session_that_claimed_it() {
-    let (_dir, sub) = built("");
+    let (_dir, sub) = built(SETTLING);
     let both = [
-        Sess::new(1, "work", vec![vec![101]]),
-        Sess::new(2, "home", vec![vec![201]]),
+        Sess::new(1, "work", vec![vec![101]]).agents(&[101]),
+        Sess::new(2, "home", vec![vec![201]]).agents(&[201]),
     ];
     open(&sub, &both);
     settled(&sub, &both, 1);
@@ -1209,13 +1235,16 @@ fn the_timer_outlives_the_session_that_claimed_it() {
         session: "work".to_string(),
     });
     sub.forget_session(SessionId::from(1));
-    let home = [Sess::new(2, "home", vec![vec![201]])];
-    line_with(&settled(&sub, &home, 2), "1.1 cat");
-    let home = [Sess::new(2, "home", vec![vec![201]]).command("vim")];
+    let home = [Sess::new(2, "home", vec![vec![201]]).agents(&[201])];
+    show(&sub, 201, "BUSY");
+    line_with(&settled(&sub, &home, 2), "\u{25cf} home:1.1 fake");
+    show(&sub, 201, "QUIET");
     frame(&sub, &home, 2);
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    let now = std::time::Instant::now();
     sub.dispatch_timers(SessionId::from(2), now);
     sub.dispatch_timers(SessionId::from(2), now + std::time::Duration::from_secs(2));
-    line_with(&frame(&sub, &home, 2), "1.1 vim");
+    line_with(&frame(&sub, &home, 2), "\u{25cb} home:1.1 fake");
 }
 
 /// A window named since the last render is in the tree the frame after `window_renamed` says so.

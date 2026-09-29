@@ -33,7 +33,8 @@ pub(crate) fn table(event: &Event, lua: &Lua, bytes: Option<&LuaString>) -> mlua
         Event::PaneOpened { pane }
         | Event::PaneClosed { pane }
         | Event::FocusChanged { pane }
-        | Event::PaneChanged { pane } => {
+        | Event::PaneChanged { pane }
+        | Event::PaneInfoChanged { pane } => {
             table.set("pane", pane.get())?;
         }
         Event::WindowOpened { window }

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### A pane's command or directory moving is an event
+
+New event `pane_info_changed`, with `pane`: what `neotmux.pane.info(pane)` answers differs from
+the host's last sample of it, or the pane has its first. The sidebar judges a pane again on it,
+and its once-a-second timer now judges again only the panes it last saw `working`, where it used
+to walk every pane of every session.
+
 ### The Lua collector is generational
 
 The Lua VM now runs Lua 5.4's generational collector instead of the incremental one. A plugin's

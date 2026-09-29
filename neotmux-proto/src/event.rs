@@ -35,6 +35,11 @@ pub enum Event {
     WindowRenamed {
         window: WindowId,
     },
+    /// What the pane is running or where it is, as the host last sampled it, differs from the
+    /// sample before, or the pane has its first one.
+    PaneInfoChanged {
+        pane: PaneId,
+    },
     SessionCreated {
         session: String,
     },
@@ -61,6 +66,7 @@ impl Event {
             Event::WindowChanged { .. } => "window_changed",
             Event::PaneChanged { .. } => "pane_changed",
             Event::WindowRenamed { .. } => "window_renamed",
+            Event::PaneInfoChanged { .. } => "pane_info_changed",
             Event::SessionCreated { .. } => "session_created",
             Event::SessionClosed { .. } => "session_closed",
             Event::SessionRenamed { .. } => "session_renamed",

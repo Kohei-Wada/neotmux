@@ -532,8 +532,16 @@ local judged = {}
 -- Per pane, the facts its rows depend on: `state|command|agent`.
 local facts = {}
 
+-- Per session, the panes last judged `working`: the only ones time alone can move.
+local working = {}
+
 local function judge(pane)
   local now = seen_state.of(pane, require("neotmux.state").of(pane))
+  local name = neotmux.session.current()
+  if name then
+    working[name] = working[name] or {}
+    working[name][pane] = now == "working" or nil
+  end
   local info = neotmux.pane.info(pane)
   local fact = tostring(now)
     .. "|"
@@ -550,8 +558,15 @@ end
 g.on_event("pane_changed", function(e)
   judge(e.pane)
 end)
+g.on_event("pane_info_changed", function(e)
+  judge(e.pane)
+end)
 g.on_event("pane_closed", function(e)
   facts[e.pane], judged[e.pane] = nil, nil
+  local name = neotmux.session.current()
+  if name and working[name] then
+    working[name][e.pane] = nil
+  end
   M.dirty()
 end)
 for _, name in ipairs({
@@ -568,9 +583,8 @@ for _, name in ipairs({
 end
 
 -- What changes with time and no output: a `working` pane settling to idle, a detector's hold
--- running out, a command the host sampled after the output that started it, a branch. Every pane
--- in every session judged again once a second, and every session's directory asked again once
--- its refresh has passed.
+-- running out, a branch. The panes last judged `working` judged again once a second, and every
+-- session's directory asked again once its refresh has passed.
 --
 -- A timer belongs to the first session to run a frame after it is armed and ends with it, so
 -- any session closing arms a fresh one for whichever frames next.
@@ -578,11 +592,14 @@ local clock
 local function arm()
   clock = g.timer.every(1000, function()
     for _, name in ipairs(neotmux.session.list()) do
-      neotmux.session.with(name, function()
-        for _, pane in ipairs(require("neotmux.panes").all()) do
-          judge(pane)
-        end
-      end)
+      local panes = working[name]
+      if panes and next(panes) then
+        neotmux.session.with(name, function()
+          for pane in pairs(panes) do
+            judge(pane)
+          end
+        end)
+      end
     end
     local spaces = package.loaded["plugin.herdr.sidebar.spaces"]
     if spaces then
@@ -600,7 +617,7 @@ g.on_event("session_closed", function(e)
   if bufs[e.session] then
     neotmux.buf.delete(bufs[e.session])
   end
-  bufs[e.session], last[e.session] = nil, nil
+  bufs[e.session], last[e.session], working[e.session] = nil, nil, nil
   if clock then
     clock:stop()
   end
@@ -610,6 +627,7 @@ g.on_event("session_renamed", function(e)
   M.dirty()
   bufs[e.session], bufs[e.from] = bufs[e.from], nil
   last[e.session], last[e.from] = last[e.from], nil
+  working[e.session], working[e.from] = working[e.from], nil
 end)
 
 local function same(a, b)

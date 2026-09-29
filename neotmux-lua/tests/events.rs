@@ -247,3 +247,65 @@ fn session_closed_is_dispatched_with_no_session_bound() {
     let ops = format!("{:?}", sub.drain_ops(None));
     assert!(ops.contains("closed work"), "{ops}");
 }
+
+fn running(
+    commands: &[(u32, &str)],
+) -> std::collections::BTreeMap<PaneId, neotmux_proto::PaneInfo> {
+    commands
+        .iter()
+        .map(|(pane, command)| {
+            (
+                PaneId::from(*pane),
+                neotmux_proto::PaneInfo {
+                    command: Some(command.to_string()),
+                    cwd: None,
+                    job: None,
+                },
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn pane_info_changed_names_only_the_pane_whose_info_moved_and_sees_the_new_value() {
+    let (_d, sub) = built(&[
+        ("init.lua", "require('plugin.watcher')"),
+        (
+            "lua/plugin/watcher.lua",
+            "neotmux.on_event('pane_info_changed', function(e) neotmux.log.info('info ' .. e.pane .. ' ' .. neotmux.pane.info(e.pane).command) end) return {}",
+        ),
+    ]);
+    assert!(sub.run_init().is_empty());
+    sub.publish_pane_info(support::one(), running(&[(1, "zsh"), (2, "zsh")]));
+    sub.drain_ops(Some(support::one()));
+
+    sub.publish_pane_info(support::one(), running(&[(1, "zsh"), (2, "vim")]));
+    let ops = format!("{:?}", sub.drain_ops(Some(support::one())));
+    assert_eq!(ops.matches("info ").count(), 1, "{ops}");
+    assert!(ops.contains("info 2 vim"), "{ops}");
+
+    sub.publish_pane_info(support::one(), running(&[(1, "zsh"), (2, "vim")]));
+    let ops = format!("{:?}", sub.drain_ops(Some(support::one())));
+    assert!(!ops.contains("info "), "{ops}");
+}
+
+#[test]
+fn pane_info_changed_compares_against_the_same_sessions_last_map() {
+    let (_d, sub) = built(&[
+        ("init.lua", "require('plugin.watcher')"),
+        (
+            "lua/plugin/watcher.lua",
+            "neotmux.on_event('pane_info_changed', function(e) neotmux.log.info('info ' .. e.pane) end) return {}",
+        ),
+    ]);
+    assert!(sub.run_init().is_empty());
+    let two = neotmux_proto::SessionId::from(2);
+    sub.publish_pane_info(support::one(), running(&[(1, "zsh")]));
+    sub.publish_pane_info(two, running(&[(1, "vim")]));
+    sub.drain_ops(Some(support::one()));
+    sub.drain_ops(Some(two));
+
+    sub.publish_pane_info(support::one(), running(&[(1, "zsh")]));
+    let ops = format!("{:?}", sub.drain_ops(Some(support::one())));
+    assert!(!ops.contains("info "), "{ops}");
+}

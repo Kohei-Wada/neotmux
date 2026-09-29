@@ -352,9 +352,26 @@ impl LuaSubsystem {
 
     /// What every pane is running, as the host last sampled it. Published on the host's own
     /// cadence rather than per frame: a plugin asks every tick, and the answer is a syscall.
+    ///
+    /// Each pane whose sample differs from the one this session had before is announced after
+    /// the new map is in place, so a handler reads the new values. A pane that is gone is
+    /// `pane_closed`'s to announce.
     pub fn publish_pane_info(&self, session: SessionId, info: BTreeMap<PaneId, PaneInfo>) {
         let _bound = self.ambient.bind(session);
-        *self.pane_info.borrow_mut() = info;
+        let previous = std::mem::replace(&mut *self.pane_info.borrow_mut(), info);
+        if !self.has_subscriber("pane_info_changed") {
+            return;
+        }
+        let changed: Vec<PaneId> = self
+            .pane_info
+            .borrow()
+            .iter()
+            .filter(|(pane, now)| previous.get(pane) != Some(now))
+            .map(|(pane, _)| *pane)
+            .collect();
+        for pane in changed {
+            self.deliver(&Event::PaneInfoChanged { pane });
+        }
     }
 
     /// Where every pane's cursor is and what mode its program has the terminal in, as of the
