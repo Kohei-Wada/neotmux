@@ -19,7 +19,6 @@ local detect = require("neotmux.detect")
 local modes = require("neotmux.mode")
 local seen = require("neotmux.seen")
 local state = require("neotmux.state")
-local style = require("neotmux.style")
 local g = neotmux.group("plugin.herdr.sidebar.agents")
 
 local M = { title = "agents", share = 0.5, always = true }
@@ -43,39 +42,39 @@ M.clock = function()
   return neotmux.now()
 end
 
--- The sidebar, set by `build` for the tokens, and the sidebar's colours, taken with it.
-local sidebar, c
+-- The sidebar, set by `build` for the tokens.
+local sidebar
 
 M.tokens = {
   state_icon = function(it)
-    return sidebar.icon(it.state), c[it.state]
+    return sidebar.icon(it.state), "sidebar:" .. it.state
   end,
   state_text = function(it)
-    return it.state, c[it.state]
+    return it.state, "sidebar:" .. it.state
   end,
   session = function(it)
-    return it.session, it.focused and c.text or c.subtext, true, true
+    return it.session, it.focused and "sidebar:text" or "sidebar:subtext", true, true
   end,
   window = function(it)
     if it.windows < 2 then
       return nil
     end
-    return it.window_name or tostring(it.window), c.subtext, false, true
+    return it.window_name or tostring(it.window), "sidebar:subtext", false, true
   end,
   location = function(it)
     return it.session .. ":" .. it.window .. "." .. it.pane,
-      it.focused and c.focused_pane or c.window,
+      it.focused and "sidebar:focused_pane" or "sidebar:window",
       false,
       true
   end,
   agent = function(it)
-    return it.agent, c.overlay, false, true
+    return it.agent, "sidebar:overlay", false, true
   end,
   command = function(it)
-    return it.command, c.overlay, false, true
+    return it.command, "sidebar:overlay", false, true
   end,
   age = function(it)
-    return it.age, c.overlay
+    return it.age, "sidebar:overlay"
   end,
 }
 
@@ -88,6 +87,13 @@ local since = {}
 
 -- Three columns whatever the count, because the band is as wide as its widest row: an age that
 -- grew a digit would widen it, and every pane would be resized each time one rolled over.
+-- When an age reading `ms` next shows something else: the next second, minute or hour.
+local function next_age(ms)
+  local s = math.floor(ms / 1000)
+  local step = s < 60 and 1 or s < 3600 and 60 or 3600
+  return (math.floor(s / step) + 1) * step * 1000
+end
+
 local function age(ms)
   local s = math.floor(ms / 1000)
   local text
@@ -147,6 +153,7 @@ function M.collect()
               command = info and info.command or agent,
               focused = pane == focused,
               age = age(now - was.at),
+              age_changes_at = was.at + next_age(now - was.at),
               order = { rank, session_at, window_at, pane_at },
             }
           end
@@ -198,15 +205,35 @@ end, { desc = "go to the previous agent" })
 -- Where the navigate cursor is, by position in `collect()`, or nil when it is not up.
 M.cursor = nil
 
+-- When the next `age` on screen reads differently, by `M.clock`, or nil when no row shows one:
+-- the sidebar renders again then, since no event says a second has passed.
+M.stale_at = nil
+
+local function shows_age()
+  for _, names in ipairs(M.rows) do
+    for _, name in ipairs(names) do
+      if name == "age" then
+        return true
+      end
+    end
+  end
+  return false
+end
+
 function M.build(given)
-  sidebar, c = given, style.get("sidebar")
+  sidebar = given
   local rows, anchor = {}, nil
+  local aged = shows_age()
+  M.stale_at = nil
   for index, it in ipairs(M.collect()) do
+    if aged and (M.stale_at == nil or it.age_changes_at < M.stale_at) then
+      M.stale_at = it.age_changes_at
+    end
     local selected = M.cursor == index
     if (it.focused and not M.cursor) or selected then
       anchor = #rows + 1
     end
-    local fill = selected and c.selection or it.focused and c.here or nil
+    local fill = selected and "sidebar:selection" or it.focused and "sidebar:here" or nil
     for at, names in ipairs(M.rows) do
       local runs = sidebar.row(M.tokens, names, it)
       if #runs > 0 then
@@ -221,14 +248,15 @@ end
 
 -- Folded: `1 ●`, an agent a row, numbered as `1`-`9` in navigate go to them.
 function M.rail(given)
-  sidebar, c = given, style.get("sidebar")
+  sidebar = given
+  M.stale_at = nil
   local rows = {}
   for at, it in ipairs(M.collect()) do
     rows[#rows + 1] = {
-      { text = tostring(at), fg = it.focused and c.text or c.overlay },
+      { text = tostring(at), hl = it.focused and "sidebar:text" or "sidebar:overlay" },
       { text = " " },
-      { text = sidebar.icon(it.state), fg = c[it.state] },
-      fill = it.focused and c.here or nil,
+      { text = sidebar.icon(it.state), hl = "sidebar:" .. it.state },
+      fill = it.focused and "sidebar:here" or nil,
     }
   end
   return rows

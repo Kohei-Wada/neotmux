@@ -1633,7 +1633,7 @@ a line, every agent numbered with its state, and `»` at the bottom.
 
 **States and colours** are herdr's: working yellow, blocked red, done teal, idle green, each a
 `●` except idle's `○` (`require('plugin.herdr.sidebar').icons`, the shapes; the colours are
-`style.get('sidebar')`'s `working`, `blocked`, `done` and `idle`, restyled with
+the `sidebar:working`, `sidebar:blocked`, `sidebar:done` and `sidebar:idle` groups, restyled with
 `require('neotmux.style').set('sidebar', { working = 'yellow', ... })`; herdr's `symbols` are
 `{ working = '◐', blocked = '×', done = '✓', idle = '○' }`). **Done** is an agent that went idle
 where nobody was looking — not in the current window of a session a client is attached to —
@@ -1678,10 +1678,11 @@ table.insert(require('plugin.herdr.sidebar').sections, {
 })
 ```
 
-A row is a list of runs, the shape `status.segments.draw` takes; a row with `fill = '#1e1e2e'`
-has the band's width behind it painted that colour. `sidebar.row(tokens, names, it)` builds one
-out of a token table the way the tree does, a token answering its text, its colour, whether
-it is bold and whether it shrinks: a row too wide for the band ends its first shrinking run in
+A row is a list of runs, `{ text = 'hello', hl = 'sidebar:text', bold = true }`, each coloured by
+the highlight group it names; a row with `fill = 'sidebar:here'` has the band's width behind it
+painted that group's colour. `sidebar.row(tokens, names, it)` builds one out of a token table the
+way the tree does, a token answering its text, a highlight group name, whether it is bold and
+whether it shrinks: a row too wide for the band ends its first shrinking run in
 `…` so the runs after it stay on screen, as a space's name and branch, an agent's names and a window's name and a pane's command in the tree do. A section with no `rail` is its open rows cut to the rail's width. Without a `fit` a section is cut by
 `sidebar.scroll`, which keeps `anchor` on screen. A section whose `build` or `fit` raises is left
 out of that frame and named once through `neotmux.notify`.
@@ -1921,9 +1922,16 @@ require('plugin.herdr.sidebar.sessions').markers =
   { current_window = '>', window = ' ', focused_pane = '*', pane = ' ' }
 ```
 
-`style.get('sidebar')` and `markers` are read every tick. The colours are the sidebar's and every
-section reads them (see [Styling](#styling)). A marker is one cell: one that measured two columns would push every name on its row
-across by one.
+The colours are the sidebar's, published as the `sidebar:<part>` highlight groups every section
+names (see [Styling](#styling)), so a `style.set` or a theme change recolours the band at once. A
+marker is one cell: one that measured two columns would push every name on its row across by one.
+
+A token answers its text, a highlight group name — `'sidebar:branch'`, or one of your own made
+with `neotmux.hl.set` — whether it is bold, and whether it shrinks to `…` when the row is too
+wide. The sidebar draws into a buffer (see Buffers) and rewrites it only when a pane's state,
+the sessions, windows or panes, the band's size, the fold or the navigate cursor changed; a
+token you add that shows something else that changes must call
+`require('plugin.herdr.sidebar').dirty()` when it does.
 
 ### Adding to the palette
 
@@ -2501,8 +2509,8 @@ Selectors the shipped plugins declare:
 `notify` draws a float, but its parts are not a list's or a prompt's, so it stays `notify`. Its
 fill is `notify.frame`, but its border is drawn in `float.box`'s `line`, not a part of its own —
 so `style.set('float', { frame = ... })` does not reach a notification's fill.
-`sidebar`'s sections (`spaces`, `agents`, `sessions`) read `style.get('sidebar')`, since they
-draw in the sidebar's colours.
+`sidebar`'s sections (`spaces`, `agents`, `sessions`) name the `sidebar:<part>` groups, since
+they draw in the sidebar's colours.
 
 A plugin of your own declares its selector the same way the shipped ones do: `style.default` at
 load, with every part it draws and a Mocha name for each, and `style.get` where it draws:

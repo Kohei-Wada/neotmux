@@ -46,29 +46,29 @@ M.refresh = 5000
 M.asks_per_build = 2
 local budget = 0
 
--- The sidebar, set by `build` for the tokens, and the sidebar's colours, taken with it.
-local sidebar, c
+-- The sidebar, set by `build` for the tokens.
+local sidebar
 
 M.tokens = {
   state_icon = function(it)
-    return sidebar.icon(it.state), c[it.state]
+    return sidebar.icon(it.state), "sidebar:" .. it.state
   end,
   name = function(it)
     if it.here then
-      return it.name, c.text, true, true
+      return it.name, "sidebar:text", true, true
     end
-    return it.name, c.subtext, false, true
+    return it.name, "sidebar:subtext", false, true
   end,
   branch = function(it)
-    return it.git and it.git.branch, it.here and c.branch or c.overlay, false, true
+    return it.git and it.git.branch, it.here and "sidebar:branch" or "sidebar:overlay", false, true
   end,
   ahead = function(it)
     local n = it.git and it.git.ahead or 0
-    return n > 0 and ("\u{2191}" .. n) or nil, c.idle -- ↑, green
+    return n > 0 and ("\u{2191}" .. n) or nil, "sidebar:idle" -- ↑, green
   end,
   behind = function(it)
     local n = it.git and it.git.behind or 0
-    return n > 0 and ("\u{2193}" .. n) or nil, c.blocked -- ↓, red
+    return n > 0 and ("\u{2193}" .. n) or nil, "sidebar:blocked" -- ↓, red
   end,
 }
 
@@ -105,12 +105,21 @@ local function ask(cwd)
   budget = budget - 1
   known = known or {}
   local asked_before = known.at
+  local was = { known.branch, known.ahead, known.behind }
   known.busy, known.at = true, now
   git[cwd] = known
+  -- The sidebar renders only when something it shows changed, and a branch is something.
+  local function settle()
+    known.busy = false
+    if known.branch ~= was[1] or known.ahead ~= was[2] or known.behind ~= was[3] then
+      package.loaded["plugin.herdr.sidebar"].dirty()
+    end
+  end
   local started = g.job.start({ "git", "-C", cwd, "rev-parse", "--abbrev-ref", "HEAD" }, {
     on_exit = function(code, stdout)
       if code ~= 0 then
-        known.branch, known.ahead, known.behind, known.busy = nil, 0, 0, false
+        known.branch, known.ahead, known.behind = nil, 0, 0
+        settle()
         return
       end
       known.branch = (stdout or ""):match("^%s*(.-)%s*$")
@@ -126,12 +135,12 @@ local function ask(cwd)
             else
               known.behind, known.ahead = 0, 0
             end
-            known.busy = false
+            settle()
           end,
         }
       )
       if not counted then
-        known.busy = false
+        settle()
       end
     end,
   })
@@ -141,6 +150,21 @@ local function ask(cwd)
     known.busy, known.at = false, asked_before
   end
   return known
+end
+
+-- Every session's directory asked again once its refresh has passed, outside a build: the
+-- sidebar builds only when something changed, and a branch changing is something.
+function M.poke()
+  budget = M.asks_per_build
+  for _, name in ipairs(neotmux.session.list()) do
+    neotmux.session.with(name, function()
+      local focus = neotmux.pane.current()
+      local info = focus and neotmux.pane.info(focus)
+      if info and info.cwd then
+        ask(info.cwd)
+      end
+    end)
+  end
 end
 
 -- Where the navigate cursor is, by position in `session.list()`, or nil when it is not up.
@@ -170,12 +194,12 @@ end
 -- Shaped as `plugin.herdr.sidebar.sessions` shapes its model, each space's own rows and the tree
 -- hung under the one you are in, so that section's fit cuts this one the same way.
 function M.build(given)
-  sidebar, c = given, style.get("sidebar")
+  sidebar = given
   local rows, anchor, spaces = {}, 1, {}
   local tree = { rows = {} }
   for at, it in ipairs(entries()) do
     local selected = M.cursor == at
-    local fill = selected and c.selection or it.here and c.here or nil
+    local fill = selected and "sidebar:selection" or it.here and "sidebar:here" or nil
     if (it.here and not M.cursor) or selected then
       anchor = #rows + 1
     end
@@ -204,7 +228,7 @@ function M.build(given)
       end
     end
     for _ = 1, M.row_gap or 0 do
-      rows[#rows + 1] = { { text = "", bg = c.bar } }
+      rows[#rows + 1] = { { text = "" } }
     end
   end
   return { rows = rows, anchor = anchor, entries = spaces, tree = tree }
@@ -221,14 +245,14 @@ end
 
 -- Folded: `1 ●`, a session a row, numbered as `1`-`9` in navigate go to them.
 function M.rail(given)
-  sidebar, c = given, style.get("sidebar")
+  sidebar = given
   local rows = {}
   for at, it in ipairs(entries()) do
     rows[#rows + 1] = {
-      { text = tostring(at), fg = it.here and c.text or c.overlay },
+      { text = tostring(at), hl = it.here and "sidebar:text" or "sidebar:overlay" },
       { text = " " },
-      { text = sidebar.icon(it.state), fg = c[it.state] },
-      fill = it.here and c.here or nil,
+      { text = sidebar.icon(it.state), hl = "sidebar:" .. it.state },
+      fill = it.here and "sidebar:here" or nil,
     }
   end
   return rows

@@ -9,15 +9,10 @@
 --   sessions.panes.rows = { { 'state_icon', 'number', 'command' } }
 --
 -- so moving what is on which line, or dropping a token you do not care about, is an assignment
--- rather than a fork of this file. The colours are the sidebar's: `style.get('sidebar')`.
+-- rather than a fork of this file. The colours are the sidebar's: the `sidebar:<part>` groups.
 local state = require("neotmux.state")
-local style = require("neotmux.style")
 
 local M = {}
-
--- The sidebar's colours, set by `build` for the tokens, which are called with nothing but the
--- row they are about.
-local colors
 
 M.markers = {
   current_window = "\u{25b8}", -- ▸
@@ -83,50 +78,50 @@ M.panes = {
 M.tokens = {
   sessions = {
     state_icon = function(it)
-      return state.icon(it.state), colors[it.state]
+      return state.icon(it.state), "sidebar:" .. tostring(it.state)
     end,
     name = function(it)
-      return it.name, it.here and colors.current_session or colors.session
+      return it.name, it.here and "sidebar:current_session" or "sidebar:session"
     end,
     command = function(it)
-      return it.command, colors.detail, false, true
+      return it.command, "sidebar:detail", false, true
     end,
     panes = function(it)
-      return it.panes .. "p", colors.detail
+      return it.panes .. "p", "sidebar:detail"
     end,
   },
   windows = {
     tree = function(it)
-      return it.guide, colors.detail
+      return it.guide, "sidebar:detail"
     end,
     marker = function(it)
       return it.current and M.markers.current_window or M.markers.window,
-        it.current and colors.current_window or colors.window
+        it.current and "sidebar:current_window" or "sidebar:window"
     end,
     number = function(it)
-      return tostring(it.number), it.current and colors.current_window or colors.window
+      return tostring(it.number), it.current and "sidebar:current_window" or "sidebar:window"
     end,
     -- Nothing for a window nobody has named: its number is what it is called until then.
     name = function(it)
-      return it.name, it.current and colors.current_window or colors.window, false, true
+      return it.name, it.current and "sidebar:current_window" or "sidebar:window", false, true
     end,
   },
   panes = {
     tree = function(it)
-      return it.guide, colors.detail
+      return it.guide, "sidebar:detail"
     end,
     marker = function(it)
       return it.focused and M.markers.focused_pane or M.markers.pane,
-        it.focused and colors.focused_pane or colors.pane
+        it.focused and "sidebar:focused_pane" or "sidebar:pane"
     end,
     state_icon = function(it)
-      return state.icon(it.state), colors[it.state]
+      return state.icon(it.state), "sidebar:" .. tostring(it.state)
     end,
     number = function(it)
-      return it.number, it.focused and colors.focused_pane or colors.pane
+      return it.number, it.focused and "sidebar:focused_pane" or "sidebar:pane"
     end,
     command = function(it)
-      return it.command, colors.detail, false, true
+      return it.command, "sidebar:detail", false, true
     end,
   },
 }
@@ -162,13 +157,13 @@ local function entry(sidebar, level, kind, it, out)
     local runs = sidebar.row(M.tokens[kind], names, it)
     if #runs > 0 then
       if at > 1 then
-        table.insert(runs, 1, { text = "  ", bg = colors.bar })
+        table.insert(runs, 1, { text = "  " })
       end
       out[#out + 1] = runs
     end
   end
   for _ = 1, level.row_gap or 0 do
-    out[#out + 1] = { { text = "", bg = colors.bar } }
+    out[#out + 1] = { { text = "" } }
   end
 end
 
@@ -177,7 +172,6 @@ end
 -- `plugin.herdr.sidebar.spaces` hangs the same rows under the space you are in, laid out by its own
 -- `levels`: `{ windows = ..., panes = ... }`, shaped as `M.windows` and `M.panes` are.
 function M.subtree(sidebar, out, levels)
-  colors = style.get("sidebar")
   levels = levels or M
   local anchor
   local current_window = neotmux.window.current()
@@ -218,7 +212,6 @@ end
 -- Beside the rows, what a fit needs to cut them sensibly: each session's own rows and which one
 -- is here, and the subtree hung under it with the row inside it worth keeping.
 function M.build(sidebar)
-  colors = style.get("sidebar")
   local rows, entries, anchor = {}, {}, 1
   local tree = { rows = {} }
   local here = neotmux.session.current()
@@ -253,7 +246,7 @@ end
 -- What stands in for the subtree rows cut off either side of the pane you are in. Indented
 -- like a tree row, so the first column stays the markers'.
 local function more(n)
-  return { { text = "  \u{2026} " .. n .. " more", fg = colors.detail, bg = colors.bar } }
+  return { { text = "  \u{2026} " .. n .. " more", hl = "sidebar:detail" } }
 end
 
 -- Sessions before panes. Every row if they fit; else every session's rows with the subtree of
@@ -261,7 +254,6 @@ end
 -- row and no subtree; else those first rows scrolled around the one you are in. Where a session
 -- is, is the thing the sidebar is for, and the panes of the one you are in are on your screen.
 function M.fit(model, height, sidebar)
-  colors = style.get("sidebar")
   if #model.rows <= height then
     return model.rows
   end

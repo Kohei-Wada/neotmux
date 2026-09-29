@@ -20,15 +20,20 @@
 --     rail = function(sidebar) return { runs, ... } end,   -- optional: what it is folded
 --   })
 --
--- A row is a list of runs, the shape `status.segments.draw` takes, and a row with a `fill` has the
--- band's width behind it painted that colour. `build` is handed this module
+-- A row is a list of runs, `{ text = ..., hl = 'sidebar:branch', bold = ... }`, each coloured by
+-- the highlight group it names, and a row with a `fill` has the band's width behind it painted
+-- that group's colour. `build` is handed this module
 -- rather than requiring it, because the shipped sections are required from here while this file
 -- is still loading. Without a `fit`, a section is cut by `sidebar.scroll`.
 --
 -- Nothing here is a host feature. `neotmux.reserve('left', n)` takes the band,
--- `handle:resize_to(n)` widens and folds it, and `ctx:reserved()` answers where it landed.
+-- `handle:resize_to(n)` widens and folds it, and `ctx:reserved()` answers where it landed. The
+-- rows are written into a buffer the band shows (`neotmux.buf`), rewritten only when something
+-- they show changed: see `dirty` below.
 local segments = require("status.segments")
 local style = require("neotmux.style")
+-- Before this file's own tick, so a pane `seen` moved this frame is drawn in this frame.
+local seen_state = require("neotmux.seen")
 local g = neotmux.group("plugin.herdr.sidebar")
 
 local M = {}
@@ -44,10 +49,10 @@ M.widths = {
   closed = 4,
 }
 
--- Catppuccin Mocha, the palette the status bar was drawn from. Every section reads these
--- through `style.get('sidebar')`, so restyling it with `neotmux.style.set('sidebar', ...)`
--- takes effect on the next tick. `bar` has no default: the terminal's own background, which is
--- herdr's.
+-- Catppuccin Mocha, the palette the status bar was drawn from. `neotmux.style` publishes each
+-- part as the highlight group `sidebar:<part>` the rows name, so restyling it with
+-- `neotmux.style.set('sidebar', ...)` or a theme change recolours the band with nothing rewritten.
+-- `bar` has no default: the terminal's own background, which is herdr's.
 style.default("sidebar", {
   text = "text",
   subtext = "subtext0", -- a name you are not at
@@ -98,6 +103,12 @@ M.rule = "\u{2502}" -- │
 
 M.band = g.reserve("left", M.widths.min)
 
+local buf = g.buf.create()
+local ns = neotmux.buf.namespace("plugin.herdr.sidebar")
+if M.band then
+  M.band:set_buf(buf)
+end
+
 -- Which of the two the band is in. Folded, a section with a `rail` draws that, and one without is
 -- its open rows cut to the rail's width.
 M.open = true
@@ -110,22 +121,21 @@ M.split = 0.5
 M.folds = { open = "\u{ab}", closed = "\u{bb}" } -- «, »
 
 -- One row: every token in `names` that has something to say, in order, separated by a space.
--- A token answers its text, its colour, whether it is bold and whether it gives up its end to an
--- ellipsis when the row is too wide for the band. One that answers nil or an empty string is left
--- out, so a row whose tokens are all empty is no row.
+-- A token answers its text, a highlight group name, whether it is bold and whether it gives up
+-- its end to an ellipsis when the row is too wide for the band. One that answers nil or an empty
+-- string is left out, so a row whose tokens are all empty is no row.
 function M.row(tokens, names, it)
-  local c = style.get("sidebar")
   local runs = {}
   for _, name in ipairs(names) do
     local token = tokens[name]
     if token then
-      local text, colour, bold, shrink = token(it)
+      local text, group, bold, shrink = token(it)
       if text and text ~= "" then
         if #runs > 0 then
-          runs[#runs + 1] = { text = " ", bg = c.bar }
+          runs[#runs + 1] = { text = " " }
         end
         runs[#runs + 1] =
-          { text = text, fg = colour or c.detail, bg = c.bar, bold = bold, shrink = shrink }
+          { text = text, hl = group or "sidebar:detail", bold = bold, shrink = shrink }
       end
     end
   end
@@ -136,8 +146,7 @@ end
 -- number is how many rows are not on screen on that side.
 local function arrow(glyph)
   return function(n)
-    local c = style.get("sidebar")
-    return { { text = glyph .. " " .. n, fg = c.detail, bg = c.bar } }
+    return { { text = glyph .. " " .. n, hl = "sidebar:detail" } }
   end
 end
 
@@ -242,11 +251,10 @@ local function header(section, width)
   if gap < 1 then
     right, gap = "", 0
   end
-  local c = style.get("sidebar")
   return {
-    { text = left, fg = c.header, bg = c.bar, bold = true },
-    { text = string.rep(" ", gap), bg = c.bar },
-    { text = right, fg = c.header, bg = c.bar, bold = true },
+    { text = left, hl = "sidebar:header", bold = true },
+    { text = string.rep(" ", gap) },
+    { text = right, hl = "sidebar:header", bold = true },
   }
 end
 
@@ -287,19 +295,39 @@ local function shrunk(runs, width)
   return runs
 end
 
-local function draw_row(ctx, x, y, width, runs)
+-- One row of the grid: its runs cut to `width` as `shrunk` cuts them, from column `x`, as a line
+-- of text and the extmarks that colour it.
+local function put(grid, y, x, width, runs)
   runs = shrunk(runs, width)
-  if runs.fill then
-    ctx:rect(nil, x, y, width, 1, { bg = runs.fill })
-    -- Over the band's own colour too, which `row` gives every run it builds.
-    local c = style.get("sidebar")
-    for _, run in ipairs(runs) do
-      if run.bg == nil or run.bg == c.bar then
-        run.bg = runs.fill
+  local row = grid[y]
+  for _, run in ipairs(runs) do
+    local room = width - (row.cols - x)
+    if room <= 0 then
+      break
+    end
+    local text = run.text or ""
+    if segments.columns(text) > room then
+      text = segments.clip(text, room)
+    end
+    if text ~= "" then
+      local at = row.cols
+      row.text = row.text .. text
+      row.cols = row.cols + segments.columns(text)
+      if run.hl then
+        row.marks[#row.marks + 1] = { col = at, end_col = row.cols, hl = run.hl, bold = run.bold }
       end
     end
   end
-  segments.draw(ctx, x, y, width, runs)
+  if runs.fill then
+    row.fill = runs.fill
+  end
+end
+
+local function pad_to(row, col)
+  if row.cols < col then
+    row.text = row.text .. string.rep(" ", col - row.cols)
+    row.cols = col
+  end
 end
 
 -- How many rows each live section gets out of `height`: cut at `M.split` when there are two,
@@ -355,13 +383,11 @@ end
 -- knowledge goes in.
 require("neotmux.bind").prefix("b", M.toggle, "fold the sidebar to its rail, or open it")
 
-g.on_tick(function(ctx)
-  local c = style.get("sidebar")
-  local band = ctx:reserved()
-  -- Nil while the terminal is too narrow to spare the columns. The panes have them back, so
-  -- there is nowhere to draw and nothing to draw over.
-  if not band then
-    return
+-- The whole band as lines, row for row, written into the buffer the band shows.
+function M.render(band)
+  local grid = {}
+  for y = 1, band.h do
+    grid[y] = { text = "", cols = 0, marks = {} }
   end
   local rail = not M.open
 
@@ -384,7 +410,7 @@ g.on_tick(function(ctx)
   end
 
   -- The width the content wants, asked for once it is known. `resize_to` lands on the next
-  -- frame, which is why this is a comparison and not a call every tick.
+  -- frame, which is why this is a comparison and not a call every render.
   if M.band then
     local want = M.open and width_for(live) or M.widths.closed
     if want ~= band.w then
@@ -392,39 +418,32 @@ g.on_tick(function(ctx)
     end
   end
 
-  ctx:rect(nil, band.x, band.y, band.w, band.h, { bg = c.bar })
-
   local ruled = band.w > 1
   local inner = ruled and band.w - 1 or band.w
-  if ruled then
-    for row = band.y, band.y + band.h - 1 do
-      ctx:text(nil, band.x + inner, row, M.rule, { fg = c.rule, bg = c.bar })
-    end
-  end
 
   -- The bottom row is the fold's: `«` in its corner open, `»` in the middle of the rail.
   local height = band.h
   if M.band and M.folds and height > 1 then
     height = height - 1
     local glyph = rail and M.folds.closed or M.folds.open
-    local x = rail and band.x + math.floor((inner - 1) / 2) or band.x + inner - 1
-    ctx:text(nil, x, band.y + height, glyph, { fg = c.overlay, bg = c.bar })
+    local x = rail and math.floor((inner - 1) / 2) or inner - 1
+    pad_to(grid[height + 1], x)
+    put(grid, height + 1, x, 1, { { text = glyph, hl = "sidebar:overlay" } })
   end
 
   local heights = heights_of(live, height)
-  local y = band.y
+  local y = 1
   for i, it in ipairs(live) do
     local body = heights[i] - it.heading
     -- A header with no room for a row under it is not drawn, unless there are no rows to want.
     local room = heights[i] >= it.heading and (body >= 1 or #it.model.rows == 0)
     local top = y
     if i > 1 and room then
-      local line = string.rep("\u{2500}", inner)
-      ctx:text(nil, band.x, top, line, { fg = c.rule, bg = c.bar })
+      put(grid, top, 0, inner, { { text = string.rep("\u{2500}", inner), hl = "sidebar:rule" } })
       top = top + 1
     end
     if it.section.title and not rail and room then
-      segments.draw(ctx, band.x, top, inner, header(it.section, inner))
+      put(grid, top, 0, inner, header(it.section, inner))
       top = top + 2
     end
     if body >= 1 then
@@ -432,11 +451,176 @@ g.on_tick(function(ctx)
       local rows = guarded(it.section, it.at, "fit", fit, it.model, body, M)
       if type(rows) == "table" then
         for k = 1, math.min(#rows, body) do
-          draw_row(ctx, band.x, top + k - 1, inner, rows[k])
+          put(grid, top + k - 1, 0, inner, rows[k])
         end
       end
     end
     y = y + heights[i]
+  end
+
+  -- The band's own colour, where a user gave it one (`sidebar:bar` exists only then), on every
+  -- row a fill of its own did not paint; then the rule down the right edge.
+  local bar = neotmux.hl.get("sidebar:bar") and "sidebar:bar" or nil
+  local lines = {}
+  for row = 1, band.h do
+    grid[row].fill = grid[row].fill or bar
+    if ruled then
+      pad_to(grid[row], inner)
+      put(grid, row, inner, 1, { { text = M.rule, hl = "sidebar:rule" } })
+    end
+    lines[row] = grid[row].text
+  end
+  neotmux.buf.set_lines(buf, 0, -1, lines)
+  neotmux.buf.clear_namespace(buf, ns, 0, -1)
+  for row = 1, band.h do
+    local it = grid[row]
+    if it.fill then
+      neotmux.buf.set_extmark(buf, ns, row - 1, 0, { line_hl_group = it.fill })
+    end
+    for _, m in ipairs(it.marks) do
+      neotmux.buf.set_extmark(
+        buf,
+        ns,
+        row - 1,
+        m.col,
+        { end_col = m.end_col, hl_group = m.hl, bold = m.bold }
+      )
+    end
+  end
+end
+
+-- When to render: the model is stale when something it shows changed. Events say most of it; a
+-- token of your own that shows something else must call `dirty()` when that changes.
+local dirty = true
+function M.dirty()
+  dirty = true
+end
+
+-- Per pane, the facts its rows depend on: `state|command|agent`.
+local facts = {}
+
+local function judge(pane)
+  local now = seen_state.of(pane, require("neotmux.state").of(pane))
+  local info = neotmux.pane.info(pane)
+  local fact = tostring(now)
+    .. "|"
+    .. tostring(info and info.command)
+    .. "|"
+    .. tostring(require("neotmux.detect").agent(pane))
+  if facts[pane] ~= fact then
+    facts[pane] = fact
+    dirty = true
+  end
+end
+
+g.on_event("pane_changed", function(e)
+  judge(e.pane)
+end)
+g.on_event("pane_closed", function(e)
+  facts[e.pane] = nil
+  dirty = true
+end)
+for _, name in ipairs({
+  "pane_opened",
+  "focus_changed",
+  "resized",
+  "window_opened",
+  "window_closed",
+  "window_changed",
+  "window_renamed",
+  "session_created",
+  "session_renamed",
+}) do
+  g.on_event(name, M.dirty)
+end
+
+-- What changes with time and no output: a `working` pane settling to idle, a detector's hold
+-- running out, a branch. Every agent pane in every session judged again once a second, and every
+-- session's directory asked again once its refresh has passed.
+--
+-- A timer belongs to the first session to run a frame after it is armed and ends with it, so a
+-- session closing that had it arms another.
+local clock_in
+local function arm()
+  clock_in = nil
+  g.timer.every(1000, function()
+    clock_in = clock_in or neotmux.session.current()
+    for _, name in ipairs(neotmux.session.list()) do
+      neotmux.session.with(name, function()
+        for _, pane in ipairs(require("neotmux.panes").all()) do
+          if facts[pane] and not facts[pane]:find("|nil$") then
+            judge(pane)
+          end
+        end
+      end)
+    end
+    local spaces = package.loaded["plugin.herdr.sidebar.spaces"]
+    if spaces then
+      spaces.poke()
+    end
+  end)
+end
+arm()
+
+g.on_event("session_closed", function(e)
+  dirty = true
+  if e.session == clock_in then
+    arm()
+  end
+end)
+g.on_event("session_renamed", function(e)
+  if e.from == clock_in then
+    clock_in = e.session
+  end
+end)
+
+-- Whose sidebar the one buffer is: the session this tick is for when a client is at it, else one
+-- that has a client, so a session nobody is at does not draw its own "you are here" over theirs.
+local function viewer()
+  local here = neotmux.session.current()
+  if here == nil or neotmux.session.attached(here) > 0 then
+    return here
+  end
+  for _, name in ipairs(neotmux.session.list()) do
+    if neotmux.session.attached(name) > 0 then
+      return name
+    end
+  end
+  return here
+end
+
+local last = {}
+g.on_tick(function(ctx)
+  local band = ctx:reserved()
+  -- Nil while the terminal is too narrow to spare the columns. The panes have them back, so
+  -- there is nowhere to draw and nothing to draw over.
+  if not band then
+    return
+  end
+  local who = viewer()
+  -- What the rows are laid out against, besides the model.
+  local spaces = package.loaded["plugin.herdr.sidebar.spaces"]
+  local agents = package.loaded["plugin.herdr.sidebar.agents"]
+  local layout = table.concat({
+    tostring(who),
+    band.w,
+    band.h,
+    tostring(M.open),
+    tostring(spaces and spaces.cursor),
+    tostring(agents and agents.cursor),
+    tostring(agents and agents.sort),
+  }, ",")
+  local stale = agents and agents.stale_at and agents.clock() >= agents.stale_at
+  if dirty or stale or layout ~= last.layout or seen_state.generation ~= last.seen then
+    dirty = false
+    last.layout, last.seen = layout, seen_state.generation
+    if who and who ~= neotmux.session.current() then
+      neotmux.session.with(who, function()
+        M.render(band)
+      end)
+    else
+      M.render(band)
+    end
   end
 end)
 

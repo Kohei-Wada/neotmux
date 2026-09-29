@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 
 use neotmux_proto::{
-    DrawCmd, Epoch, Geometry, PaneId, PaneInfo, Rect, SessionId, Size, Window, WindowId,
+    DrawCmd, Epoch, Event, Geometry, PaneId, PaneInfo, Rect, SessionId, Size, Window, WindowId,
 };
 
 mod support;
@@ -250,6 +250,14 @@ fn line_with(lines: &[String], needle: &str) -> usize {
         .iter()
         .position(|l| l.contains(needle))
         .unwrap_or_else(|| panic!("no line contains {needle:?}:\n{}", lines.join("\n")))
+}
+
+fn logged_builds(sub: &Built) -> u32 {
+    support::logged(sub)
+        .iter()
+        .rev()
+        .find_map(|l| l.strip_prefix("builds=").and_then(|n| n.parse().ok()))
+        .expect("builds= logged")
 }
 
 #[test]
@@ -517,10 +525,18 @@ const AGENTS: &str = "local detect = require('neotmux.detect')\n\
       return false\n\
     end)\n";
 
+/// A pane's screen replaced, and the `pane_changed` the server raises for it in the session it is
+/// in: every pane id here is its session's id times a hundred, plus its place.
 fn show(sub: &Built, pane: u32, text: &str) {
     sub.terminals().feed(
         PaneId::from(pane),
         format!("\x1b[2J\x1b[H{text}").as_bytes(),
+    );
+    sub.dispatch_event(
+        SessionId::from(pane / 100),
+        &Event::PaneChanged {
+            pane: PaneId::from(pane),
+        },
     );
 }
 
@@ -992,6 +1008,100 @@ fn a_space_counts_the_agents_in_its_hidden_windows() {
     line_with(&lines, " B work");
 }
 
+/// Nothing the sidebar shows changed, so a tick does not rewrite its buffer: the host keeps
+/// drawing the lines it has.
+#[test]
+fn a_tick_with_nothing_new_does_not_rebuild_the_sidebar() {
+    let (_dir, sub) = built_herdr(
+        "local sidebar = require('plugin.herdr.sidebar')\n\
+         local builds = 0\n\
+         local real = sidebar.render\n\
+         sidebar.render = function(...) builds = builds + 1 return real(...) end\n\
+         neotmux.on_key(function(key) if key == 'B' then neotmux.log.info('builds=' .. builds) return true end return false end)\n",
+    );
+    let s = [Sess::new(1, "work", vec![vec![101]])];
+    open(&sub, &s);
+    settled(&sub, &s, 1);
+    let lines = frame(&sub, &s, 1);
+    support::keys(&sub, &["B"]);
+    let first: u32 = logged_builds(&sub);
+    assert!(first > 0, "the sidebar was never rendered: {lines:#?}");
+    for _ in 0..5 {
+        frame(&sub, &s, 1);
+    }
+    support::keys(&sub, &["B"]);
+    assert_eq!(logged_builds(&sub), first, "{lines:#?}");
+    line_with(&lines, "work");
+}
+
+/// Every session ticks, but the one buffer is the sidebar of the session a client is at: a tick in
+/// a session nobody is at neither rewrites it with its own "you are here" nor rewrites it at all.
+#[test]
+fn a_session_nobody_is_at_does_not_rebuild_the_sidebar() {
+    let (_dir, sub) = built_herdr(
+        "local sidebar = require('plugin.herdr.sidebar')\n\
+         local builds = 0\n\
+         local real = sidebar.render\n\
+         sidebar.render = function(...) builds = builds + 1 return real(...) end\n\
+         neotmux.on_key(function(key) if key == 'B' then neotmux.log.info('builds=' .. builds) return true end return false end)\n",
+    );
+    let s = [
+        Sess::new(1, "work", vec![vec![101]]),
+        Sess::new(2, "home", vec![vec![201]]),
+    ];
+    open(&sub, &s);
+    settled(&sub, &s, 1);
+    frame(&sub, &s, 1);
+    support::keys(&sub, &["B"]);
+    let first = logged_builds(&sub);
+    let mut lines = Vec::new();
+    for _ in 0..5 {
+        lines = frame(&sub, &s, 1);
+    }
+    support::keys(&sub, &["B"]);
+    assert_eq!(logged_builds(&sub), first, "{lines:#?}");
+    assert_eq!(style_of(&sub, "work"), (TEXT, true), "{lines:#?}");
+    assert_eq!(style_of(&sub, "home"), (SUBTEXT, false), "{lines:#?}");
+}
+
+/// A window named since the last render is in the tree the frame after `window_renamed` says so.
+#[test]
+fn a_window_renamed_is_in_the_sidebar_the_next_frame() {
+    let (_dir, sub) = built_herdr("");
+    let s = [Sess::new(1, "work", vec![vec![101]])];
+    open(&sub, &s);
+    settled(&sub, &s, 1);
+    let s = [Sess::new(1, "work", vec![vec![101]]).window_names(&["editor"])];
+    sub.dispatch_event(
+        SessionId::from(1),
+        &Event::WindowRenamed {
+            window: WindowId::from(100),
+        },
+    );
+    let lines = frame(&sub, &s, 1);
+    line_with(&lines, "1 editor");
+}
+
+/// A pane whose output changes its state rewrites that session's row.
+#[test]
+fn output_that_changes_a_panes_state_rewrites_the_sidebar() {
+    let (_dir, sub) = built_herdr(&format!("{AGENTS}{LETTERS}"));
+    let s = [Sess::new(1, "work", vec![vec![101]]).agents(&[101])];
+    open(&sub, &s);
+    show(&sub, 101, "BUSY");
+    let lines = settled(&sub, &s, 1);
+    line_with(&lines, " W work");
+    show(&sub, 101, "ASK");
+    sub.dispatch_event(
+        SessionId::from(1),
+        &Event::PaneChanged {
+            pane: PaneId::from(101),
+        },
+    );
+    let lines = settled(&sub, &s, 1);
+    line_with(&lines, " B work");
+}
+
 /// `C-b` while the cursor is up leaves it, so the prefix key that follows is the prefix's and
 /// the one after that is the pane's again.
 #[test]
@@ -1239,23 +1349,19 @@ fn a_band_colour_of_your_own_still_shows_the_rows_you_are_at() {
     assert_eq!(bg, HERE);
 }
 
-/// `style.set('sidebar', ...)` is not only read by a row's own fill: the band itself, painted
-/// first every tick with `c.bar`, is the user's colour too.
+/// `style.set('sidebar', ...)` is not only read by a row's own fill: the band itself, every row
+/// a fill of its own does not paint, is the user's colour too.
 #[test]
 fn a_style_set_recolours_the_band_itself() {
     let (_dir, sub) = built_herdr("require('neotmux.style').set('sidebar', { bar = '#123456' })\n");
     let s = [Sess::new(1, "work", vec![vec![101]])];
     open(&sub, &s);
     settled(&sub, &s, 1);
-    let bg = sub
-        .frame_output()
-        .into_iter()
-        .find_map(|cmd| match cmd {
-            DrawCmd::Rect { rect, bg, .. } if rect.h > 1 => Some(bg),
-            _ => None,
-        })
-        .expect("the band itself is painted");
-    assert_eq!(bg, neotmux_proto::Color::Rgb(0x12, 0x34, 0x56));
+    assert_eq!(
+        fill_on(&sub, 0),
+        Some(neotmux_proto::Color::Rgb(0x12, 0x34, 0x56)),
+        "the band itself is painted"
+    );
 }
 
 /// The theme, not only a plugin's own `style.set`, reaches the sidebar: `header` is `overlay0`

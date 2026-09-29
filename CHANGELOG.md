@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### The sidebar is a buffer the host draws
+
+Plugins can write lines into a buffer the host keeps and draws in a band or a float every frame
+— `neotmux.buf`, Neovim's buffers and extmarks — coloured by highlight groups that
+`neotmux.style` publishes as `selector:part`. `plugin.herdr.sidebar` is one: it rewrites its
+buffer only when something it shows changed, where it used to rebuild and redraw everything on
+every tick. **A sidebar token now answers a highlight group name where it answered a colour**:
+`return it.name, c.text` is `return it.name, 'sidebar:text'`. New events: `pane_changed` (once
+per pane per frame, no bytes), `window_renamed`, `session_created`, `session_closed` and
+`session_renamed`.
+
 ### `C-b N` makes a session without asking for a name, `C-b W` renames it
 
 `session-new`, on `C-b N` and in the palette, no longer opens a prompt: the session is called the

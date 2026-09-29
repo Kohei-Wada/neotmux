@@ -20,6 +20,10 @@ local g = neotmux.group("neotmux.seen")
 
 local M = {}
 
+-- Moves whenever a pane's state or whether it is done changes, so a reader that keeps what it
+-- drew can tell it is stale without asking every pane.
+M.generation = 0
+
 -- The state each pane was last seen in, the panes that finished unwatched, and which session
 -- each pane is in, so a session's tick can drop the ones it no longer has.
 local last = {}
@@ -54,16 +58,21 @@ g.on_tick(function()
     owner[pane] = name
     local now = state.of(pane)
     local was = last[pane]
+    local done = unseen[pane]
     last[pane] = now
     if now ~= "idle" or looked_at(pane) then
       unseen[pane] = nil
     elseif (was == "working" or was == "blocked") and detect.agent(pane) then
       unseen[pane] = true
     end
+    if now ~= was or unseen[pane] ~= done then
+      M.generation = M.generation + 1
+    end
   end
   for pane, who in pairs(owner) do
     if who == name and not present[pane] then
       owner[pane], last[pane], unseen[pane] = nil, nil, nil
+      M.generation = M.generation + 1
     end
   end
 end)
