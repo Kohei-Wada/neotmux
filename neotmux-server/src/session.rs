@@ -66,6 +66,8 @@ pub struct Session {
     /// Whether any plugin is subscribed to `pane_output`. Nothing is, almost always, and a
     /// pane's bytes are the one payload worth not sending.
     wants_pane_output: bool,
+    /// Whether any plugin is subscribed to `pane_changed`.
+    wants_pane_changed: bool,
     /// The last pane's child is gone. The session ends after one more frame, which is what
     /// draws that pane's final output.
     ended: bool,
@@ -119,6 +121,7 @@ impl Session {
             last_views: BTreeMap::new(),
             steps: Vec::new(),
             wants_pane_output: setup.wants_pane_output,
+            wants_pane_changed: setup.wants_pane_changed,
             ended: false,
             terminals,
             last_ticked: Instant::now(),
@@ -219,12 +222,21 @@ impl Session {
     /// input or the other panes.
     fn drain_panes(&mut self) -> anyhow::Result<DrainOutcome> {
         let wanted = self.wants_pane_output;
+        let changed_wanted = self.wants_pane_changed;
         let steps = &mut self.steps;
+        let mut changed: Vec<PaneId> = Vec::new();
         let drained = self.shells.drain(MAX_CHUNKS_PER_FRAME, |pane, bytes| {
+            // A pane's chunks arrive together, so the last one pushed is the only one to check.
+            if changed_wanted && changed.last() != Some(&pane) {
+                changed.push(pane);
+            }
             if wanted {
                 steps.push(Step::Event(Event::PaneOutput { pane, bytes }));
             }
         })?;
+        for pane in changed {
+            self.steps.push(Step::Event(Event::PaneChanged { pane }));
+        }
         if drained.output {
             self.dirty = true;
         }
@@ -310,6 +322,7 @@ impl Session {
         self.surface.gutter = setup.gutter;
         self.surface.pane_band = setup.pane_band;
         self.wants_pane_output = setup.wants_pane_output;
+        self.wants_pane_changed = setup.wants_pane_changed;
         // What happened while nobody was looking is not news for a client that was not
         // there: geometry is how a plugin learns what exists, events how it learns what
         // changed, and everything here is the former.
@@ -406,6 +419,8 @@ impl Session {
                         // The name is in the geometry, so a plugin that asks for it in the
                         // same frame is told the new one.
                         self.publish_geometry();
+                        self.steps
+                            .push(Step::Event(Event::WindowRenamed { window: *window }));
                         self.dirty = true;
                     }
                 }
@@ -829,6 +844,11 @@ impl Session {
         self.wants_pane_output = wanted;
     }
 
+    /// An event about the session itself, dispatched bound to it on its next frame.
+    pub fn announce(&mut self, event: Event) {
+        self.steps.push(Step::Event(event));
+    }
+
     /// What the panes have written since, fed to their terminals between frames. The frame
     /// it makes dirty is the next one.
     pub fn drain(&mut self) -> anyhow::Result<()> {
@@ -871,6 +891,7 @@ impl Session {
         views: &BTreeMap<PaneId, usize>,
     ) -> anyhow::Result<Pass<'_>> {
         self.wants_output(tock.wants_pane_output);
+        self.wants_pane_changed = tock.wants_pane_changed;
         let application = self.apply(tock)?;
         // The picture this tock asked for is committed before the end is looked at, on
         // every path but an ops-Quit (which the original also skipped it on), so the

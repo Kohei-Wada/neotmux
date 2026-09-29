@@ -46,6 +46,7 @@ fn halves(files: &[(&str, &str)]) -> (tempfile::TempDir, Wakeup, Session, Plugin
             gutter: 0,
             pane_band: 0,
             wants_pane_output: false,
+            wants_pane_changed: false,
         },
         waker,
         terminals.clone(),
@@ -218,6 +219,87 @@ fn a_frame_carries_what_the_sources_drew_and_what_they_notified() {
     );
 }
 
+/// What the frame's overlay says, its `Text` commands joined in order.
+fn overlay_text(frame: &Frame) -> String {
+    frame
+        .overlay
+        .iter()
+        .filter_map(|cmd| match cmd {
+            DrawCmd::Text { text, .. } => Some(text.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+/// Many chunks from one pane in one frame are one `pane_changed`.
+#[test]
+fn pane_changed_fires_once_per_pane_per_frame() {
+    let (_dir, _wakeup, mut session, mut plugins) = halves(&[
+        ("init.lua", "require('plugin.count')"),
+        (
+            "lua/plugin/count.lua",
+            "local n = 0\n\
+             neotmux.on_event('pane_changed', function() n = n + 1 end)\n\
+             neotmux.on_tick(function(ctx) ctx:text(nil, 0, 0, 'changed=' .. n) end)\n\
+             return {}",
+        ),
+    ]);
+    let pane = {
+        let pass = frame(&mut session, &mut plugins);
+        pass.frame
+            .as_ref()
+            .expect("a frame")
+            .cursor
+            .expect("a focused pane")
+    };
+    session
+        .write_to_pane(pane, b"yes | head -c 200000\r")
+        .expect("type");
+    // `wants_pane_changed` reaches the session through the first tock.
+    frame(&mut session, &mut plugins);
+    let mut seen = Vec::new();
+    step_until(&mut session, &mut plugins, |shown| {
+        let text = overlay_text(shown);
+        seen.push(text.clone());
+        text.contains("changed=") && seen.len() > 20
+    });
+    // Each frame adds at most one: the count never jumps by more than one between frames.
+    let counts: Vec<u32> = seen
+        .iter()
+        .filter_map(|t| {
+            t.strip_prefix("changed=")
+                .and_then(|n| n.trim().parse().ok())
+        })
+        .collect();
+    assert!(counts.windows(2).all(|w| w[1] <= w[0] + 1), "{counts:?}");
+}
+
+#[test]
+fn renaming_a_window_raises_window_renamed() {
+    let (_dir, _wakeup, mut session, mut plugins) = halves(&[
+        ("init.lua", "require('plugin.names')"),
+        (
+            "lua/plugin/names.lua",
+            "local said = 'none'\n\
+             neotmux.on_event('window_renamed', function(e) said = 'renamed ' .. e.window end)\n\
+             neotmux.on_key(function(key)\n\
+               if key == 'R' then neotmux.window.rename(neotmux.window.current(), 'logs') return true end\n\
+               return false\n\
+             end)\n\
+             neotmux.on_tick(function(ctx) ctx:text(nil, 0, 0, said) end)\n\
+             return {}",
+        ),
+    ]);
+    frame(&mut session, &mut plugins);
+    plugins.key(one(), Key::plain(KeyCode::Char('R')));
+    assert!(
+        step_until(&mut session, &mut plugins, |shown| overlay_text(shown)
+            .contains("renamed")),
+        "window_renamed was never raised"
+    );
+}
+
 #[test]
 fn a_session_ends_when_its_last_shell_does_and_still_produces_that_frame() {
     let (_dir, _wakeup, mut session, mut plugins) = halves(&[("init.lua", "return {}")]);
@@ -366,6 +448,7 @@ fn two_applies_are_two_stops_on_the_way_to_two_frames() {
         gutter: 0,
         pane_band: 0,
         wants_pane_output: false,
+        wants_pane_changed: false,
     };
     // A fresh session hands out with its own steps already queued (`Session::new`:
     // the initial `Bands` and `Geometry`), so the first apply carries those and says

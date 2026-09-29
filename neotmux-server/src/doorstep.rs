@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
 use neotmux_proto::wire::{Attach, ToClient, ToServer};
-use neotmux_proto::{Level, wire};
+use neotmux_proto::{Event, Level, wire};
 use neotmux_pty::PaneTerminals;
 use neotmux_pty::child::Waker;
 use neotmux_sys::{Link, logging};
@@ -314,6 +314,7 @@ fn admit(
         gutter: lua.opt().pane_gutter,
         pane_band: lua.pane_band(),
         wants_pane_output: lua.has_subscriber("pane_output"),
+        wants_pane_changed: lua.has_subscriber("pane_changed"),
     };
     let name = attach
         .session
@@ -341,6 +342,11 @@ fn admit(
                 },
             );
             plugins.lua().name_session(id, &name);
+            if let Some(held) = sessions.live.get_mut(&id) {
+                held.session.announce(Event::SessionCreated {
+                    session: name.clone(),
+                });
+            }
             id
         }
     };

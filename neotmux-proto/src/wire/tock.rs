@@ -12,4 +12,5 @@ pub struct Tock {
     pub gutter: u16,
     pub pane_band: u16,
     pub wants_pane_output: bool,
+    pub wants_pane_changed: bool,
 }

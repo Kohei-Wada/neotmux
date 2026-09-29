@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use neotmux_layout::PaneIds;
 use neotmux_proto::wire::{Done, End, ToClient};
-use neotmux_proto::{SessionId, Size, wire};
+use neotmux_proto::{Event, SessionId, Size, wire};
 use neotmux_pty::PaneTerminals;
 use neotmux_pty::child::Waker;
 use neotmux_sys::Link;
@@ -136,6 +136,11 @@ pub(crate) fn start_session(
                 },
             );
             plugins.lua().name_session(id, name);
+            if let Some(held) = sessions.live.get_mut(&id) {
+                held.session.announce(Event::SessionCreated {
+                    session: name.to_string(),
+                });
+            }
             Ok(())
         }
         Err(err) => Err(StartFailure::Failed(err)),
@@ -169,6 +174,10 @@ pub(crate) fn rename_session(
     }
     if let Some(held) = sessions.live.get_mut(&id) {
         held.name = to.to_string();
+        held.session.announce(Event::SessionRenamed {
+            session: to.to_string(),
+            from: from.to_string(),
+        });
     }
     // The Lua layer keeps its own copy, for `session.current()` and for the list a picker
     // draws.
@@ -224,6 +233,7 @@ pub(crate) fn setup_for(plugins: &Plugins, size: Size) -> Setup {
         gutter: lua.opt().pane_gutter,
         pane_band: lua.pane_band(),
         wants_pane_output: lua.has_subscriber("pane_output"),
+        wants_pane_changed: lua.has_subscriber("pane_changed"),
     }
 }
 
@@ -245,6 +255,11 @@ pub(crate) fn end_session(
         client.gone = true;
     }
     clients.retain(|client| !client.gone);
+    if let Some(name) = sessions.live.get(&id).map(|held| held.name.clone()) {
+        plugins
+            .lua()
+            .dispatch_event_unbound(&Event::SessionClosed { session: name });
+    }
     // The Lua layer first: a job's `on_exit` runs in here, and a plugin that asks what its
     // panes are showing has to be answered by the session it is being told about rather than
     // by the hole where it was.
