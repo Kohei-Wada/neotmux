@@ -3,7 +3,7 @@ use std::rc::Rc;
 use mlua::RegistryKey;
 use neotmux_proto::screen::Hold;
 
-use crate::draw::{FloatId, ReservationId};
+use crate::draw::{BufId, FloatId, ReservationId};
 use crate::plugin::RegistrationId;
 use crate::sched::JobId;
 use crate::sched::timers::TimerId;
@@ -14,6 +14,7 @@ pub enum Held {
     Reservation(ReservationId),
     PaneBand(ReservationId),
     Float(FloatId),
+    Buf(BufId),
     Job(JobId),
     Timer(TimerId),
     Freeze(Hold),

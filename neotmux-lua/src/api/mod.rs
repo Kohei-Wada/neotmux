@@ -1,3 +1,4 @@
+mod buf;
 pub mod clipboard;
 pub mod command;
 pub mod ctx;

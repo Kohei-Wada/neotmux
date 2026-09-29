@@ -16,12 +16,13 @@ const TOP: [&str; 7] = [
     "reserve",
     "reserve_pane",
 ];
-const NESTED: [(&str, &[&str]); 5] = [
+const NESTED: [(&str, &[&str]); 6] = [
     ("keymap", &["set"]),
     ("command", &["add"]),
     ("job", &["start"]),
     ("timer", &["every", "after"]),
     ("pane", &["freeze"]),
+    ("buf", &["create"]),
 ];
 
 fn wrap(lua: &Lua, groups: &Rc<Groups>, id: GroupId, real: Function) -> mlua::Result<Function> {

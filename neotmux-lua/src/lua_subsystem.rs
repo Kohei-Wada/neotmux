@@ -14,7 +14,7 @@ use neotmux_proto::{
 
 use crate::api::ctx::Ctx;
 use crate::api::{self, Opts, keymap};
-use crate::draw::{Buffers, Floats, HlGroups, PaneBands, Reservations};
+use crate::draw::{Buffers, Floats, HlGroups, PaneBands, Reservations, TextBuffers};
 use crate::host::{Ambient, Clipboard, Op, OpBuffer, PaneInfos, PaneTtys, Runner, WindowIds};
 use crate::plugin::{
     Commands, Groups, Kind, KindTag, Layers, RegistrationId, Registry, SourceId, Sources,
@@ -48,6 +48,7 @@ pub struct LuaSubsystem {
     window_ids: Rc<WindowIds>,
     floats: Rc<Floats>,
     hl_groups: Rc<HlGroups>,
+    text_buffers: Rc<TextBuffers>,
     jobs: Rc<Jobs>,
     timers: Rc<Timers>,
     groups: Rc<Groups>,
@@ -109,6 +110,7 @@ impl LuaSubsystem {
         let window_ids = Rc::new(WindowIds::new());
         let floats = Rc::new(Floats::new());
         let hl_groups = Rc::new(HlGroups::new());
+        let text_buffers = Rc::new(TextBuffers::new());
         let buffers = Rc::new(Buffers::new());
 
         let jobs = Rc::new(Jobs::new(runner));
@@ -125,6 +127,7 @@ impl LuaSubsystem {
             reservations: reservations.clone(),
             pane_bands: pane_bands.clone(),
             floats: floats.clone(),
+            text_buffers: text_buffers.clone(),
             jobs: jobs.clone(),
             timers: timers.clone(),
             commands: commands.clone(),
@@ -154,6 +157,7 @@ impl LuaSubsystem {
                 window_ids: window_ids.clone(),
                 floats: floats.clone(),
                 hl_groups: hl_groups.clone(),
+                text_buffers: text_buffers.clone(),
                 home,
                 ambient: Rc::clone(&ambient),
                 groups: groups.clone(),
@@ -186,6 +190,7 @@ impl LuaSubsystem {
             window_ids,
             floats,
             hl_groups,
+            text_buffers,
             jobs,
             timers,
             groups,
@@ -1192,6 +1197,10 @@ impl LuaSubsystem {
 
     pub fn hl_groups(&self) -> &HlGroups {
         &self.hl_groups
+    }
+
+    pub fn text_buffers(&self) -> &TextBuffers {
+        &self.text_buffers
     }
 
     pub fn opt(&self) -> Opts {
