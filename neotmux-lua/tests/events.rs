@@ -1,8 +1,9 @@
+use std::collections::BTreeMap;
 use std::fs;
 
 use neotmux_lua::LuaSubsystem;
 use neotmux_lua::plugin::Layers;
-use neotmux_proto::{Event, PaneId, Size};
+use neotmux_proto::{Event, PaneId, PaneInfo, SessionId, Size};
 
 mod support;
 
@@ -248,15 +249,13 @@ fn session_closed_is_dispatched_with_no_session_bound() {
     assert!(ops.contains("closed work"), "{ops}");
 }
 
-fn running(
-    commands: &[(u32, &str)],
-) -> std::collections::BTreeMap<PaneId, neotmux_proto::PaneInfo> {
+fn running(commands: &[(u32, &str)]) -> BTreeMap<PaneId, PaneInfo> {
     commands
         .iter()
         .map(|(pane, command)| {
             (
                 PaneId::from(*pane),
-                neotmux_proto::PaneInfo {
+                PaneInfo {
                     command: Some(command.to_string()),
                     cwd: None,
                     job: None,
@@ -299,7 +298,7 @@ fn pane_info_changed_compares_against_the_same_sessions_last_map() {
         ),
     ]);
     assert!(sub.run_init().is_empty());
-    let two = neotmux_proto::SessionId::from(2);
+    let two = SessionId::from(2);
     sub.publish_pane_info(support::one(), running(&[(1, "zsh")]));
     sub.publish_pane_info(two, running(&[(1, "vim")]));
     sub.drain_ops(Some(support::one()));

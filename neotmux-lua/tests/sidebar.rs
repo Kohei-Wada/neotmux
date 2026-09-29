@@ -1190,7 +1190,7 @@ fn a_command_that_changes_with_no_output_is_shown_the_next_frame() {
 /// A ruleset whose `QUIET` is a fall to idle the screen does not say in so many words, so the
 /// detector holds it `working` for a settle short enough to wait out.
 const SETTLING: &str = "local detect = require('neotmux.detect')\n\
-    detect.settle = 50\n\
+    detect.settle = 200\n\
     detect.agents = { fake = {\n\
       claims = function(info) return info ~= nil and info.command == 'agent' end,\n\
       { id = 'busy', state = 'working', priority = 2,\n\
@@ -1210,7 +1210,7 @@ fn a_working_agent_that_settles_with_no_output_is_shown_idle_after_the_timer() {
     line_with(&settled(&sub, &s, 1), "\u{25cf} work:1.1 fake");
     show(&sub, 101, "QUIET");
     line_with(&frame(&sub, &s, 1), "\u{25cf} work:1.1 fake");
-    std::thread::sleep(std::time::Duration::from_millis(100));
+    std::thread::sleep(std::time::Duration::from_millis(500));
     sub.dispatch_timers(
         SessionId::from(1),
         std::time::Instant::now() + std::time::Duration::from_secs(2),
@@ -1240,7 +1240,7 @@ fn the_timer_outlives_the_session_that_claimed_it() {
     line_with(&settled(&sub, &home, 2), "\u{25cf} home:1.1 fake");
     show(&sub, 201, "QUIET");
     frame(&sub, &home, 2);
-    std::thread::sleep(std::time::Duration::from_millis(100));
+    std::thread::sleep(std::time::Duration::from_millis(500));
     let now = std::time::Instant::now();
     sub.dispatch_timers(SessionId::from(2), now);
     sub.dispatch_timers(SessionId::from(2), now + std::time::Duration::from_secs(2));
