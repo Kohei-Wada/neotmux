@@ -1,21 +1,9 @@
 use std::cell::RefCell;
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use crate::plugin::SourceId;
-
-/// What one source's ticks have cost so far: how many ran, their time together, and the
-/// longest. Wall time around the source's whole group, host calls included, which is what a
-/// frame waits on. `recent` is the last [`RECENT`] of them, oldest first, for a trend.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct TickCost {
-    pub ticks: u64,
-    pub total: Duration,
-    pub longest: Duration,
-    pub recent: VecDeque<Duration>,
-}
-
-pub const RECENT: usize = 120;
+use crate::sched::{RECENT, TickCost};
 
 /// Every source's [`TickCost`], kept for the life of the VM, so that what a plugin spends on
 /// drawing every frame can be read rather than guessed at.

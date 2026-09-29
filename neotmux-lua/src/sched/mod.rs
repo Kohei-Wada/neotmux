@@ -11,6 +11,7 @@ mod strikes;
 mod sweep_flag;
 mod sweeping;
 mod thread_cpu;
+mod tick_cost;
 mod tick_costs;
 pub mod timers;
 
@@ -27,4 +28,5 @@ pub use strikes::*;
 pub use sweep_flag::*;
 pub use sweeping::*;
 pub(crate) use thread_cpu::*;
+pub use tick_cost::*;
 pub use tick_costs::*;

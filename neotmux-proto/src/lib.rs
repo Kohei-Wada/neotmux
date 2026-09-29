@@ -3,6 +3,8 @@ pub mod screen;
 pub mod wire;
 
 mod event;
+mod job;
+mod job_process;
 mod key;
 mod key_code;
 mod level;
@@ -16,6 +18,8 @@ mod version;
 mod window_id;
 
 pub use event::*;
+pub use job::*;
+pub use job_process::*;
 pub use key::*;
 pub use key_code::*;
 pub use level::*;

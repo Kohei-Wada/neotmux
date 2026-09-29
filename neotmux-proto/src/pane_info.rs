@@ -1,3 +1,5 @@
+use crate::Job;
+
 /// What a pane is doing, as a status line reads it: the command its foreground process is
 /// running and that process's working directory.
 ///
@@ -11,21 +13,6 @@ pub struct PaneInfo {
     /// Every process of the foreground job, for telling what is running under a wrapper: a
     /// `node` handed Codex's script is `command = "node"`, and only its argv says Codex.
     pub job: Option<Job>,
-}
-
-/// A pane's foreground job: its process group, and the members of it that could be read.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct Job {
-    pub group: i32,
-    pub processes: Vec<JobProcess>,
-}
-
-/// One process of a job: its `comm`, and its argv where reading it was safe.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct JobProcess {
-    pub pid: i32,
-    pub name: String,
-    pub argv: Option<Vec<String>>,
 }
 
 impl PaneInfo {
