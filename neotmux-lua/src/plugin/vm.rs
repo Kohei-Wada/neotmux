@@ -1,4 +1,5 @@
 use mlua::chunk::ChunkMode;
+use mlua::state::{GcGenParams, GcMode};
 use mlua::{Lua, LuaOptions, StdLib, Table, Value};
 
 const SEAL: &str = r#"
@@ -24,6 +25,9 @@ pub fn new_vm() -> mlua::Result<Lua> {
         | StdLib::OS
         | StdLib::PACKAGE;
     let lua = Lua::new_with(libs, LuaOptions::default())?;
+    // A tick builds short-lived tables every frame; the incremental collector finishing a cycle
+    // inside one is what pushed the sidebar's longest tick to the budget (2026-09-29).
+    lua.gc_set_mode(GcMode::Generational(GcGenParams::default()));
 
     let globals = lua.globals();
     let os: Table = globals.get("os")?;
@@ -111,6 +115,17 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
 
         assert!(!ok, "require found probe.lua via the working directory");
+    }
+
+    /// Lua 5.4 answers the mode it leaves when told a new one.
+    #[test]
+    fn the_collector_is_generational() {
+        let lua = new_vm().unwrap();
+        let was: String = lua
+            .load("return collectgarbage('incremental')")
+            .eval()
+            .unwrap();
+        assert_eq!(was, "generational");
     }
 
     #[test]

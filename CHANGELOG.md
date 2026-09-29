@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### The Lua collector is generational
+
+The Lua VM now runs Lua 5.4's generational collector instead of the incremental one. A plugin's
+tick builds short-lived tables every frame, and an incremental cycle finishing inside a tick was
+what put the sidebar's longest tick at the 8 ms budget: at 12 sessions and 48 panes it went from
+7.8 ms to 5.3 ms. `collectgarbage('incremental')` from `init.lua` puts the old one back.
+
 ### The sidebar is a buffer the host draws
 
 Plugins can write lines into a buffer the host keeps and draws in a band or a float every frame
