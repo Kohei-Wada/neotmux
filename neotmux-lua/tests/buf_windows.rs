@@ -58,8 +58,14 @@ fn frame_in(sub: &LuaSubsystem, session: SessionId, applied: bool) {
     sub.dispatch_tick(session);
 }
 
+/// What `support::one()` is shown: a band has a rect only in a session it was laid out for,
+/// so there is none to project into outside one.
+fn shown(sub: &LuaSubsystem) -> Vec<DrawCmd> {
+    sub.frame_over(support::one(), &sub.frame_immediate())
+}
+
 fn texts(sub: &LuaSubsystem) -> Vec<(u16, u16, String)> {
-    texts_of(sub.frame_output())
+    texts_of(shown(sub))
 }
 
 /// What `session` is shown.
@@ -156,7 +162,7 @@ fn extmarks_colour_their_columns_and_a_line_group_paints_the_row() {
         ),
     ]);
     frame(&sub, true);
-    let out = sub.frame_output();
+    let out = shown(&sub);
     let row_bg = Color::Rgb(0, 0, 0x11);
     assert!(
         out.iter().any(|c| matches!(c,
@@ -192,7 +198,7 @@ fn a_line_group_with_only_a_foreground_paints_the_row_with_it() {
         ),
     ]);
     frame(&sub, true);
-    let out = sub.frame_output();
+    let out = shown(&sub);
     assert!(
         out.iter().any(|c| matches!(c,
         DrawCmd::Rect { rect, bg, .. }
@@ -359,5 +365,38 @@ fn a_session_that_ends_takes_its_own_buffer_with_it() {
     ]);
     let [_, two, _] = sessions(&sub);
     sub.forget_session(two);
+    // Its bands went with it, so they are laid out again to see what the band would show.
+    sub.lay_out_reservations(two, SURFACE, sub.reserved());
     assert_eq!(texts_in(&sub, two), vec![(0, 0, "dflt".to_string())]);
+}
+
+/// A band's buffer is projected at the rect its own session was laid out with, whichever
+/// session was laid out last: the host projects a quiet frame with no layout in front of it.
+#[test]
+fn a_bands_buffer_is_projected_at_each_sessions_own_rect() {
+    let (_d, sub) = built(&[
+        ("init.lua", "require('plugin.b')"),
+        (
+            "lua/plugin/b.lua",
+            "local buf = neotmux.buf.create()\n\
+            neotmux.buf.set_lines(buf, 0, -1, { 'rail' })\n\
+            neotmux.reserve('right', 10):set_buf(buf)\n\
+            return {}",
+        ),
+    ]);
+    let (a, b) = (SessionId::from(1), SessionId::from(2));
+    let reserved = sub.reserved();
+    sub.lay_out_reservations(a, Size { rows: 24, cols: 80 }, reserved);
+    sub.lay_out_reservations(
+        b,
+        Size {
+            rows: 30,
+            cols: 100,
+        },
+        reserved,
+    );
+    assert_eq!(texts_in(&sub, a), vec![(70, 0, "rail".to_string())]);
+    assert_eq!(texts_in(&sub, b), vec![(90, 0, "rail".to_string())]);
+    sub.lay_out_reservations(a, Size { rows: 24, cols: 80 }, reserved);
+    assert_eq!(texts_in(&sub, b), vec![(90, 0, "rail".to_string())]);
 }

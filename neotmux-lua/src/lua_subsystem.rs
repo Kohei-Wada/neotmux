@@ -613,7 +613,7 @@ impl LuaSubsystem {
                         geometry.area,
                         geometry.panes.clone(),
                         geometry.outer.clone(),
-                        self.reservations.band(owner),
+                        self.reservations.band(session, owner),
                         pane_bands,
                         self.floats.by_owner(owner),
                     )
@@ -1045,7 +1045,7 @@ impl LuaSubsystem {
     }
 
     /// What the session bound now is shown, or what every session is shown by default when
-    /// none is.
+    /// none is — less any band's buffer, since a band has a place only in a session.
     pub fn frame_output(&self) -> Vec<DrawCmd> {
         self.project_over(self.ambient.current(), &self.frame_immediate())
     }
@@ -1073,7 +1073,8 @@ impl LuaSubsystem {
                 BufWindow::Band(id) => self
                     .reservations
                     .owner(id)
-                    .and_then(|owner| self.reservations.band(owner)),
+                    .zip(session)
+                    .and_then(|(owner, session)| self.reservations.band(session, owner)),
                 BufWindow::Float(id) => self.floats.rect(id),
             };
             let Some(rect) = rect else { continue };
@@ -1128,7 +1129,7 @@ impl LuaSubsystem {
     /// invalidating the epoch of a frame already being composed.
     pub fn lay_out_reservations(&self, session: SessionId, surface: Size, applied: Reserved) {
         let _bound = self.ambient.bind(session);
-        self.reservations.lay_out(surface, applied);
+        self.reservations.lay_out(session, surface, applied);
     }
 
     /// How many ops are waiting to be drained, for a caller that wants to know whether
@@ -1169,6 +1170,7 @@ impl LuaSubsystem {
         // where a job is reported.
         self.timers.remove_all_for(session);
         self.text_buffers.forget(session);
+        self.reservations.forget(session);
         self.ambient.forget(session);
     }
 

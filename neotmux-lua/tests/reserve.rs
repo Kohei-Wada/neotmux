@@ -5,7 +5,7 @@ use std::fs;
 
 use neotmux_lua::LuaSubsystem;
 use neotmux_lua::plugin::Layers;
-use neotmux_proto::{DrawCmd, Epoch, Geometry, PaneId, Rect, Reserved, Size};
+use neotmux_proto::{DrawCmd, Epoch, Geometry, PaneId, Rect, Reserved, SessionId, Size};
 
 mod support;
 
@@ -36,14 +36,19 @@ fn frame(sub: &LuaSubsystem, applied: bool) {
         Reserved::default()
     };
     sub.lay_out_reservations(support::one(), SURFACE, reserved);
+    tick_in(sub, support::one(), SURFACE, reserved);
+}
+
+/// The half of a frame after the bands are handed out: publish the geometry and tick.
+fn tick_in(sub: &LuaSubsystem, session: SessionId, surface: Size, reserved: Reserved) {
     let content = Size {
-        rows: SURFACE.rows - reserved.rows(),
-        cols: SURFACE.cols - reserved.cols(),
+        rows: surface.rows - reserved.rows(),
+        cols: surface.cols - reserved.cols(),
     };
     let pane = PaneId::from(1);
     let rect = Rect::new(reserved.left, reserved.top, content.cols, content.rows);
     sub.begin_frame(
-        support::one(),
+        session,
         Epoch::new(content, vec![pane], Some(pane)),
         Geometry {
             area: rect,
@@ -52,7 +57,7 @@ fn frame(sub: &LuaSubsystem, applied: bool) {
             ..Default::default()
         },
     );
-    sub.dispatch_tick(support::one());
+    sub.dispatch_tick(session);
 }
 
 /// Every `Text` command's text, in the order the frame composed them.
@@ -585,4 +590,58 @@ fn the_area_a_tick_is_given_is_placed_where_the_bands_left_it() {
     ]);
     frame(&sub, true);
     assert_eq!(texts(&sub), vec!["12,0 68x24 size=68x24".to_string()]);
+}
+
+/// A right band's column and height, in the surface its session was laid out against.
+const RIGHT_RAIL: &str = r#"
+    neotmux.reserve('right', 10)
+    neotmux.on_tick(function(ctx)
+      local band = ctx:reserved()
+      ctx:text(nil, 0, 0, band and (band.x .. ',' .. band.h) or 'nil')
+    end)
+    return {}
+    "#;
+
+/// The bug this answers: the bands were one map for the whole server, so a session drew in
+/// whatever rect the session laid out last had been given — a right band at another
+/// terminal's right edge, on a quiet frame that laid nothing out.
+#[test]
+fn each_session_reads_the_band_laid_out_for_its_own_surface() {
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.rail')"),
+        ("lua/plugin/rail.lua", RIGHT_RAIL),
+    ]);
+    let (a, b) = (SessionId::from(1), SessionId::from(2));
+    let small = Size { rows: 24, cols: 80 };
+    let large = Size {
+        rows: 30,
+        cols: 100,
+    };
+    let reserved = sub.reserved();
+    sub.lay_out_reservations(a, small, reserved);
+    sub.lay_out_reservations(b, large, reserved);
+    tick_in(&sub, a, small, reserved);
+    assert_eq!(texts(&sub), vec!["70,24".to_string()], "a read b's band");
+    tick_in(&sub, b, large, reserved);
+    assert_eq!(texts(&sub), vec!["90,30".to_string()]);
+
+    sub.lay_out_reservations(a, small, reserved);
+    tick_in(&sub, b, large, reserved);
+    assert_eq!(texts(&sub), vec!["90,30".to_string()], "b read a's band");
+}
+
+#[test]
+fn a_session_that_ends_takes_its_bands_with_it() {
+    let (_dir, sub) = built(&[
+        ("init.lua", "require('plugin.rail')"),
+        ("lua/plugin/rail.lua", RIGHT_RAIL),
+    ]);
+    let a = SessionId::from(1);
+    let reserved = sub.reserved();
+    sub.lay_out_reservations(a, SURFACE, reserved);
+    tick_in(&sub, a, SURFACE, reserved);
+    assert_eq!(texts(&sub), vec!["70,24".to_string()]);
+    sub.forget_session(a);
+    tick_in(&sub, a, SURFACE, reserved);
+    assert_eq!(texts(&sub), vec!["nil".to_string()]);
 }

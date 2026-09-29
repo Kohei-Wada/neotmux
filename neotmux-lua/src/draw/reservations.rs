@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
-use neotmux_proto::{Axis, Edge, Rect, Reserved, Size};
+use neotmux_proto::{Axis, Edge, Rect, Reserved, SessionId, Size};
 
 use crate::draw::ReservationId;
 use crate::plugin::SourceId;
@@ -46,8 +46,10 @@ struct Inner {
     /// In grant order, which — since a reservation is asked for while its chunk loads — is
     /// load order. An edge is filled from the outside in along it.
     entries: Vec<Entry>,
-    /// Where each source draws this frame. Empty while the surface cannot afford the bands.
-    bands: BTreeMap<SourceId, Rect>,
+    /// Where each source draws in each session, whose surfaces are their own terminals'.
+    /// A session's map is empty while its surface cannot afford the bands, and absent until
+    /// its first frame lays them out.
+    bands: BTreeMap<SessionId, BTreeMap<SourceId, Rect>>,
 }
 
 impl Inner {
@@ -158,8 +160,8 @@ impl Reservations {
         reserved
     }
 
-    /// The host has settled this frame's surface: give every granted reservation its band in
-    /// surface coordinates, or — for an axis the surface could not afford, which `applied`
+    /// The host has settled `session`'s surface for this frame: give every granted reservation
+    /// its band there in surface coordinates, or — for an axis the surface could not afford, which `applied`
     /// reports as nothing reserved on its edges — no band at all.
     ///
     /// A vertical band spans the full height and a horizontal one only what the vertical
@@ -168,8 +170,8 @@ impl Reservations {
     /// across the panes beside it.
     ///
     /// Called at a frame boundary and nowhere else, so the bands a tick reads are the ones
-    /// the layout it is drawing against was computed from.
-    pub fn lay_out(&self, surface: Size, applied: Reserved) {
+    /// the layout it is drawing against was computed from. Every other session keeps its own.
+    pub fn lay_out(&self, session: SessionId, surface: Size, applied: Reserved) {
         let mut inner = self.inner.borrow_mut();
         let mut bands = BTreeMap::new();
         let middle_x = applied.left;
@@ -211,11 +213,21 @@ impl Reservations {
             };
             bands.insert(entry.owner, rect);
         }
-        inner.bands = bands;
+        inner.bands.insert(session, bands);
     }
 
-    pub fn band(&self, owner: SourceId) -> Option<Rect> {
-        self.inner.borrow().bands.get(&owner).copied()
+    pub fn band(&self, session: SessionId, owner: SourceId) -> Option<Rect> {
+        self.inner
+            .borrow()
+            .bands
+            .get(&session)?
+            .get(&owner)
+            .copied()
+    }
+
+    /// A session is over, and so are the bands it was laid out with.
+    pub fn forget(&self, session: SessionId) {
+        self.inner.borrow_mut().bands.remove(&session);
     }
 
     /// Whose band this is, while it exists.
@@ -255,9 +267,13 @@ mod tests {
         Size { rows: 24, cols: 80 }
     }
 
+    fn session() -> SessionId {
+        SessionId::from(1)
+    }
+
     /// The ordinary case: the surface affords everything that was granted.
     fn lay_out(reservations: &Reservations) {
-        reservations.lay_out(surface(), reservations.totals());
+        reservations.lay_out(session(), surface(), reservations.totals());
     }
 
     #[test]
@@ -276,9 +292,12 @@ mod tests {
         reservations.add(a, Edge::Bottom, 1).expect("granted");
         reservations.add(b, Edge::Bottom, 1).expect("granted");
         lay_out(&reservations);
-        assert_eq!(reservations.band(a), Some(Rect::new(0, 23, 80, 1)));
         assert_eq!(
-            reservations.band(b),
+            reservations.band(session(), a),
+            Some(Rect::new(0, 23, 80, 1))
+        );
+        assert_eq!(
+            reservations.band(session(), b),
             Some(Rect::new(0, 22, 80, 1)),
             "the second to ask sits inside the first"
         );
@@ -291,8 +310,14 @@ mod tests {
         reservations.add(a, Edge::Top, 2).expect("granted");
         reservations.add(b, Edge::Top, 1).expect("granted");
         lay_out(&reservations);
-        assert_eq!(reservations.band(a), Some(Rect::new(0, 0, 80, 2)));
-        assert_eq!(reservations.band(b), Some(Rect::new(0, 2, 80, 1)));
+        assert_eq!(
+            reservations.band(session(), a),
+            Some(Rect::new(0, 0, 80, 2))
+        );
+        assert_eq!(
+            reservations.band(session(), b),
+            Some(Rect::new(0, 2, 80, 1))
+        );
     }
 
     #[test]
@@ -303,8 +328,14 @@ mod tests {
         reservations.add(b, Edge::Right, 10).expect("granted");
         assert_eq!(reservations.totals(), Reserved::vertical(20, 10));
         lay_out(&reservations);
-        assert_eq!(reservations.band(a), Some(Rect::new(0, 0, 20, 24)));
-        assert_eq!(reservations.band(b), Some(Rect::new(70, 0, 10, 24)));
+        assert_eq!(
+            reservations.band(session(), a),
+            Some(Rect::new(0, 0, 20, 24))
+        );
+        assert_eq!(
+            reservations.band(session(), b),
+            Some(Rect::new(70, 0, 10, 24))
+        );
     }
 
     #[test]
@@ -314,9 +345,12 @@ mod tests {
         reservations.add(a, Edge::Left, 10).expect("granted");
         reservations.add(b, Edge::Left, 6).expect("granted");
         lay_out(&reservations);
-        assert_eq!(reservations.band(a), Some(Rect::new(0, 0, 10, 24)));
         assert_eq!(
-            reservations.band(b),
+            reservations.band(session(), a),
+            Some(Rect::new(0, 0, 10, 24))
+        );
+        assert_eq!(
+            reservations.band(session(), b),
             Some(Rect::new(10, 0, 6, 24)),
             "the second to ask sits inside the first"
         );
@@ -334,8 +368,14 @@ mod tests {
             .add(s.intern("@c.lua"), Edge::Right, 10)
             .expect("granted");
         lay_out(&reservations);
-        assert_eq!(reservations.band(a), Some(Rect::new(20, 0, 50, 1)));
-        assert_eq!(reservations.band(b), Some(Rect::new(0, 0, 20, 24)));
+        assert_eq!(
+            reservations.band(session(), a),
+            Some(Rect::new(20, 0, 50, 1))
+        );
+        assert_eq!(
+            reservations.band(session(), b),
+            Some(Rect::new(0, 0, 20, 24))
+        );
     }
 
     /// The host refuses the axes separately, and so does the hand-out: the bands of the axis
@@ -346,12 +386,18 @@ mod tests {
         let reservations = Reservations::new();
         reservations.add(a, Edge::Top, 1).expect("granted");
         reservations.add(b, Edge::Left, 20).expect("granted");
-        reservations.lay_out(surface(), Reserved::vertical(20, 0));
-        assert_eq!(reservations.band(a), None);
-        assert_eq!(reservations.band(b), Some(Rect::new(0, 0, 20, 24)));
-        reservations.lay_out(surface(), Reserved::horizontal(1, 0));
-        assert_eq!(reservations.band(a), Some(Rect::new(0, 0, 80, 1)));
-        assert_eq!(reservations.band(b), None);
+        reservations.lay_out(session(), surface(), Reserved::vertical(20, 0));
+        assert_eq!(reservations.band(session(), a), None);
+        assert_eq!(
+            reservations.band(session(), b),
+            Some(Rect::new(0, 0, 20, 24))
+        );
+        reservations.lay_out(session(), surface(), Reserved::horizontal(1, 0));
+        assert_eq!(
+            reservations.band(session(), a),
+            Some(Rect::new(0, 0, 80, 1))
+        );
+        assert_eq!(reservations.band(session(), b), None);
     }
 
     /// Forty columns is a sidebar; forty rows is a mistake. The two bounds are decided
@@ -380,7 +426,7 @@ mod tests {
         let reservations = Reservations::new();
         reservations.add(a, Edge::Bottom, 1).expect("granted");
         lay_out(&reservations);
-        assert_eq!(reservations.band(b), None);
+        assert_eq!(reservations.band(session(), b), None);
     }
 
     #[test]
@@ -388,11 +434,11 @@ mod tests {
         let (_s, a, _b) = sources();
         let reservations = Reservations::new();
         reservations.add(a, Edge::Bottom, 1).expect("granted");
-        reservations.lay_out(surface(), Reserved::default());
-        assert_eq!(reservations.band(a), None);
+        reservations.lay_out(session(), surface(), Reserved::default());
+        assert_eq!(reservations.band(session(), a), None);
         lay_out(&reservations);
         assert!(
-            reservations.band(a).is_some(),
+            reservations.band(session(), a).is_some(),
             "growing back brings it back"
         );
     }
@@ -411,7 +457,7 @@ mod tests {
             Reserved::horizontal(0, MAX_RESERVED_ROWS)
         );
         lay_out(&reservations);
-        assert_eq!(reservations.band(b), None);
+        assert_eq!(reservations.band(session(), b), None);
     }
 
     #[test]
@@ -449,9 +495,9 @@ mod tests {
         assert_eq!(reservations.totals(), Reserved::horizontal(0, 1));
 
         lay_out(&reservations);
-        assert_eq!(reservations.band(a), None);
+        assert_eq!(reservations.band(session(), a), None);
         assert_eq!(
-            reservations.band(b),
+            reservations.band(session(), b),
             Some(Rect::new(0, 23, 80, 1)),
             "the survivor moves out to the edge the removed one held"
         );
@@ -476,24 +522,36 @@ mod tests {
         let outer = reservations.add(a, Edge::Left, 10).expect("granted");
         reservations.add(b, Edge::Left, 6).expect("granted");
         lay_out(&reservations);
-        assert_eq!(reservations.band(a), Some(Rect::new(0, 0, 10, 24)));
-        assert_eq!(reservations.band(b), Some(Rect::new(10, 0, 6, 24)));
+        assert_eq!(
+            reservations.band(session(), a),
+            Some(Rect::new(0, 0, 10, 24))
+        );
+        assert_eq!(
+            reservations.band(session(), b),
+            Some(Rect::new(10, 0, 6, 24))
+        );
 
         reservations.resize(outer, 1).expect("granted");
         assert_eq!(reservations.totals(), Reserved::vertical(7, 0));
         lay_out(&reservations);
-        assert_eq!(reservations.band(a), Some(Rect::new(0, 0, 1, 24)));
         assert_eq!(
-            reservations.band(b),
+            reservations.band(session(), a),
+            Some(Rect::new(0, 0, 1, 24))
+        );
+        assert_eq!(
+            reservations.band(session(), b),
             Some(Rect::new(1, 0, 6, 24)),
             "the inner band followed the outer one in, and is still inside it"
         );
 
         reservations.resize(outer, 10).expect("granted");
         lay_out(&reservations);
-        assert_eq!(reservations.band(a), Some(Rect::new(0, 0, 10, 24)));
         assert_eq!(
-            reservations.band(b),
+            reservations.band(session(), a),
+            Some(Rect::new(0, 0, 10, 24))
+        );
+        assert_eq!(
+            reservations.band(session(), b),
             Some(Rect::new(10, 0, 6, 24)),
             "unfolding puts both back exactly where they were"
         );
@@ -516,7 +574,10 @@ mod tests {
             Reserved::vertical(MAX_RESERVED_COLS, 0)
         );
         lay_out(&reservations);
-        assert_eq!(reservations.band(a), Some(Rect::new(0, 0, 10, 24)));
+        assert_eq!(
+            reservations.band(session(), a),
+            Some(Rect::new(0, 0, 10, 24))
+        );
     }
 
     /// The cap is counted against the other bands only, so a band already at the cap may be
